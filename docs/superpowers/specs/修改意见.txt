@@ -1,0 +1,91 @@
+2. 多人审批语义未明确
+引擎 approve 算法第 5 步：
+
+a user-assignee with ids: [a, b] becomes 2 tasks, any-of semantics
+
+这里的 any-of 意味着“或签”——同一节点上的多个审批人，只要其中一个批准，任务就前进。
+但文档没有明说，也没有提供“会签”（所有人通过才前进）的选项。
+
+影响：
+
+如果产品需要“会签”功能（如需要部门全员同意），MVP 引擎做不到，而且数据结构 t_task 中没有区分或签/会签的标记，后续扩展会比较被动。
+
+建议：
+
+在 MVP 的决策中，明确写出“多人审批仅支持或签模式”，在 t_task 或节点属性中预留一个 approvalMode 字段（哪怕暂时不用），避免将来改表。
+
+3. end 节点处理逻辑缺失
+引擎算法中说：
+
+find next nodes from this node → 对每个 next node 创建任务。If next set is empty → APPROVED
+
+但是你的节点类型里明确有 "type": "end"。当流程走到 end 时，按现在逻辑会被当作普通节点去解析审批人，这显然不对。
+
+修正：
+
+在 NodeDispatcher 或解析下一个节点时，如果节点类型是 end，直接触发流程结束逻辑，不创建任务。
+
+或者约定 edges 中指向 end 节点的边不算“待处理节点”，在找 next 时过滤掉，然后 next 为空 → 结束。
+
+4. t_form_data 创建时机模糊
+文档中同时存在：
+
+POST /api/forms/data —— 单独提交表单数据（用于测试）
+
+POST /api/instances/start —— 发起流程，body 包含 { formDefCode, data }
+
+但是没有说明 instances/start 内部是否自动创建 t_form_data 记录。
+如果创建，那 form_data_id 如何返回？如果有重复逻辑，前端可能搞混。
+
+建议：明确引擎 start 方法内部会：
+
+创建一条 t_form_data（状态可为 SUBMITTED）
+
+创建 t_process_instance 并关联 form_data_id
+
+返回 { instanceId, firstTaskIds }
+
+独立的数据提交接口只用于“暂存/测试”，不启动流程。
+
+5. 审批人解析异常处理
+AssigneeResolver 在解析审批人时可能出现：
+
+所选用户已被禁用
+
+部门领导为空
+
+角色下没有任何用户
+
+风险：如果不处理，引擎可能会创建一个没有 assignee_id 的 t_task，导致流程卡死。
+
+建议：在 AssigneeResolver 中返回空的用户列表时，引擎应抛出明确的业务异常（如 NoAssigneeFoundException），让发起人无法启动流程，并要求管理员重新配置节点。
+
+6. 前端撤销/重做的性能隐患
+zustand store 中的 history 存储整个 SchemaNode[] 快照。
+当表单字段数量达到 50+ 或包含多层嵌套布局时，每次 push 都会深拷贝整个数组，可能导致画布卡顿。
+
+建议：MVP 阶段先保持简单，但可以加一个注释 // TODO: 使用 immutability-helper 或 immer 做增量更新。如果实际测试不卡，就不改。
+
+7. 数据库细节
+ltree 扩展：t_department.path ltree 需要在 Flyway 脚本中显式执行 CREATE EXTENSION IF NOT EXISTS ltree;
+
+Flyway 脚本命名：V1__init.sql 和 V2__seed.sql 可执行，但注意种子数据中的密码必须用 BCrypt 加密后的值，不能存明文。建议在 SQL 里直接写加密后的 hash。
+
+t_form_definition.code 作为唯一标识符被 API 大量使用，务必保证 UNIQUE 约束。
+
+8. 流程定义与表单定义的发布一致性
+文档中流程定义有独立的 publish 接口，但没有说明是否强制表单定义必须先发布才能发布流程。
+
+建议：在 POST /api/processes/definitions/{id}/publish 中加入校验：关联的 form_def_id 状态必须为 PUBLISHED，否则返回 422。
+
+9. JWT 密钥安全问题
+文档写“secret from ${JWT_SECRET} env var”，但没有默认值校验。
+
+风险：开发者本地启动时忘了设环境变量，JWT 签名使用空字符串或默认值，存在安全漏洞。
+
+建议：在 JwtService 构造函数中强制判断 secret 是否为空或过短，若不符合直接抛出 IllegalStateException，阻止应用启动。
+
+10. 技术选型细节点
+@xyflow/react：React Flow 的 v12+ 使用 @xyflow/react 包名，其 API 和 v11 略有变化，确认文档中的自定义节点写法与版本匹配。
+
+@tanstack/react-query：与 Umi 的 useRequest 可能会冲突，建议明确划分：API 调用统一使用 @tanstack/react-query 的 hooks，Umi 的 request 只用于简单请求或保留给 ProTable 等 ProComponents 内部使用。
