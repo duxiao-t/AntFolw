@@ -57,15 +57,50 @@ export default [
     routes: [
       {
         path: '/admin',
-        redirect: '/admin/sub-page',
+        redirect: '/admin/companies',
       },
       {
-        path: '/admin/sub-page',
-        name: 'sub-page',
-        component: './Admin',
+        name: 'companies',
+        icon: 'bank',
+        path: '/admin/companies',
+        component: './admin/Company',
+      },
+      {
+        name: 'departments',
+        icon: 'apartment',
+        path: '/admin/departments',
+        component: './admin/Department',
+      },
+      {
+        name: 'users',
+        icon: 'team',
+        path: '/admin/users',
+        component: './admin/User',
+      },
+      {
+        name: 'forms',
+        icon: 'form',
+        path: '/admin/forms',
+        component: './admin/FormList',
+      },
+      {
+        name: 'processes',
+        icon: 'partition',
+        path: '/admin/processes',
+        component: './admin/ProcessList',
       },
     ],
   },
+  // Designer pages — direct URL entry, no menu entry needed
+  { path: '/designer/form/:id', component: './designer/form/FormDesigner', hideInMenu: true, access: 'canAdmin' },
+  { path: '/designer/process/:formDefId', component: './designer/process/ProcessDesigner', hideInMenu: true, access: 'canAdmin' },
+  // Runtime / task pages
+  { path: '/runtime/form/:code', component: './runtime/form/Fill', hideInMenu: true },
+  { path: '/runtime/list', name: 'mySubmissions', icon: 'profile', component: './runtime/form/List' },
+  { path: '/tasks/inbox', name: 'inbox', icon: 'inbox', component: './tasks/Inbox' },
+  { path: '/tasks/done',  name: 'done',  icon: 'check-circle', component: './tasks/Done' },
+  { path: '/proc',        name: 'proc',  icon: 'file-text',   component: './proc/Sent' },
+  { path: '/proc/:id',    component: './proc/Detail', hideInMenu: true },
   {
     path: '/dashboard',
     name: 'dashboard',
