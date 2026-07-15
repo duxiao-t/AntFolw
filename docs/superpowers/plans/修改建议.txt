@@ -1,0 +1,108 @@
+严重缺陷（Blockers — 不修复则无法启动或数据损坏）
+1. JSONB 字段缺少 TypeHandler 注解
+所有 JSONB 字段（FormDefinition.schema/settings, FormData.data, ProcessDefinition.nodes/edges）在实体中定义为 String，但未添加 @TableField(typeHandler = JacksonTypeHandler.class)。
+👉 后果：MyBatis-Plus 会按普通 VARCHAR 读写，导致 JSONB 被转义为字符串（如 "{\"id\":\"a\"}"），前端收到的不是 JSON 对象，且写入时若包含特殊字符会直接破坏 JSON 结构。
+
+修正： 在上述四个实体类中，对相应字段添加：
+
+java
+@TableField(typeHandler = JacksonTypeHandler.class)
+private String schema;   // 或 nodes/data/settings
+2. 乐观锁插件（@Version）缺失
+ProcessInstance 和 TaskEntity 均有 @Version 字段，但 MyBatis-Plus 的乐观锁拦截器未注册。并发审批时（如两个审批人几乎同时完成同一节点的不同任务），ProcessInstance.version 不会自增，也不会校验，最终可能导致状态覆盖。
+
+修正： 在 backend 中增加配置类：
+
+java
+@Configuration
+public class MybatisPlusConfig {
+    @Bean
+    public MybatisPlusInterceptor mybatisPlusInterceptor() {
+        var interceptor = new MybatisPlusInterceptor();
+        interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
+        return interceptor;
+    }
+}
+3. TaskMapperExt 未定义
+P4.3 中 ProcessEngine 依赖 TaskMapperExt，但计划没有给出该类的源码。编译失败。
+
+修正： 创建 backend/src/main/java/com/antflow/task/TaskMapperExt.java：
+
+java
+@Component
+@RequiredArgsConstructor
+public class TaskMapperExt {
+    private final ProcessInstanceMapper processInstanceMapper;
+    public Optional<ProcessInstance> selectInstanceById(long id) {
+        return Optional.ofNullable(processInstanceMapper.selectById(id));
+    }
+    public void updateInstance(ProcessInstance pi) {
+        processInstanceMapper.updateById(pi);
+    }
+}
+4. SecurityConfig 中 CORS 配置存在编译错误
+代码：
+
+java
+cfg.setAllowedOrigins(List.of(jwtProperties.getSecret() == null ? List.of() : List.of()));
+三元运算符两侧类型不匹配（List.of() 返回 List<Object>，List.of(jwtProperties.getSecret()) 返回 List<String>），无法编译。
+
+修正： 直接使用 allowedOriginPatterns（已设置 *），删除 setAllowedOrigins 这一行，或改为 cfg.setAllowedOrigins(null);。
+
+5. 前端缺失 API 代理配置
+frontend 默认监听 :8000，后端在 :8080。ant-design-pro 默认代理配置位于 config/proxy.ts，但计划未修改，导致前端请求 /api/... 会直接打到 localhost:8000，返回 404。
+
+修正： 在 frontend/config/proxy.ts 中增加：
+
+ts
+export default {
+  dev: {
+    '/api': {
+      target: 'http://localhost:8080',
+      changeOrigin: true,
+    },
+  },
+};
+6. 缺少全局异常处理器（GlobalExceptionHandler）
+计划中提及了统一错误格式（{ code, message, traceId }），但未实现。若 BizException 或 NoAssigneeFoundException 被抛出，将返回 Spring Boot 默认的 500 或 400 页面，前端无法解析。
+
+修正： 创建 backend/src/main/java/com/antflow/common/GlobalExceptionHandler.java：
+
+java
+@RestControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+    @ExceptionHandler(BizException.class)
+    public ResponseEntity<Map<String, Object>> handleBiz(BizException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(Map.of("code", e.getCode(), "message", e.getMessage(), "traceId", UUID.randomUUID().toString()));
+    }
+    // 处理 AccessDeniedException → 403, MethodArgumentNotValidException → 422 等
+}
+🟡 设计缺陷与性能风险（建议修复）
+7. zustand Undo/Redo 深拷贝性能隐患（已标注但未处理）
+每次修改都全量深拷贝整个 schema，若表单有 50+ 字段且频繁拖拽，会导致卡顿。计划中已用 TODO 标注。
+建议： 在 MVP 中可暂时保留，但应使用 immer 的 produceWithPatches，或仅存储差量补丁。现阶段的 pushPast 在 setSchema 中也会被调用，加载已有表单时会错误地把加载前的空 schema 推进历史，破坏撤销栈。需在 setSchema 中区分“外部加载”与“内部变更”。
+
+8. 表单设计器拖拽仅支持根级添加
+@dnd-kit 的 Droppable 只放在顶层 canvas，无法将字段拖入 span_layout 或 table_list 的子区域。
+影响： 用户无法构建多层嵌套布局。虽可在 v1.x 解决，但不符合 Spec 中“表单设计器”的完整预期。
+可接受度： 若 MVP 仅演示基本功能，可接受；但建议在 span_layout 内部也放置 Droppable，利用 useDroppable 和 parentId 传递。
+
+9. ProcessEngine 在顺序线性流程中处理多个 next 节点
+approve 方法中，若 next 列表有多个非 end 节点（例如并行分支），会为每个分支都创建任务，但只将最后一个节点的 id 赋给 current_node_id，导致前一个分支丢失。
+当前阶段： Spec 明确 MVP 仅支持顺序审批，因此可限制编辑器中只允许单条出边。但代码未做校验，用户可能保存多出边流程。
+建议： 在 ProcessDefinitionService.publish 中增加校验：每个非 end 节点出度必须为 1，否则抛出异常。
+
+🟢 细节可优化项（不阻塞发布）
+10. 前端路由权限未在 access.ts 中细化
+只有 canAdmin 控制所有管理菜单，但 runtime 页面未做保护（未登录用户也可访问）。Ant Design Pro 默认会检查登录状态，但若 /runtime/form/:code 不需要登录则有问题。建议保留登录拦截。
+
+11. E2E 测试中依赖 document.getElementById('cmt') 的脆弱性
+Inbox.tsx 的 Modal 使用了固定 id "cmt"，若同时打开两个 Modal 会冲突。建议改用 useRef 或 Modal.confirm 的 content 函数式写法，直接拿到输入框值。
+
+12. 密码默认 ant.design 硬编码
+UserService.create 中若未传密码，默认使用 ant.design。虽然方便测试，但生产环境 Admin 应强制修改。可接受，但应在文档中说明。
+
+13. @MapperScan("com.antflow") 会扫描所有包，可能引入不必要 Bean，但无害。
+14. springdoc-openapi 未配置认证头，不影响功能。
