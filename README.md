@@ -2,16 +2,18 @@
 
 Ant Design Pro + wflow fusion. Visual form designer + approval workflow.
 
-## Status (2026-07-15)
+## Status (2026-07-16)
 
 - ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway) — compiles, **16 unit tests green**.
-- ✅ PostgreSQL 17 schema (V1+V3 migrations) — ready to apply.
-- ✅ Custom approval engine — `ProcessEngine.start/approve/reject/withdraw`, OR-sign short-circuit, `@Version` optimistic locking, linear-flow validator, end-node gating.
-- ✅ Form designer storage — `FormDefinition` with JSONB schema, draft/publish flow, schema validation.
+- ✅ PostgreSQL 17 schema (V1 schema + V2 bcrypt seed + V3 indexes) — ready to apply.
+- ✅ Custom approval engine — `ProcessEngine.start/approve/reject/withdraw`, OR-sign short-circuit, `@Version` optimistic locking, linear-flow validator, end-node gating, NoAssigneeFoundException.
+- ✅ Form designer storage — `FormDefinition` with JSONB + JacksonTypeHandler, draft/publish flow, schema validation.
 - ✅ Form runtime — `FormData` with `form_def_version` snapshot.
-- ✅ Org module — Company / Department (ltree) / User / Role + ltree subtree + JWT auth + login rate limit.
-- 🚧 Frontend pages (designer / runtime / task center) — scaffolded; React Flow + zustand + ProTable to be wired.
-- ⏸ Live integration tests — pending Docker daemon availability.
+- ✅ Org module — Company / Department (ltree) / User / Role + ltree subtree + JWT auth + 5-req/min login rate limit.
+- ✅ Frontend — 14-field registry + recursive FormRenderer + zustand designer + React Flow process designer + ProTable admin pages + Inbox/Done/Sent/Detail task pages.
+- ✅ CI — `.github/workflows/ci.yml` (backend `mvn test` + frontend lint/tsc/build).
+- ✅ E2E — `frontend/e2e/full-flow.spec.ts` Playwright happy-path.
+- ⏸ Live integration — pending your Docker daemon + first boot.
 
 ## Prerequisites
 
@@ -58,8 +60,8 @@ curl -s http://localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
 
 ```bash
 cd frontend
-npm install    # one-off
-npm start      # UMI_ENV=dev, dev server on http://localhost:8000
+npm install --no-audit --no-fund    # one-off, may take a few minutes
+npm start                            # UMI_ENV=dev, dev server on http://localhost:8000
 # Proxy: /api/* → http://localhost:8080 via config/proxy.ts
 ```
 
@@ -72,6 +74,7 @@ antflow/
 ├── backend/                # Spring Boot 3 + Java 17 (see backend/pom.xml)
 ├── frontend/               # Umi Max 4 + React 18 + TS — port 8000
 ├── infra/docker-compose.yml  # postgres:17-alpine
+├── .github/workflows/ci.yml  # backend mvn test + frontend lint/tsc/build
 ├── docs/superpowers/
 │   ├── specs/2026-07-15-antflow-fusion-design.md      # Design spec
 │   └── plans/2026-07-15-antflow-fusion-impl.md       # Implementation plan
@@ -80,22 +83,54 @@ antflow/
 
 ## Tests
 
+### Backend unit tests (no PG needed)
+
 ```bash
 cd backend && mvn test
-# Currently green: JwtService (3), FormDefinitionService schema (4), AssigneeResolver (5), ProcessDefinitionService validation (4) = 16 tests.
+# Currently green: JwtService (3), FormDefinitionService schema (4),
+# AssigneeResolver (5), ProcessDefinitionService validation (4) = 16 tests.
 ```
 
-## What's next
+### Frontend E2E (Playwright happy-path)
 
-Frontend pages are scaffolded; the missing pieces are:
+Pre-req: docker compose up -d, backend running on :8080.
 
-1. `frontend/src/registry/formRegistry.ts` + `frontend/src/components/form-fields/*`
-2. `frontend/src/components/FormRenderer/FormRenderer.tsx`
-3. `frontend/src/pages/designer/form/*` (palette, canvas, inspector, zustand store)
-4. `frontend/src/pages/designer/process/*` (React Flow, AssigneePicker)
-5. `frontend/src/pages/runtime/form/*` (Fill, List)
-6. `frontend/src/pages/tasks/*` + `frontend/src/pages/proc/*`
-7. CI workflow at `.github/workflows/ci.yml`
-8. Playwright E2E test at `frontend/e2e/full-flow.spec.ts`
+```bash
+cd frontend
+npx playwright install chromium --with-deps
+npx playwright test
+# Walks: admin login → design form → publish → wire 1-level approval (via API to skip
+# React Flow drag) → bob submits → admin approves → instance APPROVED.
+```
 
-These follow the plan verbatim (`docs/superpowers/plans/...`). Run that plan's tasks task-by-task when ready.
+## CI
+
+`.github/workflows/ci.yml` runs on push/PR to `master`/`main`:
+
+- **backend**: `mvn test` on Java 17.
+- **frontend**: install, Biome lint, tsc, build on Node 22.
+
+## Frontend dependency setup note
+
+On Windows, `node_modules` file locks can leave broken state if `npm install` is interrupted. Recover:
+
+```bash
+cd frontend
+rm -rf node_modules package-lock.json
+npm install --no-audit --no-fund
+```
+
+## Out of scope (MVP non-goals)
+
+Per spec, explicitly NOT in MVP — reserved for v1.x:
+
+- Parallel branches / multi-counter-sign / reject-back
+- Dynamic form permissions per node
+- Expression-based condition nodes
+- Process versioning migrations
+- File upload to S3/MinIO
+- Multi-tenancy guard
+- OAuth2/OIDC
+- Redis caching
+- i18n
+- Print/export/dashboards
