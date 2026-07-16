@@ -21,11 +21,17 @@ class AssigneeResolverTest {
     private UserMapper userMapper;
     private UserRoleMapper userRoleMapper;
     private RoleMapper roleMapper;
+    private DepartmentMapper deptMapper;
 
     @BeforeEach void setup() {
         userMapper = Mockito.mock(UserMapper.class);
         userRoleMapper = Mockito.mock(UserRoleMapper.class);
         roleMapper = Mockito.mock(RoleMapper.class);
+        deptMapper = Mockito.mock(DepartmentMapper.class);
+    }
+
+    private AssigneeResolver resolver() {
+        return new AssigneeResolver(userMapper, userRoleMapper, roleMapper, deptMapper);
     }
 
     private User user(long id, String status) {
@@ -38,13 +44,27 @@ class AssigneeResolverTest {
         return u;
     }
 
+    private User user(long id, String status, Long deptId) {
+        User u = user(id, status);
+        u.setDeptId(deptId);
+        return u;
+    }
+
+    private Department dept(long id, Long leaderId, Long parentId) {
+        Department d = new Department();
+        d.setId(id);
+        d.setName("d" + id);
+        d.setLeaderId(leaderId);
+        d.setParentId(parentId);
+        return d;
+    }
+
     @Test void disabledUsersAreSilentlyDropped() {
         Mockito.when(userMapper.selectBatchIds(any())).thenReturn(List.of(
             user(1L, "ACTIVE"),
             user(2L, "DISABLED")
         ));
-        var r = new AssigneeResolver(userMapper, userRoleMapper, roleMapper);
-        var resolved = r.resolve("n1", AssigneeSpec.user(List.of(1L, 2L)));
+        var resolved = resolver().resolve("n1", AssigneeSpec.of("ASSIGN_USER", List.of(1L, 2L)));
         assertThat(resolved).containsExactly(1L);
     }
 
@@ -53,27 +73,42 @@ class AssigneeResolverTest {
             user(1L, "DISABLED"),
             user(2L, "DISABLED")
         ));
-        var r = new AssigneeResolver(userMapper, userRoleMapper, roleMapper);
-        assertThatThrownBy(() -> r.resolve("n1", AssigneeSpec.user(List.of(1L, 2L))))
+        assertThatThrownBy(() -> resolver().resolve("n1", AssigneeSpec.of("ASSIGN_USER", List.of(1L, 2L))))
             .isInstanceOf(NoAssigneeFoundException.class);
     }
 
     @Test void emptyUserListThrowsNoAssignee() {
-        var r = new AssigneeResolver(userMapper, userRoleMapper, roleMapper);
-        assertThatThrownBy(() -> r.resolve("n1", AssigneeSpec.user(List.of())))
+        assertThatThrownBy(() -> resolver().resolve("n1", AssigneeSpec.of("ASSIGN_USER", List.of())))
             .isInstanceOf(NoAssigneeFoundException.class);
     }
 
     @Test void emptyRoleMembersThrowNoAssignee() {
         Mockito.when(userRoleMapper.selectList(any())).thenReturn(List.of());
-        var r = new AssigneeResolver(userMapper, userRoleMapper, roleMapper);
-        assertThatThrownBy(() -> r.resolve("n1", AssigneeSpec.role(List.of(99L))))
+        assertThatThrownBy(() -> resolver().resolve("n1", AssigneeSpec.of("ROLE", List.of(99L))))
             .isInstanceOf(NoAssigneeFoundException.class);
     }
 
-    @Test void deptLeaderNotSupportedYet() {
-        var r = new AssigneeResolver(userMapper, userRoleMapper, roleMapper);
-        assertThatThrownBy(() -> r.resolve("n1", AssigneeSpec.deptLeader()))
-            .isInstanceOf(IllegalStateException.class);
+    @Test void resolve_self_returnsStarter() {
+        var spec = new AssigneeSpec("SELF", List.of(), 1, 42L, List.of());
+        assertThat(resolver().resolve("n1", spec)).containsExactly(42L);
+    }
+
+    @Test void resolve_selfSelect_returnsChosen() {
+        var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null, List.of(7L, 8L));
+        assertThat(resolver().resolve("n1", spec)).containsExactly(7L, 8L);
+    }
+
+    @Test void resolve_selfSelect_emptyThrows() {
+        var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null, List.of());
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(NoAssigneeFoundException.class);
+    }
+
+    @Test void resolve_leader_level1_usesDeptLeader() {
+        Mockito.when(userMapper.selectById(42L)).thenReturn(user(42L, "ACTIVE", 10L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(dept(10L, 99L, null));
+        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 10L));
+        var spec = new AssigneeSpec("LEADER", List.of(), 1, 42L, List.of());
+        assertThat(resolver().resolve("n1", spec)).containsExactly(99L);
     }
 }
