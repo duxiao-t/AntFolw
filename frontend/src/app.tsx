@@ -19,7 +19,7 @@ import {
   OfflineBanner,
   VersionDropdown,
 } from '@/components';
-import { request } from '@umijs/max';
+import { request as umiRequest } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -40,7 +40,7 @@ export async function getInitialState(): Promise<{
     try {
       // AntFlow: hit our backend instead of the upstream mock.
       // skipErrorHandler=true keeps GlobalExceptionHandler from showing toast on 401.
-      const me = await request<API.CurrentUser>('/api/auth/me', {
+      const me = await umiRequest<API.CurrentUser>('/api/auth/me', {
         skipErrorHandler: true,
       });
       // Mark admin status for access.ts gating.

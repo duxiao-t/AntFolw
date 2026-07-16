@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useParams, history } from '@umijs/max';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { request } from '@umijs/max';
-import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
+import { FormRenderer } from '../../../components/FormRenderer/FormRenderer';
 
 export default function Fill() {
   const params = useParams();

@@ -1,6 +1,6 @@
 import { Form, Input, Select } from 'antd';
 import type { Node } from '@xyflow/react';
-import { AssigneePicker } from '../../components/AssigneePicker';
+import { AssigneePicker } from '../../../components/AssigneePicker';
 
 export function ApprovalNodeConfig({ node, onChange }: {
   node: Node<any, 'approval'>;
