@@ -10,7 +10,7 @@ public class TaskEntity {
     private Long procInstId;
     private String nodeId;
     private Long assigneeId;
-    private String status;       // PENDING/APPROVED/REJECTED/SKIPPED
+    private String status;       // PENDING/APPROVED/REJECTED/SKIPPED/CC
     private String approvalMode; // OR_SIGN (default); ALL_SIGN reserved for v1.x
     @Version private Integer version;
     private Long approvedBy;
