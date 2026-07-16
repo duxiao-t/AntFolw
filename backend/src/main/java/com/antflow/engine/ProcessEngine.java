@@ -81,13 +81,16 @@ public class ProcessEngine {
 
         ProcessInstance pi = new ProcessInstance();
         pi.setProcDefId(pd.getId());
+        pi.setProcessDefVersion(pd.getVersion());
+        pi.setProcessSnapshot(pd.getProcess());  // 冻结流程树，避免后续改版污染已发起实例
         pi.setFormDataId(fd2.getId());
         pi.setStatus("RUNNING");
         pi.setStartedBy(userId);
         pi.setStartedAt(OffsetDateTime.now());
         processInstanceMapper.insert(pi);
 
-        JsonNode root = readTree(pd.getProcess());
+        // 引擎后续一律走快照树，而非 pd.getProcess()
+        JsonNode root = readTree(pi.getProcessSnapshot());
         JsonNode formData = readTreeOrEmpty(fd2.getData());
         Map<String, List<Long>> selfSelected =
             cmd.selfSelected() == null ? Map.of() : cmd.selfSelected();
@@ -118,8 +121,8 @@ public class ProcessEngine {
         insertHistory(t, null, t.getNodeId(), "APPROVE", operatorId, cmd.comment());
 
         ProcessInstance pi = taskMapperExt.selectInstanceById(t.getProcInstId()).orElseThrow();
-        ProcessDefinition pd = processDefinitionService.getById(pi.getProcDefId());
-        JsonNode root = readTree(pd.getProcess());
+        // 永远走快照，不依赖 pd.getProcess()（避免流程改版后已发起的实例跑飞）
+        JsonNode root = readTree(pi.getProcessSnapshot());
         JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
         if (cur == null) {
             throw new BizException("BAD_FLOW", "approval node not in tree: " + t.getNodeId());
