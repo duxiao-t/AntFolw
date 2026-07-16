@@ -214,6 +214,7 @@ class ProcessEngineTreeTest {
         Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
             ProcessInstance pi = new ProcessInstance();
             pi.setId(1L); pi.setProcDefId(10L); pi.setFormDataId(1L);
+            pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
             pi.setStatus("RUNNING"); pi.setStartedBy(7L);
             pi.setCurrentNodeId("a1");
             return pi;
@@ -225,7 +226,7 @@ class ProcessEngineTreeTest {
             return fd;
         });
 
-        eng.approve(new CompleteCmd(1L, "approve", "ok"), 42L);
+        eng.approve(new CompleteCmd(1L, "approve", "ok", null), 42L);
 
         // Sibling (id=2) must be SKIPPED.
         ArgumentCaptor<TaskEntity> updCap = ArgumentCaptor.forClass(TaskEntity.class);
@@ -277,6 +278,7 @@ class ProcessEngineTreeTest {
         Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
             ProcessInstance pi = new ProcessInstance();
             pi.setId(1L); pi.setProcDefId(10L); pi.setStatus("RUNNING");
+            pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
             pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
             return pi;
         });
@@ -286,7 +288,7 @@ class ProcessEngineTreeTest {
             return fd;
         });
 
-        eng.approve(new CompleteCmd(1L, "approve", "ok"), 42L);
+        eng.approve(new CompleteCmd(1L, "approve", "ok", null), 42L);
 
         // Instance must STILL be RUNNING, no COMPLETE history yet.
         ProcessInstance pi = lastInstance();
@@ -299,7 +301,7 @@ class ProcessEngineTreeTest {
 
         // 43 approves second — instance ends.
         Mockito.when(taskMapper.selectById(2L)).thenAnswer(inv -> taskWithId(2L, "a1", 43L, "PENDING"));
-        eng.approve(new CompleteCmd(2L, "approve", "ok"), 43L);
+        eng.approve(new CompleteCmd(2L, "approve", "ok", null), 43L);
 
         ProcessInstance pi2 = lastInstance();
         assertThat(pi2.getStatus()).isEqualTo("APPROVED");
@@ -436,11 +438,12 @@ class ProcessEngineTreeTest {
         Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
             ProcessInstance pi = new ProcessInstance();
             pi.setId(1L); pi.setProcDefId(10L); pi.setStatus("RUNNING");
+            pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
             pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
             return pi;
         });
 
-        eng.reject(new CompleteCmd(1L, "reject", "not ok"), 42L);
+        eng.reject(new CompleteCmd(1L, "reject", "not ok", null), 42L);
 
         // Instance must be REJECTED.
         assertThat(lastInstance().getStatus()).isEqualTo("REJECTED");
@@ -459,5 +462,124 @@ class ProcessEngineTreeTest {
         assertThat(instReject.getToNodeId()).isNull();
         assertThat(instReject.getOperatorId()).isEqualTo(42L);
         assertThat(instReject.getComment()).isEqualTo("not ok");
+    }
+
+    // ---------- 8. reject to specified node (props.refuse = TO_NODE) ----------
+    @Test
+    void reject_toConfiguredNode_resumesAtTarget() {
+        // ROOT -> a1 (ASSIGN_USER [42], refuse={mode:TO_NODE,targetNodeId:a1})
+        //   -> a2 (ASSIGN_USER [99]) -> null
+        String processJson = """
+            {"id":"root","type":"ROOT","children":
+              {"id":"a1","type":"APPROVAL",
+               "props":{"assignedType":"ASSIGN_USER","assignedUser":[42],
+                        "refuse":{"mode":"TO_NODE","targetNodeId":"a1"}},
+               "children":
+              {"id":"a2","type":"APPROVAL",
+               "props":{"assignedType":"ASSIGN_USER","assignedUser":[99]},
+               "children":null}}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+        Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(99L));
+
+        ProcessEngine eng = engine();
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+
+        // Task id=1, 42's PENDING on a1.
+        Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(taskMapper.selectList(any())).thenAnswer(inv -> List.of());
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance pi = new ProcessInstance();
+            pi.setId(1L); pi.setProcDefId(10L); pi.setProcessSnapshot(processJson);
+            pi.setProcessDefVersion(1);
+            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            return pi;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData fd = new FormData();
+            fd.setId(1L); fd.setData("{\"k\":\"v\"}");
+            return fd;
+        });
+
+        eng.reject(new CompleteCmd(1L, "reject", "请重审", null), 42L);
+
+        // Instance must STILL be RUNNING (驳回到节点未结束).
+        assertThat(lastInstance().getStatus()).isEqualTo("RUNNING");
+
+        // 应该有 1 条 PENDING 任务：a1 上的新任务（id=2）
+        List<TaskEntity> tasks = capturesOfTaskInsert();
+        TaskEntity reborn = tasks.stream()
+            .filter(t -> "a1".equals(t.getNodeId()) && "PENDING".equals(t.getStatus()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("no reborn PENDING on a1 in: " + tasks));
+        assertThat(reborn.getAssigneeId()).isEqualTo(42L);
+
+        // 历史记录里应有 REJECT_TO_NODE
+        ArgumentCaptor<TaskHistoryEntity> cap = ArgumentCaptor.forClass(TaskHistoryEntity.class);
+        Mockito.verify(historyMapper, Mockito.atLeastOnce()).insert(cap.capture());
+        List<TaskHistoryEntity> all = cap.getAllValues();
+        TaskHistoryEntity rtn = all.stream()
+            .filter(h -> "REJECT_TO_NODE".equals(h.getAction()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError(
+                "no REJECT_TO_NODE history in: " + all));
+        assertThat(rtn.getFromNodeId()).isEqualTo("a1");
+        assertThat(rtn.getToNodeId()).isEqualTo("a1");
+        assertThat(rtn.getOperatorId()).isEqualTo(42L);
+        assertThat(rtn.getComment()).isEqualTo("请重审");
+    }
+
+    // ---------- 9. reject with runtime rejectToNodeId override ----------
+    @Test
+    void reject_runtimeOverride_routesToChosenNode() {
+        // Process tree 没有 props.refuse，但运行时传 rejectToNodeId="a1"，应驳回到 a1。
+        // a1 之后还有 a2，所以驳回到 a1 重审后会新建 a1 的任务。
+        String processJson = """
+            {"id":"root","type":"ROOT","children":
+              {"id":"a1","type":"APPROVAL",
+               "props":{"assignedType":"ASSIGN_USER","assignedUser":[42]},
+               "children":
+              {"id":"a2","type":"APPROVAL",
+               "props":{"assignedType":"ASSIGN_USER","assignedUser":[99]},
+               "children":null}}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+        Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(99L));
+
+        ProcessEngine eng = engine();
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+
+        Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(taskMapper.selectList(any())).thenAnswer(inv -> List.of());
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance pi = new ProcessInstance();
+            pi.setId(1L); pi.setProcDefId(10L); pi.setProcessSnapshot(processJson);
+            pi.setProcessDefVersion(1);
+            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            return pi;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData fd = new FormData();
+            fd.setId(1L); fd.setData("{\"k\":\"v\"}");
+            return fd;
+        });
+
+        // 运行时传 rejectToNodeId="a1"，即使树里没配 refuse，也应驳回到 a1
+        eng.reject(new CompleteCmd(1L, "reject", "再看看", "a1"), 42L);
+
+        // 实例仍 RUNNING，新任务在 a1 上
+        assertThat(lastInstance().getStatus()).isEqualTo("RUNNING");
+        boolean hasReborn = capturesOfTaskInsert().stream()
+            .anyMatch(t -> "a1".equals(t.getNodeId()) && "PENDING".equals(t.getStatus()));
+        assertThat(hasReborn).isTrue();
+
+        // 历史有 REJECT_TO_NODE
+        ArgumentCaptor<TaskHistoryEntity> cap = ArgumentCaptor.forClass(TaskHistoryEntity.class);
+        Mockito.verify(historyMapper, Mockito.atLeastOnce()).insert(cap.capture());
+        boolean hasRtn = cap.getAllValues().stream()
+            .anyMatch(h -> "REJECT_TO_NODE".equals(h.getAction()));
+        assertThat(hasRtn).isTrue();
     }
 }
