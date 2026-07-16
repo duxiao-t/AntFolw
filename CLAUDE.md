@@ -1,82 +1,65 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code 在此仓库工作提供指引。
 
-## Workspace Layout
+## 这是什么
 
-This directory is a **workspace of two independent projects** — neither is a sub-package of the other. Each has its own `package.json`, lockfile, and dependencies. Always `cd` into the project you intend to work on; do not run commands from the workspace root.
+**AntFlow** —— 一个流程审批后台管理系统（对标钉钉：可视化表单配置 + 审批流配置）。单仓多模块 monorepo：
 
 ```
 ant-flow/
-├── ant-design-pro-master/   # React admin boilerplate (see ant-design-pro-master/CLAUDE.md)
-└── wflow-master/           # Vue 2 workflow designer
+├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway + PostgreSQL；自研轻量审批引擎
+├── frontend/    # Umi Max 4 + React 18 + antd 6 + zustand（ant-design-pro 底座）；有自己的 CLAUDE.md
+├── infra/       # docker-compose（postgres:17）+ initdb 扩展脚本
+└── docs/        # superpowers/specs（设计规格）、superpowers/plans（实施计划）
 ```
 
-## Projects at a Glance
+> 注意：`backend/` 与 `frontend/` 各有独立依赖与构建。**先 `cd` 进对应模块再执行命令**，不要在仓库根跑 `mvn`/`npm`。前端另有 `frontend/CLAUDE.md`（Biome-only、TS strict、`/antd` 与 `/pro-upgrade` skill），改前端前先读它。
 
-### `ant-design-pro-master/`
-
-React 19 + TypeScript + Umi Max 4 enterprise boilerplate on antd 6 / ProComponents 3, built with utoopack. **Has its own CLAUDE.md** — read `ant-design-pro-master/CLAUDE.md` first. Key entry points: `npm start`, `npm run build`, `npm run lint` (Biome + tsc). Ships two built-in Claude Code skills: `/pro-upgrade` and `/antd`.
-
-### `wflow-master/`
-
-Front-end of `wflow-web` (by willianfu): a visual form designer + approval-flow designer for OA workflows. Vue 2.6 + Vue Router 3 + Vuex 3 + Element UI 2 + vuedraggable + codemirror 6 + signature_pad. Designed for normal business users — no BPMN jargon. The accompanying Java/Spring Boot backend lives at `wflow-master/server/code/` (Maven, Spring Boot 2.0.4, MyBatis-Plus 3.5, Java 8); the schema is in `wflow-master/server/sql/wflow.sql`. The OSS edition is front-end only — back-end support is paid `wflow-pro`.
-
-#### Run / build (wflow)
+## 运行 / 构建
 
 ```bash
-cd wflow-master
-npm install
-npm run serve         # dev server on port 88 (see vue.config.js)
-npm run build         # production build → dist/
-npm run lint          # eslint (plugin:vue/essential)
+# 数据库
+cd infra && docker compose up -d          # postgres:17，含 ltree/pgcrypto 扩展
+
+# 后端（首次启动自动跑 Flyway V1..V4）
+cd backend && mvn -B spring-boot:run       # http://localhost:8080
+cd backend && mvn test                     # 单元测试（不需 PG）
+
+# 前端（dev 代理 /api → :8080）
+cd frontend && npm install
+cd frontend && npm start                   # http://localhost:8000
+cd frontend && npm run build               # utoopack 打包
 ```
 
-- **Node**: vue-cli-service v4.5 requires Node 14–16; newer Node may need `--openssl-legacy-provider`.
-- **Less**: `src/assets/theme.less` is auto-injected globally by `style-resources-loader` (see `vue.config.js`). Edit this file to change theme tokens used across all components.
-- **axios**: all API calls go through `src/api/request.js`. Per-domain modules: `design.js`, `org.js`, `process.js`.
+种子账号：`admin / ant.design`、`bob / ant.design`（V2 迁移写入）。
 
-#### Source map (wflow)
+## 核心领域模型：钉钉式流程树（重要）
 
-```
-src/
-├── api/                       # axios wrappers — design.js, org.js, process.js
-├── assets/                    # theme.less, iconfont, images
-├── components/common/         # shared widgets: Ellipsis, OrgPicker, Tip, WDialog
-├── router/                    # routes
-├── store/                     # Vuex — designer state (formItems, process tree, etc.)
-├── utils/CustomUtil.js        # helpers
-└── views/
-    ├── workspace/             # user-facing workspace
-    └── admin/
-        ├── FormsPanel.vue     # form/process list
-        ├── LayoutHeader.vue
-        └── layout/
-            ├── FormDesign.vue + form/      # form designer surface
-            └── ProcessDesign.vue + process/ # process designer surface
-    └── common/
-        ├── form/   components | config | components == renderable form fields
-        │   ├── components/  AmountInput, DateTime, DeptPicker, FileUpload, SignPannel, TableList, UserPicker, ...
-        │   └── config/      per-component config panels (e.g. TextInputConfig.vue)
-        └── process/          ApprovalNode, CcNode, ConcurrentNode, ConditionNode, DelayNode, TriggerNode, RootNode, EmptyNode
-            ├── nodes/        node renderers
-            └── config/       node config panels (ApprovalNodeConfig, ConditionGroupItemConfig, ...)
-```
+流程定义**不是** BPMN 图，也不是 nodes+edges 平面图，而是**单棵递归树**，参考实现见 `D:\code\wflow-master`（Vue 版 wflow：`src/views/admin/layout/process/{ProcessTree.vue,DefaultNodeProps.js}`、`src/views/common/process/config/ApprovalNodeConfig.vue`）。
 
-**Convention**: every component type comes in **two siblings** — a renderer under `views/common/{form|process}/{components|nodes}/` and a config panel under `views/common/{form|process}/config/`. `ComponentExport.js` and `ComponentsConfigExport.js` are the registries; new field/node types must be registered here or they won't appear in the designer palette.
+- 存储：`t_process_definition.process`（JSONB，`ProcessDefinition.process` 字段）。**已弃用** `nodes`/`edges` 列。
+- 节点类型：`ROOT / APPROVAL / CC / CONDITIONS / CONDITION / EMPTY`（首期核心子集；并行 `CONCURRENTS`、延时、触发器等为二期）。
+- 结构：业务节点（ROOT/APPROVAL/CC）用**单个 `children`** 指向唯一后继（线性链，末端为 null）；`CONDITIONS` 用 `branchs[]`（每个 `CONDITION` 分支各带自己的 children 链）+ `children`（分支合流后的后续）；分支尾部用 `EMPTY` 占位。
+- 审批人 `props.assignedType`：`ASSIGN_USER / ROLE / LEADER(第N级主管) / SELF / SELF_SELECT`。多人 `props.mode`：`AND`(会签) / `OR`(或签)。审批人为空 `props.nobody.handler`：`TO_PASS / TO_REFUSE`。
+- 条件分支 `CONDITION.props`：`{ isDefault, groupsType(OR|AND), groups:[{ groupType(OR|AND), conditions:[{field, operator, value}] }] }`；`field` = 某表单字段的 `node.id`。
 
-**State shape** (Vuex store — see `src/store/index.js` and README §"设计器数据"): `{ formId, formName, logo, settings: {commiter, admin, sign, notify}, group, formItems[], process{}, remark }`. This whole object is what you POST to the backend.
+后端引擎 `com.antflow.engine`：
+- `ProcessEngine.start/approve/reject/withdraw` 沿树遍历（`engine.tree.ProcessTreeNav`），CC 非阻塞、`CONDITIONS` 用 `engine.condition.ConditionEvaluator` 选分支、审批节点按 mode 决定推进（OR 首个通过即推进并跳过兄弟；AND 全部通过才推进）。
+- `engine.resolver.AssigneeResolver` 解析审批人（含第 N 级主管：沿部门 `parentId` 上溯取 `leaderId`）。
+- 乐观锁：`t_process_instance.version` / `t_task.version`（MyBatis-Plus `OptimisticLockerInnerInterceptor`）。
 
-#### wflow gotchas
+前端设计器 `frontend/src/pages/designer/process/`：
+- 递归树渲染 `ProcessTree.tsx` + `NodeChain.tsx` + `nodes/*`（节点卡片）；状态在 `useProcessDesignerStore.ts`（zustand，含 insert/remove/addBranch/updateProps）。
+- 节点配置面板在 `config/*`；`ProcessDesigner.tsx` 用 antd Drawer 承载。**已移除 `@xyflow/react`**。
 
-- `npm run serve` defaults to **port 88** (`vue.config.js`). If 88 is busy, dev server will still start but on another port — watch the log.
-- `lintOnSave: false` — ESLint is not wired to the dev server. Run `npm run lint` manually.
-- `productionSourceMap: true` — sourcemaps ship to production; reduce by toggling if size matters.
-- `signature_pad` is pinned to `3.0.0-beta.4`; the new API differs from v4+. Don't bump without auditing `SignPannel.vue`.
-- Front-end is the open-source piece; the real process engine is **not** in this repo. Integration points (URLs in `api/*.js`) are stubs against the pro backend.
+## 约定与坑
 
-## Working in this workspace
+- **表单数据以 `node.id`（nanoid）为键**：`t_form_data.data = { "<字段node.id>": 值 }`（见 `FormRenderer.tsx`）。条件分支的 `field` 即字段 node.id。
+- 表单/流程 1:1：`t_process_definition.form_def_id` UNIQUE。发起流程时后端自动建 `t_form_data(SUBMITTED)` + `t_process_instance(RUNNING)`。
+- 发起接口 `POST /api/instances/start` body：`{ formCode, data, selfSelected }`，`selfSelected: { [nodeId]: number[] }` 提供所有 SELF_SELECT 节点的自选审批人。
+- **前端存在历史 tsc 错误**（app.tsx / requestErrorConfig.ts / 部分 form-fields / login 等，与流程改造无关）；`npm run build`（utoopack）不因类型错误失败，但 `npm run lint`/`tsc` 在这些历史文件上仍报错。这是独立的待整改项，勿误判为本次改动引入。
 
-- **Pick a project, then `cd`.** Never run `npm`/`mvn` from `E:\code\ant-flow` directly — the lockfiles aren't workspaces.
-- The two projects use different stacks (React/TS vs Vue 2/JS), different package managers (npm), and unrelated lint configs (Biome vs ESLint). Don't conflate them.
-- If asked to work on "antd" or "pro", go into `ant-design-pro-master/` and read its CLAUDE.md first; the `/antd` and `/pro-upgrade` skills live there.
+## 二期（未做）
+
+并行分支、延时/触发器节点、连续多级主管(LEADER_TOP)、依次会签(NEXT)、超时处理、驳回到指定节点、节点级表单字段权限、转交/加签、流程发布版本快照、列表分页、实例详情读权限收敛。
