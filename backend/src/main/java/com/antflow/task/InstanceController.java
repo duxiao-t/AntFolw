@@ -49,4 +49,10 @@ public class InstanceController {
         return historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
             .eq("proc_inst_id", id).orderByAsc("created_at"));
     }
+
+    @PostMapping("/{id}/withdraw")
+    public void withdraw(@PathVariable Long id) {
+        var p = PrincipalHolder.current().orElseThrow();
+        engine.withdraw(id, p.userId());
+    }
 }
