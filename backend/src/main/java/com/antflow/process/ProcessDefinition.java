@@ -1,7 +1,7 @@
 package com.antflow.process;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.antflow.form.handler.JsonbJacksonTypeHandler;
 import lombok.Data;
 
 @Data
@@ -10,7 +10,7 @@ public class ProcessDefinition {
     @TableId(type = IdType.AUTO) private Long id;
     private Long formDefId;
     private Integer version;
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = JsonbJacksonTypeHandler.class)
     private String process;     // JSONB 流程树
     private String status;
     private Long createdBy;

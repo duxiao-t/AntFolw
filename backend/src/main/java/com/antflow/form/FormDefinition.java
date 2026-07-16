@@ -1,7 +1,7 @@
 package com.antflow.form;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.antflow.form.handler.JsonbJacksonTypeHandler;
 import lombok.Data;
 
 @Data
@@ -11,8 +11,8 @@ public class FormDefinition {
     private String code;
     private String name;
     private Integer version;
-    @TableField(typeHandler = JacksonTypeHandler.class) private String schema;       // JSONB
-    @TableField(typeHandler = JacksonTypeHandler.class) private String settings;     // JSONB
+    @TableField(typeHandler = JsonbJacksonTypeHandler.class) private String schema;       // JSONB
+    @TableField(typeHandler = JsonbJacksonTypeHandler.class) private String settings;     // JSONB
     private String status;       // DRAFT / PUBLISHED / DEPRECATED
     private Long createdBy;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
