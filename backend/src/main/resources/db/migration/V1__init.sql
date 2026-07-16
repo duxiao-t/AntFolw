@@ -1,6 +1,15 @@
 -- V1__init.sql
--- AntFlow schema baseline. Extensions are loaded by initdb.d/01-extensions.sql
--- on first container start; this file assumes ltree and pgcrypto are present.
+-- AntFlow schema baseline.
+--
+-- Extensions: previously loaded by initdb.d/01-extensions.sql on docker-compose
+-- startup. For local (non-docker) deployments where the user runs against an
+-- existing PG instance, Flyway executes this file as the migration owner.
+-- CREATE EXTENSION IF NOT EXISTS is a no-op when the extension already exists,
+-- so it's safe to include here. Requires superuser or extension-related grants
+-- on the connecting role.
+
+CREATE EXTENSION IF NOT EXISTS ltree;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Organization
 CREATE TABLE t_company (

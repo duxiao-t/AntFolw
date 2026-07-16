@@ -2,9 +2,11 @@ spring:
   application:
     name: antflow-backend
   datasource:
+    # Default: local PostgreSQL on 5432 (user-supplied postgres/Tao@1234).
+    # Override via env: SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD.
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/antflow}
-    username: ${SPRING_DATASOURCE_USERNAME:antflow}
-    password: ${SPRING_DATASOURCE_PASSWORD:antflow}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:Tao@1234}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
