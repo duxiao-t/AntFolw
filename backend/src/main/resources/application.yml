@@ -4,7 +4,10 @@ spring:
   datasource:
     # Default: local PostgreSQL on 5432 (user-supplied postgres/Tao@1234).
     # Override via env: SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD.
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/antflow}
+    # stringtype=unspecified: 让 PG 把 JacksonTypeHandler 写出的字符串隐式转为 jsonb，
+    # 否则 schema/settings/data/process 等 jsonb 列写入报 "column is of type jsonb but
+    # expression is of type character varying"。自定义 SPRING_DATASOURCE_URL 时需自行带上此参数。
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/antflow?stringtype=unspecified}
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:Tao@1234}
     driver-class-name: org.postgresql.Driver
