@@ -252,27 +252,7 @@ public class ProcessEngine {
     }
 
     private List<JsonNode> nextNodes(ProcessDefinition pd, String fromId) {
-        try {
-            var edges = json.readTree(pd.getEdges() == null ? "[]" : pd.getEdges());
-            var nodes = json.readTree(pd.getNodes() == null ? "[]" : pd.getNodes());
-            Map<String, JsonNode> byId = new HashMap<>();
-            nodes.forEach(n -> byId.put(n.path("id").asText(), n));
-            List<JsonNode> acc = new ArrayList<>();
-            edges.forEach(e -> {
-                if (fromId.equals(e.path("from").asText())) {
-                    var n = byId.get(e.path("to").asText());
-                    if (n != null) {
-                        dispatcher.assertKnown(n.path("type").asText());
-                        acc.add(n);
-                    }
-                }
-            });
-            return acc;
-        } catch (com.antflow.engine.handler.BadNodeTypeException e) {
-            throw new BizException("BAD_NODE_TYPE", e.getMessage());
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new BizException("BAD_FLOW_JSON", e.getMessage());
-        }
+        throw new UnsupportedOperationException("流程引擎将于 Task 7 重写为树遍历");
     }
 
     private AssigneeSpec parseAssignee(JsonNode n) {
