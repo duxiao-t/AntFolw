@@ -1,6 +1,7 @@
 import { Button } from 'antd';
+import { findById, formRegistry } from '../../../registry/formRegistry';
+import type { SchemaNode } from '../../../registry/types';
 import { useFormDesignerStore } from './useFormDesignerStore';
-import { formRegistry, findById } from '../../../registry/formRegistry';
 
 export function Inspector() {
   const selectedId = useFormDesignerStore((s) => s.selectedId);
@@ -25,7 +26,10 @@ export function Inspector() {
       <h4 style={{ padding: 16, margin: 0, borderBottom: '1px solid #eee' }}>
         {ft.label} <small style={{ color: '#888' }}>({node.type})</small>
       </h4>
-      <ft.ConfigPanel node={node} onChange={(n) => updateNode(node.id, n)} />
+      <ft.ConfigPanel
+        node={node}
+        onChange={(n: SchemaNode) => updateNode(node.id, n)}
+      />
       <div style={{ padding: 16 }}>
         <Button danger onClick={() => removeNode(node.id)}>
           删除字段

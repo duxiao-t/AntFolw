@@ -15,6 +15,7 @@ import {
 import {
   FormattedMessage,
   Helmet,
+  request,
   SelectLang,
   useIntl,
   useModel,
@@ -23,7 +24,6 @@ import { Alert, App, Button, Tabs } from 'antd';
 import { createStyles } from 'antd-style';
 import React, { startTransition, useState } from 'react';
 import { Footer } from '@/components';
-import { request } from '@umijs/max';
 import Settings from '../../../../config/defaultSettings';
 
 /**
@@ -174,7 +174,6 @@ const Login: React.FC = () => {
       setUserLoginState({
         status: 'error',
         type: 'account',
-        message: defaultLoginFailureMessage,
       });
       message.error(defaultLoginFailureMessage);
     }

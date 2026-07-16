@@ -40,7 +40,9 @@ function collectSelfSelectNodes(
     collectSelfSelectNodes(node.children, acc);
   }
   if (Array.isArray(node.branchs)) {
-    node.branchs.forEach((b) => collectSelfSelectNodes(b, acc));
+    node.branchs.forEach((b) => {
+      collectSelfSelectNodes(b, acc);
+    });
   }
 }
 

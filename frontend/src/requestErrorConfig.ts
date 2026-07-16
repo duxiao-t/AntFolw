@@ -1,5 +1,4 @@
-﻿import type { RequestOptions } from '@@/plugin-request/request';
-import type { RequestConfig } from '@umijs/max';
+﻿import type { RequestConfig, RequestOptions } from '@@/plugin-request/request';
 import { getIntl } from '@umijs/max';
 import { message, notification } from 'antd';
 
@@ -108,7 +107,10 @@ export const errorConfig: RequestConfig = {
       // AntFlow JWT 注入
       const token = localStorage.getItem(TOKEN_KEY);
       if (token) {
-        config.headers = { ...(config.headers as Record<string, string>), Authorization: `Bearer ${token}` };
+        config.headers = {
+          ...(config.headers as Record<string, string>),
+          Authorization: `Bearer ${token}`,
+        };
       }
       return config;
     },
@@ -124,7 +126,9 @@ export const errorConfig: RequestConfig = {
           localStorage.removeItem(TOKEN_KEY);
           window.location.href = '/user/login';
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       return response;
     },
   ],

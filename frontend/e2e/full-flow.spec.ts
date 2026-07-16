@@ -1,4 +1,4 @@
-import { test, expect, request } from '@playwright/test';
+import { expect, request, test } from '@playwright/test';
 
 /**
  * End-to-end smoke test for the AntFlow happy path:
@@ -14,12 +14,19 @@ import { test, expect, request } from '@playwright/test';
  *   cd infra && docker compose up -d
  * Then: cd frontend && npx playwright test
  */
-test('design → publish → submit → approve end-to-end', async ({ page, baseURL }) => {
+test('design → publish → submit → approve end-to-end', async ({
+  page,
+  baseURL,
+}) => {
   test.setTimeout(120_000);
 
   // -- 1. admin login
   await page.goto('/user/login');
-  await page.locator('input[placeholder*="账" i], input[id*="userName" i], input[id*="username" i]').first()
+  await page
+    .locator(
+      'input[placeholder*="账" i], input[id*="userName" i], input[id*="username" i]',
+    )
+    .first()
     .fill('admin');
   await page.locator('input[type="password"]').first().fill('ant.design');
   await page.getByRole('button', { name: /登录/ }).click();
@@ -46,12 +53,16 @@ test('design → publish → submit → approve end-to-end', async ({ page, base
   // -- 4. set up a 1-level approval (process_def) by direct API call.
   //       (Driving React Flow drag-and-drop in a headless browser is brittle;
   //        the API path is identical and is what production callers would use.)
-  const token = await page.evaluate(() => localStorage.getItem('antflow-token'));
+  const token = await page.evaluate(() =>
+    localStorage.getItem('antflow-token'),
+  );
   expect(token).toBeTruthy();
 
   // Look up the admin user id (we need a real id for the assignee)
-  const apiContext = await request.newContext({ baseURL: baseURL! });
-  apiContext.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+  const apiContext = await request.newContext({
+    baseURL: baseURL!,
+    extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+  });
   const meResp = await apiContext.get('/api/auth/me');
   expect(meResp.ok()).toBeTruthy();
   const me = await meResp.json();
@@ -61,29 +72,57 @@ test('design → publish → submit → approve end-to-end', async ({ page, base
   const procBody = {
     formDefId: Number(formId),
     nodes: [
-      { id: 'start', type: 'start', x: 80, y: 80, props: {}, assignee: { type: 'user', ids: [] } },
-      { id: 'a1',    type: 'approval', x: 240, y: 80,
-        assignee: { type: 'user', ids: [adminId] }, props: {} },
-      { id: 'end',   type: 'end', x: 400, y: 80, props: {}, assignee: { type: 'user', ids: [] } },
+      {
+        id: 'start',
+        type: 'start',
+        x: 80,
+        y: 80,
+        props: {},
+        assignee: { type: 'user', ids: [] },
+      },
+      {
+        id: 'a1',
+        type: 'approval',
+        x: 240,
+        y: 80,
+        assignee: { type: 'user', ids: [adminId] },
+        props: {},
+      },
+      {
+        id: 'end',
+        type: 'end',
+        x: 400,
+        y: 80,
+        props: {},
+        assignee: { type: 'user', ids: [] },
+      },
     ],
     edges: [
       { from: 'start', to: 'a1' },
       { from: 'a1', to: 'end' },
     ],
   };
-  const saveProc = await apiContext.post('/api/processes/definitions', { data: procBody });
+  const saveProc = await apiContext.post('/api/processes/definitions', {
+    data: procBody,
+  });
   expect(saveProc.ok()).toBeTruthy();
   const procResp = await saveProc.json();
   const procId = procResp.id;
 
   // Publish — server enforces linear-flow + form-published
-  const pubProc = await apiContext.post(`/api/processes/definitions/${procId}/publish`);
+  const pubProc = await apiContext.post(
+    `/api/processes/definitions/${procId}/publish`,
+  );
   expect(pubProc.ok()).toBeTruthy();
 
   // -- 5. log out, log in as bob
   await page.evaluate(() => localStorage.removeItem('antflow-token'));
   await page.goto('/user/login');
-  await page.locator('input[placeholder*="账" i], input[id*="userName" i], input[id*="username" i]').first()
+  await page
+    .locator(
+      'input[placeholder*="账" i], input[id*="userName" i], input[id*="username" i]',
+    )
+    .first()
     .fill('bob');
   await page.locator('input[type="password"]').first().fill('ant.design');
   await page.getByRole('button', { name: /登录/ }).click();
@@ -101,7 +140,11 @@ test('design → publish → submit → approve end-to-end', async ({ page, base
   // -- 7. log back in as admin to approve
   await page.evaluate(() => localStorage.removeItem('antflow-token'));
   await page.goto('/user/login');
-  await page.locator('input[placeholder*="账" i], input[id*="userName" i], input[id*="username" i]').first()
+  await page
+    .locator(
+      'input[placeholder*="账" i], input[id*="userName" i], input[id*="username" i]',
+    )
+    .first()
     .fill('admin');
   await page.locator('input[type="password"]').first().fill('ant.design');
   await page.getByRole('button', { name: /登录/ }).click();
@@ -109,11 +152,18 @@ test('design → publish → submit → approve end-to-end', async ({ page, base
 
   // -- 8. check inbox, approve
   await page.goto('/tasks/inbox');
-  await expect(page.locator('text=审批').first()).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: /^同意$/ }).first().click();
+  await expect(page.locator('text=审批').first()).toBeVisible({
+    timeout: 10_000,
+  });
+  await page
+    .getByRole('button', { name: /^同意$/ })
+    .first()
+    .click();
   await page.getByRole('button', { name: /确定/ }).click();
 
   // -- 9. instance detail shows APPROVED
   await page.goto('/proc');
-  await expect(page.locator('text=APPROVED').first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('text=APPROVED').first()).toBeVisible({
+    timeout: 10_000,
+  });
 });
