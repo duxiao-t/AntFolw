@@ -11,9 +11,7 @@ public class ProcessDefinition {
     private Long formDefId;
     private Integer version;
     @TableField(typeHandler = JacksonTypeHandler.class)
-    private String nodes;       // JSONB
-    @TableField(typeHandler = JacksonTypeHandler.class)
-    private String edges;       // JSONB
+    private String process;     // JSONB 流程树
     private String status;
     private Long createdBy;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;

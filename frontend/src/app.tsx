@@ -1,7 +1,8 @@
+import type { RunTimeLayoutConfig } from '@@/plugin-layout/types.d';
+import type { RequestConfig } from '@@/plugin-request/request';
 import { LinkOutlined } from '@ant-design/icons';
 import type { Settings as LayoutSettings } from '@ant-design/pro-components';
 import { SettingDrawer } from '@ant-design/pro-components';
-import type { RequestConfig, RunTimeLayoutConfig } from '@umijs/max';
 import { history, Link } from '@umijs/max';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -10,6 +11,7 @@ import React from 'react';
 // Initialize dayjs plugins globally
 dayjs.extend(relativeTime);
 
+import { request as umiRequest } from '@umijs/max';
 import {
   AvatarDropdown,
   DocLink,
@@ -19,7 +21,6 @@ import {
   OfflineBanner,
   VersionDropdown,
 } from '@/components';
-import { request } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -40,17 +41,17 @@ export async function getInitialState(): Promise<{
     try {
       // AntFlow: hit our backend instead of the upstream mock.
       // skipErrorHandler=true keeps GlobalExceptionHandler from showing toast on 401.
-      const me = await request<API.CurrentUser>('/api/auth/me', {
+      const me = await umiRequest<API.CurrentUser>('/api/auth/me', {
         skipErrorHandler: true,
       });
       // Mark admin status for access.ts gating.
       return {
         ...me,
         access: (me as any).roles?.includes('admin') ? 'admin' : 'user',
-        name: me.displayName ?? me.username,
+        name: (me as any).displayName ?? (me as any).username,
       } as API.CurrentUser;
     } catch (_error) {
-      const { pathname, search, hash } = history.location;
+      const { pathname, search, hash } = window.location;
       history.replace(
         `${loginPath}?redirect=${encodeURIComponent(pathname + search + hash)}`,
       );
@@ -58,7 +59,7 @@ export async function getInitialState(): Promise<{
     return undefined;
   };
   // 如果不是登录页面，执行
-  const { location } = history;
+  const { location } = window;
   if (
     ![loginPath, '/user/register', '/user/register-result'].includes(
       location.pathname,
@@ -118,7 +119,7 @@ export const layout: RunTimeLayoutConfig = ({
     // },
     footerRender: () => <Footer />,
     onPageChange: () => {
-      const { location } = history;
+      const { location } = window;
       // 如果没有登录，重定向到 login
       if (!initialState?.currentUser && location.pathname !== loginPath) {
         history.replace(
@@ -199,7 +200,7 @@ export const layout: RunTimeLayoutConfig = ({
 export const request: RequestConfig = {
   // AntFlow: dev proxies /api → :8080 via config/proxy.ts. Build artifacts
   // ship static — backend URL is injected at deploy time via UMI_ENV.
-  baseURL: isDev ? '' : (process.env.UMI_ENV === 'pre' ? '/api' : '/api'),
+  baseURL: isDev ? '' : process.env.UMI_ENV === 'pre' ? '/api' : '/api',
   ...errorConfig,
 };
 

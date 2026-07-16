@@ -34,7 +34,7 @@ public class ProcessDefinitionController {
     public ProcessDefinition save(@RequestBody SaveBody body) {
         var p = PrincipalHolder.current().orElseThrow();
         return service.saveOrUpdateDraft(body.id(), body.formDefId(),
-            body.nodes(), body.edges(), p.userId());
+            body.process(), p.userId());
     }
 
     @PostMapping("/{id}/publish")
@@ -42,5 +42,5 @@ public class ProcessDefinitionController {
         return service.publish(id);
     }
 
-    public record SaveBody(Long id, Long formDefId, Object nodes, Object edges) {}
+    public record SaveBody(Long id, Long formDefId, Object process) {}
 }

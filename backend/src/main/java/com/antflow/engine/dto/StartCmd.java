@@ -1,3 +1,7 @@
 package com.antflow.engine.dto;
 
-public record StartCmd(String formCode, Object data) {}
+import java.util.List;
+import java.util.Map;
+
+public record StartCmd(String formCode, Object data,
+                       Map<String, List<Long>> selfSelected) {}

@@ -1,10 +1,11 @@
 package com.antflow.engine;
 
+import com.antflow.engine.condition.ConditionEvaluator;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
-import com.antflow.engine.handler.NodeDispatcher;
 import com.antflow.engine.resolver.AssigneeResolver;
 import com.antflow.engine.resolver.AssigneeSpec;
+import com.antflow.engine.tree.ProcessTreeNav;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
@@ -21,20 +22,28 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
- * Custom lightweight approval engine — sequential MVP (spec decision #3, #20).
+ * 钉钉式流程树的运行时引擎（Task 7）。
  *
- * Engagement points:
- *   - {@link #start(StartCmd, long)} — creates FormData (SUBMITTED, with form_def_version snapshot)
- *     + ProcessInstance (RUNNING) + first wave of {@code TaskEntity} records (PENDING, OR_SIGN).
- *   - {@link #approve(CompleteCmd, long)} — advances the instance; siblings SKIPPED on OR-sign.
- *   - {@link #reject(CompleteCmd, long)} — terminates the instance REJECTED + sibling SKIPPED.
- *   - {@link #withdraw(long, long)} — starter can withdraw before any task is acted on.
+ * <p>流程由 {@link ProcessDefinition#getProcess()}（JSONB 字符串）持有：
+ * 每个节点 {@code {id, type, props, children, branchs?}}；业务节点用单个
+ * {@code children} 指向唯一后继；{@code CONDITIONS} 有
+ * {@code branchs[]}+{@code children}（合流后续）。
  *
- * Concurrency: optimistic locking on {@code t_process_instance.version} and
- * {@code t_task.version} via MyBatis-Plus (see {@link com.antflow.common.MybatisPlusConfig}).
+ * <p>引擎入口：
+ * <ul>
+ *   <li>{@link #start(StartCmd, long)} — 建 FormData(SUBMITTED) + ProcessInstance(RUNNING)，
+ *       从 ROOT 出发首次 {@code resolveAndLand}。</li>
+ *   <li>{@link #approve(CompleteCmd, long)} — 标记 PENDING 任务 APPROVED，按节点 mode
+ *       （OR→跳兄弟+推进；AND→等全员再推进）处理后继续 {@code resolveAndLand}。</li>
+ *   <li>{@link #reject(CompleteCmd, long)} — 标记 REJECTED、跳兄弟、实例 REJECTED。</li>
+ *   <li>{@link #withdraw(long, long)} — 发起人在任意任务被处理前撤回。</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -48,7 +57,7 @@ public class ProcessEngine {
     private final TaskMapperExt taskMapperExt;
     private final TaskHistoryMapper historyMapper;
     private final AssigneeResolver assigneeResolver;
-    private final NodeDispatcher dispatcher;
+    private final ConditionEvaluator conditionEvaluator;
     private final ObjectMapper json;
 
     @Transactional
@@ -78,7 +87,12 @@ public class ProcessEngine {
         pi.setStartedAt(OffsetDateTime.now());
         processInstanceMapper.insert(pi);
 
-        List<Long> firstTasks = advance(pd, pi, "start");
+        JsonNode root = readTree(pd.getProcess());
+        JsonNode formData = readTreeOrEmpty(fd2.getData());
+        Map<String, List<Long>> selfSelected =
+            cmd.selfSelected() == null ? Map.of() : cmd.selfSelected();
+
+        List<Long> firstTasks = resolveAndLand(root, pi, formData, userId, selfSelected, root);
         return Map.of(
             "instanceId", pi.getId(),
             "formDataId", fd2.getId(),
@@ -105,50 +119,44 @@ public class ProcessEngine {
 
         ProcessInstance pi = taskMapperExt.selectInstanceById(t.getProcInstId()).orElseThrow();
         ProcessDefinition pd = processDefinitionService.getById(pi.getProcDefId());
-
-        List<JsonNode> next = nextNodes(pd, t.getNodeId());
-        // MVP: filter out `end` nodes from "tasks to create"; if only end-nodes remain,
-        // the instance terminates.
-        List<JsonNode> produceTasks = next.stream()
-            .filter(n -> !"end".equals(n.path("type").asText()))
-            .toList();
-
-        if (produceTasks.isEmpty()) {
-            pi.setStatus("APPROVED");
-            pi.setFinishedAt(OffsetDateTime.now());
-            processInstanceMapper.updateById(pi);
-            insertHistoryOnInstance(pi.getId(), null, null, "COMPLETE", operatorId, null);
-            return;
+        JsonNode root = readTree(pd.getProcess());
+        JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
+        if (cur == null) {
+            throw new BizException("BAD_FLOW", "approval node not in tree: " + t.getNodeId());
         }
 
-        for (JsonNode nn : produceTasks) {
-            AssigneeSpec spec = parseAssignee(nn.path("assignee"));
-            List<Long> assignees = assigneeResolver.resolve(nn.path("id").asText(), spec);
-            for (Long a : assignees) {
-                TaskEntity nt = new TaskEntity();
-                nt.setProcInstId(pi.getId());
-                nt.setNodeId(nn.path("id").asText());
-                nt.setAssigneeId(a);
-                nt.setStatus("PENDING");
-                nt.setApprovalMode("OR_SIGN");
-                taskMapper.insert(nt);
+        String mode = cur.path("props").path("mode").asText("OR");
+        boolean andMode = "AND".equals(mode);
+
+        if (andMode) {
+            // Wait until all PENDING siblings have acted.
+            List<TaskEntity> stillPending = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", pi.getId())
+                .eq("status", "PENDING")
+                .eq("node_id", t.getNodeId())
+                .ne("id", t.getId()));
+            if (!stillPending.isEmpty()) {
+                return;   // 尚未完成本节点全员
             }
-            pi.setCurrentNodeId(nn.path("id").asText());
+            // All done — first-come OR any-of-several, choose "auto approve" semantics.
+        } else {
+            // OR-sign: skip sibling PENDING tasks on same node.
+            List<TaskEntity> siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", pi.getId())
+                .eq("status", "PENDING")
+                .eq("node_id", t.getNodeId())
+                .ne("id", t.getId()));
+            for (TaskEntity sib : siblings) {
+                sib.setStatus("SKIPPED");
+                taskMapper.updateById(sib);
+                insertHistoryOnInstance(pi.getId(), t.getNodeId(), sib.getNodeId(),
+                    "SKIP", operatorId, "OR-sign short-circuit");
+            }
         }
-        processInstanceMapper.updateById(pi);
 
-        // OR-sign short-circuit: skip sibling tasks on the just-completed node.
-        var pendingSiblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", pi.getId())
-            .eq("status", "PENDING")
-            .eq("node_id", t.getNodeId())
-            .ne("id", t.getId()));
-        for (TaskEntity sib : pendingSiblings) {
-            sib.setStatus("SKIPPED");
-            taskMapper.updateById(sib);
-            insertHistoryOnInstance(pi.getId(), t.getNodeId(), sib.getNodeId(),
-                "SKIP", operatorId, "OR-sign short-circuit");
-        }
+        JsonNode formData = readFormData(pi.getFormDataId());
+        // 仅首轮 start 时传入过 selfSelected；后续（理论上不会出现）传空 map。
+        resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
     }
 
     @Transactional
@@ -169,11 +177,11 @@ public class ProcessEngine {
         insertHistory(t, null, t.getNodeId(), "REJECT", operatorId, cmd.comment());
 
         ProcessInstance pi = taskMapperExt.selectInstanceById(t.getProcInstId()).orElseThrow();
-        // Sibling SKIP
-        var pendingSiblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+        // 同节点兄弟一律 SKIPPED
+        List<TaskEntity> siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
             .eq("proc_inst_id", pi.getId()).eq("status", "PENDING")
             .eq("node_id", t.getNodeId()).ne("id", t.getId()));
-        for (TaskEntity sib : pendingSiblings) {
+        for (TaskEntity sib : siblings) {
             sib.setStatus("SKIPPED");
             taskMapper.updateById(sib);
             insertHistoryOnInstance(pi.getId(), t.getNodeId(), sib.getNodeId(),
@@ -182,6 +190,8 @@ public class ProcessEngine {
         pi.setStatus("REJECTED");
         pi.setFinishedAt(OffsetDateTime.now());
         processInstanceMapper.updateById(pi);
+        insertHistoryOnInstance(pi.getId(), t.getNodeId(), null,
+            "REJECT", operatorId, cmd.comment());
     }
 
     @Transactional
@@ -194,13 +204,13 @@ public class ProcessEngine {
         if (!"RUNNING".equals(pi.getStatus())) {
             throw new BizException("BAD_STATE", "instance not running");
         }
-        var anyDone = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+        List<TaskEntity> anyDone = taskMapper.selectList(new QueryWrapper<TaskEntity>()
             .eq("proc_inst_id", pi.getId()).ne("status", "PENDING"));
         if (!anyDone.isEmpty()) {
             throw new BizException("ALREADY_ACTED",
                 "cannot withdraw after a task has been acted on");
         }
-        var pending = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+        List<TaskEntity> pending = taskMapper.selectList(new QueryWrapper<TaskEntity>()
             .eq("proc_inst_id", pi.getId()).eq("status", "PENDING"));
         for (TaskEntity p : pending) {
             p.setStatus("SKIPPED");
@@ -213,78 +223,199 @@ public class ProcessEngine {
             "WITHDRAW", operatorId, null);
     }
 
+    // -----------------------------------------------------------------------
+    // 核心：resolveAndLand — 从刚完成/起点节点起沿树前进，直到落到一个需要建
+    // 任务的 APPROVAL 节点（可能多条）、走完末端、或实例结束。
+    // -----------------------------------------------------------------------
+
     /**
-     * Walk from {@code fromNodeId}; create one TaskEntity per resolved assignee; advance
-     * the instance's {@code current_node_id}; emit START history.
+     * @param root          流程树根（用于历史记录）
+     * @param pi            当前实例
+     * @param formData      当前表单数据（条件求值用）
+     * @param starterId     发起人 id
+     * @param selfSelected  自选审批人映射
+     * @param fromNode      刚完成的节点（首轮 = root）
+     * @return 新建的任务 id 列表
      */
-    private List<Long> advance(ProcessDefinition pd, ProcessInstance pi, String fromNodeId) {
-        List<JsonNode> next = nextNodes(pd, fromNodeId);
-        List<JsonNode> produceTasks = next.stream()
-            .filter(n -> !"end".equals(n.path("type").asText()))
-            .toList();
-        if (produceTasks.isEmpty()) {
-            pi.setStatus("APPROVED");
-            pi.setFinishedAt(OffsetDateTime.now());
-            processInstanceMapper.updateById(pi);
-            insertHistoryOnInstance(pi.getId(), fromNodeId, null, "COMPLETE", pi.getStartedBy(), null);
-            return List.of();
-        }
-        List<Long> newTaskIds = new ArrayList<>();
-        for (var nn : produceTasks) {
-            var spec = parseAssignee(nn.path("assignee"));
-            var assignees = assigneeResolver.resolve(nn.path("id").asText(), spec);
-            for (Long a : assignees) {
-                TaskEntity nt = new TaskEntity();
-                nt.setProcInstId(pi.getId());
-                nt.setNodeId(nn.path("id").asText());
-                nt.setAssigneeId(a);
-                nt.setStatus("PENDING");
-                nt.setApprovalMode("OR_SIGN");
-                taskMapper.insert(nt);
-                newTaskIds.add(nt.getId());
+    private List<Long> resolveAndLand(JsonNode root, ProcessInstance pi,
+                                      JsonNode formData, long starterId,
+                                      Map<String, List<Long>> selfSelected,
+                                      JsonNode fromNode) {
+        JsonNode node = ProcessTreeNav.childrenOf(fromNode);
+        while (true) {
+            if (node == null) {
+                // 末端 → 实例 APPROVED
+                pi.setStatus("APPROVED");
+                pi.setFinishedAt(OffsetDateTime.now());
+                pi.setCurrentNodeId(null);
+                processInstanceMapper.updateById(pi);
+                insertHistoryOnInstance(pi.getId(),
+                    fromNode == null ? null : fromNode.path("id").asText(null),
+                    null, "COMPLETE", pi.getStartedBy(), null);
+                return List.of();
             }
-            pi.setCurrentNodeId(nn.path("id").asText());
+
+            String type = node.path("type").asText();
+            switch (type) {
+                case "EMPTY": {
+                    node = ProcessTreeNav.childrenOf(node);
+                    continue;
+                }
+                case "CC": {
+                    // 建 CC 任务（不阻塞，沿单链继续）。
+                    List<Long> ccUsers = readIds(node.path("props").path("assignedUser"));
+                    for (Long u : ccUsers) {
+                        TaskEntity ct = new TaskEntity();
+                        ct.setProcInstId(pi.getId());
+                        ct.setNodeId(node.path("id").asText());
+                        ct.setAssigneeId(u);
+                        ct.setStatus("CC");
+                        ct.setApprovalMode("OR");
+                        taskMapper.insert(ct);
+                    }
+                    insertHistoryOnInstance(pi.getId(),
+                        fromNode == null ? null : fromNode.path("id").asText(null),
+                        node.path("id").asText(), "CC", pi.getStartedBy(), null);
+                    node = ProcessTreeNav.childrenOf(node);
+                    continue;
+                }
+                case "CONDITIONS": {
+                    JsonNode chosen = null;
+                    for (JsonNode b : node.withArray("branchs")) {
+                        if (conditionEvaluator.matches(b.path("props"), formData)) {
+                            chosen = b;
+                            break;
+                        }
+                    }
+                    if (chosen == null) {
+                        throw new BizException("BAD_FLOW", "无匹配条件分支");
+                    }
+                    JsonNode inner = ProcessTreeNav.childrenOf(chosen);
+                    node = (inner != null) ? inner : ProcessTreeNav.childrenOf(node);
+                    continue;
+                }
+                case "APPROVAL": {
+                    String nodeId = node.path("id").asText();
+                    AssigneeSpec spec = parseAssignee(node.path("props"), starterId,
+                        selfSelected.get(nodeId));
+                    List<Long> assignees;
+                    try {
+                        assignees = assigneeResolver.resolve(nodeId, spec);
+                    } catch (NoAssigneeFoundException e) {
+                        String handler = node.path("props").path("nobody").path("handler")
+                            .asText("TO_PASS");
+                        if ("TO_PASS".equals(handler)) {
+                            insertHistoryOnInstance(pi.getId(),
+                                fromNode == null ? null : fromNode.path("id").asText(null),
+                                nodeId, "AUTO_PASS", pi.getStartedBy(), null);
+                            node = ProcessTreeNav.childrenOf(node);
+                            continue;
+                        }
+                        if ("TO_REFUSE".equals(handler)) {
+                            pi.setStatus("REJECTED");
+                            pi.setFinishedAt(OffsetDateTime.now());
+                            processInstanceMapper.updateById(pi);
+                            insertHistoryOnInstance(pi.getId(),
+                                fromNode == null ? null : fromNode.path("id").asText(null),
+                                nodeId, "REJECT", pi.getStartedBy(), "no assignee");
+                            return List.of();
+                        }
+                        throw e;
+                    }
+                    String mode = node.path("props").path("mode").asText("OR");
+                    List<Long> ids = new ArrayList<>();
+                    for (Long a : assignees) {
+                        TaskEntity nt = new TaskEntity();
+                        nt.setProcInstId(pi.getId());
+                        nt.setNodeId(nodeId);
+                        nt.setAssigneeId(a);
+                        nt.setStatus("PENDING");
+                        nt.setApprovalMode(mode);
+                        taskMapper.insert(nt);
+                        ids.add(nt.getId());
+                    }
+                    pi.setCurrentNodeId(nodeId);
+                    processInstanceMapper.updateById(pi);
+                    insertHistoryOnInstance(pi.getId(),
+                        fromNode == null ? null : fromNode.path("id").asText(null),
+                        nodeId, "ARRIVE", pi.getStartedBy(), null);
+                    return ids;
+                }
+                default:
+                    throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);
+            }
         }
-        processInstanceMapper.updateById(pi);
-        insertHistoryOnInstance(pi.getId(), fromNodeId, pi.getCurrentNodeId(),
-            "START", pi.getStartedBy(), null);
-        return newTaskIds;
     }
 
-    private List<JsonNode> nextNodes(ProcessDefinition pd, String fromId) {
+    // -----------------------------------------------------------------------
+    // helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * 将节点 props 转为 {@link AssigneeSpec}。
+     */
+    private AssigneeSpec parseAssignee(JsonNode props, long starterId, List<Long> selfSelectedForNode) {
+        String type = props.path("assignedType").asText();
+        switch (type) {
+            case "ASSIGN_USER":
+                return AssigneeSpec.of("ASSIGN_USER", readIds(props.path("assignedUser")));
+            case "ROLE":
+                return AssigneeSpec.of("ROLE", readIds(props.path("role")));
+            case "LEADER": {
+                int level = props.path("leader").path("level").asInt(1);
+                return new AssigneeSpec("LEADER", List.of(), level, starterId, List.of());
+            }
+            case "SELF":
+                return new AssigneeSpec("SELF", List.of(), 1, starterId, List.of());
+            case "SELF_SELECT":
+                return new AssigneeSpec("SELF_SELECT", List.of(), 1, starterId,
+                    selfSelectedForNode == null ? List.of() : selfSelectedForNode);
+            default:
+                throw new BizException("BAD_NODE_TYPE", "未识别审批人类型: " + type);
+        }
+    }
+
+    private static List<Long> readIds(JsonNode arr) {
+        List<Long> out = new ArrayList<>();
+        if (arr == null || !arr.isArray()) return out;
+        for (JsonNode x : arr) {
+            if (x.isNumber()) out.add(x.asLong());
+            else if (x.isTextual()) {
+                try { out.add(Long.parseLong(x.asText())); } catch (NumberFormatException ignored) {}
+            }
+        }
+        return out;
+    }
+
+    private JsonNode readTree(String s) {
+        if (s == null || s.isBlank()) {
+            throw new BizException("BAD_FLOW_JSON", "process tree is empty");
+        }
         try {
-            var edges = json.readTree(pd.getEdges() == null ? "[]" : pd.getEdges());
-            var nodes = json.readTree(pd.getNodes() == null ? "[]" : pd.getNodes());
-            Map<String, JsonNode> byId = new HashMap<>();
-            nodes.forEach(n -> byId.put(n.path("id").asText(), n));
-            List<JsonNode> acc = new ArrayList<>();
-            edges.forEach(e -> {
-                if (fromId.equals(e.path("from").asText())) {
-                    var n = byId.get(e.path("to").asText());
-                    if (n != null) {
-                        dispatcher.assertKnown(n.path("type").asText());
-                        acc.add(n);
-                    }
-                }
-            });
-            return acc;
-        } catch (com.antflow.engine.handler.BadNodeTypeException e) {
-            throw new BizException("BAD_NODE_TYPE", e.getMessage());
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return json.readTree(s);
+        } catch (Exception e) {
             throw new BizException("BAD_FLOW_JSON", e.getMessage());
         }
     }
 
-    private AssigneeSpec parseAssignee(JsonNode n) {
-        var type = n.path("type").asText();
-        var ids = new ArrayList<>();
-        n.path("ids").forEach(x -> ids.add(x.asLong()));
-        return new AssigneeSpec(type, ids);
+    private JsonNode readTreeOrEmpty(String s) {
+        if (s == null || s.isBlank()) return json.createObjectNode();
+        try {
+            return json.readTree(s);
+        } catch (Exception e) {
+            throw new BizException("BAD_JSON", e.getMessage());
+        }
+    }
+
+    private JsonNode readFormData(Long formDataId) {
+        FormData fd = formDataMapper.selectById(formDataId);
+        if (fd == null) return json.createObjectNode();
+        return readTreeOrEmpty(fd.getData());
     }
 
     private void insertHistory(TaskEntity t, String from, String to,
                                 String action, Long operatorId, String comment) {
-        var h = new TaskHistoryEntity();
+        TaskHistoryEntity h = new TaskHistoryEntity();
         h.setProcInstId(t.getProcInstId());
         h.setTaskId(t.getId());
         h.setFromNodeId(from);
@@ -297,7 +428,7 @@ public class ProcessEngine {
 
     private void insertHistoryOnInstance(Long instId, String from, String to,
                                           String action, Long operatorId, String comment) {
-        var h = new TaskHistoryEntity();
+        TaskHistoryEntity h = new TaskHistoryEntity();
         h.setProcInstId(instId);
         h.setFromNodeId(from);
         h.setToNodeId(to);
