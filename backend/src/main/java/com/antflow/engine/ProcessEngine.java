@@ -190,6 +190,8 @@ public class ProcessEngine {
         pi.setStatus("REJECTED");
         pi.setFinishedAt(OffsetDateTime.now());
         processInstanceMapper.updateById(pi);
+        insertHistoryOnInstance(pi.getId(), t.getNodeId(), null,
+            "REJECT", operatorId, cmd.comment());
     }
 
     @Transactional

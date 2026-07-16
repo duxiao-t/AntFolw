@@ -415,4 +415,49 @@ class ProcessEngineTreeTest {
         assertThat(pi.getStatus()).isEqualTo("RUNNING");
         assertThat(pi.getCurrentNodeId()).isEqualTo("a2");
     }
+
+    // ---------- 7. reject writes instance-level REJECT history ----------
+    @Test
+    void reject_writesInstanceLevelRejectHistory() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[42]},
+              "children":null}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+
+        ProcessEngine eng = engine();
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+
+        // Task id=1 belongs to 42, PENDING on a1.
+        Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(taskMapper.selectList(any())).thenAnswer(inv -> List.of());
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance pi = new ProcessInstance();
+            pi.setId(1L); pi.setProcDefId(10L); pi.setStatus("RUNNING");
+            pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            return pi;
+        });
+
+        eng.reject(new CompleteCmd(1L, "reject", "not ok"), 42L);
+
+        // Instance must be REJECTED.
+        assertThat(lastInstance().getStatus()).isEqualTo("REJECTED");
+
+        // Verify an instance-level REJECT history row was inserted (taskId == null).
+        ArgumentCaptor<TaskHistoryEntity> cap = ArgumentCaptor.forClass(TaskHistoryEntity.class);
+        Mockito.verify(historyMapper, Mockito.atLeastOnce()).insert(cap.capture());
+        List<TaskHistoryEntity> all = cap.getAllValues();
+        TaskHistoryEntity instReject = all.stream()
+            .filter(h -> "REJECT".equals(h.getAction()) && h.getTaskId() == null)
+            .findFirst()
+            .orElseThrow(() -> new AssertionError(
+                "no instance-level REJECT history (taskId==null) found in: " + all));
+        assertThat(instReject.getProcInstId()).isEqualTo(1L);
+        assertThat(instReject.getFromNodeId()).isEqualTo("a1");
+        assertThat(instReject.getToNodeId()).isNull();
+        assertThat(instReject.getOperatorId()).isEqualTo(42L);
+        assertThat(instReject.getComment()).isEqualTo("not ok");
+    }
 }
