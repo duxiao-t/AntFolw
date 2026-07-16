@@ -27,17 +27,23 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/approve")
-    public void approve(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
+    public void approve(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
         var p = PrincipalHolder.current().orElseThrow();
         engine.approve(new CompleteCmd(id, "APPROVE",
-            body == null ? null : body.get("comment")), p.userId());
+            body == null ? null : asString(body.get("comment")),
+            null), p.userId());
     }
 
     @PostMapping("/{id}/reject")
-    public void reject(@PathVariable Long id, @RequestBody Map<String, String> body) {
+    public void reject(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         var p = PrincipalHolder.current().orElseThrow();
-        engine.reject(new CompleteCmd(id, "REJECT", body.get("comment")), p.userId());
+        engine.reject(new CompleteCmd(id, "REJECT",
+            asString(body.get("comment")),
+            asString(body.get("rejectToNodeId"))),
+            p.userId());
     }
+
+    private static String asString(Object o) { return o == null ? null : o.toString(); }
 
     @PostMapping("/instances/{id}/withdraw")
     public void withdraw(@PathVariable Long id) {

@@ -190,8 +190,41 @@ public class ProcessEngine {
             insertHistoryOnInstance(pi.getId(), t.getNodeId(), sib.getNodeId(),
                 "SKIP", operatorId, null);
         }
+
+        // === 驳回路由 ===
+        // 默认 TO_END（保持 MVP 行为）；TO_NODE 表示驳回到指定节点重审。
+        JsonNode root = readTree(pi.getProcessSnapshot());
+        JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
+        if (cur == null) {
+            throw new BizException("BAD_FLOW", "current node not in tree: " + t.getNodeId());
+        }
+        String refuseMode = cur.path("props").path("refuse").path("mode").asText("TO_END");
+        String refuseTarget = cur.path("props").path("refuse").path("targetNodeId").asText(null);
+
+        // 运行时覆盖：前端传入 rejectToNodeId 时优先
+        if (cmd.rejectToNodeId() != null && !cmd.rejectToNodeId().isBlank()) {
+            refuseMode = "TO_NODE";
+            refuseTarget = cmd.rejectToNodeId();
+        }
+
+        if ("TO_NODE".equals(refuseMode) && refuseTarget != null && !refuseTarget.isBlank()) {
+            JsonNode target = ProcessTreeNav.findById(root, refuseTarget);
+            if (target == null) {
+                throw new BizException("BAD_FLOW",
+                    "refuse target node not in tree: " + refuseTarget);
+            }
+            insertHistoryOnInstance(pi.getId(), t.getNodeId(), refuseTarget,
+                "REJECT_TO_NODE", operatorId, cmd.comment());
+            // 沿 target 起跳：把 target 当作"已完成 from 节点"，从其 children 继续推进
+            JsonNode formData = readFormData(pi.getFormDataId());
+            resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), target);
+            return;
+        }
+
+        // TO_END 或未配置 —— 实例终止（保持 MVP 行为）
         pi.setStatus("REJECTED");
         pi.setFinishedAt(OffsetDateTime.now());
+        pi.setCurrentNodeId(null);
         processInstanceMapper.updateById(pi);
         insertHistoryOnInstance(pi.getId(), t.getNodeId(), null,
             "REJECT", operatorId, cmd.comment());
