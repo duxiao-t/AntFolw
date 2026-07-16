@@ -256,10 +256,7 @@ public class ProcessEngine {
     }
 
     private AssigneeSpec parseAssignee(JsonNode n) {
-        var type = n.path("type").asText();
-        var ids = new ArrayList<>();
-        n.path("ids").forEach(x -> ids.add(x.asLong()));
-        return new AssigneeSpec(type, ids);
+        throw new UnsupportedOperationException("审批人解析将于 Task 7 随引擎重写接入");
     }
 
     private void insertHistory(TaskEntity t, String from, String to,
