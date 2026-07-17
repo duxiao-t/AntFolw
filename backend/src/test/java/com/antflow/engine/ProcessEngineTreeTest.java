@@ -69,10 +69,17 @@ class ProcessEngineTreeTest {
     private final AtomicLong fakeHistoryId = new AtomicLong(0L);
 
     private ProcessEngine engine() {
+        // Sprint 2 C2：构造一组 handler（real impls + mocked mappers/resolver）
+        var handlers = List.of(
+            new com.antflow.engine.handler.EmptyHandler(),
+            new com.antflow.engine.handler.ApprovalHandler(assigneeResolver, taskMapper, historyMapper),
+            new com.antflow.engine.handler.CcHandler(taskMapper, historyMapper),
+            new com.antflow.engine.handler.ConditionsHandler(evaluator)
+        );
         return new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
-            historyMapper, assigneeResolver, evaluator, json
+            historyMapper, handlers, json
         );
     }
 

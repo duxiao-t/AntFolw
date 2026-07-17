@@ -1,10 +1,10 @@
 package com.antflow.engine;
 
-import com.antflow.engine.condition.ConditionEvaluator;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
-import com.antflow.engine.resolver.AssigneeResolver;
-import com.antflow.engine.resolver.AssigneeSpec;
+import com.antflow.engine.handler.NodeContext;
+import com.antflow.engine.handler.NodeHandler;
+import com.antflow.engine.handler.NodeOutcome;
 import com.antflow.engine.tree.ProcessTreeNav;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
@@ -22,7 +22,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,8 +55,7 @@ public class ProcessEngine {
     private final ProcessInstanceMapper processInstanceMapper;
     private final TaskMapperExt taskMapperExt;
     private final TaskHistoryMapper historyMapper;
-    private final AssigneeResolver assigneeResolver;
-    private final ConditionEvaluator conditionEvaluator;
+    private final List<NodeHandler> nodeHandlers;
     private final ObjectMapper json;
 
     @Transactional
@@ -302,6 +300,8 @@ public class ProcessEngine {
                                           Map<String, List<Long>> selfSelected,
                                           JsonNode fromNode, JsonNode startNode) {
         JsonNode node = startNode;
+        NodeContext ctx = new NodeContext(starterId, formData, selfSelected,
+            fromNode == null ? null : fromNode.path("id").asText(null));
         while (true) {
             if (node == null) {
                 // 末端 → 实例 APPROVED
@@ -314,138 +314,52 @@ public class ProcessEngine {
                     null, "COMPLETE", pi.getStartedBy(), null);
                 return List.of();
             }
-
             String type = node.path("type").asText();
-            switch (type) {
-                case "EMPTY": {
-                    node = ProcessTreeNav.childrenOf(node);
+            NodeHandler handler = pickHandler(type);
+            if (handler == null) {
+                throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);
+            }
+            NodeOutcome outcome = handler.handle(root, node, pi, ctx);
+            switch (outcome.type()) {
+                case NEXT:
+                    fromNode = node;
+                    node = outcome.node();
+                    ctx = new NodeContext(starterId, formData, selfSelected,
+                        node == null ? null : node.path("id").asText(null));
                     continue;
-                }
-                case "CC": {
-                    // 建 CC 任务（不阻塞，沿单链继续）。
-                    List<Long> ccUsers = readIds(node.path("props").path("assignedUser"));
-                    for (Long u : ccUsers) {
-                        TaskEntity ct = new TaskEntity();
-                        ct.setProcInstId(pi.getId());
-                        ct.setNodeId(node.path("id").asText());
-                        ct.setAssigneeId(u);
-                        ct.setStatus("CC");
-                        ct.setApprovalMode("OR");
-                        taskMapper.insert(ct);
-                    }
-                    insertHistoryOnInstance(pi.getId(),
-                        fromNode == null ? null : fromNode.path("id").asText(null),
-                        node.path("id").asText(), "CC", pi.getStartedBy(), null);
-                    node = ProcessTreeNav.childrenOf(node);
+                case JUMP:
+                    fromNode = node;
+                    node = outcome.node();
+                    ctx = new NodeContext(starterId, formData, selfSelected,
+                        node == null ? null : node.path("id").asText(null));
                     continue;
-                }
-                case "CONDITIONS": {
-                    JsonNode chosen = null;
-                    for (JsonNode b : node.withArray("branchs")) {
-                        if (conditionEvaluator.matches(b.path("props"), formData)) {
-                            chosen = b;
-                            break;
-                        }
-                    }
-                    if (chosen == null) {
-                        throw new BizException("BAD_FLOW", "无匹配条件分支");
-                    }
-                    JsonNode inner = ProcessTreeNav.childrenOf(chosen);
-                    node = (inner != null) ? inner : ProcessTreeNav.childrenOf(node);
-                    continue;
-                }
-                case "APPROVAL": {
-                    String nodeId = node.path("id").asText();
-                    AssigneeSpec spec = parseAssignee(node.path("props"), starterId,
-                        selfSelected.get(nodeId));
-                    List<Long> assignees;
-                    try {
-                        assignees = assigneeResolver.resolve(nodeId, spec);
-                    } catch (NoAssigneeFoundException e) {
-                        String handler = node.path("props").path("nobody").path("handler")
-                            .asText("TO_PASS");
-                        if ("TO_PASS".equals(handler)) {
-                            insertHistoryOnInstance(pi.getId(),
-                                fromNode == null ? null : fromNode.path("id").asText(null),
-                                nodeId, "AUTO_PASS", pi.getStartedBy(), null);
-                            node = ProcessTreeNav.childrenOf(node);
-                            continue;
-                        }
-                        if ("TO_REFUSE".equals(handler)) {
-                            pi.setStatus("REJECTED");
-                            pi.setFinishedAt(OffsetDateTime.now());
-                            processInstanceMapper.updateById(pi);
-                            insertHistoryOnInstance(pi.getId(),
-                                fromNode == null ? null : fromNode.path("id").asText(null),
-                                nodeId, "REJECT", pi.getStartedBy(), "no assignee");
-                            return List.of();
-                        }
-                        throw e;
-                    }
-                    String mode = node.path("props").path("mode").asText("OR");
-                    List<Long> ids = new ArrayList<>();
-                    for (Long a : assignees) {
-                        TaskEntity nt = new TaskEntity();
-                        nt.setProcInstId(pi.getId());
-                        nt.setNodeId(nodeId);
-                        nt.setAssigneeId(a);
-                        nt.setStatus("PENDING");
-                        nt.setApprovalMode(mode);
-                        taskMapper.insert(nt);
-                        ids.add(nt.getId());
-                    }
-                    pi.setCurrentNodeId(nodeId);
+                case END:
                     processInstanceMapper.updateById(pi);
-                    insertHistoryOnInstance(pi.getId(),
-                        fromNode == null ? null : fromNode.path("id").asText(null),
-                        nodeId, "ARRIVE", pi.getStartedBy(), null);
-                    return ids;
-                }
+                    insertHistoryOnInstance(pi.getId(), node.path("id").asText(null),
+                        null, "COMPLETE", pi.getStartedBy(), null);
+                    return List.of();
+                case HALT:
                 default:
-                    throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);
+                    // handler 已建 PENDING 任务并写 ARRIVE 历史；保存实例并返回
+                    processInstanceMapper.updateById(pi);
+                    if (outcome instanceof NodeOutcome.Halt h) {
+                        return h.newTaskIds();
+                    }
+                    return List.of();
             }
         }
+    }
+
+    private NodeHandler pickHandler(String type) {
+        for (NodeHandler h : nodeHandlers) {
+            if (h.supports(type)) return h;
+        }
+        return null;
     }
 
     // -----------------------------------------------------------------------
     // helpers
     // -----------------------------------------------------------------------
-
-    /**
-     * 将节点 props 转为 {@link AssigneeSpec}。
-     */
-    private AssigneeSpec parseAssignee(JsonNode props, long starterId, List<Long> selfSelectedForNode) {
-        String type = props.path("assignedType").asText();
-        switch (type) {
-            case "ASSIGN_USER":
-                return AssigneeSpec.of("ASSIGN_USER", readIds(props.path("assignedUser")));
-            case "ROLE":
-                return AssigneeSpec.of("ROLE", readIds(props.path("role")));
-            case "LEADER": {
-                int level = props.path("leader").path("level").asInt(1);
-                return new AssigneeSpec("LEADER", List.of(), level, starterId, List.of());
-            }
-            case "SELF":
-                return new AssigneeSpec("SELF", List.of(), 1, starterId, List.of());
-            case "SELF_SELECT":
-                return new AssigneeSpec("SELF_SELECT", List.of(), 1, starterId,
-                    selfSelectedForNode == null ? List.of() : selfSelectedForNode);
-            default:
-                throw new BizException("BAD_NODE_TYPE", "未识别审批人类型: " + type);
-        }
-    }
-
-    private static List<Long> readIds(JsonNode arr) {
-        List<Long> out = new ArrayList<>();
-        if (arr == null || !arr.isArray()) return out;
-        for (JsonNode x : arr) {
-            if (x.isNumber()) out.add(x.asLong());
-            else if (x.isTextual()) {
-                try { out.add(Long.parseLong(x.asText())); } catch (NumberFormatException ignored) {}
-            }
-        }
-        return out;
-    }
 
     private JsonNode readTree(String s) {
         if (s == null || s.isBlank()) {
