@@ -20,12 +20,12 @@ export default function TemplateListPage() {
         }}
         search={false}
         onRow={(record: any) => ({
-          onClick: () => history.push(`/designer/form/${record.id}`),
+          onClick: () => history.push(`/approval/forms/${record.id}/wizard?step=designer`),
           style: { cursor: 'pointer' },
         })}
         toolBarRender={() => [
           <Button key="add" type="primary" icon={<PlusOutlined />}
-            onClick={() => history.push('/designer/form/new')}>新建模板</Button>,
+            onClick={() => history.push('/approval/forms/new')}>新建模板</Button>,
         ]}
       />
     </PageContainer>

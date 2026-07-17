@@ -25,6 +25,11 @@ public class ProcessDefinitionController {
         return service.latestPublishedForForm(formDefId);
     }
 
+    @GetMapping("/draft/by-form/{formDefId}")
+    public ProcessDefinition draftByForm(@PathVariable Long formDefId) {
+        return service.findByForm(formDefId);
+    }
+
     @GetMapping("/{id}")
     public ProcessDefinition get(@PathVariable Long id) {
         return service.getById(id);

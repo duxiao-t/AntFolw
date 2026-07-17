@@ -1,6 +1,6 @@
 import { DndContext, useDraggable, useDroppable } from '@dnd-kit/core';
 import { Button, Space, message } from 'antd';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from '@umijs/max';
 import { useMutation } from '@tanstack/react-query';
 import { request } from '@umijs/max';
@@ -63,10 +63,37 @@ function CanvasDrop() {
   );
 }
 
-export default function FormDesigner() {
-  const { id } = useParams();
+type FormDefinition = {
+  id: number;
+  code: string;
+  name: string;
+  schema?: any[] | string;
+  settings?: Record<string, any> | string;
+};
+
+function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
+  if (typeof value !== 'string') return value ?? fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+export function FormDesignerSurface({
+  formId,
+  embedded = false,
+  onSaved,
+}: {
+  formId?: string | number;
+  embedded?: boolean;
+  onSaved?: (form: FormDefinition) => void;
+}) {
+  const routeParams = useParams();
+  const id = String(formId ?? routeParams.id ?? 'new');
   const navigate = useNavigate();
   const { schema, loadSchema, addNode, undo, redo } = useFormDesignerStore();
+  const [definition, setDefinition] = useState<FormDefinition | null>(null);
 
   // Load existing definition when id is provided (not 'new').
   useEffect(() => {
@@ -74,7 +101,8 @@ export default function FormDesigner() {
     (async () => {
       try {
         const fd = await request<any>(`/api/forms/definitions/${id}`);
-        loadSchema(fd.schema ?? []);
+        setDefinition(fd);
+        loadSchema(parseJsonValue(fd.schema, []));
       } catch (e) {
         message.error('加载表单失败');
       }
@@ -87,14 +115,16 @@ export default function FormDesigner() {
         method: 'POST',
         data: {
           id: id === 'new' ? null : Number(id),
-          code: id === 'new' ? `form_${Date.now()}` : `form_${id}`,
-          name: id === 'new' ? '未命名表单' : `表单 ${id}`,
+          code: definition?.code ?? `form_${Date.now()}`,
+          name: definition?.name ?? '未命名表单',
           schema,
-          settings: {},
+          settings: parseJsonValue(definition?.settings, {}),
         },
       }),
     onSuccess: (res: any) => {
-      if (id === 'new') navigate(`/designer/form/${res.id}`);
+      setDefinition(res);
+      onSaved?.(res);
+      if (id === 'new' && !embedded) navigate(`/designer/form/${res.id}`);
       message.success('已保存草稿');
     },
   });
@@ -114,7 +144,7 @@ export default function FormDesigner() {
         }
       }}
     >
-      <div style={{ display: 'flex', height: '100vh' }}>
+      <div style={{ display: 'flex', height: embedded ? 'calc(100vh - 260px)' : '100vh', minHeight: embedded ? 560 : undefined }}>
         <aside
           style={{
             width: 200,
@@ -146,12 +176,14 @@ export default function FormDesigner() {
             >
               保存草稿
             </Button>
-            <Button
-              onClick={() => publish.mutate()}
-              disabled={id === 'new'}
-            >
-              发布
-            </Button>
+            {!embedded && (
+              <Button
+                onClick={() => publish.mutate()}
+                disabled={id === 'new'}
+              >
+                发布
+              </Button>
+            )}
           </Space>
           <CanvasDrop />
         </main>
@@ -167,4 +199,8 @@ export default function FormDesigner() {
       </div>
     </DndContext>
   );
+}
+
+export default function FormDesigner() {
+  return <FormDesignerSurface />;
 }

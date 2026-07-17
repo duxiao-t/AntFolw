@@ -18,6 +18,7 @@ export default {
 
   // 审批与流程
   'menu.approval': '审批与流程',
+  'menu.approval.forms': '表单管理',
   'menu.approval.templates': '审批模板库',
   'menu.approval.designer': '流程设计器',
   'menu.approval.records': '审批记录查询',

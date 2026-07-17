@@ -27,8 +27,26 @@ type FormDefinition = {
   schema?: any[];
 };
 
-export default function ProcessDesigner() {
-  const { formDefId } = useParams();
+function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
+  if (typeof value !== 'string') return value ?? fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+export function ProcessDesignerSurface({
+  formDefId: formDefIdProp,
+  embedded = false,
+  onSaved,
+}: {
+  formDefId?: string | number;
+  embedded?: boolean;
+  onSaved?: (processDefinition: any) => void;
+}) {
+  const routeParams = useParams();
+  const formDefId = String(formDefIdProp ?? routeParams.formDefId ?? '');
   const process = useProcessDesignerStore(
     (s: ReturnType<typeof useProcessDesignerStore.getState>) => s.process,
   );
@@ -48,11 +66,11 @@ export default function ProcessDesigner() {
     (async () => {
       try {
         const pd = await request<any>(
-          `/api/processes/definitions/by-form/${formDefId}`,
+          `/api/processes/definitions/draft/by-form/${formDefId}`,
         );
         if (pd?.process) {
           setPdId(pd.id);
-          load(pd.process);
+          load(parseJsonValue(pd.process, null));
           return;
         }
       } catch {
@@ -68,7 +86,7 @@ export default function ProcessDesigner() {
     queryFn: () => request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
     enabled: !!formDefId,
   });
-  const formFields = ((formDef?.schema ?? []) as any[]).map((n) => ({
+  const formFields = parseJsonValue<any[]>(formDef?.schema, []).map((n) => ({
     id: n.id,
     label: n.props?.label ?? n.type,
     type: n.type,
@@ -80,6 +98,7 @@ export default function ProcessDesigner() {
       data: { id: pdId, formDefId: Number(formDefId), process },
     });
     setPdId(res.id);
+    onSaved?.(res);
     message.success('已保存草稿');
   };
 
@@ -100,12 +119,12 @@ export default function ProcessDesigner() {
   const selected = selectedId ? find(process, selectedId) : null;
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: embedded ? 'calc(100vh - 260px)' : '100vh', minHeight: embedded ? 560 : undefined, display: 'flex', flexDirection: 'column' }}>
       <Space style={{ padding: 8 }}>
         <Button type="primary" onClick={save}>
           保存草稿
         </Button>
-        <Button onClick={publish}>发布</Button>
+        {!embedded && <Button onClick={publish}>发布</Button>}
       </Space>
       <div
         style={{ flex: 1, overflow: 'auto', background: '#f5f6f6', padding: 24 }}
@@ -128,4 +147,8 @@ export default function ProcessDesigner() {
       </Drawer>
     </div>
   );
+}
+
+export default function ProcessDesigner() {
+  return <ProcessDesignerSurface />;
 }

@@ -54,9 +54,10 @@ export default [
     name: 'approval',
     icon: 'audit',
     routes: [
-      { path: '/approval', redirect: '/approval/templates' },
-      { name: 'templates', icon: 'fileText', path: '/approval/templates', component: './approval/TemplateList' },
-      { name: 'designer', icon: 'partition', path: '/approval/designer', component: './approval/DesignerEntry' },
+      { path: '/approval', redirect: '/approval/forms' },
+      { name: 'forms', icon: 'form', path: '/approval/forms', component: './approval/FormManagementList' },
+      { name: 'templates', icon: 'fileText', path: '/approval/templates', component: './approval/TemplateList', hideInMenu: true },
+      { name: 'designer', icon: 'partition', path: '/approval/designer', component: './approval/DesignerEntry', hideInMenu: true },
       { name: 'records', icon: 'search', path: '/approval/records', component: './approval/RecordList' },
     ],
   },
@@ -91,6 +92,8 @@ export default [
   },
 
   // ===== 设计器（隐藏）=====
+  { path: '/approval/forms/new', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canAdmin' },
+  { path: '/approval/forms/:id/wizard', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canAdmin' },
   { path: '/designer/form/:id',        component: './designer/form/FormDesigner',    hideInMenu: true, access: 'canAdmin' },
   { path: '/designer/process/:formDefId', component: './designer/process/ProcessDesigner', hideInMenu: true, access: 'canAdmin' },
 

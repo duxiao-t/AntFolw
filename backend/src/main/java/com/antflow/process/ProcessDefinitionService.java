@@ -72,6 +72,12 @@ public class ProcessDefinitionService {
             .orderByDesc("version").last("LIMIT 1"));
     }
 
+    public ProcessDefinition findByForm(Long formDefId) {
+        return mapper.selectOne(new QueryWrapper<ProcessDefinition>()
+            .eq("form_def_id", formDefId)
+            .orderByDesc("id").last("LIMIT 1"));
+    }
+
     public List<ProcessDefinition> list() {
         return mapper.selectList(null);
     }
