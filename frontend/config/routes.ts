@@ -1,332 +1,111 @@
 /**
- * @name umi 的路由配置
- * @description 只支持 path,component,routes,redirect,wrappers,name,icon 的配置
- * @param path  path 只支持两种占位符配置，第一种是动态参数 :id 的形式，第二种是 * 通配符，通配符只能出现路由字符串的最后。
- * @param component 配置 location 和 path 匹配后用于渲染的 React 组件路径。可以是绝对路径，也可以是相对路径，如果是相对路径，会从 src/pages 开始找起。
- * @param routes 配置子路由，通常在需要为多个路径增加 layout 组件时使用。
- * @param redirect 配置路由跳转
- * @param wrappers 配置路由组件的包装组件，通过包装组件可以为当前的路由组件组合进更多的功能。 比如，可以用于路由级别的权限校验
- * @param name 配置路由的标题，默认读取国际化文件 menu.ts 中 menu.xxxx 的值，如配置 name 为 login，则读取 menu.ts 中 menu.login 的取值作为标题
- * @param icon 配置路由的图标，取值参考 https://ant.design/components/icon-cn， 注意去除风格后缀和大小写，如想要配置图标为 <StepBackwardOutlined /> 则取值应为 stepBackward 或 StepBackward，如想要配置图标为 <UserOutlined /> 则取值应为 user 或者 User
- * @doc https://umijs.org/docs/guides/routes
+ * AntFlow 路由配置 — 钉钉式菜单结构
  */
 export default [
+  // ===== 登录（无布局）=====
   {
     path: '/user',
     layout: false,
     routes: [
-      {
-        path: '/user/login',
-        name: 'login',
-        component: './user/login',
-      },
-      {
-        path: '/user',
-        redirect: '/user/login',
-      },
-      {
-        name: 'register-result',
-        icon: 'checkCircle',
-        path: '/user/register-result',
-        component: './user/register-result',
-      },
-      {
-        name: 'register',
-        icon: 'userAdd',
-        path: '/user/register',
-        component: './user/register',
-      },
-      {
-        name: '404',
-        component: './exception/404',
-        path: '/user/*',
-      },
+      { path: '/user/login', name: 'login', component: './user/login' },
+      { path: '/user', redirect: '/user/login' },
+      { component: './exception/404', path: '/user/*' },
     ],
   },
+
+  // ===== 工作台 =====
   {
-    path: '/welcome',
-    name: 'welcome',
+    path: '/workplace',
+    name: 'workplace',
     icon: 'home',
     component: './Welcome',
   },
+
+  // ===== 组织架构 =====
   {
-    path: '/admin',
-    name: 'admin',
-    icon: 'crown',
+    path: '/org',
+    name: 'org',
+    icon: 'team',
     access: 'canAdmin',
     routes: [
-      {
-        path: '/admin',
-        redirect: '/admin/companies',
-      },
-      {
-        name: 'companies',
-        icon: 'bank',
-        path: '/admin/companies',
-        component: './admin/Company',
-      },
-      {
-        name: 'departments',
-        icon: 'apartment',
-        path: '/admin/departments',
-        component: './admin/Department',
-      },
-      {
-        name: 'users',
-        icon: 'team',
-        path: '/admin/users',
-        component: './admin/User',
-      },
-      {
-        name: 'forms',
-        icon: 'form',
-        path: '/admin/forms',
-        component: './admin/FormList',
-      },
-      {
-        name: 'processes',
-        icon: 'partition',
-        path: '/admin/processes',
-        component: './admin/ProcessList',
-      },
+      { path: '/org', redirect: '/org/departments' },
+      { name: 'departments', icon: 'apartment', path: '/org/departments', component: './admin/Department' },
+      { name: 'employees', icon: 'user', path: '/org/employees', component: './admin/User' },
     ],
   },
-  // Designer pages — direct URL entry, no menu entry needed
-  { path: '/designer/form/:id', component: './designer/form/FormDesigner', hideInMenu: true, access: 'canAdmin' },
+
+  // ===== 权限与安全 =====
+  {
+    path: '/security',
+    name: 'security',
+    icon: 'safetyCertificate',
+    access: 'canAdmin',
+    routes: [
+      { path: '/security', redirect: '/security/roles' },
+      { name: 'roles', icon: 'idcard', path: '/security/roles', component: './security/Role' },
+      { name: 'user-permissions', icon: 'key', path: '/security/user-permissions', component: './security/UserPermission' },
+      { name: 'audit-log', icon: 'fileSearch', path: '/security/audit-log', component: './security/AuditLog' },
+      { name: 'policy', icon: 'safety', path: '/security/policy', component: './security/Policy' },
+    ],
+  },
+
+  // ===== 审批与流程 =====
+  {
+    path: '/approval',
+    name: 'approval',
+    icon: 'audit',
+    routes: [
+      { path: '/approval', redirect: '/approval/templates' },
+      { name: 'templates', icon: 'fileText', path: '/approval/templates', component: './approval/TemplateList' },
+      { name: 'designer', icon: 'partition', path: '/approval/designer', component: './approval/DesignerEntry' },
+      { name: 'records', icon: 'search', path: '/approval/records', component: './approval/RecordList' },
+    ],
+  },
+
+  // ===== 数据与报表 =====
+  {
+    path: '/report',
+    name: 'report',
+    icon: 'barChart',
+    access: 'canAdmin',
+    routes: [
+      { path: '/report', redirect: '/report/center' },
+      { name: 'center', icon: 'fund', path: '/report/center', component: './report/Center' },
+      { name: 'export', icon: 'export', path: '/report/export', component: './report/Export' },
+      { name: 'view', icon: 'dashboard', path: '/report/view', component: './report/Dashboard' },
+    ],
+  },
+
+  // ===== 系统设置 =====
+  {
+    path: '/settings',
+    name: 'settings',
+    icon: 'setting',
+    access: 'canAdmin',
+    routes: [
+      { path: '/settings', redirect: '/settings/company' },
+      { name: 'company', icon: 'bank', path: '/settings/company', component: './settings/Company' },
+      { name: 's3', icon: 'cloud', path: '/settings/s3', component: './settings/S3Storage' },
+      { name: 'wecom', icon: 'wechat', path: '/settings/wecom', component: './settings/Wecom' },
+      { name: 'billing', icon: 'dollar', path: '/settings/billing', component: './settings/Billing' },
+    ],
+  },
+
+  // ===== 设计器（隐藏）=====
+  { path: '/designer/form/:id',        component: './designer/form/FormDesigner',    hideInMenu: true, access: 'canAdmin' },
   { path: '/designer/process/:formDefId', component: './designer/process/ProcessDesigner', hideInMenu: true, access: 'canAdmin' },
-  // Runtime / task pages
+
+  // ===== 运行时 / 任务（隐藏）=====
   { path: '/runtime/form/:code', component: './runtime/form/Fill', hideInMenu: true },
-  { path: '/runtime/list', name: 'mySubmissions', icon: 'profile', component: './runtime/form/List' },
-  { path: '/tasks/inbox', name: 'inbox', icon: 'inbox', component: './tasks/Inbox' },
-  { path: '/tasks/done',  name: 'done',  icon: 'check-circle', component: './tasks/Done' },
-  { path: '/proc',        name: 'proc',  icon: 'file-text',   component: './proc/Sent' },
-  { path: '/proc/:id',    component: './proc/Detail', hideInMenu: true },
-  {
-    path: '/dashboard',
-    name: 'dashboard',
-    icon: 'dashboard',
-    routes: [
-      {
-        path: '/dashboard',
-        redirect: '/dashboard/analysis',
-      },
-      {
-        name: 'analysis',
-        icon: 'barChart',
-        path: '/dashboard/analysis',
-        component: './dashboard/analysis',
-      },
-      {
-        name: 'monitor',
-        icon: 'monitor',
-        path: '/dashboard/monitor',
-        component: './dashboard/monitor',
-      },
-      {
-        name: 'workplace',
-        icon: 'desktop',
-        path: '/dashboard/workplace',
-        component: './dashboard/workplace',
-      },
-    ],
-  },
-  {
-    path: '/form',
-    icon: 'form',
-    name: 'form',
-    routes: [
-      {
-        path: '/form',
-        redirect: '/form/basic-form',
-      },
-      {
-        name: 'basic-form',
-        icon: 'form',
-        path: '/form/basic-form',
-        component: './form/basic-form',
-      },
-      {
-        name: 'step-form',
-        icon: 'orderedList',
-        path: '/form/step-form',
-        component: './form/step-form',
-      },
-      {
-        name: 'advanced-form',
-        icon: 'profile',
-        path: '/form/advanced-form',
-        component: './form/advanced-form',
-      },
-    ],
-  },
-  {
-    path: '/list',
-    icon: 'table',
-    name: 'list',
-    routes: [
-      {
-        path: '/list/search',
-        name: 'search-list',
-        component: './list/search',
-        routes: [
-          {
-            path: '/list/search',
-            redirect: '/list/search/articles',
-          },
-          {
-            name: 'articles',
-            icon: 'read',
-            path: '/list/search/articles',
-            component: './list/search/articles',
-          },
-          {
-            name: 'projects',
-            icon: 'project',
-            path: '/list/search/projects',
-            component: './list/search/projects',
-          },
-          {
-            name: 'applications',
-            icon: 'appstore',
-            path: '/list/search/applications',
-            component: './list/search/applications',
-          },
-        ],
-      },
-      {
-        path: '/list',
-        redirect: '/list/table-list',
-      },
-      {
-        name: 'table-list',
-        icon: 'table',
-        path: '/list/table-list',
-        component: './table-list',
-      },
-      {
-        name: 'basic-list',
-        icon: 'unorderedList',
-        path: '/list/basic-list',
-        component: './list/basic-list',
-      },
-      {
-        name: 'card-list',
-        icon: 'creditCard',
-        path: '/list/card-list',
-        component: './list/card-list',
-      },
-    ],
-  },
-  {
-    path: '/profile',
-    name: 'profile',
-    icon: 'profile',
-    routes: [
-      {
-        path: '/profile',
-        redirect: '/profile/basic',
-      },
-      {
-        name: 'basic',
-        icon: 'idcard',
-        path: '/profile/basic',
-        component: './profile/basic',
-      },
-      {
-        name: 'advanced',
-        icon: 'crown',
-        path: '/profile/advanced',
-        component: './profile/advanced',
-      },
-    ],
-  },
-  {
-    name: 'result',
-    icon: 'checkCircle',
-    path: '/result',
-    routes: [
-      {
-        path: '/result',
-        redirect: '/result/success',
-      },
-      {
-        name: 'success',
-        icon: 'checkCircle',
-        path: '/result/success',
-        component: './result/success',
-      },
-      {
-        name: 'fail',
-        icon: 'closeCircle',
-        path: '/result/fail',
-        component: './result/fail',
-      },
-    ],
-  },
-  {
-    name: 'exception',
-    icon: 'warning',
-    path: '/exception',
-    routes: [
-      {
-        path: '/exception',
-        redirect: '/exception/403',
-      },
-      {
-        name: '403',
-        icon: 'stop',
-        path: '/exception/403',
-        component: './exception/403',
-      },
-      {
-        name: '404',
-        icon: 'warning',
-        path: '/exception/404',
-        component: './exception/404',
-      },
-      {
-        name: '500',
-        icon: 'bug',
-        path: '/exception/500',
-        component: './exception/500',
-      },
-    ],
-  },
-  {
-    name: 'account',
-    icon: 'user',
-    path: '/account',
-    routes: [
-      {
-        path: '/account',
-        redirect: '/account/center',
-      },
-      {
-        name: 'center',
-        icon: 'user',
-        path: '/account/center',
-        component: './account/center',
-      },
-      {
-        name: 'settings',
-        icon: 'setting',
-        path: '/account/settings',
-        component: './account/settings',
-      },
-    ],
-  },
-  {
-    path: '/chatbot',
-    name: 'chatbot',
-    icon: 'robot',
-    component: './chatbot',
-  },
-  {
-    path: '/',
-    redirect: '/dashboard/analysis',
-  },
-  {
-    component: './exception/404',
-    path: '/*',
-  },
+  { path: '/runtime/list',       component: './runtime/form/List', hideInMenu: true },
+  { path: '/tasks/inbox',        component: './tasks/Inbox',       hideInMenu: true },
+  { path: '/tasks/done',         component: './tasks/Done',        hideInMenu: true },
+  { path: '/proc',               component: './proc/Sent',         hideInMenu: true },
+  { path: '/proc/:id',           component: './proc/Detail',       hideInMenu: true },
+  { path: '/account/settings',      component: './account/settings',   hideInMenu: true },
+  { path: '/account/center',        component: './account/center',     hideInMenu: true },
+
+  // ===== 默认 =====
+  { path: '/', redirect: '/workplace' },
+  { component: './exception/404', path: '/*' },
 ];
