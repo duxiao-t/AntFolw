@@ -58,7 +58,7 @@ export default function ContactsPage() {
 
   const { data: members = [], refetch: refetchMembers } = useQuery({
     queryKey: ['members', selDeptId],
-    queryFn: () => request(`/api/users?deptId=${selDeptId}`),
+    queryFn: () => request(`/api/users?deptId=${selDeptId}&_t=${Date.now()}`),
     enabled: !!selDeptId,
   });
 
