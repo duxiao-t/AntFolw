@@ -10,10 +10,11 @@
  * @doc https://umijs.org/docs/guides/proxy
  */
 export default {
-  // AntFlow: dev server on :8000 forwards /api/** to backend on :8080.
+  // AntFlow: dev server on :8000 forwards /api/** to backend on :8081.
+  // (8080 in plan default; we run on 8081 because 8080 is taken on this host.)
   dev: {
     '/api/': {
-      target: 'http://localhost:8080',
+      target: 'http://localhost:8081',
       changeOrigin: true,
     },
   },

@@ -1,5 +1,4 @@
 import {
-  App,
   Card,
   Descriptions,
   Timeline,
@@ -10,6 +9,7 @@ import {
   Modal,
   Input,
   Select,
+  message,
 } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
@@ -67,7 +67,6 @@ export default function DetailPage() {
   const qc = useQueryClient();
   const { initialState } = useModel('@@initialState');
   const currentUserId = (initialState?.currentUser as any)?.id;
-  const { message } = App.useApp();
 
   const { data, isFetching } = useQuery({
     queryKey: ['instance', id],
@@ -92,6 +91,7 @@ export default function DetailPage() {
 
   if (isFetching || !data) return <Spin />;
   const { instance, tasks, history: historyRows } = data as any;
+  if (!instance) return <Spin />;
 
   const ccTasks = (tasks ?? []).filter((t: any) => t.status === 'CC');
   const normalTasks = (tasks ?? []).filter((t: any) => t.status !== 'CC');
