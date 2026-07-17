@@ -2,17 +2,13 @@ package com.antflow.task;
 
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.engine.BizException;
-import com.antflow.engine.ProcessEngine;
-import com.antflow.engine.dto.CompleteCmd;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 任务操作服务 — Sprint 2 阶段三件套：转交 / 委托 / 加签。
@@ -41,7 +37,6 @@ public class TaskOperationService {
     private final TaskMapper taskMapper;
     private final TaskHistoryMapper historyMapper;
     private final ProcessInstanceMapper instanceMapper;
-    private final ProcessEngine engine;
 
     /**
      * 转交：把 taskId 转给 targetUserId。taskId 必须 PENDING；operator 必须是当前 assignee。

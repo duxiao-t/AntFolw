@@ -1,7 +1,6 @@
 package com.antflow.task;
 
 import com.antflow.auth.PrincipalHolder;
-import com.antflow.engine.ProcessEngine;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,15 +23,13 @@ class TaskOperationServiceTest {
     private TaskMapper taskMapper;
     private TaskHistoryMapper historyMapper;
     private ProcessInstanceMapper instanceMapper;
-    private ProcessEngine engine;
     private TaskOperationService ops;
 
     @BeforeEach void setup() {
         taskMapper = Mockito.mock(TaskMapper.class);
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         instanceMapper = Mockito.mock(ProcessInstanceMapper.class);
-        engine = Mockito.mock(ProcessEngine.class);
-        ops = new TaskOperationService(taskMapper, historyMapper, instanceMapper, engine);
+        ops = new TaskOperationService(taskMapper, historyMapper, instanceMapper);
         // 默认 insert 行为：分配 id
         Mockito.doAnswer(inv -> {
             TaskEntity t = inv.getArgument(0);
