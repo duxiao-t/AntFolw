@@ -240,6 +240,8 @@ public class ProcessEngine {
         processInstanceMapper.updateById(pi);
         insertHistoryOnInstance(pi.getId(), t.getNodeId(), null,
             "REJECT", operatorId, cmd.comment());
+        notifier.publish(new NotificationEvent(this, "INSTANCE_REJECTED",
+            pi.getId(), null, pi.getStartedBy(), "实例 #" + pi.getId() + " 已驳回"));
     }
 
     @Transactional
@@ -269,6 +271,8 @@ public class ProcessEngine {
         processInstanceMapper.updateById(pi);
         insertHistoryOnInstance(pi.getId(), null, pi.getCurrentNodeId(),
             "WITHDRAW", operatorId, null);
+        notifier.publish(new NotificationEvent(this, "INSTANCE_WITHDRAWN",
+            pi.getId(), null, pi.getStartedBy(), "实例 #" + pi.getId() + " 已撤回"));
     }
 
     // -----------------------------------------------------------------------
@@ -325,6 +329,9 @@ public class ProcessEngine {
                 insertHistoryOnInstance(pi.getId(),
                     fromNode == null ? null : fromNode.path("id").asText(null),
                     null, "COMPLETE", pi.getStartedBy(), null);
+                notifier.publish(new NotificationEvent(this, "INSTANCE_APPROVED",
+                    pi.getId(), null, pi.getStartedBy(),
+                    "实例 #" + pi.getId() + " 已审批通过"));
                 return List.of();
             }
             String type = node.path("type").asText();
