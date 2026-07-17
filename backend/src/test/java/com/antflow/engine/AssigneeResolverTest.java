@@ -4,6 +4,7 @@ import com.antflow.engine.resolver.AssigneeResolver;
 import com.antflow.engine.resolver.AssigneeSpec;
 import com.antflow.engine.resolver.AssignUserStrategy;
 import com.antflow.engine.resolver.LeaderStrategy;
+import com.antflow.engine.resolver.LeaderTopStrategy;
 import com.antflow.engine.resolver.RoleStrategy;
 import com.antflow.engine.resolver.SelfSelectStrategy;
 import com.antflow.engine.resolver.SelfStrategy;
@@ -42,6 +43,7 @@ class AssigneeResolverTest {
             new AssignUserStrategy(userMapper),
             new RoleStrategy(userMapper, userRoleMapper),
             new LeaderStrategy(userMapper, deptMapper),
+            new LeaderTopStrategy(userMapper, deptMapper),
             new SelfStrategy(),
             new SelfSelectStrategy()
         ));
@@ -122,6 +124,28 @@ class AssigneeResolverTest {
         Mockito.when(deptMapper.selectById(10L)).thenReturn(dept(10L, 99L, null));
         Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 10L));
         var spec = new AssigneeSpec("LEADER", List.of(), 1, 42L, List.of());
+        assertThat(resolver().resolve("n1", spec)).containsExactly(99L);
+    }
+
+    // ---------- Sprint 3 LEADER_TOP ----------
+    @Test void resolve_leaderTop_level3_walksAllAncestors() {
+        // starter 42 -> dept 10 (leader 99) -> dept 11 (leader 100) -> dept 12 (leader 101)
+        Mockito.when(userMapper.selectById(42L)).thenReturn(user(42L, "ACTIVE", 10L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(dept(10L, 99L, 11L));
+        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 10L));
+        Mockito.when(deptMapper.selectById(11L)).thenReturn(dept(11L, 100L, 12L));
+        Mockito.when(userMapper.selectById(100L)).thenReturn(user(100L, "ACTIVE", 11L));
+        Mockito.when(deptMapper.selectById(12L)).thenReturn(dept(12L, 101L, null));
+        Mockito.when(userMapper.selectById(101L)).thenReturn(user(101L, "ACTIVE", 12L));
+        var spec = new AssigneeSpec("LEADER_TOP", List.of(), 3, 42L, List.of());
+        assertThat(resolver().resolve("n1", spec)).containsExactly(99L, 100L, 101L);
+    }
+
+    @Test void resolve_leaderTop_level1_singleDeptLeader() {
+        Mockito.when(userMapper.selectById(42L)).thenReturn(user(42L, "ACTIVE", 10L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(dept(10L, 99L, null));
+        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 10L));
+        var spec = new AssigneeSpec("LEADER_TOP", List.of(), 1, 42L, List.of());
         assertThat(resolver().resolve("n1", spec)).containsExactly(99L);
     }
 }
