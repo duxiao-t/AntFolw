@@ -215,9 +215,10 @@ public class ProcessEngine {
             }
             insertHistoryOnInstance(pi.getId(), t.getNodeId(), refuseTarget,
                 "REJECT_TO_NODE", operatorId, cmd.comment());
-            // 沿 target 起跳：把 target 当作"已完成 from 节点"，从其 children 继续推进
+            // 沿 target 重新推进：把 target 当作"起点节点"（不是其 children），
+            // 这样 target 自身会被重新评估（建任务或继续走）。
             JsonNode formData = readFormData(pi.getFormDataId());
-            resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), target);
+            resolveAndLandFromNode(root, pi, formData, pi.getStartedBy(), Map.of(), target);
             return;
         }
 
@@ -278,6 +279,29 @@ public class ProcessEngine {
                                       Map<String, List<Long>> selfSelected,
                                       JsonNode fromNode) {
         JsonNode node = ProcessTreeNav.childrenOf(fromNode);
+        return resolveAndLandLoop(root, pi, formData, starterId, selfSelected,
+            fromNode, node);
+    }
+
+    /**
+     * 驳回到节点专用：从指定 target 节点自身（而不是其 children）开始推进，
+     * 让 target 自身被重新评估（建任务 / AUTO_PASS / 继续 children）。
+     * fromNode 设为 null，使 ARRIVE/CC/AUTO_PASS/COMPLETE 历史行的 from 字段为空。
+     */
+    private List<Long> resolveAndLandFromNode(JsonNode root, ProcessInstance pi,
+                                               JsonNode formData, long starterId,
+                                               Map<String, List<Long>> selfSelected,
+                                               JsonNode targetNode) {
+        return resolveAndLandLoop(root, pi, formData, starterId, selfSelected,
+            null, targetNode);
+    }
+
+    /** 真正的循环实现：startNode 为入口节点（可能为 null）。 */
+    private List<Long> resolveAndLandLoop(JsonNode root, ProcessInstance pi,
+                                          JsonNode formData, long starterId,
+                                          Map<String, List<Long>> selfSelected,
+                                          JsonNode fromNode, JsonNode startNode) {
+        JsonNode node = startNode;
         while (true) {
             if (node == null) {
                 // 末端 → 实例 APPROVED
