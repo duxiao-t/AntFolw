@@ -28,9 +28,8 @@ export default [
     icon: 'team',
     access: 'canAdmin',
     routes: [
-      { path: '/org', redirect: '/org/departments' },
-      { name: 'departments', icon: 'apartment', path: '/org/departments', component: './admin/Department' },
-      { name: 'employees', icon: 'user', path: '/org/employees', component: './admin/User' },
+      { path: '/org', redirect: '/org/contacts' },
+      { name: 'contacts', icon: 'contacts', path: '/org/contacts', component: './org/Contacts' },
     ],
   },
 

@@ -7,8 +7,7 @@ export default {
 
   // 组织架构
   'menu.org': '组织架构',
-  'menu.org.departments': '部门管理',
-  'menu.org.employees': '员工管理',
+  'menu.org.contacts': '通讯录',
 
   // 权限与安全
   'menu.security': '权限与安全',

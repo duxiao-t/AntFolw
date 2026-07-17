@@ -1,0 +1,21 @@
+.ct-layout {
+  display: flex; height: calc(100vh - 120px); background: #fff; border-radius: 8px; overflow: hidden;
+}
+.ct-left {
+  width: 280px; min-width: 280px; border-right: 1px solid #f0f0f0; display: flex; flex-direction: column;
+  .ct-left-top {
+    display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid #f0f0f0;
+    .ant-input-affix-wrapper { flex: 1; }
+  }
+  .ct-tree-wrap { flex: 1; overflow: auto; padding: 4px 0;
+    .ct-tree-title { display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 4px; }
+  }
+}
+.ct-right {
+  flex: 1; display: flex; flex-direction: column; overflow: auto;
+  .ct-right-header {
+    display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #f0f0f0;
+    h2 { margin: 0; font-size: 16px; }
+  }
+  .ct-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #bbb; font-size: 14px; }
+}
