@@ -79,7 +79,7 @@ class ProcessEngineTreeTest {
         return new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
-            historyMapper, handlers, json
+            historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class), json
         );
     }
 

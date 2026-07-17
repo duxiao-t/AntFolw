@@ -10,6 +10,8 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.notify.NotificationEvent;
+import com.antflow.notify.NotificationPublisher;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
 import com.antflow.task.*;
@@ -56,6 +58,7 @@ public class ProcessEngine {
     private final TaskMapperExt taskMapperExt;
     private final TaskHistoryMapper historyMapper;
     private final List<NodeHandler> nodeHandlers;
+    private final NotificationPublisher notifier;
     private final ObjectMapper json;
 
     @Transactional
@@ -94,6 +97,16 @@ public class ProcessEngine {
             cmd.selfSelected() == null ? Map.of() : cmd.selfSelected();
 
         List<Long> firstTasks = resolveAndLand(root, pi, formData, userId, selfSelected, root);
+        notifier.publish(new NotificationEvent(this, "INSTANCE_STARTED",
+            pi.getId(), null, userId, "流程发起 #" + pi.getId()));
+        for (Long tid : firstTasks) {
+            TaskEntity nt = taskMapper.selectById(tid);
+            if (nt != null) {
+                notifier.publish(new NotificationEvent(this, "TASK_ASSIGNED",
+                    pi.getId(), tid, nt.getAssigneeId(),
+                    "新任务 #" + tid + " 节点 " + nt.getNodeId()));
+            }
+        }
         return Map.of(
             "instanceId", pi.getId(),
             "formDataId", fd2.getId(),
