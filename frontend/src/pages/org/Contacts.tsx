@@ -3,13 +3,13 @@ import { request } from '@umijs/max';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Input, Tree, Button, Dropdown, Modal, Form, Space, Tag, Popconfirm,
-  Select, App, Table,
+  Select, App,
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, MoreOutlined, UserAddOutlined,
   ImportOutlined, DeleteOutlined, EditOutlined, TeamOutlined,
 } from '@ant-design/icons';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import type { DataNode } from 'antd/es/tree';
 import './Contacts.less';
 
@@ -117,7 +117,7 @@ export default function ContactsPage() {
 
   // --- member CRUD ---
   const memberCreate = useMutation({
-    mutationFn: (body: any) => request('/api/users', { method: 'POST', data: { ...body, deptId: selDeptId } }),
+    mutationFn: (body: any) => request('/api/users', { method: 'POST', data: body }),
     onSuccess: () => { refetchMembers(); msg.success('添加成功'); },
   });
   const memberUpdate = useMutation({
@@ -130,14 +130,16 @@ export default function ContactsPage() {
   });
 
   // --- tree drop ---
-  const onDrop = useCallback((info: any) => {
-    if (!info.dropToGap) {
-      deptUpdate.mutate({ id: info.dragNode.key, parentId: info.node.key });
+  const onDrop = (info: any) => {
+    const dragId = info.dragNode?.key ?? info.dragNode?.props?.eventKey;
+    const dropId = info.node?.key ?? info.node?.props?.eventKey;
+    if (dragId && dropId && !info.dropToGap) {
+      deptUpdate.mutate({ id: Number(dragId), parentId: Number(dropId) });
     }
-  }, []);
+  };
 
   // --- tree title render ---
-  const titleRender = useCallback((node: DataNode) => {
+  const titleRender = (node: DataNode) => {
     const items = [
       { key: 'add', label: '添加子部门', icon: <PlusOutlined />,
         onClick: () => { setDeptAddParentId(node.key as number); setDeptAddOpen(true); } },
@@ -164,7 +166,7 @@ export default function ContactsPage() {
         </Dropdown>
       </div>
     );
-  }, [deptList]);
+  };
 
   // --- breadcrumb ---
   const breadcrumb = useMemo(() => {
@@ -194,7 +196,7 @@ export default function ContactsPage() {
   const handleMemberOk = () => {
     const v = memberForm.getFieldsValue();
     if (memberEdit) { memberUpdate.mutate({ id: memberEdit.id, ...v }); }
-    else { memberCreate.mutate(v); }
+    else { memberCreate.mutate({ ...v, deptId: selDeptId }); }
     setMemberOpen(false); setMemberEdit(null); memberForm.resetFields();
   };
 
@@ -222,7 +224,6 @@ export default function ContactsPage() {
               draggable
               blockNode
               onDrop={onDrop}
-              showIcon={false}
             />
           </div>
         </aside>
@@ -373,6 +374,10 @@ function LeaderPicker({ users, currentLeaderId, onOk, onCancel }: {
       <div style={{ width: 160, border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>已选负责人</div>
         {sel ? <Tag closable onClose={() => setSel(null)}>{users.find(u => u.id === sel)?.name}</Tag> : <span style={{ color: '#bbb' }}>未选择</span>}
+        <div style={{ marginTop: 16, textAlign: 'right' }}>
+          <Button size="small" onClick={onCancel} style={{ marginRight: 8 }}>取消</Button>
+          <Button type="primary" size="small" onClick={() => onOk(sel)}>确定</Button>
+        </div>
       </div>
     </div>
   );

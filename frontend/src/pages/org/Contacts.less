@@ -5,7 +5,10 @@
     display: flex; align-items: center; gap: 6px; padding: 12px;
     border-bottom: 1px solid #f0f0f0;
   }
-  .ct-tree-wrap { flex: 1; overflow: auto; padding: 6px 0; }
+  .ct-tree-wrap { flex: 1; overflow: auto; padding: 8px 4px;
+    .ant-tree-node-content-wrapper { padding: 4px 8px; }
+    .ant-tree-treenode { padding: 3px 0; }
+  }
 }
 .ct-tree-node {
   display: flex; align-items: center; justify-content: space-between; width: 100%;
