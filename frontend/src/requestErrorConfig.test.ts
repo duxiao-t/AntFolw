@@ -54,6 +54,16 @@ describe('requestErrorConfig', () => {
       }).not.toThrow();
     });
 
+    it('should not throw for direct backend object or array responses', () => {
+      expect(() => {
+        errorThrower([{ id: 1, name: 'Tech' }]);
+      }).not.toThrow();
+
+      expect(() => {
+        errorThrower({ id: 1, username: 'admin' });
+      }).not.toThrow();
+    });
+
     it('should throw BizError with correct info', () => {
       const response = {
         success: false,

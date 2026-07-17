@@ -36,6 +36,9 @@ public class DepartmentController {
             Object lid = body.get("leaderId");
             d.setLeaderId(lid == null ? null : ((Number) lid).longValue());
         }
+        if (body.containsKey("leaderIds")) {
+            d = service.setLeaders(id, toLongList(body.get("leaderIds")));
+        }
         if (body.containsKey("parentId")) {
             Long newParentId = body.get("parentId") == null ? null : ((Number) body.get("parentId")).longValue();
             if (!java.util.Objects.equals(d.getParentId(), newParentId)) {
@@ -43,7 +46,21 @@ public class DepartmentController {
             }
         }
         mapper.updateById(d);
-        return d;
+        return service.withLeaderIds(d);
+    }
+
+    @PutMapping("/{id}/order")
+    public Department moveOrder(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return service.moveOrder(id, String.valueOf(body.get("direction")));
+    }
+
+    @PutMapping("/{id}/position")
+    public Department movePosition(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        Object targetId = body.get("targetId");
+        if (targetId == null) {
+            throw new BizException("BAD_TARGET", "目标部门不能为空");
+        }
+        return service.movePosition(id, ((Number) targetId).longValue(), String.valueOf(body.get("placement")));
     }
 
     @DeleteMapping("/{id}")
@@ -54,5 +71,13 @@ public class DepartmentController {
     @GetMapping("/{id}/path")
     public List<Department> path(@PathVariable Long id) {
         return service.pathToRoot(id);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Long> toLongList(Object o) {
+        if (o == null) {
+            return List.of();
+        }
+        return ((List<Number>) o).stream().map(Number::longValue).toList();
     }
 }

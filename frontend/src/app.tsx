@@ -198,9 +198,9 @@ export const layout: RunTimeLayoutConfig = ({
  * @doc https://umijs.org/docs/max/request#配置
  */
 export const request: RequestConfig = {
-  // AntFlow: dev proxies /api → :8080 via config/proxy.ts. Build artifacts
-  // ship static — backend URL is injected at deploy time via UMI_ENV.
-  baseURL: isDev ? '' : process.env.UMI_ENV === 'pre' ? '/api' : '/api',
+  // AntFlow endpoints are called with explicit /api paths. Keep baseURL empty
+  // so Umi does not turn /api/auth/login into /api/api/auth/login.
+  baseURL: '',
   ...errorConfig,
 };
 

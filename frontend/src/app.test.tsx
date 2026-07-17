@@ -16,10 +16,7 @@ const mockQueryCurrentUser = vi.fn();
 vi.mock('@umijs/max', () => ({
   history: mockHistory,
   Link: ({ children }: any) => children,
-}));
-
-vi.mock('@/services/ant-design-pro/api', () => ({
-  currentUser: mockQueryCurrentUser,
+  request: mockQueryCurrentUser,
 }));
 
 vi.mock('@/components', () => ({
@@ -56,21 +53,24 @@ describe('app getInitialState', () => {
       search: '',
       hash: '',
     };
+    window.history.pushState({}, '', '/welcome');
   });
 
   it('should fetch currentUser when not on login page', async () => {
     const { getInitialState } = await import('./app');
     mockQueryCurrentUser.mockResolvedValue({
-      data: {
-        name: 'Test User',
-        access: 'admin',
-      },
+      displayName: 'Test User',
+      roles: ['admin'],
     });
 
     const state = await getInitialState();
 
-    expect(mockQueryCurrentUser).toHaveBeenCalled();
+    expect(mockQueryCurrentUser).toHaveBeenCalledWith('/api/auth/me', {
+      skipErrorHandler: true,
+    });
     expect(state.currentUser).toEqual({
+      displayName: 'Test User',
+      roles: ['admin'],
       name: 'Test User',
       access: 'admin',
     });
@@ -97,6 +97,7 @@ describe('app getInitialState', () => {
       search: '',
       hash: '',
     };
+    window.history.pushState({}, '', '/user/login');
 
     const state = await getInitialState();
 
@@ -112,6 +113,7 @@ describe('app getInitialState', () => {
       search: '?page=2',
       hash: '#section',
     };
+    window.history.pushState({}, '', '/admin/users?page=2#section');
     mockQueryCurrentUser.mockRejectedValue(new Error('401'));
 
     await getInitialState();
@@ -124,7 +126,8 @@ describe('app getInitialState', () => {
   it('should include default settings in initial state', async () => {
     const { getInitialState } = await import('./app');
     mockQueryCurrentUser.mockResolvedValue({
-      data: { name: 'User' },
+      username: 'user',
+      roles: ['user'],
     });
 
     const state = await getInitialState();
@@ -135,12 +138,26 @@ describe('app getInitialState', () => {
   it('fetchUserInfo should return user data on success', async () => {
     const { getInitialState } = await import('./app');
     mockQueryCurrentUser.mockResolvedValue({
-      data: { name: 'Fetched User', access: 'user' },
+      username: 'fetched',
+      displayName: 'Fetched User',
+      roles: ['user'],
     });
 
     const state = await getInitialState();
 
     const user = await state.fetchUserInfo?.();
-    expect(user).toEqual({ name: 'Fetched User', access: 'user' });
+    expect(user).toEqual({
+      username: 'fetched',
+      displayName: 'Fetched User',
+      roles: ['user'],
+      name: 'Fetched User',
+      access: 'user',
+    });
+  });
+
+  it('should not prefix explicit /api request paths with another /api', async () => {
+    const { request } = await import('./app');
+
+    expect(request.baseURL).toBe('');
   });
 });

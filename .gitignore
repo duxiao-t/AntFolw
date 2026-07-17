@@ -26,5 +26,10 @@ wflow-master/
 infra/.env
 infra/data/
 
+# Local verification artifacts
+*-run.log
+*-run.err.log
+screenshots/
+
 # OS
 Thumbs.db

@@ -70,9 +70,7 @@ public class UserController {
 
     @DeleteMapping("/{id}")
     public void delete(@PathVariable Long id) {
-        User u = userMapper.selectById(id);
-        if (u == null) throw new BizException("NOT_FOUND", "用户不存在");
-        userMapper.deleteById(id);
+        userService.delete(id);
     }
 
     @SuppressWarnings("unchecked")

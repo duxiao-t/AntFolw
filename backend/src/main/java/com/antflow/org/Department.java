@@ -3,6 +3,8 @@ package com.antflow.org;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @TableName(value = "t_department", autoResultMap = true)
 public class Department {
@@ -13,5 +15,7 @@ public class Department {
     private String path;
     private String name;
     private Long leaderId;
+    private Integer sortOrder;
+    @TableField(exist = false) private List<Long> leaderIds = List.of();
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }
