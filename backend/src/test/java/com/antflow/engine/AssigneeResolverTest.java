@@ -2,6 +2,11 @@ package com.antflow.engine;
 
 import com.antflow.engine.resolver.AssigneeResolver;
 import com.antflow.engine.resolver.AssigneeSpec;
+import com.antflow.engine.resolver.AssignUserStrategy;
+import com.antflow.engine.resolver.LeaderStrategy;
+import com.antflow.engine.resolver.RoleStrategy;
+import com.antflow.engine.resolver.SelfSelectStrategy;
+import com.antflow.engine.resolver.SelfStrategy;
 import com.antflow.org.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,7 +19,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 
 /**
- * Resolver tests do NOT need a real DB or PG — mappers are mocked.
+ * Sprint 2 C1 重构后：AssigneeResolver 不再是 switch-case；通过 Spring 注入
+ * List&lt;AssigneeStrategy&gt; 路由到第一个 supports() 匹配的实现。
+ * 测试手工构造 strategies 列表（mappers mocked）。
  */
 class AssigneeResolverTest {
 
@@ -31,7 +38,13 @@ class AssigneeResolverTest {
     }
 
     private AssigneeResolver resolver() {
-        return new AssigneeResolver(userMapper, userRoleMapper, roleMapper, deptMapper);
+        return new AssigneeResolver(List.of(
+            new AssignUserStrategy(userMapper),
+            new RoleStrategy(userMapper, userRoleMapper),
+            new LeaderStrategy(userMapper, deptMapper),
+            new SelfStrategy(),
+            new SelfSelectStrategy()
+        ));
     }
 
     private User user(long id, String status) {
