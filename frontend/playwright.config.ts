@@ -16,15 +16,15 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'bash -lc "cd ../backend && mvn -B spring-boot:run -Dspring-boot.run.jvmArguments=-Xmx512m"',
-      port: 8080,
+      command: 'mvn.cmd -f ../backend/pom.xml -B spring-boot:run -Dspring-boot.run.arguments=--server.port=8081 -Dspring-boot.run.jvmArguments=-Xmx512m',
+      port: 8081,
       reuseExistingServer: true,
       timeout: 180_000,
       stdout: 'pipe',
       stderr: 'pipe',
     },
     {
-      command: 'npm start',
+      command: 'npm run dev',
       port: 8000,
       reuseExistingServer: true,
       timeout: 180_000,

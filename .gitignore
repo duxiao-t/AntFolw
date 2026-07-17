@@ -5,6 +5,8 @@ frontend/.umi/
 frontend/.cache/
 frontend/.env.local
 frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
 
 # Java / backend
 backend/target/

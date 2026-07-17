@@ -26,6 +26,7 @@
     "start:test": "cross-env UMI_ENV=test MOCK=none max dev",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "doctor": "react-doctor .",
