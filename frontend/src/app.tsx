@@ -24,7 +24,7 @@ import {
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = process.env.NODE_ENV === 'development' || process.env.UMI_ENV === 'dev';
 const loginPath = '/user/login';
 
 /**
