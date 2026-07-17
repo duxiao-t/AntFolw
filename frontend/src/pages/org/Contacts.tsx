@@ -1,13 +1,12 @@
-import { PageContainer, ProTable } from '@ant-design/pro-components';
+import { PageContainer } from '@ant-design/pro-components';
 import { request } from '@umijs/max';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Input, Tree, Button, Dropdown, Modal, Form, Space, Popconfirm,
-  Select, App,
+  Input, Tree, Button, Dropdown, Modal, Form, Select, App,
 } from 'antd';
 import {
-  PlusOutlined, SearchOutlined, MoreOutlined, UserAddOutlined,
-  ImportOutlined, DeleteOutlined, EditOutlined, TeamOutlined, DownloadOutlined,
+  PlusOutlined, SearchOutlined, MoreOutlined,
+  DeleteOutlined, EditOutlined, TeamOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
@@ -23,7 +22,7 @@ import {
   resolveDepartmentDropAction,
   summarizeSettledResults,
 } from './Contacts.utils';
-import { LeaderPicker, MemberGenderTag } from './Contacts.components';
+import { LeaderPicker, MemberFormModal, MembersSection } from './Contacts.components';
 
 interface Dept {
   id: number; companyId: number; parentId: number | null;
@@ -404,51 +403,20 @@ export default function ContactsPage() {
         {/* ===== RIGHT ===== */}
         <main className="ct-right">
           {selDeptId ? (
-            <>
-              <div className="ct-right-header">
-                <h2>{breadcrumb} · {members.length}人</h2>
-                <Space>
-                  <Button icon={<UserAddOutlined />} type="primary" onClick={() => { setMemberEdit(null); memberForm.resetFields(); setMemberOpen(true); }}>添加成员</Button>
-                  <Popconfirm
-                    title={`确定删除选中的 ${selectedMemberIds.length} 名成员?`}
-                    disabled={!selectedMemberIds.length}
-                    onConfirm={handleBulkMemberRemove}
-                  >
-                    <Button danger icon={<DeleteOutlined />} disabled={!selectedMemberIds.length}>批量删除</Button>
-                  </Popconfirm>
-                  <Button icon={<ImportOutlined />} onClick={() => importInputRef.current?.click()}>批量导入</Button>
-                  <Button icon={<DownloadOutlined />} onClick={handleExportMembers}>导出</Button>
-                  <input ref={importInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleImportMembers} />
-                </Space>
-              </div>
-              <ProTable<UserItem>
-                rowKey="id"
-                columns={[
-                  { title: '姓名', dataIndex: 'displayName' },
-                  { title: '账号', dataIndex: 'username' },
-                  { title: '手机', dataIndex: 'phone' },
-                  { title: '部门', dataIndex: 'deptId', render: (_, r) => deptNameById[r.deptId] ?? '-' },
-                  { title: '职务', dataIndex: 'position' },
-                  { title: '性别', dataIndex: 'gender', render: (_, r) => <MemberGenderTag value={r.gender} /> },
-                  { title: '操作', key: 'op', width: 160, render: (_, r) => (
-                    <Space>
-                      <a onClick={() => { setMemberEdit(r); setMemberOpen(true); memberForm.setFieldsValue({ ...r, gender: normalizeGender(r.gender) }); }}>编辑</a>
-                      <Popconfirm title="确定删除?" onConfirm={() => memberRemove.mutate(r.id)}>
-                        <a style={{ color: '#ff4d4f' }}>删除</a>
-                      </Popconfirm>
-                    </Space>
-                  )},
-                ]}
-                dataSource={members}
-                rowSelection={{
-                  selectedRowKeys: selectedMemberIds,
-                  onChange: (keys) => setSelectedMemberIds(keys),
-                }}
-                search={false}
-                options={false}
-                pagination={{ pageSize: 15 }}
-              />
-            </>
+            <MembersSection
+              breadcrumb={breadcrumb}
+              members={members}
+              selectedMemberIds={selectedMemberIds}
+              deptNameById={deptNameById}
+              importInputRef={importInputRef}
+              onSelectedMemberIdsChange={setSelectedMemberIds}
+              onAdd={() => { setMemberEdit(null); memberForm.resetFields(); setMemberOpen(true); }}
+              onEdit={(member) => { setMemberEdit(member); setMemberOpen(true); memberForm.setFieldsValue({ ...member, gender: normalizeGender(member.gender) }); }}
+              onRemove={(id) => memberRemove.mutate(id)}
+              onBulkRemove={handleBulkMemberRemove}
+              onExport={handleExportMembers}
+              onImport={handleImportMembers}
+            />
           ) : (
             <div className="ct-empty">请从左侧选择部门</div>
           )}
@@ -517,28 +485,14 @@ export default function ContactsPage() {
         />
       </Modal>
 
-      {/* ===== Member Modal ===== */}
-      <Modal
-        title={memberEdit ? '编辑成员' : '添加成员'}
+      <MemberFormModal
         open={memberOpen}
-        confirmLoading={memberCreate.isPending || memberUpdate.isPending}
-        width={520}
+        editing={memberEdit}
+        form={memberForm}
+        saving={memberCreate.isPending || memberUpdate.isPending}
         onOk={handleMemberOk}
         onCancel={() => { setMemberOpen(false); setMemberEdit(null); memberForm.resetFields(); }}
-        destroyOnClose
-      >
-        <Form form={memberForm} layout="vertical" preserve={false}
-          initialValues={memberEdit ? memberEdit : undefined}>
-          <Form.Item label="姓名" name="displayName" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input disabled={!!memberEdit} /></Form.Item>
-          <Form.Item label="手机" name="phone"><Input /></Form.Item>
-          <Form.Item label="邮箱" name="email"><Input /></Form.Item>
-          <Form.Item label="职务" name="position"><Input /></Form.Item>
-          <Form.Item label="性别" name="gender">
-            <Select allowClear options={[{ value: 'M', label: '男' }, { value: 'F', label: '女' }]} />
-          </Form.Item>
-        </Form>
-      </Modal>
+      />
     </PageContainer>
   );
 }
