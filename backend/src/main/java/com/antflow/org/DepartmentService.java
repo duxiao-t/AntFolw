@@ -90,10 +90,14 @@ public class DepartmentService {
 
     /** 公司下的完整部门树 */
     public List<Department> tree(long companyId) {
-        Department root = mapper.selectOne(new QueryWrapper<Department>()
+        List<Department> roots = mapper.selectList(new QueryWrapper<Department>()
             .eq("company_id", companyId).isNull("parent_id"));
-        if (root == null) return List.of();
-        return mapper.subtree(root.getPath());
+        if (roots.isEmpty()) return List.of();
+        List<Department> all = new ArrayList<>();
+        for (Department root : roots) {
+            all.addAll(mapper.subtree(root.getPath()));
+        }
+        return all;
     }
 
     private String slugOf(String name) {
