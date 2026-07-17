@@ -12,6 +12,9 @@ public class User {
     private String passwordHash;
     private String displayName;
     private String email;
+    private String phone;
+    private String position;
+    private String gender;
     private String status;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }

@@ -1,5 +1,6 @@
 package com.antflow.org;
 
+import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,9 +18,15 @@ public class UserController {
     private final UserService userService;
 
     @GetMapping
-    public List<User> list(@RequestParam(required = false) String keyword) {
+    public List<User> list(@RequestParam(required = false) String keyword,
+                           @RequestParam(required = false) Long deptId) {
         var q = new QueryWrapper<User>();
-        if (keyword != null && !keyword.isBlank()) q.like("username", keyword);
+        if (keyword != null && !keyword.isBlank()) {
+            q.and(w -> w.like("username", keyword).or().like("display_name", keyword));
+        }
+        if (deptId != null) {
+            q.eq("dept_id", deptId);
+        }
         return userMapper.selectList(q);
     }
 
@@ -29,6 +36,9 @@ public class UserController {
         u.setUsername((String) body.get("username"));
         u.setDisplayName((String) body.get("displayName"));
         u.setEmail((String) body.get("email"));
+        u.setPhone((String) body.get("phone"));
+        u.setPosition((String) body.get("position"));
+        u.setGender((String) body.get("gender"));
         if (body.get("deptId") != null) {
             u.setDeptId(((Number) body.get("deptId")).longValue());
         }
@@ -36,9 +46,33 @@ public class UserController {
         return Map.of("id", id);
     }
 
+    @PutMapping("/{id}")
+    public User update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        User u = userMapper.selectById(id);
+        if (u == null) throw new BizException("NOT_FOUND", "用户不存在");
+        if (body.containsKey("displayName")) u.setDisplayName((String) body.get("displayName"));
+        if (body.containsKey("email")) u.setEmail((String) body.get("email"));
+        if (body.containsKey("phone")) u.setPhone((String) body.get("phone"));
+        if (body.containsKey("position")) u.setPosition((String) body.get("position"));
+        if (body.containsKey("gender")) u.setGender((String) body.get("gender"));
+        if (body.containsKey("deptId")) {
+            u.setDeptId(body.get("deptId") == null ? null : ((Number) body.get("deptId")).longValue());
+        }
+        if (body.containsKey("username")) u.setUsername((String) body.get("username"));
+        userMapper.updateById(u);
+        return u;
+    }
+
     @PutMapping("/{id}/roles")
     public void setRoles(@PathVariable Long id, @RequestBody List<Long> roleIds) {
         userService.setRoles(id, roleIds);
+    }
+
+    @DeleteMapping("/{id}")
+    public void delete(@PathVariable Long id) {
+        User u = userMapper.selectById(id);
+        if (u == null) throw new BizException("NOT_FOUND", "用户不存在");
+        userMapper.deleteById(id);
     }
 
     @SuppressWarnings("unchecked")
