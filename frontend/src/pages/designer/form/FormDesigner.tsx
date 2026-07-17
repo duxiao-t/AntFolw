@@ -12,7 +12,7 @@ import {
 import { useFormDesignerStore } from './useFormDesignerStore';
 import { Inspector } from './Inspector';
 
-function PaletteCard({ entry }: any) {
+function PaletteCard({ entry, onAdd }: any) {
   const { attributes, listeners, setNodeRef } = useDraggable({
     id: entry.type,
     data: { source: 'palette' },
@@ -22,6 +22,7 @@ function PaletteCard({ entry }: any) {
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      onDoubleClick={onAdd}
       style={{
         padding: 12,
         border: '1px solid #ddd',
@@ -50,6 +51,7 @@ function CanvasDrop() {
   return (
     <div
       ref={setNodeRef}
+      data-canvas
       style={{ flex: 1, padding: 16, background: '#fafafa' }}
       onClick={(e) => {
         const id = (e.target as HTMLElement)
@@ -156,7 +158,13 @@ export function FormDesignerSurface({
           <h4>字段</h4>
           {paletteEntries
             .filter((e) => e.type !== 'description')
-            .map((e) => <PaletteCard key={e.type} entry={e} />)}
+            .map((e) => (
+              <PaletteCard
+                key={e.type}
+                entry={e}
+                onAdd={() => addNode(null, e.type, e.defaultProps)}
+              />
+            ))}
         </aside>
         <main
           style={{
