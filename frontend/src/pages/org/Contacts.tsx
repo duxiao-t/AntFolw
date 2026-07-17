@@ -9,7 +9,7 @@ import {
   PlusOutlined, SearchOutlined, MoreOutlined, UserAddOutlined,
   ImportOutlined, DeleteOutlined, EditOutlined, TeamOutlined,
 } from '@ant-design/icons';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { DataNode } from 'antd/es/tree';
 import './Contacts.less';
 
@@ -56,7 +56,7 @@ export default function ContactsPage() {
     enabled: !!selDeptId,
   });
 
-  const { data: members = [], refetch: refetchMembers } = useQuery({
+  const { data: members = [] } = useQuery({
     queryKey: ['members', selDeptId],
     queryFn: () => request(`/api/users?deptId=${selDeptId}&_t=${Date.now()}`),
     enabled: !!selDeptId,
@@ -65,7 +65,6 @@ export default function ContactsPage() {
   const { data: allUsers = [] } = useQuery({
     queryKey: ['all-users'],
     queryFn: () => request('/api/users'),
-    enabled: leaderOpen,
   });
 
   // --- tree data ---
@@ -118,25 +117,26 @@ export default function ContactsPage() {
   // --- member CRUD ---
   const memberCreate = useMutation({
     mutationFn: (body: any) => request('/api/users', { method: 'POST', data: body }),
-    onSuccess: () => { refetchMembers(); msg.success('添加成功'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['members', selDeptId] }); msg.success('添加成功'); },
   });
   const memberUpdate = useMutation({
     mutationFn: ({ id, ...body }: any) => request(`/api/users/${id}`, { method: 'PUT', data: body }),
-    onSuccess: () => { refetchMembers(); msg.success('已更新'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['members', selDeptId] }); msg.success('已更新'); },
   });
   const memberRemove = useMutation({
     mutationFn: (id: number) => request(`/api/users/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { refetchMembers(); msg.success('已删除'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['members', selDeptId] }); msg.success('已删除'); },
   });
 
   // --- tree drop ---
-  const onDrop = (info: any) => {
-    const dragId = info.dragNode?.key ?? info.dragNode?.props?.eventKey;
-    const dropId = info.node?.key ?? info.node?.props?.eventKey;
+  const onDrop = useCallback((info: any) => {
+    const dragId = Number(info.dragNode?.key ?? info.dragNode?.props?.eventKey);
+    const dropId = Number(info.node?.key ?? info.node?.props?.eventKey);
     if (dragId && dropId && !info.dropToGap) {
-      deptUpdate.mutate({ id: Number(dragId), parentId: Number(dropId) });
+      deptUpdate.mutate({ id: dragId, parentId: dropId });
+      msg.success('已移动');
     }
-  };
+  }, [deptUpdate]);
 
   // --- tree title render ---
   const titleRender = (node: DataNode) => {
@@ -178,7 +178,7 @@ export default function ContactsPage() {
   const handleDeptAdd = () => {
     const v = deptForm.getFieldsValue();
     if (!v?.name) { msg.error('请输入部门名称'); return; }
-    deptCreate.mutate({ name: v.name, companyId, parentId: deptAddParentId ?? null });
+    deptCreate.mutate({ name: v.name, companyId, parentId: v.parentId ?? deptAddParentId ?? null });
     setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields();
   };
   const handleDeptEdit = () => {
@@ -215,13 +215,14 @@ export default function ContactsPage() {
           </div>
           <div className="ct-tree-wrap">
             <Tree
+              showIcon
               treeData={filteredTree}
               expandedKeys={expandedKeys}
               onExpand={keys => setExpandedKeys(keys)}
               onSelect={keys => { if (keys[0]) setSelDeptId(keys[0] as number); }}
               selectedKeys={selDeptId ? [selDeptId] : []}
               titleRender={titleRender}
-              draggable
+              draggable={{ icon: false }}
               blockNode
               onDrop={onDrop}
             />
@@ -275,6 +276,7 @@ export default function ContactsPage() {
       <Modal
         title={deptAddParentId ? '添加子部门' : '新建部门'}
         open={deptAddOpen}
+        confirmLoading={deptCreate.isPending}
         onOk={handleDeptAdd}
         onCancel={() => { setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields(); }}
         destroyOnClose
@@ -330,6 +332,7 @@ export default function ContactsPage() {
       <Modal
         title={memberEdit ? '编辑成员' : '添加成员'}
         open={memberOpen}
+        confirmLoading={memberCreate.isPending || memberUpdate.isPending}
         width={520}
         onOk={handleMemberOk}
         onCancel={() => { setMemberOpen(false); setMemberEdit(null); memberForm.resetFields(); }}
