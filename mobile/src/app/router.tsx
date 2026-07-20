@@ -3,6 +3,7 @@ import { LoginPage } from '../features/auth/LoginPage';
 import { WorkbenchPage } from '../features/workbench/WorkbenchPage';
 import { TaskCenterPage } from '../features/tasks/TaskCenterPage';
 import { ProfilePage } from '../features/profile/ProfilePage';
+import { SecurityPage } from '../features/profile/SecurityPage';
 import { AppCatalogPage } from '../features/workbench/AppCatalogPage';
 import { FavoriteAppsPage } from '../features/workbench/FavoriteAppsPage';
 import { RouteErrorPage } from './RouteErrorPage';
@@ -49,6 +50,11 @@ const routes: RouteObject[] = [
       {
         path: '/apps/favorites',
         Component: FavoriteAppsPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/profile/security',
+        Component: SecurityPage,
         HydrateFallback: NoHydrate,
       },
     ],

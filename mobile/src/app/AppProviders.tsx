@@ -12,10 +12,19 @@ const queryClient = new QueryClient({
   },
 });
 
+export function isRefreshExcludedAuthEndpoint(path: string): boolean {
+  const pathname = path.split('?')[0];
+  return (
+    pathname === '/api/auth/login' ||
+    pathname === '/api/auth/refresh' ||
+    pathname === '/api/auth/logout'
+  );
+}
+
 setAuthController({
   authorizationHeader: () => useAuthStore.getState().authorizationHeader(),
   refresh: () => useAuthStore.getState().refresh(),
-  isAuthEndpoint: (path) => path.includes('/auth/'),
+  isAuthEndpoint: isRefreshExcludedAuthEndpoint,
 });
 
 export function AppProviders({ children }: PropsWithChildren) {
