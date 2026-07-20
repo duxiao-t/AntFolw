@@ -1,4 +1,13 @@
 import { createElement, type ChangeEvent, type CSSProperties } from 'react';
+import { DateField } from '../fields/DateField';
+import { DateRangeField } from '../fields/DateRangeField';
+import { DescriptionField } from '../fields/DescriptionField';
+import { MoneyField } from '../fields/MoneyField';
+import { MultiSelectField } from '../fields/MultiSelectField';
+import { NumberField } from '../fields/NumberField';
+import { SelectField } from '../fields/SelectField';
+import { TextField } from '../fields/TextField';
+import { TextareaField } from '../fields/TextareaField';
 import { summarizeValue, validateRequired } from './validators';
 import type {
   FieldValidationErrors,
@@ -60,17 +69,6 @@ function GenericField(props: MobileFieldProps) {
   );
 }
 
-function DescriptionField(props: MobileFieldProps) {
-  return createElement(
-    'section',
-    { style: { ...fieldShellStyle, color: 'rgba(0,0,0,0.68)' } },
-    props.node.label
-      ? createElement('strong', { style: labelStyle }, props.node.label)
-      : null,
-    createElement('p', { style: { margin: 0 } }, String(props.node.props?.text ?? '')),
-  );
-}
-
 function SpanLayoutField(props: MobileFieldProps) {
   return createElement(
     'section',
@@ -113,29 +111,42 @@ function UnsupportedField(props: MobileFieldProps) {
   );
 }
 
-function field(type: MobileFieldDefinition['type'],
-               Component = GenericField): MobileFieldDefinition {
+function field(
+  type: MobileFieldDefinition['type'],
+  Component: MobileFieldDefinition['Component'] = GenericField,
+  overrides: Partial<Pick<MobileFieldDefinition, 'validate' | 'summarize'>> = {},
+): MobileFieldDefinition {
   return {
     type,
     Component,
-    validate: validateRequired,
-    summarize: (_node, value) => summarizeValue(value),
+    validate: overrides.validate ?? validateRequired,
+    summarize: overrides.summarize ?? ((_node, value) => summarizeValue(value)),
   };
 }
 
 export const registeredFields: MobileFieldDefinition[] = [
-  field('text'),
-  field('textarea'),
-  field('number'),
-  field('money'),
-  field('date'),
-  field('date_range'),
-  field('select'),
-  field('multi_select'),
+  field('text', TextField),
+  field('textarea', TextareaField),
+  field('number', NumberField),
+  field('money', MoneyField),
+  field('date', DateField),
+  field('date_range', DateRangeField, {
+    validate: validateDateRange,
+    summarize: (_node, value) => summarizeDateRange(value),
+  }),
+  field('select', SelectField, {
+    summarize: (node, value) => optionSummary(node, value),
+  }),
+  field('multi_select', MultiSelectField, {
+    summarize: (node, value) => multiOptionSummary(node, value),
+  }),
   field('user_picker'),
   field('dept_picker'),
   field('file_upload'),
-  field('description', DescriptionField),
+  field('description', DescriptionField, {
+    validate: () => null,
+    summarize: (node) => String(node.props?.text ?? ''),
+  }),
   field('span_layout', SpanLayoutField),
   field('table_list', TableListField),
 ];
@@ -178,4 +189,54 @@ function stringValue(value: unknown) {
     return '';
   }
   return typeof value === 'string' ? value : String(value);
+}
+
+function validateDateRange(node: MobileSchemaNode, value: unknown) {
+  if (node.props?.required !== true) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length < 2 || !value[0] || !value[1]) {
+    return `请填写${node.label ?? node.id}`;
+  }
+  return null;
+}
+
+function summarizeDateRange(value: unknown) {
+  if (!Array.isArray(value) || !value[0] || !value[1]) {
+    return '未填写';
+  }
+  return `${String(value[0])} 至 ${String(value[1])}`;
+}
+
+function optionSummary(node: MobileSchemaNode, value: unknown) {
+  const hit = options(node).find((option) => option.value === value);
+  return hit?.label ?? summarizeValue(value);
+}
+
+function multiOptionSummary(node: MobileSchemaNode, value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return '未填写';
+  }
+  const selected = options(node)
+    .filter((option) => value.includes(option.value))
+    .map((option) => option.label);
+  return selected.length > 0 ? selected.join('、') : summarizeValue(value);
+}
+
+function options(node: MobileSchemaNode) {
+  const fieldOptions = node.props?.options;
+  if (!Array.isArray(fieldOptions)) {
+    return [];
+  }
+  return fieldOptions.flatMap((item) => {
+    if (typeof item !== 'object' || item == null) {
+      return [];
+    }
+    const option = item as Record<string, unknown>;
+    const value = option.value;
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return [];
+    }
+    return [{ label: String(option.label ?? value), value }];
+  });
 }
