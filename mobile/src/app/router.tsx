@@ -1,6 +1,6 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react-router-dom';
 import { RouteErrorPage } from './RouteErrorPage';
-import { AuthenticatedRoute } from './AuthenticatedRoute';
+import { AuthenticatedRoute } from '../features/auth/AuthenticatedRoute';
 import { MobileShell } from './MobileShell';
 
 const routes: RouteObject[] = [
