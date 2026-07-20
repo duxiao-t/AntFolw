@@ -1,0 +1,27 @@
+.mobileShell {
+  min-height: 100dvh;
+  background: var(--af-color-bg);
+  color: var(--af-color-text);
+}
+
+.content {
+  min-height: 100dvh;
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  background: var(--af-color-bg);
+}
+
+.tabBarWrap {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  height: calc(56px + env(safe-area-inset-bottom, 0px));
+  background: var(--af-color-surface);
+  border-top: 1px solid var(--af-color-border);
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+}
+
+:global(.adm-tab-bar) {
+  --height: 56px;
+}
