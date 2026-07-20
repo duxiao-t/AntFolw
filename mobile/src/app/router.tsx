@@ -1,15 +1,21 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react-router-dom';
+import { LoginPage } from '../features/auth/LoginPage';
+import { WorkbenchPage } from '../features/workbench/WorkbenchPage';
+import { TaskCenterPage } from '../features/tasks/TaskCenterPage';
+import { ProfilePage } from '../features/profile/ProfilePage';
+import { AppCatalogPage } from '../features/workbench/AppCatalogPage';
+import { FavoriteAppsPage } from '../features/workbench/FavoriteAppsPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { AuthenticatedRoute } from '../features/auth/AuthenticatedRoute';
 import { MobileShell } from './MobileShell';
 
+const NoHydrate: React.ComponentType = () => null;
+
 const routes: RouteObject[] = [
   {
     path: '/login',
-    lazy: async () => {
-      const module = await import('../features/auth/LoginPage');
-      return { Component: module.LoginPage };
-    },
+    Component: LoginPage,
+    HydrateFallback: NoHydrate,
     errorElement: <RouteErrorPage title="登录失败" />,
   },
   {
@@ -20,40 +26,30 @@ const routes: RouteObject[] = [
         children: [
           {
             path: '/workbench',
-            lazy: async () => {
-              const module = await import('../features/workbench/WorkbenchPage');
-              return { Component: module.WorkbenchPage };
-            },
+            Component: WorkbenchPage,
+            HydrateFallback: NoHydrate,
           },
           {
             path: '/tasks',
-            lazy: async () => {
-              const module = await import('../features/tasks/TaskCenterPage');
-              return { Component: module.TaskCenterPage };
-            },
+            Component: TaskCenterPage,
+            HydrateFallback: NoHydrate,
           },
           {
             path: '/profile',
-            lazy: async () => {
-              const module = await import('../features/profile/ProfilePage');
-              return { Component: module.ProfilePage };
-            },
+            Component: ProfilePage,
+            HydrateFallback: NoHydrate,
           },
         ],
       },
       {
         path: '/apps',
-        lazy: async () => {
-          const module = await import('../features/workbench/AppCatalogPage');
-          return { Component: module.AppCatalogPage };
-        },
+        Component: AppCatalogPage,
+        HydrateFallback: NoHydrate,
       },
       {
         path: '/apps/favorites',
-        lazy: async () => {
-          const module = await import('../features/workbench/FavoriteAppsPage');
-          return { Component: module.FavoriteAppsPage };
-        },
+        Component: FavoriteAppsPage,
+        HydrateFallback: NoHydrate,
       },
     ],
   },

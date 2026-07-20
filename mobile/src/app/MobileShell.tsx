@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { TabBar } from 'antd-mobile';
 import { AppOutline, CheckShieldOutline, UserOutline } from 'antd-mobile-icons';
 import classes from './MobileShell.module.css';
-import { useMobileBootstrapStub } from '../features/workbench/useBootstrapStub';
+import { useMobileBootstrap } from '../features/workbench/workbench.api';
 
 interface TabConfig {
   key: string;
@@ -25,7 +25,7 @@ function isActiveTab(pathname: string, key: string): boolean {
 export function MobileShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const bootstrap = useMobileBootstrapStub();
+  const bootstrap = useMobileBootstrap();
 
   const tabs: TabConfig[] = useMemo(() => {
     const pendingCount = bootstrap.data?.pendingCount ?? 0;
