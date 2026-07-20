@@ -23,7 +23,7 @@ export function AppGrid({ apps, onSelect }: AppGridProps) {
       style={{ listStyle: 'none', margin: 0, padding: 0 }}
     >
       {apps.map((app) => (
-        <li key={app.id} style={{ display: 'contents' }}>
+        <li key={app.formId} style={{ display: 'contents' }}>
           <button
             type="button"
             className={classes.tile}

@@ -26,11 +26,12 @@ export interface DeviceSession {
 }
 
 export interface MobileApp {
-  id: number;
+  formId: number;
   code: string;
   name: string;
   iconUrl?: string;
-  category: string;
+  category?: string;
+  categoryLabel?: string;
   description?: string;
 }
 

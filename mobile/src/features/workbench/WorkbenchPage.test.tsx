@@ -6,7 +6,7 @@ import type { MobileBootstrap, MobileApp, RecentProcess } from '../../shared/api
 import { MAX_FAVORITE_APPS, MAX_RECENT_PROCESSES } from './workbench.api';
 
 function makeApp(id: number, name = `App ${id}`): MobileApp {
-  return { id, code: `app-${id}`, name, category: '其他' };
+  return { formId: id, code: `app-${id}`, name, category: 'other', categoryLabel: '其他' };
 }
 
 function makeProcess(id: number, status: RecentProcess['status'] = 'RUNNING'): RecentProcess {
