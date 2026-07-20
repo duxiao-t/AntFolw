@@ -12,7 +12,8 @@
 
 .tabBarWrap {
   position: fixed;
-  inset-inline: 0;
+  left: max(0px, calc((100vw - 430px) / 2));
+  right: max(0px, calc((100vw - 430px) / 2));
   bottom: 0;
   height: calc(56px + env(safe-area-inset-bottom, 0px));
   background: var(--af-color-surface);

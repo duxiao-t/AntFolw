@@ -42,7 +42,7 @@ export function MobileShell() {
       <div className={classes.content}>
         <Outlet />
       </div>
-      <nav className={classes.tabBarWrap} aria-label="主导航">
+      <nav className={`${classes.tabBarWrap} touchSafeNav`} aria-label="主导航">
         <TabBar activeKey={tabs.find((tab) => isActiveTab(location.pathname, tab.key))?.key} safeArea={false}>
           {tabs.map((tab) => (
             <TabBar.Item

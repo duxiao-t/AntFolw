@@ -1,0 +1,32 @@
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+.touchSafeNav :where(button, a, [role="tab"], .adm-tab-bar-item) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.app-page,
+.page {
+  max-width: 100vw;
+}
+
+@media (max-width: 430px) {
+  .app-page {
+    padding-inline: 14px !important;
+  }
+}
+
+@media (min-width: 431px) {
+  #root {
+    max-width: 430px;
+    margin-inline: auto;
+    background: var(--af-color-bg);
+  }
+}
