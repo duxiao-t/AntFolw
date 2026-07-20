@@ -8,6 +8,8 @@
 
 **Tech Stack:** Java 17/Spring Boot/MyBatis-Plus/PostgreSQL, React 19/TypeScript/Vite, Ant Design Mobile, TanStack Query, Zustand, Vitest/Testing Library/Playwright, browser performance APIs.
 
+**Execution Notes:** 当前基线只包含移动壳层完成点，`backend/src/main/java/com/antflow/mobile`、`backend/src/main/java/com/antflow/branding` 等平台基础实现尚未落地；执行 Task 1 起会顺着计划把这些缺口补齐。仓库根目录还缺少 `codex.md`，而 AGENTS.md 要求先读它，这个文档缺口已记录，后续在项目引用更新阶段一并处理。
+
 ---
 
 ## File Map
