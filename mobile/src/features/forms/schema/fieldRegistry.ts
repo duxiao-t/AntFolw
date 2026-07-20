@@ -2,12 +2,17 @@ import { createElement, type ChangeEvent, type CSSProperties } from 'react';
 import { DateField } from '../fields/DateField';
 import { DateRangeField } from '../fields/DateRangeField';
 import { DescriptionField } from '../fields/DescriptionField';
+import { DeptPickerField } from '../fields/DeptPickerField';
+import { FileUploadField, hasBlockingUploadQueue } from '../fields/FileUploadField';
 import { MoneyField } from '../fields/MoneyField';
 import { MultiSelectField } from '../fields/MultiSelectField';
 import { NumberField } from '../fields/NumberField';
 import { SelectField } from '../fields/SelectField';
+import { SpanLayoutField } from '../fields/SpanLayoutField';
 import { TextField } from '../fields/TextField';
 import { TextareaField } from '../fields/TextareaField';
+import { TableListField } from '../fields/TableListField';
+import { UserPickerField } from '../fields/UserPickerField';
 import { summarizeValue, validateRequired } from './validators';
 import type {
   FieldValidationErrors,
@@ -69,35 +74,6 @@ function GenericField(props: MobileFieldProps) {
   );
 }
 
-function SpanLayoutField(props: MobileFieldProps) {
-  return createElement(
-    'section',
-    {
-      style: {
-        display: 'grid',
-        gap: 8,
-        padding: '4px 0',
-      },
-    },
-    props.renderChildren?.(props.node.children ?? []),
-  );
-}
-
-function TableListField(props: MobileFieldProps) {
-  return createElement(
-    'section',
-    {
-      style: {
-        display: 'grid',
-        gap: 8,
-        padding: '8px 0',
-      },
-    },
-    props.node.label ? createElement('strong', { style: labelStyle }, props.node.label) : null,
-    props.renderChildren?.(props.node.children ?? []),
-  );
-}
-
 function UnsupportedField(props: MobileFieldProps) {
   return createElement(
     'div',
@@ -140,15 +116,30 @@ export const registeredFields: MobileFieldDefinition[] = [
   field('multi_select', MultiSelectField, {
     summarize: (node, value) => multiOptionSummary(node, value),
   }),
-  field('user_picker'),
-  field('dept_picker'),
-  field('file_upload'),
+  field('user_picker', UserPickerField, {
+    validate: validateNumericValue,
+    summarize: (_node, value) => summarizePickerValue('用户', value),
+  }),
+  field('dept_picker', DeptPickerField, {
+    validate: validateNumericValue,
+    summarize: (_node, value) => summarizePickerValue('部门', value),
+  }),
+  field('file_upload', FileUploadField, {
+    validate: validateFileUpload,
+    summarize: (_node, value) => summarizeUploadedFiles(value),
+  }),
   field('description', DescriptionField, {
     validate: () => null,
     summarize: (node) => String(node.props?.text ?? ''),
   }),
-  field('span_layout', SpanLayoutField),
-  field('table_list', TableListField),
+  field('span_layout', SpanLayoutField, {
+    validate: () => null,
+    summarize: () => '布局',
+  }),
+  field('table_list', TableListField, {
+    validate: validateTableList,
+    summarize: (_node, value) => summarizeRows(value),
+  }),
 ];
 
 const unsupportedField: MobileFieldDefinition = {
@@ -167,20 +158,26 @@ export function validateSchemaValues(schema: MobileSchemaNode[],
                                      values: MobileFormValues): FieldValidationErrors {
   const errors: FieldValidationErrors = {};
   for (const node of schema) {
-    validateNode(node, values, errors);
+    validateNodeInValues(node, values, errors);
   }
   return errors;
 }
 
-function validateNode(node: MobileSchemaNode, values: MobileFormValues,
-                      errors: FieldValidationErrors) {
+function validateNodeInValues(node: MobileSchemaNode, values: MobileFormValues, errors: FieldValidationErrors) {
+  if (node.type === 'table_list') {
+    const error = validateTableList(node, values[node.id]);
+    if (error) {
+      errors[node.id] = error;
+    }
+    return;
+  }
   const definition = getFieldDefinition(node.type);
   const error = definition.validate(node, values[node.id]);
   if (error) {
     errors[node.id] = error;
   }
   for (const child of node.children ?? []) {
-    validateNode(child, values, errors);
+    validateNodeInValues(child, values, errors);
   }
 }
 
@@ -239,4 +236,67 @@ function options(node: MobileSchemaNode) {
     }
     return [{ label: String(option.label ?? value), value }];
   });
+}
+
+function validateNumericValue(node: MobileSchemaNode, value: unknown) {
+  if (value == null || value === '') {
+    return node.props?.required === true ? `请填写${node.label ?? node.id}` : null;
+  }
+  return typeof value === 'number' ? null : `请填写${node.label ?? node.id}`;
+}
+
+function summarizePickerValue(prefix: string, value: unknown) {
+  return typeof value === 'number' ? `${prefix}#${value}` : '未填写';
+}
+
+function validateFileUpload(node: MobileSchemaNode, value: unknown) {
+  if (hasBlockingUploadQueue(value)) {
+    return '仍有文件未完成上传';
+  }
+  if (node.props?.required !== true) {
+    return null;
+  }
+  return Array.isArray(value) && value.length > 0 ? null : `请填写${node.label ?? node.id}`;
+}
+
+function summarizeUploadedFiles(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return '未填写';
+  }
+  return `${value.length}个附件`;
+}
+
+function validateTableList(node: MobileSchemaNode, value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  const minRows = numberValue(node.props?.minRows, node.props?.required === true ? 1 : 0);
+  const maxRows = numberValue(node.props?.maxRows, Number.POSITIVE_INFINITY);
+  if (rows.length < minRows) {
+    return `请至少填写${minRows}行`;
+  }
+  if (rows.length > maxRows) {
+    return `最多可填写${maxRows}行`;
+  }
+  const children = node.children ?? [];
+  for (const [index, row] of rows.entries()) {
+    if (typeof row !== 'object' || row == null) {
+      return `第${index + 1}行: 请填写${node.label ?? node.id}`;
+    }
+    for (const child of children) {
+      const rowErrors: FieldValidationErrors = {};
+      validateNodeInValues(child, row as MobileFormValues, rowErrors);
+      const error = Object.values(rowErrors)[0];
+      if (error) {
+        return `第${index + 1}行: ${error}`;
+      }
+    }
+  }
+  return null;
+}
+
+function summarizeRows(value: unknown) {
+  return Array.isArray(value) ? `${value.length}行` : '未填写';
+}
+
+function numberValue(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }

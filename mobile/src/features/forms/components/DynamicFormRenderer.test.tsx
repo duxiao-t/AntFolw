@@ -42,6 +42,28 @@ describe('DynamicFormRenderer', () => {
     expect(onValueChange).toHaveBeenCalledWith('reason', '参加会议');
   });
 
+  it('renders span-layout child validation errors on the child field', () => {
+    const schema: MobileSchemaNode[] = [
+      {
+        id: 'layout',
+        type: 'span_layout',
+        children: [{ id: 'reason', type: 'text', label: '请假事由', props: { required: true } }],
+      },
+    ];
+
+    render(
+      <DynamicFormRenderer
+        mode="fill"
+        schema={schema}
+        values={{ reason: '' }}
+        errors={{ reason: '请填写请假事由' }}
+        onValueChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('请填写请假事由')).toBeInTheDocument();
+  });
+
   it('renders readonly leaf summaries without editable controls', () => {
     const schema: MobileSchemaNode[] = [
       { id: 'reason', type: 'text', label: '请假事由' },
