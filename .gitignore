@@ -35,3 +35,10 @@ screenshots/
 
 # OS
 Thumbs.db
+
+mobile/node_modules/
+mobile/dist/
+mobile/coverage/
+mobile/playwright-report/
+mobile/test-results/
+.superpowers/
