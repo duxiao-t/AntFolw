@@ -1,0 +1,25 @@
+/**
+ * Fixed semantic tokens. Branding may only override the primary color through
+ * the allowlist in features/branding/brandTokens.ts; every other design token
+ * is fixed here and must not be re-written from server-provided branding.
+ */
+:root {
+  --af-color-success: #31a354;
+  --af-color-warning: #fa8c16;
+  --af-color-danger: #ff4d4f;
+  --af-color-text: #202830;
+  --af-color-bg: #f4f6f8;
+  --af-color-surface: #ffffff;
+  --af-color-border: rgba(0, 0, 0, 0.08);
+  --af-color-on-primary: #ffffff;
+  --af-radius-surface: 8px;
+  --af-radius-control: 6px;
+  --af-color-primary: #1677ff;
+}
+
+:root[data-theme="dark"] {
+  --af-color-text: #f5f7fa;
+  --af-color-bg: #0f1418;
+  --af-color-surface: #1a2026;
+  --af-color-border: rgba(255, 255, 255, 0.08);
+}

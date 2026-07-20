@@ -1,4 +1,13 @@
-import type { PublicBranding } from '../../app/BrandProvider';
+export interface PublicBranding {
+  version: string;
+  appName: string;
+  companyName: string;
+  primaryColor: string;
+  mobileHeaderTitle: string;
+  loginTitle: string;
+  showLoginFooter: boolean;
+  footerText: string;
+}
 
 export interface MobileUser {
   id: number;
@@ -52,5 +61,3 @@ export interface MobileFile {
   contentType: string;
   sizeBytes: number;
 }
-
-export type { PublicBranding };

@@ -1,6 +1,6 @@
 import type { PropsWithChildren } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrandProvider } from './BrandProvider';
+import { BrandProvider } from '../features/branding/BrandProvider';
 import { PlatformProvider } from './PlatformProvider';
 import { setAuthController } from '../shared/api/auth';
 import { useAuthStore } from '../features/auth/auth.store';

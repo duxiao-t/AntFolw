@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Form, Input, Button, SafeArea, Toast } from 'antd-mobile';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, safeReturnUrl } from './auth.store';
-import { useBranding } from '../../app/BrandProvider';
+import { useBranding } from '../branding/BrandProvider';
 import { isApiError } from '../../shared/api/errors';
 
 export function LoginPage() {
