@@ -6,6 +6,8 @@ import { ProfilePage } from '../features/profile/ProfilePage';
 import { SecurityPage } from '../features/profile/SecurityPage';
 import { AppCatalogPage } from '../features/workbench/AppCatalogPage';
 import { FavoriteAppsPage } from '../features/workbench/FavoriteAppsPage';
+import { FormFillPage } from '../features/forms/FormFillPage';
+import { DraftListPage } from '../features/forms/DraftListPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { AuthenticatedRoute } from '../features/auth/AuthenticatedRoute';
 import { MobileShell } from './MobileShell';
@@ -50,6 +52,16 @@ const routes: RouteObject[] = [
       {
         path: '/apps/favorites',
         Component: FavoriteAppsPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/forms/drafts',
+        Component: DraftListPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/forms/:code',
+        Component: FormFillPage,
         HydrateFallback: NoHydrate,
       },
       {

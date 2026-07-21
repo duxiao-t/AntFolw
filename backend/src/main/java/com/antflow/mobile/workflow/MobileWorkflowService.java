@@ -37,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class MobileWorkflowService {
     private static final String READY_STATUS = "READY";
     private static final String PENDING_STATUS = "PENDING";
+    private static final String PUBLISHED_STATUS = "PUBLISHED";
     private static final String RUNNING_STATUS = "RUNNING";
     private static final String APPROVAL_NODE = "APPROVAL";
     private static final String ADMIN_ROLE = "admin";
@@ -53,6 +54,15 @@ public class MobileWorkflowService {
     private final UserMapper userMapper;
     private final DepartmentMapper departmentMapper;
     private final ObjectMapper objectMapper;
+
+    public MobileFormDto getMobileForm(String code) {
+        FormDefinition form = formDefinitionService.getByCode(code);
+        if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
+            throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
+        }
+        return new MobileFormDto(form.getCode(), form.getName(), form.getVersion(),
+            readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"));
+    }
 
     @Transactional(rollbackFor = Exception.class)
     public MobileStartResult start(StartMobileInstanceRequest request, long userId) {

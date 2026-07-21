@@ -101,6 +101,7 @@ class MobileDraftServiceTest {
 
         assertThat(drafts).hasSize(2);
         assertThat(drafts).allSatisfy(draft -> assertThat(draft.readOnly()).isFalse());
+        assertThat(drafts.get(0).schema().get(1).path("id").asText()).isEqualTo("days");
         ArgumentCaptor<QueryWrapper<FormData>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         Mockito.verify(formDataMapper).selectList(captor.capture());
         assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("CREATED_BY");
@@ -133,6 +134,7 @@ class MobileDraftServiceTest {
         form.setCode(code);
         form.setName("请假申请");
         form.setVersion(3);
+        form.setSchema("[{\"id\":\"reason\",\"type\":\"text\"},{\"id\":\"days\",\"type\":\"number\"}]");
         form.setStatus(status);
         return form;
     }

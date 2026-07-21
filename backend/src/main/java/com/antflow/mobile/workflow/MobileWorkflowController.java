@@ -50,6 +50,12 @@ public class MobileWorkflowController {
         return draftService.get(id, principal().userId());
     }
 
+    @GetMapping("/forms/{code}")
+    public MobileFormDto form(@PathVariable String code) {
+        principal();
+        return workflowService.getMobileForm(code);
+    }
+
     @PostMapping("/instances")
     public MobileStartResult start(@RequestBody StartMobileInstanceRequest request) {
         return workflowService.start(request, principal().userId());

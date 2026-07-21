@@ -72,7 +72,7 @@ class MobileWorkflowServiceTest {
         UUID fileId = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
         Mockito.when(draftService.get(101L, 7L)).thenReturn(new MobileDraftDto(101L, 10L,
-            "leave", "请假申请", 3, data, false, null, null));
+            "leave", "请假申请", 3, data, objectMapper.createArrayNode(), false, null, null));
         Mockito.when(fileMapper.selectById(fileId)).thenReturn(file(fileId, 7L, "READY"));
         Mockito.when(engine.start(any(StartCmd.class), Mockito.eq(7L)))
             .thenReturn(Map.of("instanceId", 501L, "formDataId", 301L,
@@ -174,6 +174,18 @@ class MobileWorkflowServiceTest {
 
         assertThatThrownBy(() -> service.getTaskDetail(401L, 9L, List.of("user")))
             .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void mobileFormDetailReturnsPublishedSchemaForFillPage() {
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form());
+
+        MobileFormDto detail = service.getMobileForm("leave");
+
+        assertThat(detail.code()).isEqualTo("leave");
+        assertThat(detail.name()).isEqualTo("请假申请");
+        assertThat(detail.version()).isEqualTo(3);
+        assertThat(detail.schema().get(0).path("id").asText()).isEqualTo("days");
     }
 
     private static MobileFile file(UUID id, Long ownerId, String status) {

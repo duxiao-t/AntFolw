@@ -115,6 +115,7 @@ public class MobileDraftService {
             formDefinition == null ? null : formDefinition.getName(),
             draft.getFormDefVersion(),
             readJsonObject(draft.getData()),
+            readJsonArray(formDefinition == null ? null : formDefinition.getSchema()),
             readOnly,
             draft.getCreatedAt(),
             draft.getUpdatedAt()
@@ -138,6 +139,17 @@ public class MobileDraftService {
             return objectMapper.readTree(value);
         } catch (JsonProcessingException exception) {
             throw new BizException("BAD_JSON", exception.getMessage());
+        }
+    }
+
+    private JsonNode readJsonArray(String value) {
+        if (value == null || value.isBlank()) {
+            return objectMapper.createArrayNode();
+        }
+        try {
+            return objectMapper.readTree(value);
+        } catch (JsonProcessingException exception) {
+            throw new BizException("BAD_SCHEMA_JSON", exception.getMessage());
         }
     }
 }
