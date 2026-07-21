@@ -1,11 +1,12 @@
 import { apiRequest } from '../../shared/api/http';
-import type { MobileFormValues, MobileSchemaNode } from './schema/types';
+import type { MobileFlowNode, MobileFormValues, MobileSchemaNode } from './schema/types';
 
 export type MobileFormDetail = {
   code: string;
   name: string;
   version: number;
   schema: MobileSchemaNode[];
+  process?: MobileFlowNode | null;
 };
 
 export type MobileDraft = {

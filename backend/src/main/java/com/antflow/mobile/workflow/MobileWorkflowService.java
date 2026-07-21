@@ -9,6 +9,8 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.ProcessDefinition;
+import com.antflow.process.ProcessDefinitionService;
 import com.antflow.org.Department;
 import com.antflow.org.DepartmentMapper;
 import com.antflow.org.User;
@@ -46,6 +48,7 @@ public class MobileWorkflowService {
     private final MobileDraftService draftService;
     private final MobileWorkflowMapper workflowMapper;
     private final FormDefinitionService formDefinitionService;
+    private final ProcessDefinitionService processDefinitionService;
     private final FormDataMapper formDataMapper;
     private final ProcessInstanceMapper instanceMapper;
     private final TaskMapper taskMapper;
@@ -60,8 +63,10 @@ public class MobileWorkflowService {
         if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
+        ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         return new MobileFormDto(form.getCode(), form.getName(), form.getVersion(),
-            readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"));
+            readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"),
+            readJsonObject(process == null ? null : process.getProcess(), "BAD_FLOW_JSON"));
     }
 
     @Transactional(rollbackFor = Exception.class)

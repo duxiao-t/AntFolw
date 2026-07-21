@@ -8,6 +8,10 @@ import { AppCatalogPage } from '../features/workbench/AppCatalogPage';
 import { FavoriteAppsPage } from '../features/workbench/FavoriteAppsPage';
 import { FormFillPage } from '../features/forms/FormFillPage';
 import { DraftListPage } from '../features/forms/DraftListPage';
+import { SelfSelectPage } from '../features/forms/SelfSelectPage';
+import { SubmitConfirmPage } from '../features/forms/SubmitConfirmPage';
+import { SubmitSuccessPage } from '../features/forms/SubmitSuccessPage';
+import { ProcessDetailPage } from '../features/processes/ProcessDetailPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { AuthenticatedRoute } from '../features/auth/AuthenticatedRoute';
 import { MobileShell } from './MobileShell';
@@ -62,6 +66,26 @@ const routes: RouteObject[] = [
       {
         path: '/forms/:code',
         Component: FormFillPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/forms/:code/self-select',
+        Component: SelfSelectPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/forms/:code/confirm',
+        Component: SubmitConfirmPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/forms/:code/success/:instanceId',
+        Component: SubmitSuccessPage,
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/processes/:instanceId',
+        Component: ProcessDetailPage,
         HydrateFallback: NoHydrate,
       },
       {

@@ -7,5 +7,6 @@ export const queryKeys = {
   form: (code: string) => ['mobile', 'forms', code] as const,
   drafts: ['mobile', 'drafts'] as const,
   draft: (id: number) => ['mobile', 'drafts', id] as const,
+  instance: (id: number) => ['mobile', 'instances', id] as const,
   sessions: ['auth', 'sessions'] as const,
 } as const;

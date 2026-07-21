@@ -31,7 +31,7 @@ public class ApprovalHandler implements NodeHandler {
     @Override
     public NodeOutcome handle(JsonNode root, JsonNode node, ProcessInstance pi, NodeContext ctx) {
         String nodeId = node.path("id").asText();
-        AssigneeSpec spec = parseAssignee(node.path("props"), ctx);
+        AssigneeSpec spec = parseAssignee(node, ctx);
         List<Long> assignees;
         try {
             assignees = assigneeResolver.resolve(nodeId, spec);
@@ -64,7 +64,8 @@ public class ApprovalHandler implements NodeHandler {
         return NodeOutcome.halt(ids);
     }
 
-    private static AssigneeSpec parseAssignee(JsonNode props, NodeContext ctx) {
+    private static AssigneeSpec parseAssignee(JsonNode node, NodeContext ctx) {
+        JsonNode props = node.path("props");
         String type = props.path("assignedType").asText();
         switch (type) {
             case "ASSIGN_USER":
@@ -80,7 +81,7 @@ public class ApprovalHandler implements NodeHandler {
             case "SELF_SELECT":
                 return new AssigneeSpec("SELF_SELECT", List.of(), 1, ctx.starterId(),
                     ctx.selfSelected() == null ? List.of() :
-                        ctx.selfSelected().getOrDefault(props.path("id").asText(), List.of()));
+                        ctx.selfSelected().getOrDefault(node.path("id").asText(), List.of()));
             default:
                 throw new IllegalArgumentException("未识别审批人类型: " + type);
         }

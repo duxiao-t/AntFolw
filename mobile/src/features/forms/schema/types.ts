@@ -24,6 +24,17 @@ export type MobileSchemaNode = {
   children?: MobileSchemaNode[];
 };
 
+export type MobileFlowNode = {
+  id: string;
+  type: string;
+  label?: string;
+  name?: string;
+  props?: Record<string, unknown>;
+  children?: MobileFlowNode | MobileFlowNode[] | null;
+  branchs?: MobileFlowNode[];
+  branches?: MobileFlowNode[];
+};
+
 export type MobileFormValues = Record<string, unknown>;
 
 export type FieldMode = 'fill' | 'readonly';

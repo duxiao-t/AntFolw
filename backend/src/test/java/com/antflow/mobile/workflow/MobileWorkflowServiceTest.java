@@ -6,6 +6,8 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.ProcessDefinition;
+import com.antflow.process.ProcessDefinitionService;
 import com.antflow.org.Department;
 import com.antflow.org.DepartmentMapper;
 import com.antflow.org.User;
@@ -40,6 +42,7 @@ class MobileWorkflowServiceTest {
     private MobileDraftService draftService;
     private MobileWorkflowMapper workflowMapper;
     private FormDefinitionService formDefinitionService;
+    private ProcessDefinitionService processDefinitionService;
     private FormDataMapper formDataMapper;
     private ProcessInstanceMapper instanceMapper;
     private TaskMapper taskMapper;
@@ -55,6 +58,7 @@ class MobileWorkflowServiceTest {
         draftService = Mockito.mock(MobileDraftService.class);
         workflowMapper = Mockito.mock(MobileWorkflowMapper.class);
         formDefinitionService = Mockito.mock(FormDefinitionService.class);
+        processDefinitionService = Mockito.mock(ProcessDefinitionService.class);
         formDataMapper = Mockito.mock(FormDataMapper.class);
         instanceMapper = Mockito.mock(ProcessInstanceMapper.class);
         taskMapper = Mockito.mock(TaskMapper.class);
@@ -63,8 +67,8 @@ class MobileWorkflowServiceTest {
         userMapper = Mockito.mock(UserMapper.class);
         departmentMapper = Mockito.mock(DepartmentMapper.class);
         service = new MobileWorkflowService(engine, draftService, workflowMapper,
-            formDefinitionService, formDataMapper, instanceMapper, taskMapper, historyMapper,
-            fileMapper, userMapper, departmentMapper, objectMapper);
+            formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
+            taskMapper, historyMapper, fileMapper, userMapper, departmentMapper, objectMapper);
     }
 
     @Test
@@ -179,6 +183,7 @@ class MobileWorkflowServiceTest {
     @Test
     void mobileFormDetailReturnsPublishedSchemaForFillPage() {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form());
+        Mockito.when(processDefinitionService.latestPublishedForForm(10L)).thenReturn(process());
 
         MobileFormDto detail = service.getMobileForm("leave");
 
@@ -186,6 +191,8 @@ class MobileWorkflowServiceTest {
         assertThat(detail.name()).isEqualTo("请假申请");
         assertThat(detail.version()).isEqualTo(3);
         assertThat(detail.schema().get(0).path("id").asText()).isEqualTo("days");
+        assertThat(detail.process().path("children").path("props").path("assignedType").asText())
+            .isEqualTo("SELF_SELECT");
     }
 
     private static MobileFile file(UUID id, Long ownerId, String status) {
@@ -210,6 +217,20 @@ class MobileWorkflowServiceTest {
         form.setStatus("PUBLISHED");
         form.setVersion(3);
         return form;
+    }
+
+    private static ProcessDefinition process() {
+        ProcessDefinition process = new ProcessDefinition();
+        process.setId(201L);
+        process.setFormDefId(10L);
+        process.setVersion(5);
+        process.setStatus("PUBLISHED");
+        process.setProcess("""
+            {"id":"root","type":"ROOT","children":{"id":"manager","type":"APPROVAL",
+             "props":{"name":"直属主管","assignedType":"SELF_SELECT",
+             "selfSelect":{"multiple":false}}}}
+            """);
+        return process;
     }
 
     private static FormData formData(Long id) {

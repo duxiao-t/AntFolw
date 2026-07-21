@@ -14,6 +14,11 @@ import {
   updateMobileDraft,
 } from './drafts.api';
 import {
+  beginSubmitFlow,
+  findSelfSelectRules,
+  formSchemaWithoutSelfSelectRules,
+} from './submitFlow.store';
+import {
   createRecoveryDraftWriter,
   readRecoveryDraft,
   removeRecoveryDraft,
@@ -30,7 +35,7 @@ const bottomActionStyle: React.CSSProperties = {
   bottom: 0,
   display: 'grid',
   gap: 8,
-  padding: '12px 16px 16px',
+  padding: '12px 16px calc(16px + env(safe-area-inset-bottom))',
   background: 'var(--af-color-bg)',
   boxShadow: '0 -8px 20px rgba(0,0,0,0.08)',
 };
@@ -49,6 +54,8 @@ export function FormFillPage() {
   const [initialized, setInitialized] = useState(false);
   const [status, setStatus] = useState('');
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
+  const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
+  const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
 
   const formQuery = useQuery({
     queryKey: queryKeys.form(code),
@@ -63,7 +70,7 @@ export function FormFillPage() {
     retry: 0,
   });
 
-  const isDirty = initialized && !sameValues(values, initialValues);
+  const isDirty = initialized && !submitNavigationAllowed && !sameValues(values, initialValues);
   const blocker = useBlocker(isDirty);
 
   const saveMutation = useMutation({
@@ -141,7 +148,16 @@ export function FormFillPage() {
     ),
   );
 
+  useEffect(() => {
+    if (!pendingSubmitPath) {
+      return;
+    }
+    void navigate(pendingSubmitPath);
+  }, [navigate, pendingSubmitPath]);
+
   const schema = formQuery.data?.schema ?? [];
+  const process = formQuery.data?.process;
+  const formSchema = formSchemaWithoutSelfSelectRules(schema);
   const title = formQuery.data?.name ?? '表单填写';
 
   if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)) {
@@ -166,7 +182,7 @@ export function FormFillPage() {
       style={{ paddingBottom: 104 }}
     >
       <DynamicFormRenderer
-        schema={schema}
+        schema={formSchema}
         values={values}
         mode={draftQuery.data?.readOnly ? 'readonly' : 'fill'}
         errors={errors}
@@ -219,13 +235,18 @@ export function FormFillPage() {
   }
 
   function goNext() {
-    const nextErrors = validateSchemaValues(schema, values);
+    const nextErrors = validateSchemaValues(formSchema, values);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
     recoveryWriterRef.current?.flush();
-    setStatus('表单校验通过');
+    beginSubmitFlow({ formCode: code, draftId, values });
+    const nextPath = findSelfSelectRules(process).length > 0
+      ? `/forms/${encodeURIComponent(code)}/self-select`
+      : `/forms/${encodeURIComponent(code)}/confirm`;
+    setSubmitNavigationAllowed(true);
+    setPendingSubmitPath(nextPath);
   }
 }
 

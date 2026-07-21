@@ -17,7 +17,8 @@ record StartMobileInstanceRequest(String formCode, JsonNode data,
 record MobileStartResult(Long instanceId, Long formDataId, List<Long> firstTaskIds) {
 }
 
-record MobileFormDto(String code, String name, Integer version, JsonNode schema) {
+record MobileFormDto(String code, String name, Integer version, JsonNode schema,
+                     JsonNode process) {
 }
 
 record MobileTaskActionRequest(String comment, String rejectToNodeId) {
