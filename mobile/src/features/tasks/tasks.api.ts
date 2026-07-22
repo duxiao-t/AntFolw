@@ -82,3 +82,60 @@ async function fetchList<T>(path: string, filters: TaskCenterFilters): Promise<T
   }
   return apiRequest<PagedResponse<T>>(`${path}?${params.toString()}`);
 }
+
+export type MobileHistoryItem = {
+  id: number;
+  fromNodeId?: string | null;
+  toNodeId?: string | null;
+  taskId?: number | null;
+  action: string;
+  operatorId?: number | null;
+  comment?: string | null;
+  createdAt: string;
+};
+
+export type RejectTarget = {
+  nodeId: string;
+  name: string;
+};
+
+export type MobileTaskFile = {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  contentUrl: string;
+};
+
+export type MobileTaskDetail = {
+  task: TaskListItem;
+  schema: unknown;
+  formData: Record<string, unknown> | null;
+  processSnapshot: unknown;
+  history: MobileHistoryItem[];
+  allowedActions: string[];
+  rejectTargets: RejectTarget[];
+  files: MobileTaskFile[];
+};
+
+export type TaskActionPayload = {
+  comment?: string;
+  rejectToNodeId?: string;
+};
+
+export async function fetchTaskDetail(taskId: number): Promise<MobileTaskDetail> {
+  return apiRequest<MobileTaskDetail>(`/api/mobile/tasks/${taskId}`);
+}
+
+export async function runTaskAction(
+  taskId: number,
+  action: 'approve' | 'reject',
+  payload: TaskActionPayload,
+  idempotencyKey: string,
+): Promise<void> {
+  await apiRequest<void>(`/api/mobile/tasks/${taskId}/${action}`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(payload),
+  });
+}
