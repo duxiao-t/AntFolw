@@ -2,6 +2,7 @@ import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react
 import { LoginPage } from '../features/auth/LoginPage';
 import { WorkbenchPage } from '../features/workbench/WorkbenchPage';
 import { TaskCenterPage } from '../features/tasks/TaskCenterPage';
+import { TaskDetailPage } from '../features/tasks/TaskDetailPage';
 import { ProfilePage } from '../features/profile/ProfilePage';
 import { SecurityPage } from '../features/profile/SecurityPage';
 import { AppCatalogPage } from '../features/workbench/AppCatalogPage';
@@ -47,6 +48,11 @@ const routes: RouteObject[] = [
             HydrateFallback: NoHydrate,
           },
         ],
+      },
+      {
+        path: '/tasks/:taskId',
+        Component: TaskDetailPage,
+        HydrateFallback: NoHydrate,
       },
       {
         path: '/apps',

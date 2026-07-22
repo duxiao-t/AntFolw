@@ -101,8 +101,6 @@ class MobileWorkflowServiceTest {
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
-        Mockito.when(taskMapper.selectList(any(QueryWrapper.class)))
-            .thenReturn(List.of(task(401L, 501L, "a1", 8L, "PENDING")));
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class)))
             .thenReturn(List.of(history("ARRIVE", "root", "a1")));
         Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
@@ -117,7 +115,8 @@ class MobileWorkflowServiceTest {
 
     @Test
     void pendingTaskQueryOnlyReturnsCurrentAssignee() {
-        Mockito.when(taskMapper.selectList(any(QueryWrapper.class)))
+        Mockito.when(workflowMapper.selectTaskPage(Mockito.eq(8L), Mockito.eq("pending"),
+                Mockito.eq("请假"), Mockito.eq("PENDING"), Mockito.eq(21), Mockito.eq(20)))
             .thenReturn(List.of(task(401L, 501L, "a1", 8L, "PENDING")));
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
@@ -125,15 +124,14 @@ class MobileWorkflowServiceTest {
         Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
         Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
 
-        List<MobileTaskDto> tasks = service.listTasks("pending", 8L);
+        MobilePageDto<MobileTaskDto> tasks = service.listTasks("pending", 8L, 2, 20,
+            " 请假 ", "PENDING");
 
-        assertThat(tasks).hasSize(1);
-        assertThat(tasks.get(0).applicantName()).isEqualTo("张三");
-        ArgumentCaptor<QueryWrapper<TaskEntity>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
-        Mockito.verify(taskMapper).selectList(captor.capture());
-        String sql = captor.getValue().getSqlSegment().toUpperCase();
-        assertThat(sql).contains("ASSIGNEE_ID");
-        assertThat(sql).contains("STATUS");
+        assertThat(tasks.items()).hasSize(1);
+        assertThat(tasks.items().get(0).applicantName()).isEqualTo("张三");
+        assertThat(tasks.hasMore()).isFalse();
+        Mockito.verify(workflowMapper).selectTaskPage(8L, "pending", "请假", "PENDING",
+            21, 20);
     }
 
     @Test
@@ -148,6 +146,21 @@ class MobileWorkflowServiceTest {
         MobileInstanceDetailDto detail = service.getInstanceDetail(501L, 7L, List.of("user"));
 
         assertThat(detail.canWithdraw()).isTrue();
+    }
+
+    @Test
+    void startedInstanceQueryAppliesPagingKeywordAndStatus() {
+        Mockito.when(workflowMapper.selectInstancePage(Mockito.eq(7L), Mockito.eq("采购"),
+                Mockito.eq("RUNNING"), Mockito.eq(21), Mockito.eq(0)))
+            .thenReturn(List.of(instance(501L, 7L, "RUNNING")));
+        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
+
+        MobilePageDto<MobileInstanceDto> instances = service.listInstances(7L, 1, 20,
+            " 采购 ", "RUNNING");
+
+        assertThat(instances.items()).hasSize(1);
+        Mockito.verify(workflowMapper).selectInstancePage(7L, "采购", "RUNNING", 21, 0);
     }
 
     @Test

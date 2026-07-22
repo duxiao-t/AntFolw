@@ -1,4 +1,5 @@
 import type { AppFilters } from './types';
+import type { TaskCenterFilters } from '../../features/tasks/tasks.api';
 
 export const queryKeys = {
   branding: ['branding'] as const,
@@ -8,5 +9,6 @@ export const queryKeys = {
   drafts: ['mobile', 'drafts'] as const,
   draft: (id: number) => ['mobile', 'drafts', id] as const,
   instance: (id: number) => ['mobile', 'instances', id] as const,
+  tasks: (filters: TaskCenterFilters) => ['mobile', 'tasks', filters] as const,
   sessions: ['auth', 'sessions'] as const,
 } as const;

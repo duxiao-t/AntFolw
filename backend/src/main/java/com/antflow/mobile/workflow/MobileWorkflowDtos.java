@@ -32,6 +32,9 @@ record MobileTaskDto(Long id, Long instanceId, String formName,
                      String taskStatus, String instanceStatus, OffsetDateTime createdAt) {
 }
 
+record MobilePageDto<T>(List<T> items, boolean hasMore) {
+}
+
 record MobileHistoryDto(Long id, String fromNodeId, String toNodeId, Long taskId,
                         String action, Long operatorId, String comment,
                         OffsetDateTime createdAt) {

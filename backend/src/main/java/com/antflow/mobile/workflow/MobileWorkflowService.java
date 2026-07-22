@@ -101,14 +101,22 @@ public class MobileWorkflowService {
         return new MobileStartResult(instanceId, formDataId, firstTaskIds);
     }
 
-    public List<MobileInstanceDto> listInstances(long userId) {
-        return instanceMapper.selectList(new QueryWrapper<ProcessInstance>()
-                .eq("started_by", userId)
-                .orderByDesc("started_at")
-                .orderByDesc("id"))
+    public MobilePageDto<MobileInstanceDto> listInstances(long userId, int page, int size,
+                                                          String keyword, String status) {
+        int normalizedPage = Math.max(page, 1);
+        int normalizedSize = Math.min(Math.max(size, 1), 50);
+        int fetchSize = normalizedSize + 1;
+        int offset = (normalizedPage - 1) * normalizedSize;
+        List<MobileInstanceDto> items = workflowMapper.selectInstancePage(userId,
+                normalizedText(keyword), normalizedText(status), fetchSize, offset)
             .stream()
             .map(this::toInstanceDto)
             .toList();
+        boolean hasMore = items.size() > normalizedSize;
+        return new MobilePageDto<>(
+            hasMore ? items.subList(0, normalizedSize) : items,
+            hasMore
+        );
     }
 
     public MobileInstanceDetailDto getInstanceDetail(Long instanceId, long userId,
@@ -130,16 +138,22 @@ public class MobileWorkflowService {
         );
     }
 
-    public List<MobileTaskDto> listTasks(String view, long userId) {
-        QueryWrapper<TaskEntity> query = new QueryWrapper<TaskEntity>()
-            .eq("assignee_id", userId);
-        if ("done".equalsIgnoreCase(view)) {
-            query.ne("status", PENDING_STATUS);
-        } else {
-            query.eq("status", PENDING_STATUS);
-        }
-        query.orderByDesc("created_at").orderByDesc("id");
-        return taskMapper.selectList(query).stream().map(this::toTaskDto).toList();
+    public MobilePageDto<MobileTaskDto> listTasks(String view, long userId, int page, int size,
+                                                  String keyword, String status) {
+        int normalizedPage = Math.max(page, 1);
+        int normalizedSize = Math.min(Math.max(size, 1), 50);
+        int fetchSize = normalizedSize + 1;
+        int offset = (normalizedPage - 1) * normalizedSize;
+        String normalizedView = "done".equalsIgnoreCase(view) ? "done" : "pending";
+        List<MobileTaskDto> items = workflowMapper.selectTaskPage(userId, normalizedView,
+                normalizedText(keyword), normalizedText(status), fetchSize, offset).stream()
+            .map(this::toTaskDto)
+            .toList();
+        boolean hasMore = items.size() > normalizedSize;
+        return new MobilePageDto<>(
+            hasMore ? items.subList(0, normalizedSize) : items,
+            hasMore
+        );
     }
 
     public MobileTaskDetailDto getTaskDetail(Long taskId, long userId, List<String> roles) {
@@ -385,6 +399,13 @@ public class MobileWorkflowService {
 
     private static boolean isAdmin(List<String> roles) {
         return roles != null && roles.contains(ADMIN_ROLE);
+    }
+
+    private static String normalizedText(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private static Long asLong(Object value) {

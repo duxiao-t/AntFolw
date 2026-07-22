@@ -62,8 +62,11 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/instances")
-    public List<MobileInstanceDto> instances() {
-        return workflowService.listInstances(principal().userId());
+    public MobilePageDto<MobileInstanceDto> instances(@RequestParam(defaultValue = "1") int page,
+                                                      @RequestParam(defaultValue = "20") int size,
+                                                      @RequestParam(required = false) String keyword,
+                                                      @RequestParam(required = false) String status) {
+        return workflowService.listInstances(principal().userId(), page, size, keyword, status);
     }
 
     @GetMapping("/instances/{id}")
@@ -78,8 +81,12 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/tasks")
-    public List<MobileTaskDto> tasks(@RequestParam(defaultValue = "pending") String view) {
-        return workflowService.listTasks(view, principal().userId());
+    public MobilePageDto<MobileTaskDto> tasks(@RequestParam(defaultValue = "pending") String view,
+                                              @RequestParam(defaultValue = "1") int page,
+                                              @RequestParam(defaultValue = "20") int size,
+                                              @RequestParam(required = false) String keyword,
+                                              @RequestParam(required = false) String status) {
+        return workflowService.listTasks(view, principal().userId(), page, size, keyword, status);
     }
 
     @GetMapping("/tasks/{id}")
