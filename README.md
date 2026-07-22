@@ -1,26 +1,26 @@
 # AntFlow
 
-Ant Design Pro + wflow fusion. Visual form designer + approval workflow.
+Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterprise mobile client.
 
-## Status (2026-07-16)
+## Status (2026-07-22)
 
-- ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway) — compiles, **16 unit tests green**.
-- ✅ PostgreSQL 17 schema (V1 schema + V2 bcrypt seed + V3 indexes) — ready to apply.
-- ✅ Custom approval engine — `ProcessEngine.start/approve/reject/withdraw`, OR-sign short-circuit, `@Version` optimistic locking, linear-flow validator, end-node gating, NoAssigneeFoundException.
-- ✅ Form designer storage — `FormDefinition` with JSONB + JacksonTypeHandler, draft/publish flow, schema validation.
-- ✅ Form runtime — `FormData` with `form_def_version` snapshot.
-- ✅ Org module — Company / Department (ltree) / User / Role + ltree subtree + JWT auth + 5-req/min login rate limit.
-- ✅ Frontend — 14-field registry + recursive FormRenderer + zustand designer + React Flow process designer + ProTable admin pages + Inbox/Done/Sent/Detail task pages.
-- ✅ CI — `.github/workflows/ci.yml` (backend `mvn test` + frontend lint/tsc/build).
-- ✅ E2E — `frontend/e2e/full-flow.spec.ts` Playwright happy-path.
-- ⏸ Live integration — pending your Docker daemon + first boot.
+- ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway) — unit tests green (**88** tests, 1 skipped).
+- ✅ PostgreSQL 17 schema (Flyway V1+) — ready to apply.
+- ✅ Custom approval engine — tree process, OR/AND, SELF_SELECT, withdraw, optimistic locking.
+- ✅ Form designer storage + runtime snapshot (`form_def_version`).
+- ✅ Org module — Company / Department (ltree) / User / Role + JWT + login rate limit.
+- ✅ Desktop frontend — 14-field registry + FormRenderer + process designer + admin/task pages.
+- ✅ **Mobile client (`mobile/`)** — independent Vite app at `/mobile/`: workbench, dynamic form fill/draft, self-select, submit, task approve/reject, process detail, offline recovery, branding fallback, enterprise gates (bundle/perf/a11y/e2e).
+- ✅ CI — backend `mvn test` + frontend lint/tsc/build + mobile enterprise checks.
+- 📄 Mobile acceptance evidence — `docs/mobile-enterprise-verification.md`.
+- ⏸ Full live integration depends on Docker + backend started from this branch.
 
 ## Prerequisites
 
-- Node.js >= 22 (you have 24)
-- Java 17 (you have 17.0.12)
-- Maven 3.9 (you have 3.9.14)
-- Docker Desktop (with daemon running)
+- Node.js >= 22
+- Java 17
+- Maven 3.9
+- Docker Desktop (daemon running)
 
 ## Quick start
 
@@ -38,99 +38,131 @@ docker exec antflow-postgres psql -U antflow -d antflow -c "SELECT extname FROM 
 ```bash
 cd backend
 mvn -B spring-boot:run
-# First boot applies V1 (schema), V2 (seed: admin/bob with password 'ant.design'), V3 (indexes).
+# First boot applies Flyway migrations (seed: admin/bob, password ant.design).
 ```
 
-Visit `http://localhost:8080/actuator/health` to confirm it's up.
+Visit `http://localhost:8080/actuator/health` (or `PORT=8081` for mobile-oriented local docs).
 
-Smoke the auth flow:
+Smoke auth:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"ant.design"}'
-# Returns {"accessToken":"eyJ...","user":{...}}
-
-TOKEN=...
-curl -s http://localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
-# Returns user profile with roles: ["admin","user"]
 ```
 
-### 3. Start the frontend
+### 3. Start the desktop frontend
 
 ```bash
 cd frontend
-npm install --no-audit --no-fund    # one-off, may take a few minutes
-npm start                            # UMI_ENV=dev, dev server on http://localhost:8000
-# Proxy: /api/* → http://localhost:8080 via config/proxy.ts
+npm install --no-audit --no-fund
+npm start                            # http://localhost:8000
+# Proxy: /api/* → backend via config/proxy.ts
 ```
 
-Open `http://localhost:8000`, log in with **admin / ant.design** (or **bob / ant.design**). Both users are seeded by V2 migration.
+Log in with **admin / ant.design** or **bob / ant.design**.
+
+### 4. Start the mobile client
+
+```bash
+cd mobile
+npm ci --no-audit --no-fund
+npm run dev                          # http://localhost:5173/mobile/login
+# Vite base is fixed to /mobile/; API still /api/
+```
+
+Quality gates:
+
+```bash
+cd mobile
+npm run check:enterprise             # lint + unit + build + bundle budget
+npm run test:e2e                     # Playwright, 4 viewports
+```
 
 ## Layout
 
-```
+```text
 antflow/
-├── backend/                # Spring Boot 3 + Java 17 (see backend/pom.xml)
-├── frontend/               # Umi Max 4 + React 18 + TS — port 8000
-├── infra/docker-compose.yml  # postgres:17-alpine
-├── .github/workflows/ci.yml  # backend mvn test + frontend lint/tsc/build
-├── docs/superpowers/
-│   ├── specs/2026-07-15-antflow-fusion-design.md      # Design spec
-│   └── plans/2026-07-15-antflow-fusion-impl.md       # Implementation plan
+├── backend/                 # Spring Boot 3 + Java 17
+├── frontend/                # Umi Max desktop — port 8000
+├── mobile/                  # Vite mobile SPA — base /mobile/
+├── infra/                   # docker-compose, nginx example
+├── docs/
+│   ├── mobile-enterprise-verification.md
+│   └── superpowers/         # specs + implementation plans
+├── codex.md                 # agent quick reference (incl. mobile)
+├── CLAUDE.md
 └── README.md
 ```
 
+## Architecture (mobile)
+
+- **Shell**: bottom tabs — Workbench / Tasks / Profile.
+- **Forms**: 14 field types, drafts (user-scoped recovery), SELF_SELECT, confirm, idempotent start.
+- **Tasks**: pending / started / done; approve / reject / withdraw with server rules.
+- **Brand**: published tokens → CSS variables; safe fallback when public branding unavailable.
+- **Platform**: `BrowserAdapter` now; WeCom adapter boundary only (phase two: silent login / JS-SDK / app messages).
+- **Non-goals (phase one)**: mobile designers, org admin on phone, full theme editor, PWA-required core flows.
+
 ## Tests
 
-### Backend unit tests (no PG needed)
+### Backend
 
 ```bash
 cd backend && mvn test
-# Currently green: JwtService (3), FormDefinitionService schema (4),
-# AssigneeResolver (5), ProcessDefinitionService validation (4) = 16 tests.
 ```
 
-### Frontend E2E (Playwright happy-path)
+### Desktop frontend
 
-Pre-req: docker compose up -d, backend running on :8080.
+```bash
+cd frontend
+npm run biome:lint
+npm test
+npm run tsc
+npm run build
+```
+
+### Mobile
+
+```bash
+cd mobile
+npm run check:enterprise
+npm run test:e2e
+```
+
+### Desktop E2E (optional live)
+
+Pre-req: docker compose up, backend on :8080.
 
 ```bash
 cd frontend
 npx playwright install chromium --with-deps
 npx playwright test
-# Walks: admin login → design form → publish → wire 1-level approval (via API to skip
-# React Flow drag) → bob submits → admin approves → instance APPROVED.
 ```
 
 ## CI
 
-`.github/workflows/ci.yml` runs on push/PR to `master`/`main`:
+`.github/workflows/ci.yml` on push/PR:
 
-- **backend**: `mvn test` on Java 17.
-- **frontend**: install, Biome lint, tsc, build on Node 22.
+- **backend**: `mvn test` (Java 17)
+- **frontend**: install, Biome lint, tsc, build (Node 22)
+- **mobile**: enterprise check (and related gates when configured)
 
-## Frontend dependency setup note
+## Agent notes
 
-On Windows, `node_modules` file locks can leave broken state if `npm install` is interrupted. Recover:
+- See `codex.md` and `CLAUDE.md` for domain rules and module commands.
+- Mobile detailed runbook: `mobile/README.md`.
+- Acceptance evidence: `docs/mobile-enterprise-verification.md`.
 
-```bash
-cd frontend
-rm -rf node_modules package-lock.json
-npm install --no-audit --no-fund
-```
+## Out of scope (MVP / mobile phase-one non-goals)
 
-## Out of scope (MVP non-goals)
+Per fusion + mobile enterprise specs:
 
-Per spec, explicitly NOT in MVP — reserved for v1.x:
-
-- Parallel branches / multi-counter-sign / reject-back
+- Parallel branches / multi-counter-sign / reject-back (engine phase-two items)
 - Dynamic form permissions per node
-- Expression-based condition nodes
-- Process versioning migrations
-- File upload to S3/MinIO
-- Multi-tenancy guard
-- OAuth2/OIDC
-- Redis caching
-- i18n
+- Mobile form/process designers; mobile org administration
+- Enterprise WeChat silent login / JS-SDK / app messages (adapter only)
+- Full theme editor; arbitrary CSS from server
+- Multi-tenancy guard, OAuth2/OIDC, Redis caching, i18n
 - Print/export/dashboards
+- Core flows that require PWA install or Service Worker

@@ -10,8 +10,9 @@
 ant-flow/
 ├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway + PostgreSQL；自研轻量审批引擎
 ├── frontend/    # Umi Max 4 + React 18 + antd 6 + zustand（ant-design-pro 底座）；有自己的 CLAUDE.md
+├── mobile/      # 独立移动端 Vite + React + Ant Design Mobile；base `/mobile/`；企业级审批闭环
 ├── infra/       # docker-compose（postgres:17）+ initdb 扩展脚本
-└── docs/        # superpowers/specs（设计规格）、superpowers/plans（实施计划）
+└── docs/        # superpowers/specs、plans；mobile-enterprise-verification.md
 ```
 
 > 注意：`backend/` 与 `frontend/` 各有独立依赖与构建。**先 `cd` 进对应模块再执行命令**，不要在仓库根跑 `mvn`/`npm`。前端另有 `frontend/CLAUDE.md`（Biome-only、TS strict、`/antd` 与 `/pro-upgrade` skill），改前端前先读它。
@@ -30,6 +31,12 @@ cd backend && mvn test                     # 单元测试（不需 PG）
 cd frontend && npm install
 cd frontend && npm start                   # http://localhost:8000
 cd frontend && npm run build               # utoopack 打包
+
+# 移动端（base=/mobile/，API 仍走 /api/）
+cd mobile && npm ci
+cd mobile && npm run dev                   # http://localhost:5173/mobile/login
+cd mobile && npm run check:enterprise      # lint + unit + build + bundle
+cd mobile && npm run test:e2e              # Playwright 四视口
 ```
 
 种子账号：`admin / ant.design`、`bob / ant.design`（V2 迁移写入）。
@@ -63,3 +70,11 @@ cd frontend && npm run build               # utoopack 打包
 ## 二期（未做）
 
 并行分支、延时/触发器节点、连续多级主管(LEADER_TOP)、依次会签(NEXT)、超时处理、驳回到指定节点、节点级表单字段权限、转交/加签、流程发布版本快照、列表分页、实例详情读权限收敛。
+
+## 企业级移动端
+
+- 代码：`mobile/`（与桌面端独立依赖/构建，同域部署 `/mobile/`）。
+- 路由：工作台/待办/我的壳层 + 表单填写/草稿/自选/确认、任务详情、流程详情、账号安全。
+- 品牌：`BrandProvider` + 公开品牌 DTO；失败 fallback；不接受任意服务端 CSS。
+- 企业微信：**仅** `PlatformAdapter` 边界，一期不实现免登/JS-SDK/应用消息。
+- 验收：`docs/mobile-enterprise-verification.md`；代理速查：`codex.md`。
