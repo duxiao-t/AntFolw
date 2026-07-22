@@ -77,8 +77,8 @@ describe('applyBrandTokens', () => {
 
   it('falls back to the canonical primary color for invalid input', () => {
     applyBrandTokens({ ...REMOTE_BRANDING, primaryColor: 'rgb(0,0,0)' });
-    expect(document.documentElement.style.getPropertyValue('--af-color-primary')).toBe('#1677ff');
-    expect(document.documentElement.style.getPropertyValue('--adm-color-primary')).toBe('#1677ff');
+    expect(document.documentElement.style.getPropertyValue('--af-color-primary')).toBe('#0b57d0');
+    expect(document.documentElement.style.getPropertyValue('--adm-color-primary')).toBe('#0b57d0');
   });
 
   it('updates document title and creates a favicon link with version query', () => {

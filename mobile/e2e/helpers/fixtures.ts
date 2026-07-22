@@ -32,7 +32,7 @@ export const BRANDING = {
   version: 'e2e-approval-1',
   appName: 'AntFlow 审批',
   companyName: '安',
-  primaryColor: '#1677ff',
+  primaryColor: '#0b57d0',
   mobileHeaderTitle: '工作台',
   loginTitle: '登录 AntFlow',
   showLoginFooter: true,

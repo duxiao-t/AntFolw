@@ -194,8 +194,8 @@ describe('mobile form submit flow', () => {
       '/processes/9001',
     );
     await userEvent.click(screen.getByRole('link', { name: '查看详情' }));
-    expect(await screen.findByRole('heading', { name: '流程详情' })).toBeInTheDocument();
-    expect(screen.getByText('请假申请')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
+    expect(screen.getByText('进行中')).toBeInTheDocument();
   });
 
   it('submits uploaded files through the mobile start files contract', async () => {

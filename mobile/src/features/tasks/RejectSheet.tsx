@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, TextArea } from 'antd-mobile';
 import type { CSSProperties } from 'react';
 import type { RejectTarget } from './tasks.api';
+import { useFocusTrap } from '../../shared/a11y/useFocusTrap';
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -10,6 +11,21 @@ const overlayStyle: CSSProperties = {
   display: 'grid',
   alignItems: 'end',
   zIndex: 1000,
+};
+
+const backdropStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  border: 0,
+  padding: 0,
+  margin: 0,
+  background: 'transparent',
+  cursor: 'pointer',
+};
+
+const panelWrapStyle: CSSProperties = {
+  position: 'relative',
+  zIndex: 1,
 };
 
 const panelStyle: CSSProperties = {
@@ -55,6 +71,8 @@ export function RejectSheet({
   const [rejectToNodeId, setRejectToNodeId] = useState('');
   const [localError, setLocalError] = useState('');
   const keyRef = useRef(createIdempotencyKey());
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(open, panelRef, onClose);
 
   useEffect(() => {
     if (open) {
@@ -70,13 +88,14 @@ export function RejectSheet({
   }
 
   return (
-    <div style={overlayStyle} role="presentation" onClick={onClose}>
+    <div style={overlayStyle}>
+      <button type="button" aria-label="关闭" style={backdropStyle} onClick={onClose} />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="驳回审批"
-        style={panelStyle}
-        onClick={(event) => event.stopPropagation()}
+        style={{ ...panelStyle, ...panelWrapStyle }}
       >
         <strong>驳回</strong>
         <TextArea

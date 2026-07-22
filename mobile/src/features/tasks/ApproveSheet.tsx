@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, TextArea } from 'antd-mobile';
 import type { CSSProperties } from 'react';
+import { useFocusTrap } from '../../shared/a11y/useFocusTrap';
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -9,6 +10,21 @@ const overlayStyle: CSSProperties = {
   display: 'grid',
   alignItems: 'end',
   zIndex: 1000,
+};
+
+const backdropStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  border: 0,
+  padding: 0,
+  margin: 0,
+  background: 'transparent',
+  cursor: 'pointer',
+};
+
+const panelWrapStyle: CSSProperties = {
+  position: 'relative',
+  zIndex: 1,
 };
 
 const panelStyle: CSSProperties = {
@@ -35,6 +51,8 @@ export type ApproveSheetProps = {
 export function ApproveSheet({ open, loading, error, onClose, onSubmit }: ApproveSheetProps) {
   const [comment, setComment] = useState('');
   const keyRef = useRef(createIdempotencyKey());
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(open, panelRef, onClose);
 
   useEffect(() => {
     if (open) {
@@ -48,13 +66,14 @@ export function ApproveSheet({ open, loading, error, onClose, onSubmit }: Approv
   }
 
   return (
-    <div style={overlayStyle} role="presentation" onClick={onClose}>
+    <div style={overlayStyle}>
+      <button type="button" aria-label="关闭" style={backdropStyle} onClick={onClose} />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="同意审批"
-        style={panelStyle}
-        onClick={(event) => event.stopPropagation()}
+        style={{ ...panelStyle, ...panelWrapStyle }}
       >
         <strong>同意</strong>
         <TextArea

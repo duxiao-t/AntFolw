@@ -89,7 +89,7 @@ export class GlobalErrorBoundary extends Component<
               minHeight: 44,
               lineHeight: '28px',
               borderRadius: 8,
-              background: 'var(--af-color-primary, #1677ff)',
+              background: 'var(--af-color-primary, #0b57d0)',
               color: '#fff',
               textDecoration: 'none',
               textAlign: 'center',
