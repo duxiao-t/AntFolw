@@ -104,9 +104,10 @@ export function DraftListPage() {
 }
 
 function completionCount(draft: MobileDraft) {
-  const ids = draft.schema ? leafFieldIds(draft.schema) : Object.keys(draft.data);
+  const data = draft.data ?? {};
+  const ids = draft.schema ? leafFieldIds(draft.schema) : Object.keys(data);
   const total = Math.max(ids.length, 1);
-  const filled = ids.filter((id) => hasValue(draft.data[id])).length;
+  const filled = ids.filter((id) => hasValue(data[id])).length;
   return { filled, total };
 }
 

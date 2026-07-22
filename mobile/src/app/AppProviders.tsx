@@ -5,6 +5,7 @@ import { PlatformProvider } from '../shared/platform/PlatformProvider';
 import { NetworkStatusProvider } from '../shared/recovery/NetworkStatusProvider';
 import { setAuthController } from '../shared/api/auth';
 import { useAuthStore } from '../features/auth/auth.store';
+import { AuthBootstrap } from '../features/auth/AuthBootstrap';
 import { GlobalErrorBoundary } from './GlobalErrorBoundary';
 import { WebVitalsReporter } from '../shared/telemetry/WebVitalsReporter';
 
@@ -36,10 +37,12 @@ export function AppProviders({ children }: PropsWithChildren) {
       <BrandProvider>
         <PlatformProvider>
           <NetworkStatusProvider>
-            <GlobalErrorBoundary>
-              <WebVitalsReporter />
-              {children}
-            </GlobalErrorBoundary>
+            <AuthBootstrap>
+              <GlobalErrorBoundary>
+                <WebVitalsReporter />
+                {children}
+              </GlobalErrorBoundary>
+            </AuthBootstrap>
           </NetworkStatusProvider>
         </PlatformProvider>
       </BrandProvider>

@@ -67,8 +67,11 @@ async function mockApi(page: Page) {
     });
   });
   await page.route('**/api/auth/refresh', async (route) => {
+    // Anonymous until explicit login — keep AuthBootstrap from auto-signing-in.
     await route.fulfill({
-      json: { accessToken: 'e2e-token', user: bootstrap.user },
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'TOKEN_EXPIRED', message: '会话已过期' }),
     });
   });
   await page.route('**/api/mobile/bootstrap', async (route) => {
