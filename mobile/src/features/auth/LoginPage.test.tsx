@@ -16,6 +16,13 @@ const SAMPLE_USER: MobileUser = {
   roles: ['admin'],
 };
 
+function jsonResponse(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function renderLogin(initialPath: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -40,11 +47,27 @@ afterEach(() => {
 });
 
 describe('LoginPage', () => {
-  it('uses brand title from BrandProvider and sets autocomplete attributes', () => {
-    const fetchMock = vi.fn();
+  it('uses brand title from BrandProvider and sets autocomplete attributes', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/public/branding')) {
+        return jsonResponse(200, {
+          version: 'builtin-1',
+          appName: 'AntFlow 审批',
+          companyName: 'AntFlow',
+          primaryColor: '#0b57d0',
+          mobileHeaderTitle: '工作台',
+          loginTitle: '登录 AntFlow',
+          showLoginFooter: true,
+          footerText: '© 2026 AntFlow',
+        });
+      }
+      // Keep restore anonymous so the login form stays mounted.
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
     vi.stubGlobal('fetch', fetchMock);
     renderLogin('/login');
-    expect(screen.getByText('登录 AntFlow')).toBeInTheDocument();
+    expect(await screen.findByText('登录 AntFlow')).toBeInTheDocument();
     const username = screen.getByPlaceholderText('请输入账号');
     const password = screen.getByPlaceholderText('请输入密码');
     expect(username.getAttribute('autocomplete')).toBe('username');
@@ -52,16 +75,30 @@ describe('LoginPage', () => {
   });
 
   it('submits credentials and navigates to returnUrl on success', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ accessToken: 'mem', user: SAMPLE_USER }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/public/branding')) {
+        return jsonResponse(200, {
+          version: 'builtin-1',
+          appName: 'AntFlow 审批',
+          companyName: 'AntFlow',
+          primaryColor: '#0b57d0',
+          mobileHeaderTitle: '工作台',
+          loginTitle: '登录 AntFlow',
+          showLoginFooter: true,
+          footerText: '© 2026 AntFlow',
+        });
+      }
+      if (url.includes('/api/auth/login') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+        return jsonResponse(200, { accessToken: 'mem', user: SAMPLE_USER });
+      }
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     renderLogin('/login?returnUrl=%2Fworkbench');
 
+    await screen.findByPlaceholderText('请输入账号');
     await user.type(screen.getByPlaceholderText('请输入账号'), 'admin');
     await user.type(screen.getByPlaceholderText('请输入密码'), 'ant.design');
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
@@ -73,17 +110,31 @@ describe('LoginPage', () => {
   });
 
   it('keeps auth anonymous after a 401 from the login endpoint', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ code: 'INVALID_CREDENTIALS', message: 'bad' }), {
-        status: 401,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/public/branding')) {
+        return jsonResponse(200, {
+          version: 'builtin-1',
+          appName: 'AntFlow 审批',
+          companyName: 'AntFlow',
+          primaryColor: '#0b57d0',
+          mobileHeaderTitle: '工作台',
+          loginTitle: '登录 AntFlow',
+          showLoginFooter: true,
+          footerText: '© 2026 AntFlow',
+        });
+      }
+      if (url.includes('/api/auth/login') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+        return jsonResponse(401, { code: 'INVALID_CREDENTIALS', message: 'bad' });
+      }
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const user = userEvent.setup();
     renderLogin('/login');
 
+    await screen.findByPlaceholderText('请输入账号');
     await user.type(screen.getByPlaceholderText('请输入账号'), 'admin');
     await user.type(screen.getByPlaceholderText('请输入密码'), 'wrong');
     fireEvent.click(screen.getByRole('button', { name: '登录' }));

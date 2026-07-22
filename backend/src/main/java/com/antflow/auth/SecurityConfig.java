@@ -1,5 +1,6 @@
 package com.antflow.auth;
 
+import com.antflow.common.IdempotencyFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,6 +27,7 @@ public class SecurityConfig {
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
     private final LoginRateLimitFilter loginRateLimitFilter;
+    private final IdempotencyFilter idempotencyFilter;
 
     @Bean
     public SecurityFilterChain filter(HttpSecurity http) throws Exception {
@@ -55,8 +57,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .anyRequest().authenticated()
             )
+            // Order matters: idempotency check needs the principal set by JwtAuthFilter,
+            // so register idempotency AFTER jwt.
             .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(new JwtAuthFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(idempotencyFilter, JwtAuthFilter.class)
             .httpBasic(AbstractHttpConfigurer::disable)
             .formLogin(AbstractHttpConfigurer::disable)
             .build();

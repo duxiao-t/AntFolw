@@ -63,3 +63,12 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Bundle budget
+        run: npm run check:bundle
+      - name: Upload bundle budget report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-bundle-budget
+          path: mobile/test-results/bundle-budget.json
+          if-no-files-found: ignore

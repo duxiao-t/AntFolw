@@ -1,6 +1,10 @@
 spring:
   application:
     name: antflow-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
   datasource:
     # Default: local PostgreSQL on 5432 (user-supplied postgres/Tao@1234).
     # Override via env: SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD.
@@ -38,6 +42,11 @@ antflow:
   login:
     per-minute: 5
     per-hour: 30
+  mobile:
+    files:
+      directory: ${MOBILE_FILE_DIRECTORY:./data/mobile-files}
+      max-bytes: ${MOBILE_FILE_MAX_BYTES:10485760}
+      allowed-types: ${MOBILE_FILE_ALLOWED_TYPES:image/jpeg,image/png,application/pdf}
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

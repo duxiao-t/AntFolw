@@ -10,6 +10,9 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -51,6 +54,20 @@ public class GlobalExceptionHandler {
             .map(fe -> Map.of("field", fe.getField(), "message", fe.getDefaultMessage()))
             .toList());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
+    }
+
+    /** Unknown route (Spring 6.1+ throws NoResourceFoundException for unmapped paths). */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(envelope("NOT_FOUND", "endpoint not found"));
+    }
+
+    /** Multipart upload exceeded the configured per-file / per-request limit. */
+    @ExceptionHandler({ MaxUploadSizeExceededException.class, MultipartException.class })
+    public ResponseEntity<Map<String, Object>> handleMultipart(Exception e) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+            .body(envelope("FILE_TOO_LARGE", "uploaded file exceeds size limit"));
     }
 
     @ExceptionHandler(Exception.class)

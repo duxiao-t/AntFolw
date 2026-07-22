@@ -12,7 +12,9 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
+    "check:enterprise": "npm run lint && npm test && npm run build && npm run check:bundle"
   },
   "engines": {
     "node": ">=22.0.0"

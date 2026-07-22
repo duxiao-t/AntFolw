@@ -15,4 +15,5 @@ public class FormData {
     private String status;      // DRAFT or SUBMITTED
     private Long createdBy;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
+    @TableField(fill = FieldFill.INSERT_UPDATE) private java.time.OffsetDateTime updatedAt;
 }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './errors';
 import { apiRequest } from './http';
 import { setAuthController } from './auth';
+import { uploadMobileFile } from '../../features/forms/files.api';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -163,5 +164,34 @@ describe('apiRequest', () => {
     const headers = headersOf(fetchMock, 0);
     expect(headers.has('Cookie')).toBe(false);
     expect(headers.has('tracking')).toBe(false);
+  });
+
+  it('sends FormData through shared auth without JSON content type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
+      id: 'file-1',
+      url: '/api/mobile/files/file-1/content',
+      contentType: 'text/plain',
+      sizeBytes: 5,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    setAuthController({
+      authorizationHeader: () => ({ Authorization: 'Bearer mobile-token' }),
+      refresh: noop,
+      isAuthEndpoint: () => false,
+    });
+
+    const result = await uploadMobileFile(
+      '/api/mobile/files',
+      new File(['hello'], 'hello.txt', { type: 'text/plain' }),
+    );
+
+    expect(result.id).toBe('file-1');
+    const callArgs = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callArgs[0]).toBe('/api/mobile/files');
+    expect(callArgs[1].body).toBeInstanceOf(FormData);
+    const headers = headersOf(fetchMock, 0);
+    expect(headers.get('Authorization')).toBe('Bearer mobile-token');
+    expect(headers.get('Accept')).toBe('application/json');
+    expect(headers.has('Content-Type')).toBe(false);
   });
 });

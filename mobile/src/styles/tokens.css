@@ -14,7 +14,7 @@
   --af-color-on-primary: #ffffff;
   --af-radius-surface: 8px;
   --af-radius-control: 6px;
-  --af-color-primary: #1677ff;
+  --af-color-primary: #0b57d0;
 }
 
 :root[data-theme="dark"] {

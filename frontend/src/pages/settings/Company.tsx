@@ -9,10 +9,8 @@ export default function CompanySettingsPage() {
     (async () => {
       try {
         const list = await request('/api/companies');
-        if (list?.length) {
-          // store first company info locally for display
-          setLogo(undefined);
-        }
+        // Company list available; form remains demo until field binding lands.
+        void list;
       } catch { /* 后端无数据时忽略 */ }
     })();
   }, []);

@@ -34,7 +34,7 @@ function buildHeaders(
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json');
   }
-  if (init.body && !headers.has('Content-Type')) {
+  if (init.body && !isBrowserManagedBody(init.body) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   if (auth.Authorization && !headers.has('Authorization')) {
@@ -47,6 +47,13 @@ function buildHeaders(
     }
   }
   return headers;
+}
+
+function isBrowserManagedBody(body: BodyInit) {
+  return body instanceof FormData
+    || body instanceof URLSearchParams
+    || body instanceof Blob
+    || body instanceof ArrayBuffer;
 }
 
 async function parseBody<T>(response: Response): Promise<T> {

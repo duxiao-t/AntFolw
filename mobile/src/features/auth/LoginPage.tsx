@@ -58,7 +58,7 @@ export function LoginPage() {
               width: 56,
               height: 56,
               borderRadius: 12,
-              background: 'var(--af-color-primary, #1677ff)',
+              background: 'var(--af-color-primary, #0b57d0)',
               color: '#fff',
               display: 'flex',
               alignItems: 'center',

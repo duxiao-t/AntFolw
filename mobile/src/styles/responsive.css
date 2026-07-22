@@ -30,3 +30,13 @@ html {
     background: var(--af-color-bg);
   }
 }
+
+
+/* Enterprise a11y: primary interactive targets meet 44×44 touch budget */
+:where(button, [role="button"], a.adm-button, .adm-button, .adm-list-item) {
+  min-height: 44px;
+}
+
+:where(input, textarea, select, .adm-input, .adm-text-area) {
+  min-height: 44px;
+}
