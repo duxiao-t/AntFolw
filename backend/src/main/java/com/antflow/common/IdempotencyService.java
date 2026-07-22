@@ -49,6 +49,16 @@ public class IdempotencyService {
         return fresh;
     }
 
+    /** Direct cache lookup without triggering an action. Used by interceptors. */
+    public CachedResponse peek(String fullKey) {
+        return fallback.get(fullKey);
+    }
+
+    /** Direct cache write. Used by interceptors after the controller responds. */
+    public void store(String fullKey, CachedResponse resp) {
+        fallback.put(fullKey, resp);
+    }
+
     private Optional<CachedResponse> load(String fullKey) {
         // 当前项目无 spring-data-redis 依赖；仅用 fallback map 实现幂等缓存。
         // 生产可加 redis 依赖后扩展：反射调 redis.opsForValue().get(fullKey)。

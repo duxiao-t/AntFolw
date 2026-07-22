@@ -42,3 +42,15 @@ mobile/coverage/
 mobile/playwright-report/
 mobile/test-results/
 .superpowers/
+
+backend/smoke-backend*.log
+backend/probe*.java
+backend/probe*.class
+backend/probe*.out
+backend/probe*.err
+backend/mvn*.log
+backend/smoke-run*.out
+backend/smoke-final.out
+backend/backend/
+backend/data/
+
