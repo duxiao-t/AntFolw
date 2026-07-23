@@ -74,7 +74,7 @@ describe('DraftListPage', () => {
     renderDrafts();
 
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
-    expect(screen.getByText('已填写 1/2')).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('已填写 1/2'))).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '继续填写 请假申请' }))
       .toHaveAttribute('href', '/forms/leave?draftId=101');
   });

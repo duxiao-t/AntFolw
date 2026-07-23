@@ -136,7 +136,7 @@ describe('mobile form submit flow', () => {
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
-    expect(await screen.findByRole('heading', { name: '提交确认' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '确认提交' })).toBeInTheDocument();
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
   });
 
@@ -157,7 +157,7 @@ describe('mobile form submit flow', () => {
     await userEvent.click(screen.getByText('张经理'));
     await userEvent.click(screen.getByRole('button', { name: '确认选择' }));
 
-    expect(await screen.findByRole('heading', { name: '提交确认' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '确认提交' })).toBeInTheDocument();
     expect(screen.getByText('张经理')).toBeInTheDocument();
   });
 
@@ -172,7 +172,7 @@ describe('mobile form submit flow', () => {
 
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
-    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
     await userEvent.click(await screen.findByRole('button', { name: '重试提交' }));
 
     await waitFor(() => {
@@ -217,7 +217,7 @@ describe('mobile form submit flow', () => {
     });
     renderSubmitFlow('/forms/leave/confirm');
 
-    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
 
     await waitFor(() => {
       const postCall = instancePostCalls()[0];
@@ -248,7 +248,7 @@ describe('mobile form submit flow', () => {
     });
 
     const firstRender = renderSubmitFlow('/forms/leave/confirm');
-    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
     firstRender.unmount();
 
     useSubmitFlowStore.setState({
@@ -258,7 +258,7 @@ describe('mobile form submit flow', () => {
       selfSelected: {},
     });
     renderSubmitFlow('/forms/leave/confirm');
-    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
 
     await waitFor(() => {
       const calls = instancePostCalls();
@@ -279,7 +279,7 @@ describe('mobile form submit flow', () => {
     });
 
     const firstRender = renderSubmitFlow('/forms/leave/confirm');
-    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
     await screen.findByRole('heading', { name: '提交成功' });
     firstRender.unmount();
 
@@ -290,7 +290,7 @@ describe('mobile form submit flow', () => {
       selfSelected: {},
     });
     renderSubmitFlow('/forms/leave/confirm');
-    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
 
     await waitFor(() => {
       const calls = instancePostCalls();

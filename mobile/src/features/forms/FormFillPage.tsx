@@ -1,58 +1,46 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Button, Dialog } from 'antd-mobile';
-import { useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AppPage } from '../../shared/ui/AppPage';
-import { PageError, PageSkeleton } from '../../shared/ui/PageStates';
-import { queryKeys } from '../../shared/api/queryKeys';
-import { useAuthStore } from '../auth/auth.store';
-import { DynamicFormRenderer } from './components/DynamicFormRenderer';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Dialog } from "antd-mobile";
+import { useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AppPage } from "../../shared/ui/AppPage";
+import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
+import { queryKeys } from "../../shared/api/queryKeys";
+import { useAuthStore } from "../auth/auth.store";
+import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
 import {
   createMobileDraft,
   fetchMobileDraft,
   fetchMobileForm,
   updateMobileDraft,
-} from './drafts.api';
+} from "./drafts.api";
 import {
   beginSubmitFlow,
   findSelfSelectRules,
   formSchemaWithoutSelfSelectRules,
-} from './submitFlow.store';
+} from "./submitFlow.store";
 import {
   createRecoveryDraftWriter,
   readRecoveryDraft,
   removeRecoveryDraft,
   shouldDiscardMismatchedRecovery,
   type RecoveryDraftWriter,
-} from './recoveryDraft.store';
-import { validateSchemaValues } from './schema/fieldRegistry';
-import type { FieldValidationErrors, MobileFormValues } from './schema/types';
-
-const bottomActionStyle: React.CSSProperties = {
-  position: 'fixed',
-  left: 0,
-  right: 0,
-  bottom: 0,
-  display: 'grid',
-  gap: 8,
-  padding: '12px 16px calc(16px + env(safe-area-inset-bottom))',
-  background: 'var(--af-color-bg)',
-  boxShadow: '0 -8px 20px rgba(0,0,0,0.08)',
-};
+} from "./recoveryDraft.store";
+import { validateSchemaValues } from "./schema/fieldRegistry";
+import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
 
 export function FormFillPage() {
-  const { code = '' } = useParams();
+  const { code = "" } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const draftIdFromUrl = numberParam(searchParams.get('draftId'));
+  const draftIdFromUrl = numberParam(searchParams.get("draftId"));
   const [savedDraftId, setSavedDraftId] = useState<number | null>(draftIdFromUrl);
   const draftId = savedDraftId;
   const [values, setValues] = useState<MobileFormValues>({});
   const [initialValues, setInitialValues] = useState<MobileFormValues>({});
   const [errors, setErrors] = useState<FieldValidationErrors>({});
   const [initialized, setInitialized] = useState(false);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState("");
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
   const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
   const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
@@ -84,7 +72,7 @@ export function FormFillPage() {
     onSuccess(nextDraftId) {
       setSavedDraftId(nextDraftId);
       setInitialValues(values);
-      setStatus('草稿已保存');
+      setStatus("草稿已保存");
       if (user) {
         removeRecoveryDraft(user.id, code, draftId);
       }
@@ -142,7 +130,7 @@ export function FormFillPage() {
         }
         recoveryWriterRef.current?.flush();
         event.preventDefault();
-        event.returnValue = '';
+        event.returnValue = "";
       },
       [isDirty],
     ),
@@ -158,7 +146,7 @@ export function FormFillPage() {
   const schema = formQuery.data?.schema ?? [];
   const process = formQuery.data?.process;
   const formSchema = formSchemaWithoutSelfSelectRules(schema);
-  const title = formQuery.data?.name ?? '表单填写';
+  const title = formQuery.data?.name ?? "表单填写";
 
   if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)) {
     return <PageSkeleton rows={5} />;
@@ -171,38 +159,53 @@ export function FormFillPage() {
   return (
     <AppPage
       title={title}
-      toolbar={
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12 }}>
-          <Button onClick={() => navigate('/workbench')}>返回</Button>
-          <Button color="primary" loading={saveMutation.isPending} onClick={() => saveDraft()}>
-            保存草稿
-          </Button>
-        </div>
+      action={
+        <button
+          type="button"
+          className="af-link-button"
+          style={{ fontSize: 13 }}
+          onClick={() => saveDraft()}
+        >
+          草稿
+        </button>
       }
-      style={{ paddingBottom: 104 }}
     >
-      <DynamicFormRenderer
-        schema={formSchema}
-        values={values}
-        mode={draftQuery.data?.readOnly ? 'readonly' : 'fill'}
-        errors={errors}
-        onValueChange={(fieldId, value) => {
-          setValues((current) => ({ ...current, [fieldId]: value }));
-          setErrors((current) => {
-            const next = { ...current };
-            delete next[fieldId];
-            return next;
-          });
-          setStatus('');
-        }}
-      />
-      {status ? <p role="status">{status}</p> : null}
-      <div style={bottomActionStyle}>
-        <Button block color="primary" size="large" onClick={goNext}>
-          下一步
-        </Button>
+      <div className="af-stack">
+        <section className="af-card--form">
+          <h4>请假信息</h4>
+          <DynamicFormRenderer
+            schema={formSchema}
+            values={values}
+            mode={draftQuery.data?.readOnly ? "readonly" : "fill"}
+            errors={errors}
+            onValueChange={(fieldId, value) => {
+              setValues((current) => ({ ...current, [fieldId]: value }));
+              setErrors((current) => {
+                const next = { ...current };
+                delete next[fieldId];
+                return next;
+              });
+              setStatus("");
+            }}
+          />
+        </section>
+        <section className="af-card--form">
+          <h4>附件</h4>
+          <div className="af-upload">+ 添加图片或文件</div>
+        </section>
+        {status ? (
+          <p role="status" style={{ margin: 0, fontSize: 12, color: "var(--af-color-muted)" }}>
+            {status}
+          </p>
+        ) : null}
       </div>
-      {blocker.state === 'blocked' ? (
+
+      <div className="af-bottom-bar" style={{ position: "fixed", left: 0, right: 0, bottom: 0, padding: "10px 14px 18px", background: "#ffffff", borderTop: "1px solid #edf0f2", boxShadow: "0 -8px 18px rgba(0,0,0,0.06)" }}><button type="button" className="af-btn af-btn--block" onClick={goNext}>
+          下一步
+        </button>
+      </div>
+
+      {blocker.state === "blocked" ? (
         <Dialog
           visible
           title="离开表单"
@@ -210,13 +213,13 @@ export function FormFillPage() {
           actions={[
             [
               {
-                key: 'stay',
-                text: '继续填写',
+                key: "stay",
+                text: "继续填写",
                 onClick: () => blocker.reset(),
               },
               {
-                key: 'leave',
-                text: '继续离开',
+                key: "leave",
+                text: "继续离开",
                 danger: true,
                 onClick: () => {
                   recoveryWriterRef.current?.flush();
@@ -242,9 +245,10 @@ export function FormFillPage() {
     }
     recoveryWriterRef.current?.flush();
     beginSubmitFlow({ formCode: code, draftId, values });
-    const nextPath = findSelfSelectRules(process).length > 0
-      ? `/forms/${encodeURIComponent(code)}/self-select`
-      : `/forms/${encodeURIComponent(code)}/confirm`;
+    const nextPath =
+      findSelfSelectRules(process).length > 0
+        ? `/forms/${encodeURIComponent(code)}/self-select`
+        : `/forms/${encodeURIComponent(code)}/confirm`;
     setSubmitNavigationAllowed(true);
     setPendingSubmitPath(nextPath);
   }
@@ -271,7 +275,7 @@ function chooseInitialValues({
     return baseValues;
   }
   if (recovery.schemaVersion === schemaVersion) {
-    if (confirmDialog('发现未提交内容，是否恢复？')) {
+    if (confirmDialog("发现未提交内容，是否恢复？")) {
       return recovery.values;
     }
     removeRecoveryDraft(userId, code, draftId);
@@ -296,7 +300,7 @@ function sameValues(left: MobileFormValues, right: MobileFormValues) {
 }
 
 function confirmDialog(message: string) {
-  if (typeof window.confirm === 'function') {
+  if (typeof window.confirm === "function") {
     return window.confirm(message);
   }
   return true;
