@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Form, Input, Button, SafeArea, Toast } from 'antd-mobile';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuthStore, safeReturnUrl } from './auth.store';
-import { useBranding } from '../branding/BrandProvider';
-import { isApiError } from '../../shared/api/errors';
+import { useEffect, useState } from "react";
+import { SafeArea, Toast } from "antd-mobile";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuthStore, safeReturnUrl } from "./auth.store";
+import { useBranding } from "../branding/BrandProvider";
+import { isApiError } from "../../shared/api/errors";
+import "./LoginPage.css";
 
 export function LoginPage() {
   const branding = useBranding();
@@ -12,129 +13,87 @@ export function LoginPage() {
   const login = useAuthStore((state) => state.login);
   const status = useAuthStore((state) => state.status);
   const [submitting, setSubmitting] = useState(false);
-  const [form] = Form.useForm();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
-    if (status === 'authenticated') {
-      const target = safeReturnUrl(params.get('returnUrl')) ?? '/workbench';
+    if (status === "authenticated") {
+      const target = safeReturnUrl(params.get("returnUrl")) ?? "/workbench";
       navigate(target, { replace: true });
     }
   }, [status, params, navigate]);
 
-  async function handleSubmit(values: { username?: string; password?: string }): Promise<void> {
-    const username = values.username ?? '';
-    const password = values.password ?? '';
+  async function handleSubmit(): Promise<void> {
+    if (!username || !password) {
+      Toast.show({ icon: "fail", content: "请输入账号与密码" });
+      return;
+    }
     setSubmitting(true);
     try {
       await login(username, password);
-      const target = safeReturnUrl(params.get('returnUrl')) ?? '/workbench';
+      const target = safeReturnUrl(params.get("returnUrl")) ?? "/workbench";
       navigate(target, { replace: true });
     } catch (error) {
-      if (isApiError(error) && error.status === 401) {
-        Toast.show({ icon: 'fail', content: '账号或密码错误' });
-      } else {
-        Toast.show({ icon: 'fail', content: '登录失败，请稍后再试' });
-      }
+      Toast.show({
+        icon: "fail",
+        content: isApiError(error) && error.status === 401 ? "账号或密码错误" : "登录失败，请稍后再试",
+      });
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <>
+    <main className="af-login page page-login">
       <SafeArea position="top" />
-      <main
-        className="page page-login"
-        style={{
-          minHeight: '100dvh',
-          padding: '24px 24px 32px',
-          background: 'var(--af-color-bg, #f7f8fa)',
+      <div className="af-login__logo" aria-hidden="true">
+        {branding.companyName.slice(0, 1) || "A"}
+      </div>
+      <h1 className="af-login__title">{branding.loginTitle || "登录 AntFlow"}</h1>
+      <p className="af-login__subtitle">移动审批，让每一次流转清晰可见</p>
+
+      <form
+        className="af-login__form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
         }}
       >
-        <header style={{ marginBottom: 24 }}>
-          <div
-            aria-hidden="true"
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 12,
-              background: 'var(--af-color-primary, #0b57d0)',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 24,
-              fontWeight: 600,
-              marginBottom: 16,
-            }}
-          >
-            {branding.companyName.slice(0, 1)}
-          </div>
-          <h1 style={{ margin: '0 0 4px', fontSize: '1.5rem' }}>{branding.loginTitle}</h1>
-          <p style={{ margin: 0, color: 'rgba(0,0,0,0.55)' }}>{branding.appName}</p>
-        </header>
+        <div className="af-login__field">
+          <label htmlFor="login-username">用户名</label>
+          <input
+            id="login-username"
+            className="af-input"
+            placeholder="请输入账号"
+            autoComplete="username"
+            inputMode="text"
+            value={username}
+            onChange={(event) => setUsername(event.currentTarget.value)}
+          />
+        </div>
+        <div className="af-login__field">
+          <label htmlFor="login-password">密码</label>
+          <input
+            id="login-password"
+            className="af-input"
+            placeholder="请输入密码"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.currentTarget.value)}
+          />
+        </div>
+        <div className="af-login__submit">
+          <button type="submit" className="af-btn af-btn--block" disabled={submitting}>
+            {submitting ? "登录中..." : "登录"}
+          </button>
+        </div>
+      </form>
 
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={(values) => {
-            void handleSubmit(values as { username?: string; password?: string });
-          }}
-          requiredMarkStyle="asterisk"
-        >
-          <Form.Item
-            name="username"
-            label="账号"
-            rules={[{ required: true, message: '请输入账号' }]}
-          >
-            <Input
-              placeholder="请输入账号"
-              autoComplete="username"
-              inputMode="text"
-              clearable
-            />
-          </Form.Item>
-          <Form.Item
-            name="password"
-            label="密码"
-            rules={[{ required: true, message: '请输入密码' }]}
-          >
-            <Input
-              type="password"
-              placeholder="请输入密码"
-              autoComplete="current-password"
-              clearable
-            />
-          </Form.Item>
-          <Form.Item>
-            <Button
-              block
-              type="submit"
-              color="primary"
-              loading={submitting}
-              disabled={submitting}
-              style={{ minHeight: 44 }}
-            >
-              登录
-            </Button>
-          </Form.Item>
-        </Form>
-
-        {branding.showLoginFooter ? (
-          <footer
-            style={{
-              marginTop: 24,
-              textAlign: 'center',
-              color: 'rgba(0,0,0,0.45)',
-              fontSize: 12,
-            }}
-          >
-            {branding.footerText}
-          </footer>
-        ) : null}
-        <SafeArea position="bottom" />
-      </main>
-    </>
+      <p className="af-login__wecom">企业微信免登录（二期）</p>
+      {branding.showLoginFooter ? <footer className="af-login__footer">{branding.footerText}</footer> : null}
+      <SafeArea position="bottom" />
+    </main>
   );
 }
 
