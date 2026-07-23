@@ -1,4 +1,6 @@
-import type { PropsWithChildren, CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, PropsWithChildren, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import classes from "./AppPage.module.css";
 
 export interface AppPageProps extends PropsWithChildren {
   title?: string;
@@ -6,31 +8,64 @@ export interface AppPageProps extends PropsWithChildren {
   flush?: boolean;
   style?: CSSProperties;
   toolbar?: ReactNode;
+  action?: ReactNode;
+  back?: boolean | string;
+  onBack?: () => void;
+  contentClassName?: string;
+  contentStyle?: CSSProperties;
+  variant?: "default" | "blank" | "head";
 }
 
-const baseStyle: CSSProperties = {
-  minHeight: '100dvh',
-  padding: '16px 16px 24px',
-  background: 'var(--af-color-bg)',
-  color: 'var(--af-color-text)',
-};
+export function AppPage({
+  children,
+  title,
+  description,
+  flush = false,
+  style,
+  toolbar,
+  action,
+  back = true,
+  onBack,
+  contentClassName,
+  contentStyle,
+  variant = "default",
+}: AppPageProps) {
+  const navigate = useNavigate();
+  const hasHeader = Boolean(title || action || back);
+  const isBlank = variant === "blank";
 
-export function AppPage({ children, title, description, flush, style, toolbar }: AppPageProps) {
-  const merged = flush ? style : { ...baseStyle, ...style };
   return (
-    <main className="app-page" style={merged}>
-      {(title ?? toolbar) ? (
-        <header style={{ marginBottom: 16 }}>
-          {title ? (
-            <h1 style={{ margin: '0 0 4px', fontSize: '1.25rem' }}>{title}</h1>
-          ) : null}
-          {description ? (
-            <p style={{ margin: 0, color: 'rgba(0,0,0,0.55)' }}>{description}</p>
-          ) : null}
-          {toolbar}
+    <main className={`af-page-frame ${classes.page}`} style={style}>
+      {hasHeader ? (
+        <header className="af-nav">
+          <div>
+            {back ? (
+              <button
+                type="button"
+                className="af-nav__back"
+                aria-label={typeof back === "string" ? back : "返回"}
+                onClick={() => (onBack ? onBack() : navigate(-1))}
+              >
+                {"\u2039"}
+              </button>
+            ) : null}
+          </div>
+          {variant === "head" ? <span className="af-nav__spacer" /> : <h1 className="af-nav__title">{title}</h1>}
+          <div className="af-nav__action-wrap">{action}</div>
         </header>
       ) : null}
-      {children}
+      {!isBlank && (description || toolbar) ? (
+        <div className={classes.intro}>
+          {description ? <p className={classes.description}>{description}</p> : null}
+          {toolbar}
+        </div>
+      ) : null}
+      <div
+        className={`${classes.content}${flush ? ` ${classes.flush}` : ""}${contentClassName ? ` ${contentClassName}` : ""}`}
+        style={contentStyle}
+      >
+        {children}
+      </div>
     </main>
   );
 }

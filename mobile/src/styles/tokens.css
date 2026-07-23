@@ -1,25 +1,54 @@
-/**
- * Fixed semantic tokens. Branding may only override the primary color through
- * the allowlist in features/branding/brandTokens.ts; every other design token
- * is fixed here and must not be re-written from server-provided branding.
- */
 :root {
   --af-color-success: #31a354;
+  --af-color-success-soft: #edf8e9;
   --af-color-warning: #fa8c16;
+  --af-color-warning-soft: #fff7e6;
   --af-color-danger: #ff4d4f;
+  --af-color-danger-soft: #fff1f0;
   --af-color-text: #202830;
-  --af-color-bg: #f4f6f8;
+  --af-color-text-secondary: #6f7882;
+  --af-color-muted: #8b949e;
+  --af-color-bg: #f5f6f8;
   --af-color-surface: #ffffff;
-  --af-color-border: rgba(0, 0, 0, 0.08);
+  --af-color-border: #edf0f2;
+  --af-color-line: #edf0f2;
   --af-color-on-primary: #ffffff;
-  --af-radius-surface: 8px;
-  --af-radius-control: 6px;
-  --af-color-primary: #0b57d0;
+  --af-color-primary-soft: #e6f4ff;
+  --af-color-icon-fg: #1677ff;
+  --af-color-icon-bg: #e6f4ff;
+  --af-color-icon-fg-alt: #389e0d;
+  --af-color-icon-bg-alt: #edf8e9;
+  --af-color-tag-red-bg: #fff1f0;
+  --af-color-tag-red-fg: #cf1322;
+  --af-color-tag-gray-bg: #f0f1f3;
+  --af-color-tag-gray-fg: #69727c;
+  --af-color-neutral-line: #d9dde2;
+  --af-color-input-border: #d9dde2;
+  --af-color-placeholder: #a0a7af;
+  --af-color-overlay: rgba(0, 0, 0, 0.38);
+  --af-color-modal-bg: #ffffff;
+  --af-radius-surface: 10px;
+  --af-radius-card: 8px;
+  --af-radius-control: 7px;
+  --af-radius-pill: 999px;
+  --af-radius-sheet: 16px;
+  --af-color-primary: #1677ff;
+  --af-shadow-float: 0 8px 24px rgba(32, 40, 48, 0.08);
+  --af-shadow-card: 0 1px 2px rgba(20, 30, 50, 0.04);
+  --af-shadow-pop: 0 10px 28px rgba(20, 30, 50, 0.12);
+  --af-shadow-topbar: 0 1px 0 rgba(20, 30, 50, 0.04);
+  --af-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --af-safe-top: env(safe-area-inset-top, 0px);
+  --af-page-padding: 14px;
+  --af-page-max-width: 430px;
 }
 
 :root[data-theme="dark"] {
   --af-color-text: #f5f7fa;
+  --af-color-text-secondary: #b9c0c7;
+  --af-color-muted: #929ba4;
   --af-color-bg: #0f1418;
   --af-color-surface: #1a2026;
   --af-color-border: rgba(255, 255, 255, 0.08);
+  --af-color-line: rgba(255, 255, 255, 0.08);
 }
