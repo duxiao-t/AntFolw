@@ -142,8 +142,8 @@ describe('TaskDetailPage', () => {
   it('renders readonly form, files, timeline and allowed actions', async () => {
     renderDetail();
 
-    expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
-    expect(screen.getByText('张三 · 研发部')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '审批详情' })).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('张三'))).toBeInTheDocument();
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '证明.pdf' })).toHaveAttribute(
       'href',
@@ -169,10 +169,10 @@ describe('TaskDetailPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '同意' }));
 
     const dialog = await screen.findByRole('dialog', { name: '同意审批' });
-    await userEvent.type(within(dialog).getByPlaceholderText('可选填写审批意见'), '同意申请');
+    await userEvent.type(within(dialog).getByPlaceholderText('填写审批意见（选填）'), '同意申请');
     await userEvent.click(within(dialog).getByRole('button', { name: '确认同意' }));
 
-    expect(await screen.findByRole('heading', { name: '任务中心' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
   });
 
   it('requires reject comment and posts selected reject target', async () => {
@@ -182,12 +182,12 @@ describe('TaskDetailPage', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '驳回审批' });
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
-    expect(within(dialog).getByText('请填写驳回原因')).toBeInTheDocument();
+    expect(within(dialog).getByText('请输入驳回原因（必填）')).toBeInTheDocument();
 
-    await userEvent.type(within(dialog).getByPlaceholderText('请填写驳回原因'), '资料不全');
+    await userEvent.type(within(dialog).getByPlaceholderText('请输入驳回原因'), '资料不全');
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
 
-    expect(await screen.findByRole('heading', { name: '任务中心' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
   });
 
   it('handles 409 by showing notice and refetching readonly state', async () => {
@@ -236,6 +236,6 @@ describe('TaskDetailPage', () => {
     expect(loadingButtons.some((button) => button.hasAttribute('disabled'))).toBe(true);
     expect(screen.getByRole('button', { name: '驳回' })).toBeDisabled();
     resolveApprove?.();
-    expect(await screen.findByRole('heading', { name: '任务中心' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
   });
 });

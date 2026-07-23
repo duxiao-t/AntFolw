@@ -1,42 +1,8 @@
-import { Link } from 'react-router-dom';
-import type { TaskCenterItem, TaskListItem, StartedProcessItem } from './tasks.api';
-
-const cardStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 8,
-  padding: 12,
-  borderRadius: 8,
-  background: 'var(--af-color-surface)',
-  color: 'inherit',
-  textDecoration: 'none',
-  border: '1px solid var(--af-color-border)',
-};
-
-const headerStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 10,
-};
-
-const titleStyle: React.CSSProperties = {
-  fontSize: '1rem',
-  fontWeight: 600,
-};
-
-const metaStyle: React.CSSProperties = {
-  color: 'rgba(0,0,0,0.56)',
-  fontSize: '0.8125rem',
-};
-
-const badgeRowStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: 6,
-  flexWrap: 'wrap',
-};
+import { Link } from "react-router-dom";
+import type { TaskCenterItem, TaskListItem, StartedProcessItem } from "./tasks.api";
 
 export function TaskCard({ item, returnSearch }: { item: TaskCenterItem; returnSearch: string }) {
-  if (item.kind === 'process') {
+  if (item.kind === "process") {
     return <StartedProcessCard process={item.process} returnSearch={returnSearch} />;
   }
   return <ApprovalTaskCard task={item.task} returnSearch={returnSearch} />;
@@ -44,90 +10,85 @@ export function TaskCard({ item, returnSearch }: { item: TaskCenterItem; returnS
 
 function ApprovalTaskCard({ task, returnSearch }: { task: TaskListItem; returnSearch: string }) {
   return (
-    <Link to={`/tasks/${task.id}?${returnSearch}`} style={cardStyle}>
-      <div style={headerStyle}>
-        <span style={titleStyle}>{task.formName}</span>
-        <span style={metaStyle}>{formatDate(task.createdAt)}</span>
+    <Link to={`/tasks/${task.id}?${returnSearch}`} className="af-task-card">
+      <div className="af-task-card__meta">
+        <span>{task.formName}</span>
+        <span>{formatTime(task.createdAt)}</span>
       </div>
-      <span style={metaStyle}>{task.applicantName}{task.applicantDepartment ? ` · ${task.applicantDepartment}` : ''}</span>
-      <span style={metaStyle}>节点：{task.nodeName}</span>
-      <div style={badgeRowStyle}>
-        <StatusBadge tone={task.taskStatus === 'PENDING' ? 'warning' : 'primary'}>
-          {taskStatusLabel(task.taskStatus)}
-        </StatusBadge>
-        <StatusBadge tone="neutral">{instanceStatusLabel(task.instanceStatus)}</StatusBadge>
+      <strong className="af-task-card__title">{task.applicantName}的{task.formName}</strong>
+      <p className="af-task-card__summary">节点：{task.nodeName}</p>
+      <div className="af-task-card__foot">
+        <span className="af-task-card__avatar" aria-hidden="true">{task.applicantName.slice(0, 1)}</span>
+        <span style={{ fontSize: 11 }}>
+          {task.applicantDepartment ? `${task.applicantDepartment} · ` : ""}
+          {task.applicantName}
+        </span>
+        <span className="af-task-card__tag-spacer" />
+        <span className="af-tag af-tag--warning">待审批</span>
       </div>
     </Link>
   );
 }
 
 function StartedProcessCard({ process, returnSearch }: { process: StartedProcessItem; returnSearch: string }) {
+  const tone =
+    process.status === "APPROVED"
+      ? "af-tag--success"
+      : process.status === "REJECTED" || process.status === "WITHDRAWN"
+        ? "af-tag--neutral"
+        : "";
   return (
-    <Link to={`/processes/${process.id}?${returnSearch}`} style={cardStyle}>
-      <div style={headerStyle}>
-        <span style={titleStyle}>{process.formName}</span>
-        <span style={metaStyle}>{formatDate(process.startedAt)}</span>
+    <Link to={`/processes/${process.id}?${returnSearch}`} className="af-task-card">
+      <div className="af-task-card__meta">
+        <span>{process.formName}</span>
+        <span>{formatTime(process.startedAt)}</span>
       </div>
-      <span style={metaStyle}>当前节点：{process.currentNodeName ?? '已结束'}</span>
-      <div style={badgeRowStyle}>
-        <StatusBadge tone="neutral">{instanceStatusLabel(process.status)}</StatusBadge>
+      <strong className="af-task-card__title">我发起的{process.formName}</strong>
+      <p className="af-task-card__summary">
+        当前：{process.currentNodeName ?? "已结束"}
+      </p>
+      <div className="af-task-card__foot">
+        <span className={`af-tag ${tone}`}>{instanceStatusLabel(process.status)}</span>
+        <span className="af-task-card__tag-spacer" />
+        <span style={{ color: "var(--af-color-muted)" }}>查看进度 {"\u203A"}</span>
       </div>
     </Link>
   );
 }
 
-function StatusBadge({ children, tone }: { children: React.ReactNode; tone: 'primary' | 'warning' | 'neutral' }) {
-  const colors = {
-    primary: ['rgba(22,119,255,0.12)', 'var(--af-color-primary)'],
-    warning: ['rgba(245,158,11,0.14)', 'var(--af-color-warning)'],
-    neutral: ['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.72)'],
-  } satisfies Record<typeof tone, [string, string]>;
-  const [background, color] = colors[tone];
-  return (
-    <span style={{
-      minHeight: 24,
-      display: 'inline-flex',
-      alignItems: 'center',
-      padding: '2px 8px',
-      borderRadius: 6,
-      background,
-      color,
-      fontSize: '0.75rem',
-      lineHeight: 1.4,
-    }}>
-      {children}
-    </span>
-  );
-}
-
-export function taskStatusLabel(status: TaskListItem['taskStatus']) {
+export function taskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
-    PENDING: '待审批',
-    APPROVED: '已同意',
-    REJECTED: '已驳回',
-    SKIPPED: '已跳过',
-    CC: '抄送',
+    PENDING: "待审批",
+    APPROVED: "已同意",
+    REJECTED: "已驳回",
+    SKIPPED: "已跳过",
+    CC: "抄送",
   };
   return labels[status] ?? status;
 }
 
-export function instanceStatusLabel(status: string) {
+export function instanceStatusLabel(status: string): string {
   const labels: Record<string, string> = {
-    RUNNING: '进行中',
-    APPROVED: '已通过',
-    REJECTED: '已拒绝',
-    WITHDRAWN: '已撤回',
+    RUNNING: "进行中",
+    APPROVED: "已通过",
+    REJECTED: "已拒绝",
+    WITHDRAWN: "已撤回",
   };
   return labels[status] ?? status;
 }
 
-function formatDate(value: string) {
-  if (!value) {
-    return '';
-  }
+function formatTime(value: string): string {
+  if (!value) return "";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, '0')}`;
+  if (Number.isNaN(date.getTime())) return value;
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now.getTime() - 86400000).toDateString() === date.toDateString();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  if (sameDay) return `今天 ${hh}:${mm}`;
+  if (yesterday) return `昨天 ${hh}:${mm}`;
+  return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, "0")}`;
 }
+
+export default TaskCard;

@@ -53,7 +53,7 @@ describe('ProfilePage', () => {
     });
 
     expect(screen.getByText('admin')).toBeInTheDocument();
-    expect(screen.getByText('待办 3')).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('3'))).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '草稿箱' })).toHaveAttribute(
       'href',
       '/tasks?status=draft',

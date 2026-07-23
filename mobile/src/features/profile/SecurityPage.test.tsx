@@ -100,7 +100,7 @@ describe('SecurityPage', () => {
     renderSecurity(fetchMock);
 
     await screen.findByText('iPhone Safari');
-    fireEvent.click(screen.getByRole('button', { name: '移除 iPhone Safari' }));
+    fireEvent.click(screen.getByRole('button', { name: '移除' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

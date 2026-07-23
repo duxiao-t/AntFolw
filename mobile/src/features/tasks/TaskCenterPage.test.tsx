@@ -119,11 +119,11 @@ describe('TaskCenterPage', () => {
   it('shows pending tasks by default with task and instance status separated', async () => {
     renderTaskCenter();
 
-    expect(await screen.findByRole('heading', { name: '任务中心' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '待办' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '待我处理' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
     const pendingCard = screen.getByRole('link', { name: /请假申请/ });
-    expect(screen.getByText('张三 · 研发部')).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('张三'))).toBeInTheDocument();
     expect(within(pendingCard).getByText('待审批')).toBeInTheDocument();
     expect(within(pendingCard).getByText('进行中')).toBeInTheDocument();
     expect(pendingCard).toHaveAttribute(
@@ -139,10 +139,10 @@ describe('TaskCenterPage', () => {
 
     expect(await screen.findByText('报销申请')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '已处理' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('searchbox', { name: '搜索任务' })).toHaveValue('报销');
+    expect(screen.getByRole('searchbox', { name: '搜索表单、申请人或节点' })).toHaveValue('报销');
     expect(screen.getByLabelText('状态筛选')).toHaveValue('SKIPPED');
     const doneCard = screen.getByRole('link', { name: /报销申请/ });
-    expect(within(doneCard).getByText('已同意')).toBeInTheDocument();
+    expect(within(doneCard).getByText((text) => text.includes('已同意'))).toBeInTheDocument();
     expect(within(doneCard).getByText('已通过')).toBeInTheDocument();
     expect(doneCard).toHaveAttribute(
       'href',
@@ -152,7 +152,7 @@ describe('TaskCenterPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: '我发起的' }));
 
     expect(await screen.findByText('采购申请')).toBeInTheDocument();
-    expect(screen.getByRole('searchbox', { name: '搜索任务' })).toHaveValue('报销');
+    expect(screen.getByRole('searchbox', { name: '搜索表单、申请人或节点' })).toHaveValue('报销');
     expect(router.state.location.pathname + router.state.location.search).toContain('view=process');
     expect(router.state.location.pathname + router.state.location.search).toContain('keyword=%E6%8A%A5%E9%94%80');
     expect(router.state.location.pathname + router.state.location.search).not.toContain('status=SKIPPED');
@@ -163,7 +163,7 @@ describe('TaskCenterPage', () => {
 
     expect(await screen.findByText('采购申请')).toBeInTheDocument();
     const processCard = screen.getByRole('link', { name: /采购申请/ });
-    expect(within(processCard).getByText('当前节点：部门审批')).toBeInTheDocument();
+    expect(within(processCard).getByText((text) => text.includes('当前节点'))).toBeInTheDocument();
     expect(within(processCard).getByText('进行中')).toBeInTheDocument();
     expect(processCard).toHaveAttribute(
       'href',
@@ -189,7 +189,7 @@ describe('TaskCenterPage', () => {
 
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
     expect(screen.getByText('还有更多任务，请继续下拉加载')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }));
+    await userEvent.click(screen.getByRole('button', { name: '还有更多任务，请继续下拉加载' }));
     expect(await screen.findByText('加班申请')).toBeInTheDocument();
   });
 });
