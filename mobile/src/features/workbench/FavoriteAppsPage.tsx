@@ -1,61 +1,29 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AppPage } from '../../shared/ui/AppPage';
-import { PageEmpty, PageError } from '../../shared/ui/PageStates';
-import { apiRequest } from '../../shared/api/http';
-import { queryKeys } from '../../shared/api/queryKeys';
-import { useFavoriteDraftStore } from './apps.store';
-import type { MobileApp } from '../../shared/api/types';
-import { useMobileBootstrap } from './workbench.api';
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AppPage } from "../../shared/ui/AppPage";
+import { PageEmpty, PageError } from "../../shared/ui/PageStates";
+import { apiRequest } from "../../shared/api/http";
+import { queryKeys } from "../../shared/api/queryKeys";
+import { useFavoriteDraftStore } from "./apps.store";
+import type { MobileApp } from "../../shared/api/types";
+import { useMobileBootstrap } from "./workbench.api";
 
 async function saveFavorites(ids: number[]): Promise<void> {
-  await apiRequest('/api/mobile/preferences/apps', {
-    method: 'PUT',
+  await apiRequest("/api/mobile/preferences/apps", {
+    method: "PUT",
     body: JSON.stringify({ formIds: ids }),
   });
 }
 
-const baseItemStyle: React.CSSProperties = {
-  minHeight: 32,
-  padding: '4px 12px',
-  borderRadius: 6,
-  border: '1px solid var(--af-color-border)',
-  background: 'var(--af-color-surface)',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  fontSize: 'inherit',
-};
-
-const ghostStyle: React.CSSProperties = {
-  flex: 1,
-  minHeight: 44,
-  padding: '8px 16px',
-  borderRadius: 'var(--af-radius-surface)',
-  border: '1px solid var(--af-color-border)',
-  background: 'var(--af-color-surface)',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  fontSize: 'inherit',
-};
-
-function primaryStyle(disabled: boolean): React.CSSProperties {
-  return {
-    flex: 1,
-    minHeight: 44,
-    padding: '8px 16px',
-    borderRadius: 'var(--af-radius-surface)',
-    border: 'none',
-    background: disabled ? 'rgba(22,119,255,0.4)' : 'var(--af-color-primary)',
-    color: 'var(--af-color-on-primary)',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    fontFamily: 'inherit',
-    fontSize: 'inherit',
-  };
+function fallbackApp(id: number): MobileApp {
+  return { formId: id, code: `unknown-${id}`, name: `应用 ${id}`, category: "other", categoryLabel: "其他" };
 }
 
-function fallbackApp(id: number): MobileApp {
-  return { formId: id, code: `unknown-${id}`, name: `应用 ${id}`, category: 'other', categoryLabel: '其他' };
+function initials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  return trimmed.charAt(0);
 }
 
 export function FavoriteAppsPage() {
@@ -65,7 +33,7 @@ export function FavoriteAppsPage() {
   const bootstrapQuery = useMobileBootstrap();
   const catalogQuery = useQuery({
     queryKey: queryKeys.apps({}),
-    queryFn: () => apiRequest<MobileApp[]>('/api/mobile/apps'),
+    queryFn: () => apiRequest<MobileApp[]>("/api/mobile/apps"),
     enabled: draft.ids.length > 0,
     retry: 0,
     refetchOnWindowFocus: false,
@@ -76,7 +44,7 @@ export function FavoriteAppsPage() {
     onSuccess: async () => {
       draft.markClean();
       await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
-      navigate('/workbench');
+      navigate("/workbench");
     },
   });
 
@@ -94,16 +62,27 @@ export function FavoriteAppsPage() {
   }
 
   return (
-    <AppPage title="常用应用" description="拖动排序，完成保存后生效">
-      {mutation.isError ? (
-        <p
-          role="alert"
-          style={{
-            margin: '0 0 12px',
-            color: 'var(--af-color-danger)',
-            fontSize: '0.875rem',
+    <AppPage
+      title="管理常用应用"
+      action={
+        <button
+          type="button"
+          className="af-link-button"
+          onClick={() => {
+            if (!draft.isDirty) {
+              navigate("/apps");
+              return;
+            }
+            mutation.mutate(Array.from(draft.ids));
           }}
+          style={{ fontSize: 13 }}
         >
+          完成
+        </button>
+      }
+    >
+      {mutation.isError ? (
+        <p role="alert" style={{ margin: "0 0 12px", color: "var(--af-color-danger)", fontSize: 13 }}>
           保存失败，请重试
         </p>
       ) : null}
@@ -118,66 +97,84 @@ export function FavoriteAppsPage() {
         <PageEmpty title="还没有常用应用" hint="回到应用目录先选几个吧" />
       ) : null}
       {!catalogQuery.isError && items.length > 0 ? (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {items.map((app, index) => (
-            <li
-              key={app.formId}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '12px 16px',
-                marginBottom: 8,
-                background: 'var(--af-color-surface)',
-                borderRadius: 'var(--af-radius-surface)',
-              }}
-            >
-              <span style={{ flex: 1, fontWeight: 500 }}>{app.name}</span>
-              <button
-                type="button"
-                onClick={() => handleMove(index, index - 1)}
-                aria-label="上移"
-                style={baseItemStyle}
-                disabled={index === 0}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                onClick={() => handleMove(index, index + 1)}
-                aria-label="下移"
-                style={baseItemStyle}
-                disabled={index === items.length - 1}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm(`确定从常用应用移除「${app.name}」吗？`)) draft.remove(app.formId);
+        <section className="af-card">
+          <div className="af-card__title">
+            <span>已添加</span>
+            <small style={{ fontSize: 10, fontWeight: 400 }}>拖动排序</small>
+          </div>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+            {items.map((app, index) => (
+              <li
+                key={app.formId}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 4px",
+                  borderTop: index === 0 ? "0" : "1px solid var(--af-color-line)",
                 }}
-                aria-label="移除"
-                style={baseItemStyle}
               >
-                移除
-              </button>
-            </li>
-          ))}
-        </ul>
+                <span className="af-app-grid__icon" style={{ width: 32, height: 32, fontSize: 13 }}>
+                  {initials(app.name)}
+                </span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{app.name}</span>
+                <button
+                  type="button"
+                  onClick={() => handleMove(index, index - 1)}
+                  aria-label="上移"
+                  disabled={index === 0}
+                  style={{
+                    width: 36,
+                    height: 28,
+                    borderRadius: 6,
+                    border: "1px solid var(--af-color-input-border)",
+                    background: "var(--af-color-surface)",
+                    cursor: index === 0 ? "not-allowed" : "pointer",
+                    opacity: index === 0 ? 0.4 : 1,
+                  }}
+                >
+                  {"\u2191"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMove(index, index + 1)}
+                  aria-label="下移"
+                  disabled={index === items.length - 1}
+                  style={{
+                    width: 36,
+                    height: 28,
+                    borderRadius: 6,
+                    border: "1px solid var(--af-color-input-border)",
+                    background: "var(--af-color-surface)",
+                    cursor: index === items.length - 1 ? "not-allowed" : "pointer",
+                    opacity: index === items.length - 1 ? 0.4 : 1,
+                  }}
+                >
+                  {"\u2193"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`确定从常用应用移除「${app.name}」吗？`)) draft.remove(app.formId);
+                  }}
+                  aria-label="移除"
+                  style={{
+                    minHeight: 28,
+                    padding: "0 10px",
+                    borderRadius: 6,
+                    border: "1px solid var(--af-color-input-border)",
+                    background: "var(--af-color-surface)",
+                    color: "var(--af-color-danger)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {"\u00D7"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
-      <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-        <button type="button" onClick={() => navigate('/apps')} style={ghostStyle}>
-          返回选择
-        </button>
-        <button
-          type="button"
-          onClick={() => mutation.mutate(Array.from(draft.ids))}
-          disabled={!draft.isDirty || mutation.isPending}
-          style={primaryStyle(!draft.isDirty || mutation.isPending)}
-        >
-          完成
-        </button>
-      </div>
     </AppPage>
   );
 }
