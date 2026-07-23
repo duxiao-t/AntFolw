@@ -1,6 +1,7 @@
 package com.antflow.org;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 @Data
@@ -9,6 +10,7 @@ public class User {
     @TableId(type = IdType.AUTO) private Long id;
     private Long deptId;
     private String username;
+    @JsonIgnore
     private String passwordHash;
     private String displayName;
     private String email;

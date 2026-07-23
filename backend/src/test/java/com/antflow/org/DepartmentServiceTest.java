@@ -1,11 +1,14 @@
 package com.antflow.org;
 
+import com.antflow.engine.BizException;
+
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -143,6 +146,22 @@ class DepartmentServiceTest {
         verify(mapper).updateById(third);
     }
 
+    @Test
+    void deleteRejectsDepartmentThatStillHasMembers() {
+        DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
+        DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
+        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        Department department = dept(4L, null, "d_4", "Operations");
+        when(mapper.selectById(4L)).thenReturn(department);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(mapper.countUsers(4L)).thenReturn(2L);
+
+        BizException error = assertThrows(BizException.class, () -> service.delete(4L));
+
+        assertEquals("HAS_USERS", error.getCode());
+        assertEquals("部门下仍有成员，请先移动或删除成员", error.getMessage());
+        Mockito.verify(mapper, Mockito.never()).deleteById(4L);
+    }
     private static Department dept(Long id, Long parentId, String path, String name) {
         Department d = new Department();
         d.setId(id);

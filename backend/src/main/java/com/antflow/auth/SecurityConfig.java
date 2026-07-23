@@ -16,16 +16,15 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
-@EnableMethodSecurity   // enables @PreAuthorize("hasRole('admin')") on controllers
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
     private final JwtService jwtService;
-    private final JwtProperties jwtProperties;
+    private final CorsProperties corsProperties;
     private final LoginRateLimitFilter loginRateLimitFilter;
     private final IdempotencyFilter idempotencyFilter;
 
@@ -33,25 +32,18 @@ public class SecurityConfig {
     public SecurityFilterChain filter(HttpSecurity http) throws Exception {
         return http
             .csrf(AbstractHttpConfigurer::disable)
-            .cors(c -> {
-                CorsConfiguration cfg = new CorsConfiguration();
-                String raw = jwtProperties.getSecret() == null
-                    ? "http://localhost:8000"
-                    : "http://localhost:8000";
-                List<String> allowed = Arrays.stream(raw.split(","))
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .toList();
-                cfg.setAllowedOrigins(allowed);
-                cfg.setAllowedMethods(List.of("GET","POST","PUT","DELETE","OPTIONS","PATCH"));
-                cfg.setAllowedHeaders(List.of("*"));
-                cfg.setAllowCredentials(true);
-                UrlBasedCorsConfigurationSource src = new UrlBasedCorsConfigurationSource();
-                src.registerCorsConfiguration("/**", cfg);
-                c.configurationSource(src);
+            .cors(cors -> {
+                CorsConfiguration corsConfiguration = new CorsConfiguration();
+                corsConfiguration.setAllowedOrigins(corsProperties.getAllowedOrigins());
+                corsConfiguration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+                corsConfiguration.setAllowedHeaders(List.of("*"));
+                corsConfiguration.setAllowCredentials(true);
+                UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+                source.registerCorsConfiguration("/**", corsConfiguration);
+                cors.configurationSource(source);
             })
-            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(reg -> reg
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(registry -> registry
                 .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                 .requestMatchers("/actuator/**", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

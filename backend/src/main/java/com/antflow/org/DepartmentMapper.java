@@ -14,6 +14,8 @@ public interface DepartmentMapper extends BaseMapper<Department> {
      * Returns this department AND all its descendants via ltree's `<@`
      * ("is descendant of including") operator.
      */
+    @Select("SELECT COUNT(*) FROM t_user WHERE dept_id = #{departmentId}")
+    long countUsers(@Param("departmentId") Long departmentId);
     @Select("SELECT * FROM t_department WHERE path <@ CAST(#{path} AS ltree) ORDER BY path")
     List<Department> subtree(@Param("path") String path);
 }

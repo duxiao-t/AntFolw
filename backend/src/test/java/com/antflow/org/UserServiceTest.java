@@ -11,6 +11,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,6 +21,51 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UserServiceTest {
+    @Test
+    void createRejectsDuplicateUsernameBeforeInsert() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        RoleMapper roleMapper = Mockito.mock(RoleMapper.class);
+        PasswordEncoder encoder = Mockito.mock(PasswordEncoder.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        User user = new User();
+        user.setUsername("duplicate");
+        user.setDisplayName("Duplicate User");
+        when(userMapper.selectCount(any())).thenReturn(1L);
+
+        BizException error = assertThrows(BizException.class, () -> service.create(user, List.of()));
+
+        assertEquals("USERNAME_EXISTS", error.getCode());
+        assertEquals("账号已存在", error.getMessage());
+        verify(userMapper, never()).insert(any(User.class));
+    }
+
+    @Test
+    void createRejectsUnknownDepartmentBeforeInsert() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        RoleMapper roleMapper = Mockito.mock(RoleMapper.class);
+        PasswordEncoder encoder = Mockito.mock(PasswordEncoder.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        User user = new User();
+        user.setUsername("new-user");
+        user.setDisplayName("New User");
+        user.setDeptId(999L);
+        when(userMapper.selectCount(any())).thenReturn(0L);
+        when(departmentMapper.selectById(999L)).thenReturn(null);
+
+        BizException error = assertThrows(BizException.class, () -> service.create(user, List.of()));
+
+        assertEquals("DEPARTMENT_NOT_FOUND", error.getCode());
+        assertEquals("所属部门不存在", error.getMessage());
+        verify(userMapper, never()).insert(any(User.class));
+    }
     @Test
     void deleteClearsUserAssociationsBeforeRemovingUser() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);

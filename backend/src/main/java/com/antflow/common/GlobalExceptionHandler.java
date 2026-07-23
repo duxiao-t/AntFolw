@@ -3,6 +3,7 @@ package com.antflow.common;
 import com.antflow.engine.BizException;
 import com.antflow.engine.NoAssigneeFoundException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -33,6 +34,22 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleBiz(BizException e) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
             .body(envelope(e.getCode(), e.getMessage()));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleDataIntegrity(DataIntegrityViolationException e) {
+        String detail = e.getMostSpecificCause().getMessage();
+        if (detail != null && detail.contains("t_user_username_key")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(envelope("USERNAME_EXISTS", "账号已存在"));
+        }
+        if (detail != null && detail.contains("t_user_dept_id_fkey")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(envelope("HAS_USERS", "部门下仍有成员，请先移动或删除成员"));
+        }
+        log.warn("data integrity conflict: {}", detail);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(envelope("DATA_CONFLICT", "数据存在关联或重复，请检查后重试"));
     }
 
     @ExceptionHandler(BadCredentialsException.class)

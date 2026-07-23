@@ -23,8 +23,13 @@ public class UserService {
     private final DepartmentLeaderMapper leaderMapper;
     private final JdbcTemplate jdbcTemplate;
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds) {
+        validateUsernameAvailable(u.getUsername(), null);
+        validateDisplayName(u.getDisplayName());
+        validateDepartment(u.getDeptId());
+        u.setUsername(u.getUsername().trim());
+        u.setDisplayName(u.getDisplayName().trim());
         // MVP demo default — production must require explicit password
         // and force first-login change.
         String raw = u.getPasswordHash() == null ? "ant.design" : u.getPasswordHash();
@@ -35,13 +40,13 @@ public class UserService {
         return u.getId();
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void setRoles(Long userId, List<Long> roleIds) {
         userRoleMapper.delete(new QueryWrapper<UserRole>().eq("user_id", userId));
         setRolesInternal(userId, roleIds);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId) {
         User u = userMapper.selectById(userId);
         if (u == null) {
@@ -57,6 +62,31 @@ public class UserService {
         leaderMapper.delete(new QueryWrapper<DepartmentLeader>().eq("user_id", userId));
         departmentMapper.update(null, new UpdateWrapper<Department>().eq("leader_id", userId).set("leader_id", null));
         userMapper.deleteById(userId);
+    }
+
+    void validateUsernameAvailable(String username, Long excludedUserId) {
+        if (username == null || username.isBlank()) {
+            throw new BizException("USERNAME_REQUIRED", "账号不能为空");
+        }
+        QueryWrapper<User> query = new QueryWrapper<User>().eq("username", username.trim());
+        if (excludedUserId != null) {
+            query.ne("id", excludedUserId);
+        }
+        if (userMapper.selectCount(query) > 0) {
+            throw new BizException("USERNAME_EXISTS", "账号已存在");
+        }
+    }
+
+    void validateDepartment(Long departmentId) {
+        if (departmentId != null && departmentMapper.selectById(departmentId) == null) {
+            throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
+        }
+    }
+
+    private void validateDisplayName(String displayName) {
+        if (displayName == null || displayName.isBlank()) {
+            throw new BizException("DISPLAY_NAME_REQUIRED", "姓名不能为空");
+        }
     }
 
     public List<String> rolesOf(Long userId) {

@@ -56,9 +56,17 @@ public class UserController {
         if (body.containsKey("position")) u.setPosition((String) body.get("position"));
         if (body.containsKey("gender")) u.setGender((String) body.get("gender"));
         if (body.containsKey("deptId")) {
-            u.setDeptId(body.get("deptId") == null ? null : ((Number) body.get("deptId")).longValue());
+            Long departmentId = body.get("deptId") == null
+                ? null
+                : ((Number) body.get("deptId")).longValue();
+            userService.validateDepartment(departmentId);
+            u.setDeptId(departmentId);
         }
-        if (body.containsKey("username")) u.setUsername((String) body.get("username"));
+        if (body.containsKey("username")) {
+            String username = (String) body.get("username");
+            userService.validateUsernameAvailable(username, id);
+            u.setUsername(username.trim());
+        }
         userMapper.updateById(u);
         return u;
     }

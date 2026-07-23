@@ -176,6 +176,9 @@ public class DepartmentService {
         if (!children.isEmpty()) {
             throw new BizException("HAS_CHILDREN", "请先删除子部门");
         }
+        if (mapper.countUsers(id) > 0) {
+            throw new BizException("HAS_USERS", "部门下仍有成员，请先移动或删除成员");
+        }
         mapper.deleteById(id);
     }
 
