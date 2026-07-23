@@ -62,6 +62,6 @@ describe('MobileShell', () => {
     wrap(null, '/workbench');
     expect(screen.getByTestId('mobile-shell')).toBeInTheDocument();
     const nav = screen.getByLabelText('主导航');
-    expect(nav.className).toContain('tabBarWrap');
+    expect(nav.className).toContain('af-tabbar');
   });
 });

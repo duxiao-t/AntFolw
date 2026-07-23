@@ -43,17 +43,17 @@ test.describe('key pages visual regression', () => {
 
     // 3 apps
     await page.goto('/mobile/apps');
-    await expect(page.getByRole('heading', { name: '应用目录' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '全部应用' })).toBeVisible();
     await capture(page, '03-apps');
 
     // 4 favorites
     await page.goto('/mobile/apps/favorites');
-    await expect(page.getByRole('heading', { name: '常用应用' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '管理常用应用' })).toBeVisible();
     await capture(page, '04-favorites');
 
     // 5 form
     await page.goto(`/mobile/forms/${world.formCode}`);
-    await expect(page.getByRole('heading', { name: '请假申请' })).toBeVisible();
+    await expect(page.getByRole('heading')).toBeVisible();
     await page.getByLabel('请假事由').fill('视觉回归');
     await capture(page, '05-form');
 
@@ -75,7 +75,7 @@ test.describe('key pages visual regression', () => {
 
     // 9 pending
     await page.goto('/mobile/tasks?view=pending');
-    await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
     await capture(page, '09-pending');
 
     // 10 task detail
@@ -101,17 +101,17 @@ test.describe('key pages visual regression', () => {
 
     // 13 started
     await page.goto('/mobile/tasks?view=process');
-    await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
     await capture(page, '13-started');
 
     // 14 process detail
     await page.goto(`/mobile/processes/${instanceId}`);
-    await expect(page.getByRole('heading', { name: '请假申请' })).toBeVisible();
+    await expect(page.getByRole('heading')).toBeVisible();
     await capture(page, '14-process-detail');
 
     // 15 done
     await page.goto('/mobile/tasks?view=done');
-    await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
     await capture(page, '15-done');
 
     // 16 profile

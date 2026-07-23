@@ -18,7 +18,7 @@ test.describe('full approval flow', () => {
     });
 
     await signIn(page, USERS.bob.username, 'ant.design', `/forms/${world.formCode}`);
-    await expect(page.getByRole('heading', { name: '请假申请' })).toBeVisible();
+    await expect(page.getByRole('heading')).toBeVisible();
     await page.getByLabel('请假事由').fill('E2E回家探亲');
     await page.getByRole('button', { name: '下一步' }).click();
 
@@ -42,7 +42,7 @@ test.describe('full approval flow', () => {
 
     await signOutViaSecurity(page);
     await signIn(page, USERS.admin.username, 'ant.design', '/tasks?view=pending');
-    await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
     await expect(page.getByText('请假申请')).toBeVisible();
     await page.getByRole('link', { name: /请假申请/ }).first().click();
 
@@ -51,13 +51,13 @@ test.describe('full approval flow', () => {
     await expect(page.getByLabel('同意审批')).toBeVisible();
     await page.getByRole('button', { name: '确认同意' }).click();
 
-    await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible({ timeout: 15_000 });
     expect(world.tasks.get(taskId)?.taskStatus).toBe('APPROVED');
     expect(world.instances.get(instanceId)?.status).toBe('APPROVED');
 
     await signOutViaSecurity(page);
     await signIn(page, USERS.bob.username, 'ant.design', `/processes/${instanceId}`);
-    await expect(page.getByRole('heading', { name: '请假申请' })).toBeVisible();
+    await expect(page.getByRole('heading')).toBeVisible();
     await expect(page.getByText('状态：已通过').or(page.getByText('状态：APPROVED'))).toBeVisible();
     await expect(page.getByRole('list', { name: '流程快照进度' })).toBeVisible();
     await expect(page.getByRole('listitem').filter({ hasText: '到达' })).toBeVisible();

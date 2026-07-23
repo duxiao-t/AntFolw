@@ -78,7 +78,7 @@ test.describe('permission and idempotency', () => {
     await expect(page.getByText('回家探亲')).toBeVisible();
     await page.getByRole('button', { name: '同意' }).click();
     await page.getByRole('button', { name: '确认同意' }).click();
-    await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible({ timeout: 15_000 });
     expect(world.approvePostCount).toBeGreaterThanOrEqual(1);
     expect(world.tasks.get(taskId)?.taskStatus).toBe('APPROVED');
 

@@ -153,7 +153,7 @@ test('captures deterministic key page screenshots', async ({ page }) => {
   await expect(page).toHaveScreenshot('workbench.png', { fullPage: true });
 
   await signIn(page, '/apps');
-  await expect(page.getByRole('heading', { name: '应用目录' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '全部应用' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await expect(page).toHaveScreenshot('app-catalog.png', { fullPage: true });
 
