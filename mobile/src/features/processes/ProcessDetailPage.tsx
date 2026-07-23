@@ -1,68 +1,23 @@
-import { useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button } from 'antd-mobile';
-import type { CSSProperties } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { isApiError } from '../../shared/api/errors';
-import { queryKeys } from '../../shared/api/queryKeys';
-import { AppPage } from '../../shared/ui/AppPage';
-import { PageError, PageSkeleton } from '../../shared/ui/PageStates';
-import { DynamicFormRenderer } from '../forms/components/DynamicFormRenderer';
-import type { MobileFormValues, MobileSchemaNode } from '../forms/schema/types';
-import { ProcessSnapshotTimeline } from './ProcessSnapshotTimeline';
-import { fetchMobileInstanceDetail, withdrawMobileInstance } from './processes.api';
-
-const sectionStyle: CSSProperties = {
-  background: 'var(--af-color-surface)',
-  borderRadius: 'var(--af-radius-surface)',
-  padding: 12,
-  display: 'grid',
-  gap: 10,
-};
-
-const labelStyle: CSSProperties = {
-  color: 'rgba(0,0,0,0.55)',
-  fontSize: '0.8125rem',
-};
-
-const metaStyle: CSSProperties = {
-  color: 'rgba(0,0,0,0.55)',
-  fontSize: '0.8125rem',
-};
-
-const bottomActionStyle: CSSProperties = {
-  position: 'fixed',
-  left: 0,
-  right: 0,
-  bottom: 0,
-  display: 'grid',
-  gap: 8,
-  padding: '12px 16px calc(16px + env(safe-area-inset-bottom))',
-  background: 'var(--af-color-bg)',
-  boxShadow: '0 -8px 20px rgba(0,0,0,0.08)',
-};
-
-const noticeStyle: CSSProperties = {
-  margin: 0,
-  padding: '10px 12px',
-  borderRadius: 8,
-  background: 'rgba(22, 119, 255, 0.08)',
-  color: 'var(--af-color-primary)',
-};
-
-const errorStyle: CSSProperties = {
-  margin: 0,
-  color: 'var(--af-color-danger)',
-};
+import { useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { isApiError } from "../../shared/api/errors";
+import { queryKeys } from "../../shared/api/queryKeys";
+import { AppPage } from "../../shared/ui/AppPage";
+import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
+import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
+import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
+import { ProcessSnapshotTimeline } from "./ProcessSnapshotTimeline";
+import { fetchMobileInstanceDetail, withdrawMobileInstance } from "./processes.api";
 
 export function ProcessDetailPage() {
-  const { instanceId = '' } = useParams();
+  const { instanceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const numericInstanceId = Number(instanceId);
-  const [statusNotice, setStatusNotice] = useState('');
-  const [actionError, setActionError] = useState('');
+  const [statusNotice, setStatusNotice] = useState("");
+  const [actionError, setActionError] = useState("");
   const withdrawKeyRef = useRef(createIdempotencyKey());
 
   const instanceQuery = useQuery({
@@ -75,19 +30,19 @@ export function ProcessDetailPage() {
   const withdrawMutation = useMutation({
     mutationFn: () => withdrawMobileInstance(numericInstanceId, withdrawKeyRef.current),
     async onSuccess() {
-      setActionError('');
-      setStatusNotice('');
+      setActionError("");
+      setStatusNotice("");
       await invalidateProcessCaches(queryClient, numericInstanceId);
       navigate(returnPath(searchParams), { replace: true });
     },
     async onError(error) {
-      if (isApiError(error) && (error.status === 409 || error.body.code === 'ALREADY_ACTED')) {
-        setActionError('');
-        setStatusNotice('流程状态已更新');
+      if (isApiError(error) && (error.status === 409 || error.body.code === "ALREADY_ACTED")) {
+        setActionError("");
+        setStatusNotice("流程状态已更新");
         await instanceQuery.refetch();
         return;
       }
-      setActionError(error instanceof Error ? error.message : '撤回失败');
+      setActionError(error instanceof Error ? error.message : "撤回失败");
     },
   });
 
@@ -113,41 +68,60 @@ export function ProcessDetailPage() {
   }
 
   const instance = instanceQuery.data;
-  const history = instance.history ?? [];
   const files = instance.files ?? [];
   const canWithdraw = instance.canWithdraw;
+  const formInitial = (instance.formName ?? "流程").trim().charAt(0);
 
   return (
     <AppPage
-      title={instance.formName ?? '流程详情'}
-      description={`状态：${instanceStatusLabel(instance.status)}`}
-      toolbar={
-        <Button size="small" fill="outline" onClick={() => navigate(returnPath(searchParams))}>
-          返回
-        </Button>
+      title="流程进度"
+      action={
+        <button
+          type="button"
+          className="af-link-button"
+          style={{ fontSize: 16 }}
+          aria-label="更多操作"
+        >
+          {"\u2022\u2022\u2022"}
+        </button>
       }
     >
-      <div style={{ display: 'grid', gap: 12, paddingBottom: canWithdraw ? 96 : 16 }}>
+      <div className="af-section-stack">
+        <section className="af-process-summary">
+          <div className="af-process-summary__row">
+            <span className="af-app-grid__icon" aria-hidden="true">{formInitial}</span>
+            <div>
+              <b>{instance.formName ?? `流程#${instance.id}`}</b>
+              <small>实例 #{instance.id}</small>
+            </div>
+          </div>
+          <div className="af-process-summary__status">
+            <span>发起于 {formatTime(instance.startedAt)}</span>
+            <span className="af-tag">{instanceStatusLabel(instance.status)}</span>
+          </div>
+        </section>
+
         {statusNotice ? (
-          <p role="status" style={noticeStyle}>
+          <p role="status" style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "var(--af-color-primary-soft)", color: "var(--af-color-primary)", fontSize: 11 }}>
             {statusNotice}
           </p>
         ) : null}
         {actionError ? (
-          <p role="alert" style={errorStyle}>
+          <p role="alert" style={{ margin: 0, color: "var(--af-color-danger)", fontSize: 11 }}>
             {actionError}
           </p>
         ) : null}
 
-        <section style={sectionStyle} aria-label="流程状态">
-          <span style={labelStyle}>表单</span>
-          <strong>{instance.formName ?? `流程#${instance.id}`}</strong>
-          <span style={labelStyle}>状态</span>
-          <span>{instanceStatusLabel(instance.status)}</span>
+        <section className="af-card">
+          <div className="af-card__title"><span>审批进度</span></div>
+          <ProcessSnapshotTimeline
+            history={instance.history ?? []}
+            processSnapshot={instance.processSnapshot}
+          />
         </section>
 
-        <section style={sectionStyle} aria-label="表单内容">
-          <strong>表单内容</strong>
+        <section className="af-card">
+          <div className="af-card__title"><span>申请摘要</span></div>
           {schema.length > 0 ? (
             <DynamicFormRenderer
               schema={schema}
@@ -156,53 +130,47 @@ export function ProcessDetailPage() {
               onValueChange={() => undefined}
             />
           ) : (
-            <p style={metaStyle}>暂无表单字段</p>
+            <p style={{ margin: 0, fontSize: 11, color: "var(--af-color-muted)" }}>暂无表单字段</p>
           )}
         </section>
 
-        <section style={sectionStyle} aria-label="附件">
-          <strong>附件</strong>
+        <section className="af-card">
+          <div className="af-card__title"><span>附件</span></div>
           {files.length === 0 ? (
-            <p style={metaStyle}>暂无附件</p>
+            <p style={{ margin: 0, fontSize: 11, color: "var(--af-color-muted)" }}>暂无附件</p>
           ) : (
-            <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 6 }}>
+            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
               {files.map((file) => (
-                <li key={file.id}>
-                  <a href={file.contentUrl} target="_blank" rel="noreferrer">
-                    {file.name}
-                  </a>
+                <li key={file.id} className="af-recent-list__item" style={{ padding: "6px 0", borderTop: "0" }}>
+                  <i className="af-recent-list__dot" />
+                  <span className="af-recent-list__main">
+                    <b>{file.name}</b>
+                  </span>
+                  <span className="af-tag">查看</span>
                 </li>
               ))}
             </ul>
           )}
         </section>
-
-        <section style={sectionStyle} aria-label="流程进度">
-          <strong>流程进度</strong>
-          <ProcessSnapshotTimeline
-            history={history}
-            processSnapshot={instance.processSnapshot}
-          />
-        </section>
       </div>
 
       {canWithdraw ? (
-        <div style={bottomActionStyle}>
-          <Button
-            color="danger"
-            loading={withdrawMutation.isPending}
+        <div className="af-bottom-bar">
+          <button
+            type="button"
+            className="af-btn af-btn--danger-solid af-btn--block"
             disabled={withdrawMutation.isPending}
             onClick={() => {
-              if (!window.confirm('确认撤回该流程？撤回后不可恢复。')) {
+              if (!window.confirm("确认撤回该流程？撤回后不可恢复。")) {
                 return;
               }
-              setActionError('');
+              setActionError("");
               withdrawKeyRef.current = createIdempotencyKey();
               withdrawMutation.mutate();
             }}
           >
-            撤回
-          </Button>
+            {withdrawMutation.isPending ? "撤回中..." : "撤回流程"}
+          </button>
         </div>
       ) : null}
     </AppPage>
@@ -215,19 +183,19 @@ async function invalidateProcessCaches(
 ) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }),
-    queryClient.invalidateQueries({ queryKey: ['mobile', 'tasks'] }),
+    queryClient.invalidateQueries({ queryKey: ["mobile", "tasks"] }),
     queryClient.invalidateQueries({ queryKey: queryKeys.instance(instanceId) }),
   ]);
 }
 
 function returnPath(searchParams: URLSearchParams): string {
   const params = new URLSearchParams();
-  const view = searchParams.get('returnView') ?? 'process';
-  const keyword = searchParams.get('returnKeyword');
-  const status = searchParams.get('returnStatus');
-  params.set('view', view);
-  if (keyword) params.set('keyword', keyword);
-  if (status) params.set('status', status);
+  const view = searchParams.get("returnView") ?? "process";
+  const keyword = searchParams.get("returnKeyword");
+  const status = searchParams.get("returnStatus");
+  params.set("view", view);
+  if (keyword) params.set("keyword", keyword);
+  if (status) params.set("status", status);
   return `/tasks?${params.toString()}`;
 }
 
@@ -239,7 +207,7 @@ function normalizeSchema(schema: unknown): MobileSchemaNode[] {
 }
 
 function normalizeValues(formData: Record<string, unknown> | null | undefined): MobileFormValues {
-  if (!formData || typeof formData !== 'object' || Array.isArray(formData)) {
+  if (!formData || typeof formData !== "object" || Array.isArray(formData)) {
     return {};
   }
   return formData;
@@ -247,21 +215,35 @@ function normalizeValues(formData: Record<string, unknown> | null | undefined): 
 
 function instanceStatusLabel(status: string): string {
   switch (status) {
-    case 'RUNNING':
-      return '进行中';
-    case 'APPROVED':
-      return '已通过';
-    case 'REJECTED':
-      return '已驳回';
-    case 'WITHDRAWN':
-      return '已撤回';
+    case "RUNNING":
+      return "进行中";
+    case "APPROVED":
+      return "已通过";
+    case "REJECTED":
+      return "已驳回";
+    case "WITHDRAWN":
+      return "已撤回";
     default:
       return status;
   }
 }
 
+function formatTime(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now.getTime() - 86400000).toDateString() === date.toDateString();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  if (sameDay) return `今天 ${hh}:${mm}`;
+  if (yesterday) return `昨天 ${hh}:${mm}`;
+  return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function createIdempotencyKey() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `withdraw-${Date.now()}-${Math.random().toString(16).slice(2)}`;

@@ -116,11 +116,11 @@ describe('ProcessDetailPage', () => {
   it('renders process snapshot timeline and withdraw when allowed', async () => {
     renderProcess();
 
-    expect(await screen.findByRole('heading', { name: '采购申请' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '流程进度' })).toBeInTheDocument();
     expect(screen.getByText('显示器')).toBeInTheDocument();
     expect(screen.getByText('到达')).toBeInTheDocument();
     expect(screen.getByText(/部门审批/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '撤回' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '撤回流程' })).toBeInTheDocument();
   });
 
   it('hides withdraw when canWithdraw is false', async () => {
@@ -128,17 +128,17 @@ describe('ProcessDetailPage', () => {
     renderProcess();
 
     expect(await screen.findByText('已撤回')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '撤回' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '撤回流程' })).not.toBeInTheDocument();
   });
 
   it('confirms withdrawal and navigates back after success', async () => {
     const confirmMock = mockConfirm(true);
     renderProcess();
-    await screen.findByRole('button', { name: '撤回' });
-    await userEvent.click(screen.getByRole('button', { name: '撤回' }));
+    await screen.findByRole('button', { name: '撤回流程' });
+    await userEvent.click(screen.getByRole('button', { name: '撤回流程' }));
 
     expect(confirmMock).toHaveBeenCalled();
-    expect(await screen.findByRole('heading', { name: '任务中心' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
   });
 
   it('does not withdraw when confirmation is cancelled', async () => {
@@ -153,8 +153,8 @@ describe('ProcessDetailPage', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     renderProcess();
-    await screen.findByRole('button', { name: '撤回' });
-    await userEvent.click(screen.getByRole('button', { name: '撤回' }));
+    await screen.findByRole('button', { name: '撤回流程' });
+    await userEvent.click(screen.getByRole('button', { name: '撤回流程' }));
 
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes('/withdraw'))).toBe(true);
   });
@@ -162,12 +162,12 @@ describe('ProcessDetailPage', () => {
   it('handles ALREADY_ACTED by refetching and showing status notice', async () => {
     setupFetch({ conflictOnWithdraw: true });
     renderProcess();
-    await screen.findByRole('button', { name: '撤回' });
-    await userEvent.click(screen.getByRole('button', { name: '撤回' }));
+    await screen.findByRole('button', { name: '撤回流程' });
+    await userEvent.click(screen.getByRole('button', { name: '撤回流程' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('流程状态已更新');
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '撤回' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '撤回流程' })).not.toBeInTheDocument();
     });
   });
 
