@@ -46,7 +46,7 @@ describe('mobile accessibility contracts', () => {
 
     const nav = screen.getByLabelText('主导航');
     expect(nav).toHaveClass('touchSafeNav');
-    expect(nav.className).toContain('tabBarWrap');
+    expect(nav.className).toContain('af-tabbar');
     expect(nav).toHaveAttribute('aria-label', '主导航');
   });
 
@@ -59,6 +59,6 @@ describe('mobile accessibility contracts', () => {
       screen.getByTestId('tab-profile'),
     ];
     expect(tabs).toHaveLength(3);
-    expect(screen.getByTestId('tab-tasks').className).toContain('adm-tab-bar-item-active');
+    expect(screen.getByTestId('tab-tasks').className).toContain('is-active');
   });
 });

@@ -6,8 +6,8 @@ import {
   useMemo,
   useState,
   type PropsWithChildren,
-} from 'react';
-import { OfflineBanner } from '../ui/PageStates';
+} from "react";
+import { OfflineBanner } from "../ui/PageStates";
 
 export type NetworkStatusValue = {
   online: boolean;
@@ -21,7 +21,7 @@ const NetworkStatusContext = createContext<NetworkStatusValue>({
 });
 
 function readOnline(): boolean {
-  if (typeof navigator === 'undefined') {
+  if (typeof navigator === "undefined") {
     return true;
   }
   return navigator.onLine;
@@ -33,17 +33,20 @@ export function NetworkStatusProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const handleOnline = () => setOnline(true);
     const handleOffline = () => setOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     setOnline(readOnline());
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
     };
   }, []);
 
   const onRetry = useCallback(() => {
     setOnline(readOnline());
+    if (typeof window !== "undefined") {
+      window.location.reload();
+    }
   }, []);
 
   const value = useMemo<NetworkStatusValue>(
@@ -56,7 +59,7 @@ export function NetworkStatusProvider({ children }: PropsWithChildren) {
       {!online ? (
         <div
           data-testid="offline-banner-host"
-          style={{ position: 'sticky', top: 0, zIndex: 1000 }}
+          style={{ position: "sticky", top: 0, zIndex: 1000 }}
         >
           <OfflineBanner onRetry={onRetry} />
         </div>
