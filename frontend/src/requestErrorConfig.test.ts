@@ -200,6 +200,17 @@ describe('requestErrorConfig', () => {
       expect(message.error).toHaveBeenCalledWith('Response status:500');
     });
 
+    it('should display the backend business message for axios errors', () => {
+      const error: any = new Error('Axios error');
+      error.response = {
+        status: 422,
+        data: { code: 'USERNAME_EXISTS', message: '账号已存在' },
+      };
+
+      errorHandler(error, {});
+
+      expect(message.error).toHaveBeenCalledWith('账号已存在');
+    });
     it('should handle offline error', () => {
       const error: any = new Error('Network error');
       error.request = {};

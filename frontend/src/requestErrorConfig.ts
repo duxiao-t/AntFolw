@@ -1,4 +1,4 @@
-﻿import type { RequestConfig, RequestOptions } from '@@/plugin-request/request';
+import type { RequestConfig, RequestOptions } from '@@/plugin-request/request';
 import { getIntl } from '@umijs/max';
 import { message, notification } from 'antd';
 
@@ -85,7 +85,12 @@ export const errorConfig: RequestConfig = {
           message.error('无权限');
           return;
         }
-        message.error(`Response status:${status}`);
+        const backendMessage = error.response.data?.message;
+        message.error(
+          typeof backendMessage === 'string' && backendMessage.trim()
+            ? backendMessage
+            : `Response status:${status}`,
+        );
       } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
         message.error(
           getIntl().formatMessage({

@@ -178,7 +178,7 @@ export function MemberFormModal({
       width={520}
       onOk={onOk}
       onCancel={onCancel}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" preserve={false}
         initialValues={editing ? { ...editing, gender: normalizeGender(editing.gender) } : undefined}>

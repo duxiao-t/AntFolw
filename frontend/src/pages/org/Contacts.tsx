@@ -139,58 +139,62 @@ export default function ContactsPage() {
   // --- dept CRUD ---
   const deptCreate = useMutation({
     mutationFn: (body: any) => request('/api/departments', { method: 'POST', data: body }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['depts'] }); msg.success('部门已创建'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['depts'] }); msg.success('部门已创建'); },
   });
   const deptUpdate = useMutation({
     mutationFn: ({ id, ...body }: any) => request(`/api/departments/${id}`, { method: 'PUT', data: body }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['depts'] });
-      qc.invalidateQueries({ queryKey: ['dept-path'] });
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['depts'] }),
+        qc.invalidateQueries({ queryKey: ['dept-path'] }),
+      ]);
       msg.success('部门已更新');
     },
   });
   const deptMove = useMutation({
     mutationFn: ({ id, parentId }: { id: number; parentId: number | null }) =>
       request(`/api/departments/${id}`, { method: 'PUT', data: { parentId } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['depts'] });
-      qc.invalidateQueries({ queryKey: ['dept-path'] });
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['depts'] }),
+        qc.invalidateQueries({ queryKey: ['dept-path'] }),
+      ]);
       msg.success('部门已移动');
     },
   });
   const deptMoveOrder = useMutation({
     mutationFn: ({ id, direction }: { id: number; direction: 'UP' | 'DOWN' }) =>
       request(`/api/departments/${id}/order`, { method: 'PUT', data: { direction } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['depts'] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['depts'] });
       msg.success('排序已更新');
     },
   });
   const deptMovePosition = useMutation({
     mutationFn: ({ id, targetId, placement }: { id: number; targetId: number; placement: 'BEFORE' | 'AFTER' }) =>
       request(`/api/departments/${id}/position`, { method: 'PUT', data: { targetId, placement } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['depts'] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['depts'] });
       msg.success('排序已更新');
     },
   });
   const deptRemove = useMutation({
     mutationFn: (id: number) => request(`/api/departments/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { setSelDeptId(null); qc.invalidateQueries({ queryKey: ['depts'] }); msg.success('已删除'); },
+    onSuccess: async () => { setSelDeptId(null); await qc.invalidateQueries({ queryKey: ['depts'] }); msg.success('已删除'); },
   });
 
   // --- member CRUD ---
   const memberCreate = useMutation({
     mutationFn: (body: any) => request('/api/users', { method: 'POST', data: body }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('添加成功'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('添加成功'); },
   });
   const memberUpdate = useMutation({
     mutationFn: ({ id, ...body }: any) => request(`/api/users/${id}`, { method: 'PUT', data: body }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已更新'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已更新'); },
   });
   const memberRemove = useMutation({
     mutationFn: (id: number) => request(`/api/users/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已删除'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已删除'); },
   });
 
   // --- tree drop ---
@@ -240,7 +244,7 @@ export default function ContactsPage() {
           const d = (deptList as Dept[]).find(x => x.id === node.key);
           modal.confirm({
             title: `确认删除「${d?.name ?? node.key}」?`,
-            content: '删除后不可恢复，该部门下不能有子部门',
+            content: '删除前需先处理子部门及部门成员，删除后不可恢复',
             okType: 'danger',
             onOk: () => deptRemove.mutate(node.key as number),
           });
@@ -271,7 +275,7 @@ export default function ContactsPage() {
       await deptCreate.mutateAsync({ name: v.name, companyId, parentId: v.parentId ?? deptAddParentId ?? null });
       setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields();
     } catch (error: any) {
-      if (!error?.errorFields) msg.error('部门创建失败');
+      if (error?.errorFields) return;
     }
   };
   const handleDeptEdit = async () => {
@@ -280,7 +284,7 @@ export default function ContactsPage() {
       await deptUpdate.mutateAsync({ id: deptEditId, name: v.name });
       setDeptEditOpen(false); setDeptEditId(null); deptForm.resetFields();
     } catch (error: any) {
-      if (!error?.errorFields) msg.error('部门更新失败');
+      if (error?.errorFields) return;
     }
   };
   const handleLeaderSet = async (userIds: number[]) => {
@@ -288,8 +292,8 @@ export default function ContactsPage() {
     try {
       await deptUpdate.mutateAsync({ id: leaderDeptId, leaderIds: userIds });
       setLeaderOpen(false); setLeaderDeptId(null);
-    } catch (_error) {
-      msg.error('负责人设置失败');
+    } catch {
+      // The global request handler displays the backend business message.
     }
   };
   const handleMemberOk = async () => {
@@ -299,7 +303,7 @@ export default function ContactsPage() {
       else await memberCreate.mutateAsync({ ...v, deptId: selDeptId });
       setMemberOpen(false); setMemberEdit(null); memberForm.resetFields();
     } catch (error: any) {
-      if (!error?.errorFields) msg.error(memberEdit ? '成员更新失败' : '成员添加失败');
+      if (error?.errorFields) return;
     }
   };
 
@@ -430,7 +434,7 @@ export default function ContactsPage() {
         confirmLoading={deptCreate.isPending}
         onOk={handleDeptAdd}
         onCancel={() => { setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields(); }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={deptForm} layout="vertical" preserve={false}>
           <Form.Item label="部门名称" name="name" rules={[{ required: true, message: '请输入' }]}>
@@ -453,7 +457,7 @@ export default function ContactsPage() {
         confirmLoading={deptUpdate.isPending}
         onOk={handleDeptEdit}
         onCancel={() => { setDeptEditOpen(false); setDeptEditId(null); deptForm.resetFields(); }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={deptForm} layout="vertical" preserve={false}
           initialValues={{ name: editDeptName }}>
@@ -471,7 +475,7 @@ export default function ContactsPage() {
         footer={null}
         width={600}
         confirmLoading={deptUpdate.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <LeaderPicker
           users={(allUsers as UserItem[]).map(u => ({ id: u.id, name: u.displayName || u.username }))}
