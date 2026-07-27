@@ -29,7 +29,7 @@ export default function SentPage() {
         { title: '发起时间', dataIndex: 'startedAt' },
         { title: '完成时间', dataIndex: 'finishedAt' },
         { title: '操作', render: (_, i: any) => (
-          <Button size="small" onClick={() => navigate('/proc/' + i.id)}>查看</Button>
+          <Button size="small" onClick={() => navigate(`/proc/${i.id}`)}>查看</Button>
         ) },
       ]}
       toolBarRender={() => [

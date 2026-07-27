@@ -68,9 +68,56 @@ class FormDefinitionServiceSchemaTest {
             return 1;
         });
         var fd = service.saveDraft(null, "leave_req", "请假",
+            "请假申请",
             List.of(Map.of("id", "a", "type", "text", "label", "x", "props", Map.of())),
             null, 1L);
         assertThat(fd.getId()).isEqualTo(42L);
         assertThat(fd.getSchema()).startsWith("[");
+    }
+
+    @Test void saveDraftTurnsPublishedFormBackToDraft() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setCode("leave_req");
+        fd.setName("请假");
+        fd.setDescription("old");
+        fd.setStatus("PUBLISHED");
+        fd.setVersion(2);
+        fd.setSchema("[{\"id\":\"old\",\"type\":\"text\"}]");
+        fd.setSettings("{}");
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        var saved = service.saveDraft(
+            1L,
+            "leave_req",
+            "新版请假",
+            "new",
+            List.of(Map.of("id", "a", "type", "text")),
+            Map.of("workflowEnabled", false),
+            1L
+        );
+
+        assertThat(saved.getStatus()).isEqualTo("DRAFT");
+        assertThat(saved.getName()).isEqualTo("新版请假");
+        assertThat(saved.getSchema()).contains("\"id\":\"a\"");
+    }
+
+    @Test void publishRejectsUnsupportedFieldType() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setSchema("[{\"id\":\"a\",\"type\":\"unknown\"}]");
+        when(mapper.selectById(1L)).thenReturn(fd);
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("unsupported field type");
+    }
+
+    @Test void validateSubmissionReadsRulesRequired() {
+        assertThatThrownBy(() -> service.validateSubmission(
+            "[{\"id\":\"a\",\"type\":\"text\",\"label\":\"姓名\",\"rules\":{\"required\":true}}]",
+            Map.of("a", "")
+        )).isInstanceOf(BizException.class)
+            .hasMessageContaining("required");
     }
 }

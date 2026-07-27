@@ -10,9 +10,9 @@ export const SelectField: FieldType = {
     const opts: any[] = node.props?.options ?? [];
     return (
       <div data-field-id={node.id}>
-        <label style={{ display: 'block', marginBottom: 4 }}>
+        <div style={{ display: 'block', marginBottom: 4 }}>
           {node.label}{node.props?.required ? ' *' : ''}
-        </label>
+        </div>
         <Select
           disabled={mode !== 'runtime-fill'}
           value={value}
@@ -28,9 +28,9 @@ export const SelectField: FieldType = {
     const updateOpts = (next: any[]) => onChange({ ...node, props: { ...node.props, options: next } });
     return (
       <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-        <label>标签</label>
+        <div>标签</div>
         <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-        <label>选项（每行一条：value|label，多行）</label>
+        <div>选项（每行一条：value|label，多行）</div>
         <textarea
           rows={5}
           value={opts.map((o) => `${o.value}|${o.label}`).join('\n')}

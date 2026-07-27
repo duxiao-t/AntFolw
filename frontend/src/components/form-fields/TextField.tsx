@@ -8,9 +8,9 @@ export const TextField: FieldType = {
   defaultProps: { required: false, maxLength: 255, placeholder: '请输入' },
   Component: ({ node, mode, value, onChange }) => (
     <div data-field-id={node.id}>
-      <label style={{ display: 'block', marginBottom: 4 }}>
+      <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
-      </label>
+      </div>
       <Input
         disabled={mode !== 'runtime-fill'}
         value={value ?? ''}
@@ -22,12 +22,12 @@ export const TextField: FieldType = {
   ),
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-      <label>占位</label>
+      <div>占位</div>
       <Input value={node.props?.placeholder ?? ''}
         onChange={(e) => onChange({ ...node, props: { ...node.props, placeholder: e.target.value } })} />
-      <label>最大长度</label>
+      <div>最大长度</div>
       <Input type="number" value={node.props?.maxLength ?? 255}
         onChange={(e) => onChange({ ...node, props: { ...node.props, maxLength: Number(e.target.value) } })} />
       <label>

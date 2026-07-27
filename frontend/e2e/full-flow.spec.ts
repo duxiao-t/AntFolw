@@ -44,7 +44,8 @@ test('design → publish → submit → approve end-to-end', async ({
   const formUrl = page.url();
   const formIdMatch = formUrl.match(/\/designer\/form\/(\d+)/);
   expect(formIdMatch).not.toBeNull();
-  const formId = formIdMatch![1];
+  const formId = formIdMatch?.[1];
+  if (!formId) throw new Error('Failed to parse form id from designer URL');
   const formCode = `form_${formId}`;
 
   // -- 3. publish the form
@@ -60,7 +61,7 @@ test('design → publish → submit → approve end-to-end', async ({
 
   // Look up the admin user id (we need a real id for the assignee)
   const apiContext = await request.newContext({
-    baseURL: baseURL!,
+    baseURL: baseURL ?? 'http://localhost:8000',
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
   const meResp = await apiContext.get('/api/auth/me');

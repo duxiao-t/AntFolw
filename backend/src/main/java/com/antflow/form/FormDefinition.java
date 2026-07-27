@@ -10,6 +10,7 @@ public class FormDefinition {
     @TableId(type = IdType.AUTO) private Long id;
     private String code;
     private String name;
+    private String description;
     private Integer version;
     @TableField(typeHandler = JsonbJacksonTypeHandler.class) private String schema;       // JSONB
     @TableField(typeHandler = JsonbJacksonTypeHandler.class) private String settings;     // JSONB
@@ -17,4 +18,5 @@ public class FormDefinition {
     private Long createdBy;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE) private java.time.OffsetDateTime updatedAt;
+    @TableLogic(value = "0", delval = "1") private Integer deleted;
 }

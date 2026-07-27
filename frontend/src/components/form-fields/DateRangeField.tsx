@@ -11,9 +11,9 @@ export const DateRangeField: FieldType = {
     const dayjs = (window as any).dayjs;
     return (
       <div data-field-id={node.id}>
-        <label style={{ display: 'block', marginBottom: 4 }}>
+        <div style={{ display: 'block', marginBottom: 4 }}>
           {node.label}{node.props?.required ? ' *' : ''}
-        </label>
+        </div>
         <DatePicker.RangePicker
           disabled={mode !== 'runtime-fill'}
           value={v.length === 2 && dayjs ? [dayjs(v[0]), dayjs(v[1])] : undefined}
@@ -25,7 +25,7 @@ export const DateRangeField: FieldType = {
   },
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
     </div>

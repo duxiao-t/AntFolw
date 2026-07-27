@@ -18,6 +18,6 @@ public class MybatisAutoFill implements MetaObjectHandler {
     }
     @Override
     public void updateFill(MetaObject m) {
-        strictInsertFill(m, "updatedAt", OffsetDateTime.class, OffsetDateTime.now());
+        strictUpdateFill(m, "updatedAt", OffsetDateTime.class, OffsetDateTime.now());
     }
 }

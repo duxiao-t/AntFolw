@@ -8,9 +8,9 @@ export const NumberField: FieldType = {
   defaultProps: { min: 0, max: 1000000, precision: 0, required: false },
   Component: ({ node, mode, value, onChange }) => (
     <div data-field-id={node.id}>
-      <label style={{ display: 'block', marginBottom: 4 }}>
+      <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
-      </label>
+      </div>
       <InputNumber
         disabled={mode !== 'runtime-fill'}
         value={value}
@@ -24,16 +24,16 @@ export const NumberField: FieldType = {
   ),
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <label>最小值</label>
+      <div>最小值</div>
       <input type="number" value={node.props?.min ?? 0} onChange={(e) => onChange({ ...node, props: { ...node.props, min: Number(e.target.value) } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <label>最大值</label>
+      <div>最大值</div>
       <input type="number" value={node.props?.max ?? 1000000} onChange={(e) => onChange({ ...node, props: { ...node.props, max: Number(e.target.value) } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <label>小数位</label>
+      <div>小数位</div>
       <input type="number" value={node.props?.precision ?? 0} onChange={(e) => onChange({ ...node, props: { ...node.props, precision: Number(e.target.value) } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
     </div>

@@ -8,9 +8,9 @@ export const DateField: FieldType = {
   defaultProps: { required: false, format: 'YYYY-MM-DD' },
   Component: ({ node, mode, value, onChange }) => (
     <div data-field-id={node.id}>
-      <label style={{ display: 'block', marginBottom: 4 }}>
+      <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
-      </label>
+      </div>
       <DatePicker
         disabled={mode !== 'runtime-fill'}
         value={value ? (window as any).dayjs?.(value) : undefined}
@@ -21,7 +21,7 @@ export const DateField: FieldType = {
   ),
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
     </div>

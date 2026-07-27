@@ -19,7 +19,7 @@ async function loginAsAdmin(page: Page) {
 test('contacts supports selecting and batch deleting temporary members', async ({ page, baseURL }) => {
   const token = await loginAsAdmin(page);
   const api = await request.newContext({
-    baseURL: baseURL!,
+    baseURL: baseURL ?? 'http://localhost:8000',
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
   const createdUserIds: number[] = [];

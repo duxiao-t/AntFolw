@@ -10,7 +10,14 @@ type State = {
   // SILENT — loading from server must NOT pollute the undo stack.
   loadSchema(next: SchemaNode[]): void;
   resetSchema(next: SchemaNode[]): void;
-  addNode(parentId: string | null, type: string, defaultProps: any): void;
+  addNode(parentId: string | null, type: string, defaultProps: any): string;
+  insertNode(
+    parentId: string | null,
+    type: string,
+    defaultProps: any,
+    index: number,
+  ): string;
+  moveNode(id: string, index: number): void;
   updateNode(id: string, patch: Partial<SchemaNode>): void;
   removeNode(id: string): void;
   select(id: string | null): void;
@@ -24,6 +31,23 @@ function pushPast(state: State): State['history'] {
     past: [...state.history.past, state.schema].slice(-HISTORY_LIMIT),
     future: [],
   };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function insertAtIndex(
+  nodes: SchemaNode[],
+  newNode: SchemaNode,
+  index: number,
+): SchemaNode[] {
+  const targetIndex = clamp(index, 0, nodes.length);
+  return [
+    ...nodes.slice(0, targetIndex),
+    newNode,
+    ...nodes.slice(targetIndex),
+  ];
 }
 
 export const useFormDesignerStore = create<State>((set) => ({
@@ -42,13 +66,13 @@ export const useFormDesignerStore = create<State>((set) => ({
   resetSchema: (next) =>
     set((s) => ({ ...s, schema: next, history: pushPast(s) })),
 
-  addNode: (parentId, type, defaultProps) =>
+  addNode: (parentId, type, defaultProps) => {
+    const newNode: SchemaNode = {
+      id: nanoid(8),
+      type,
+      props: { ...defaultProps },
+    };
     set((s) => {
-      const newNode: SchemaNode = {
-        id: nanoid(8),
-        type,
-        props: { ...defaultProps },
-      };
       const next = parentId
         ? s.schema.map((n) =>
             n.id === parentId
@@ -62,6 +86,49 @@ export const useFormDesignerStore = create<State>((set) => ({
         ...s,
         schema: next,
         selectedId: newNode.id,
+        history: pushPast(s),
+      };
+    });
+    return newNode.id;
+  },
+
+  insertNode: (parentId, type, defaultProps, index) => {
+    const newNode: SchemaNode = {
+      id: nanoid(8),
+      type,
+      props: { ...defaultProps },
+    };
+    set((s) => {
+      const next = parentId
+        ? s.schema.map((n) =>
+            n.id === parentId
+              ? { ...n, children: [...(n.children ?? []), newNode] }
+              : n.children
+                ? { ...n, children: recurseAdd(n.children, parentId, newNode) }
+                : n,
+          )
+        : insertAtIndex(s.schema, newNode, index);
+      return {
+        ...s,
+        schema: next,
+        selectedId: newNode.id,
+        history: pushPast(s),
+      };
+    });
+    return newNode.id;
+  },
+
+  moveNode: (id, index) =>
+    set((s) => {
+      const currentIndex = s.schema.findIndex((n) => n.id === id);
+      if (currentIndex < 0) return s;
+      const moving = s.schema[currentIndex];
+      const without = s.schema.filter((n) => n.id !== id);
+      const targetIndex = clamp(index, 0, without.length);
+      return {
+        ...s,
+        schema: insertAtIndex(without, moving, targetIndex),
+        selectedId: id,
         history: pushPast(s),
       };
     }),

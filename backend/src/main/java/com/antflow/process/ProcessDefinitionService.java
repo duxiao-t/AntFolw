@@ -82,6 +82,11 @@ public class ProcessDefinitionService {
         return mapper.selectList(null);
     }
 
+    @Transactional
+    public void deleteByForm(Long formDefId) {
+        mapper.delete(new QueryWrapper<ProcessDefinition>().eq("form_def_id", formDefId));
+    }
+
     /** Tree validation: ROOT is the unique root; APPROVAL has assignees configured;
      *  CONDITIONS has at least 1 branch including a default branch; node type is known. */
     void validateProcessTree(String processJson) {

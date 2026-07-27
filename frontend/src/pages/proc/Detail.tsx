@@ -1,15 +1,15 @@
 import {
+  App,
+  Button,
   Card,
   Descriptions,
-  Timeline,
-  Tag,
-  Spin,
-  Space,
-  Button,
-  Modal,
   Input,
+  Modal,
   Select,
-  message,
+  Space,
+  Spin,
+  Tag,
+  Timeline,
 } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
@@ -64,6 +64,7 @@ function findApproverNodes(node: any, acc: any[] = []): any[] {
 
 export default function DetailPage() {
   const { id } = useParams();
+  const { message } = App.useApp();
   const qc = useQueryClient();
   const { initialState } = useModel('@@initialState');
   const currentUserId = (initialState?.currentUser as any)?.id;
@@ -290,7 +291,7 @@ export default function DetailPage() {
         okButtonProps={{ danger: true }}
       >
         <div style={{ marginBottom: 12 }}>
-          <label>驳回到</label>
+          <div>驳回到</div>
           <Select
             style={{ width: '100%' }}
             value={rejectFor?.targetNodeId ?? '__END__'}
@@ -314,7 +315,7 @@ export default function DetailPage() {
           />
         </div>
         <div>
-          <label>意见</label>
+          <div>意见</div>
           <Input.TextArea
             rows={3}
             value={rejectComment}

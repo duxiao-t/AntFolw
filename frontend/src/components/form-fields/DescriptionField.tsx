@@ -12,7 +12,7 @@ export const DescriptionField: FieldType = {
   ),
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>说明内容</label>
+      <div>说明内容</div>
       <textarea
         rows={3}
         value={node.label ?? ''}

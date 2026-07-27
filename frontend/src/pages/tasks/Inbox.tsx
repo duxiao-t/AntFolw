@@ -15,11 +15,15 @@ export default function Inbox() {
   const [pending, setPending] = useState<{ id: number; action: 'approve' | 'reject' } | null>(null);
   const [comment, setComment] = useState('');
   const act = useMutation({
-    mutationFn: () =>
-      request(`/api/tasks/${pending!.id}/${pending!.action}`, {
+    mutationFn: () => {
+      if (!pending) {
+        throw new Error('No pending task action selected');
+      }
+      return request(`/api/tasks/${pending.id}/${pending.action}`, {
         method: 'POST',
         data: { comment },
-      }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inbox'] });
       message.success('已完成');
@@ -56,7 +60,7 @@ export default function Inbox() {
                 </Button>{' '}
                 <Button
                   size="small"
-                  onClick={() => navigate('/proc/' + t.procInstId)}
+                  onClick={() => navigate(`/proc/${t.procInstId}`)}
                 >
                   查看流程
                 </Button>

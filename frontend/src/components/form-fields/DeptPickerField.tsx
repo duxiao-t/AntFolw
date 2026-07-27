@@ -1,4 +1,4 @@
-import { TreeSelect, Spin } from 'antd';
+import { TreeSelect } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { request } from '@umijs/max';
 import { useState } from 'react';
@@ -33,9 +33,9 @@ export const DeptPickerField: FieldType = {
 
     return (
       <div data-field-id={node.id}>
-        <label style={{ display: 'block', marginBottom: 4 }}>
+        <div style={{ display: 'block', marginBottom: 4 }}>
           {node.label}{node.props?.required ? ' *' : ''}
-        </label>
+        </div>
         <TreeSelect
           disabled={mode !== 'runtime-fill'}
           treeData={treeData}
@@ -52,7 +52,7 @@ export const DeptPickerField: FieldType = {
   },
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
       <label>

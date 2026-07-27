@@ -1,4 +1,4 @@
-import { Button, Space, message, Drawer } from 'antd';
+import { App, Button, Drawer, Space } from 'antd';
 import { useEffect, useState } from 'react';
 import { useParams, request } from '@umijs/max';
 import { useQuery } from '@tanstack/react-query';
@@ -24,7 +24,7 @@ type FormDefinition = {
   id: number;
   code: string;
   name: string;
-  schema?: any[];
+  schema?: any[] | string;
 };
 
 function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
@@ -47,6 +47,7 @@ export function ProcessDesignerSurface({
 }) {
   const routeParams = useParams();
   const formDefId = String(formDefIdProp ?? routeParams.formDefId ?? '');
+  const { message } = App.useApp();
   const process = useProcessDesignerStore(
     (s: ReturnType<typeof useProcessDesignerStore.getState>) => s.process,
   );

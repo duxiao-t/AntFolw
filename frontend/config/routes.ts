@@ -94,18 +94,23 @@ export default [
   // ===== 设计器（隐藏）=====
   { path: '/approval/forms/new', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canAdmin' },
   { path: '/approval/forms/:id/wizard', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canAdmin' },
-  { path: '/designer/form/:id',        component: './designer/form/FormDesigner',    hideInMenu: true, access: 'canAdmin' },
+  { path: '/designer/form/:id', component: './designer/form/FormDesigner', hideInMenu: true, access: 'canAdmin' },
   { path: '/designer/process/:formDefId', component: './designer/process/ProcessDesigner', hideInMenu: true, access: 'canAdmin' },
+
+  // ===== 表单后台兼容入口（隐藏）=====
+  { path: '/admin/forms', component: './admin/FormList', hideInMenu: true, access: 'canAdmin' },
+  { path: '/admin/form-data', component: './admin/FormData', hideInMenu: true, access: 'canAdmin' },
+  { path: '/approval/form-data', component: './admin/FormData', hideInMenu: true, access: 'canAdmin' },
 
   // ===== 运行时 / 任务（隐藏）=====
   { path: '/runtime/form/:code', component: './runtime/form/Fill', hideInMenu: true },
-  { path: '/runtime/list',       component: './runtime/form/List', hideInMenu: true },
-  { path: '/tasks/inbox',        component: './tasks/Inbox',       hideInMenu: true },
-  { path: '/tasks/done',         component: './tasks/Done',        hideInMenu: true },
-  { path: '/proc',               component: './proc/Sent',         hideInMenu: true },
-  { path: '/proc/:id',           component: './proc/Detail',       hideInMenu: true },
-  { path: '/account/settings',      component: './account/settings',   hideInMenu: true },
-  { path: '/account/center',        component: './account/center',     hideInMenu: true },
+  { path: '/runtime/list', component: './runtime/form/List', hideInMenu: true },
+  { path: '/tasks/inbox', component: './tasks/Inbox', hideInMenu: true },
+  { path: '/tasks/done', component: './tasks/Done', hideInMenu: true },
+  { path: '/proc', component: './proc/Sent', hideInMenu: true },
+  { path: '/proc/:id', component: './proc/Detail', hideInMenu: true },
+  { path: '/account/settings', component: './account/settings', hideInMenu: true },
+  { path: '/account/center', component: './account/center', hideInMenu: true },
 
   // ===== 默认 =====
   { path: '/', redirect: '/workplace' },

@@ -14,10 +14,9 @@ export const MultiSelectField: FieldType = {
     const opts: any[] = node.props?.options ?? [];
     return (
       <div data-field-id={node.id}>
-        <label style={{ display: 'block', marginBottom: 4 }}>
-          {node.label}
-          {node.props?.required ? ' *' : ''}
-        </label>
+        <div style={{ display: 'block', marginBottom: 4 }}>
+          {node.label}{node.props?.required ? ' *' : ''}
+        </div>
         <Select
           mode="multiple"
           disabled={mode !== 'runtime-fill'}

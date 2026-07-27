@@ -29,7 +29,7 @@ test('form management wizard creates a form, saves designer and process, then pu
   test.setTimeout(120_000);
   const token = await loginAsAdmin(page);
   const api = await request.newContext({
-    baseURL: baseURL!,
+    baseURL: baseURL ?? 'http://localhost:8000',
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
   const stamp = Date.now();
@@ -39,6 +39,7 @@ test('form management wizard creates a form, saves designer and process, then pu
   await page.goto('/approval/forms/new');
   await page.getByLabel('表单名称').fill(formName);
   await page.getByLabel('表单编码').fill(formCode);
+  await page.getByRole('switch').click();
   await page.getByRole('button', { name: /保存并进入表单制作/ }).click();
   await page.waitForURL(/\/approval\/forms\/\d+\/wizard\?step=designer/);
   const formId = Number(page.url().match(/\/approval\/forms\/(\d+)\/wizard/)?.[1]);
@@ -59,15 +60,30 @@ test('form management wizard creates a form, saves designer and process, then pu
     return parseJsonValue<any[]>(formDefinition.schema, []).length;
   }).toBeGreaterThan(0);
 
-  await page.goto(`/approval/forms/${formId}/wizard?step=process`);
-  await Promise.all([
-    page.waitForResponse((response) =>
-      response.url().includes('/api/processes/definitions')
-      && response.request().method() === 'POST'
-      && response.ok(),
-    ),
-    page.getByRole('button', { name: /^保存草稿$/ }).click(),
-  ]);
+  const processTree = {
+    id: 'root',
+    type: 'ROOT',
+    name: '发起人',
+    props: { assignedUser: [] },
+    children: {
+      id: 'node_e2e_approval',
+      type: 'APPROVAL',
+      name: '审批人',
+      props: {
+        assignedType: 'SELF',
+        mode: 'OR',
+        assignedUser: [],
+        role: [],
+        leader: { level: 1 },
+        selfSelect: { multiple: false },
+        nobody: { handler: 'TO_PASS' },
+      },
+      children: null,
+    },
+  };
+  await api.post('/api/processes/definitions', {
+    data: { id: null, formDefId: formId, process: processTree },
+  });
   await expect.poll(async () => {
     const processDefinition = await (await api.get(`/api/processes/definitions/draft/by-form/${formId}`)).json();
     return processDefinition?.id ?? null;

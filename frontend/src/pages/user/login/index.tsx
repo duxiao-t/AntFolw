@@ -166,7 +166,7 @@ const Login: React.FC = () => {
       const urlParams = new URL(window.location.href).searchParams;
       const redirectUrl = getSafeRedirectUrl(urlParams.get('redirect'));
       window.location.href = redirectUrl;
-    } catch (err: any) {
+    } catch (_err: any) {
       const defaultLoginFailureMessage = intl.formatMessage({
         id: 'pages.login.failure',
         defaultMessage: '登录失败！',

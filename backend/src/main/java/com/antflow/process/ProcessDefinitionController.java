@@ -47,5 +47,10 @@ public class ProcessDefinitionController {
         return service.publish(id);
     }
 
+    @DeleteMapping("/by-form/{formDefId}")
+    public void deleteByForm(@PathVariable Long formDefId) {
+        service.deleteByForm(formDefId);
+    }
+
     public record SaveBody(Long id, Long formDefId, Object process) {}
 }

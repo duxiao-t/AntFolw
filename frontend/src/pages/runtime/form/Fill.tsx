@@ -1,4 +1,4 @@
-import { Button, Card, message, Modal, Space, Typography } from 'antd';
+import { App, Button, Card, Modal, Space, Typography } from 'antd';
 import { useState } from 'react';
 import { useParams, history } from '@umijs/max';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -20,6 +20,15 @@ type SelfSelectNode = {
   name: string;
   multiple: boolean;
 };
+
+function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
+  if (typeof value !== 'string') return value ?? fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
 
 function collectSelfSelectNodes(
   node: TreeNode | null | undefined,
@@ -49,6 +58,7 @@ function collectSelfSelectNodes(
 export default function Fill() {
   const params = useParams();
   const code = params.code as string;
+  const { message } = App.useApp();
   const [val, setVal] = useState<any>({});
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selfSelected, setSelfSelected] = useState<Record<string, number[]>>(
@@ -58,7 +68,7 @@ export default function Fill() {
     [],
   );
 
-  const { data: fd, isFetching } = useQuery({
+  const { data: fd, isFetching } = useQuery<any>({
     queryKey: ['form-def', code],
     queryFn: () => request(`/api/forms/definitions/by-code/${code}`),
   });
@@ -75,11 +85,31 @@ export default function Fill() {
     },
   });
 
+  const submitFormData = useMutation({
+    mutationFn: () =>
+      request('/api/forms/data', {
+        method: 'POST',
+        data: { formCode: code, status: 'SUBMITTED', data: val },
+      }),
+    onSuccess: () => {
+      message.success('提交成功');
+      history.push('/runtime/list');
+    },
+  });
+
   const doStart = (sel: Record<string, number[]>) => {
     startInstance.mutate({ selfSelected: sel });
   };
 
   const handleSubmit = async () => {
+    const workflowEnabled = !!parseJsonValue<Record<string, any>>(
+      fd?.settings,
+      {},
+    ).workflowEnabled;
+    if (!workflowEnabled) {
+      submitFormData.mutate();
+      return;
+    }
     const formDefId = fd?.id;
     if (!formDefId) {
       message.error('表单定义未就绪');
@@ -89,7 +119,7 @@ export default function Fill() {
       const procRes: any = await request(
         `/api/processes/definitions/by-form/${formDefId}`,
       );
-      const tree: TreeNode | undefined = procRes?.process;
+      const tree: TreeNode | undefined = parseJsonValue(procRes?.process, undefined);
       const nodes: SelfSelectNode[] = [];
       if (tree) collectSelfSelectNodes(tree, nodes);
       if (nodes.length === 0) {
@@ -99,7 +129,7 @@ export default function Fill() {
       setPendingSelfSelect(nodes);
       setSelfSelected({});
       setPickerOpen(true);
-    } catch (e) {
+    } catch (_error) {
       message.error('获取流程定义失败');
     }
   };
@@ -109,7 +139,7 @@ export default function Fill() {
   return (
     <Card title={fd.name}>
       <FormRenderer
-        schema={fd.schema ?? []}
+        schema={parseJsonValue(fd.schema, [])}
         mode="runtime-fill"
         value={val}
         onChange={setVal}
@@ -118,9 +148,11 @@ export default function Fill() {
         type="primary"
         style={{ marginTop: 16 }}
         onClick={handleSubmit}
-        loading={startInstance.isPending}
+        loading={startInstance.isPending || submitFormData.isPending}
       >
-        提交并发起审批
+        {parseJsonValue<Record<string, any>>(fd.settings, {}).workflowEnabled
+          ? '提交并发起审批'
+          : '提交'}
       </Button>
 
       <Modal

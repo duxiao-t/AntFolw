@@ -8,9 +8,9 @@ export const MoneyField: FieldType = {
   defaultProps: { min: 0, precision: 2, required: false, prefix: '¥' },
   Component: ({ node, mode, value, onChange }) => (
     <div data-field-id={node.id}>
-      <label style={{ display: 'block', marginBottom: 4 }}>
+      <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
-      </label>
+      </div>
       <InputNumber
         disabled={mode !== 'runtime-fill'}
         value={value}
@@ -24,10 +24,10 @@ export const MoneyField: FieldType = {
   ),
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <label>小数位</label>
+      <div>小数位</div>
       <input type="number" value={node.props?.precision ?? 2} onChange={(e) => onChange({ ...node, props: { ...node.props, precision: Number(e.target.value) } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
     </div>

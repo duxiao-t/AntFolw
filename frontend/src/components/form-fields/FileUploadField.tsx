@@ -8,9 +8,9 @@ export const FileUploadField: FieldType = {
   defaultProps: { required: false, multiple: false, accept: '' },
   Component: ({ node, mode, value, onChange }) => (
     <div data-field-id={node.id}>
-      <label style={{ display: 'block', marginBottom: 4 }}>
+      <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
-      </label>
+      </div>
       <Upload
         disabled={mode !== 'runtime-fill'}
         multiple={!!node.props?.multiple}
@@ -32,10 +32,10 @@ export const FileUploadField: FieldType = {
   ),
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <label>标签</label>
+      <div>标签</div>
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <label>accept 过滤（如 image/*,.pdf，留空=不限）</label>
+      <div>accept 过滤（如 image/*,.pdf，留空=不限）</div>
       <input value={node.props?.accept ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, accept: e.target.value } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
       <label>

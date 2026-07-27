@@ -8,7 +8,7 @@ export type SchemaNode = {
 
 export type FieldMode = 'designer-preview' | 'runtime-fill' | 'readonly';
 
-export type FieldComponentProps<TProps = any, TValue = any> = {
+export type FieldComponentProps<_TProps = any, TValue = any> = {
   node: SchemaNode;
   mode: FieldMode;
   value?: TValue;
