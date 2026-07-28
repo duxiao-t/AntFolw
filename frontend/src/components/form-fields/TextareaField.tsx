@@ -17,6 +17,7 @@ export const TextareaField: FieldType = {
         rows={node.props?.rows ?? 4}
         maxLength={node.props?.maxLength}
         placeholder={node.props?.placeholder}
+        showCount={!!node.props?.showCount}
         onChange={(e) => onChange?.(e.target.value)}
       />
     </div>

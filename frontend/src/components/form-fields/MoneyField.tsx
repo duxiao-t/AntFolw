@@ -15,8 +15,10 @@ export const MoneyField: FieldType = {
         disabled={mode !== 'runtime-fill'}
         value={value}
         min={node.props?.min}
+        max={node.props?.max}
         precision={node.props?.precision}
         prefix={node.props?.prefix ?? '¥'}
+        placeholder={node.props?.placeholder}
         onChange={(v) => onChange?.(v)}
         style={{ width: '100%' }}
       />

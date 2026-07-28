@@ -17,7 +17,13 @@ export const DateRangeField: FieldType = {
         <DatePicker.RangePicker
           disabled={mode !== 'runtime-fill'}
           value={v.length === 2 && dayjs ? [dayjs(v[0]), dayjs(v[1])] : undefined}
-          onChange={(d: any) => onChange?.(d ? [d[0].format('YYYY-MM-DD'), d[1].format('YYYY-MM-DD')] : undefined)}
+          onChange={(d: any) => onChange?.(d ? [d[0].format(node.props?.format ?? 'YYYY-MM-DD'), d[1].format(node.props?.format ?? 'YYYY-MM-DD')] : undefined)}
+          placeholder={
+            node.props?.placeholder
+              ? [node.props.placeholder, node.props.placeholder]
+              : undefined
+          }
+          format={node.props?.format ?? 'YYYY-MM-DD'}
           style={{ width: '100%' }}
         />
       </div>

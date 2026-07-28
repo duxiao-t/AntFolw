@@ -8,7 +8,13 @@ export const DeptPickerField: FieldType = {
   type: 'dept_picker',
   label: '部门选择',
   icon: 'apartment',
-  defaultProps: { required: false, multiple: false, companyId: 1 },
+  defaultProps: {
+    required: false,
+    multiple: false,
+    companyId: 1,
+    selectableParent: true,
+    leafOnly: false,
+  },
   Component: ({ node, mode, value, onChange }) => {
     const [companyId] = useState<number>(node.props?.companyId ?? 1);
     const { data, isFetching } = useQuery({
@@ -16,18 +22,32 @@ export const DeptPickerField: FieldType = {
       queryFn: () => request<any[]>('/api/departments', { params: { companyId } }),
     });
 
-    const toTree = (rows: any[]): any[] =>
-      rows
+    const shouldDisable = (children: any[]) =>
+      (node.props?.leafOnly || node.props?.selectableParent === false) &&
+      children.length > 0;
+    const toTreeNode = (item: any, rows: any[]): any => {
+      const children = buildChildren(item.id, rows);
+      return {
+        value: item.id,
+        title: item.name,
+        disabled: shouldDisable(children),
+        children,
+      };
+    };
+    const toTree = (rows: any[]): any[] => {
+      const rootDeptId = node.props?.rootDeptId;
+      if (rootDeptId) {
+        const root = rows.find((row) => row.id === rootDeptId);
+        return root ? [toTreeNode(root, rows)] : [];
+      }
+      return rows
         .filter((r) => !r.parentId)
-        .map((root) => ({
-          value: root.id,
-          title: root.name,
-          children: buildChildren(root.id, rows),
-        }));
+        .map((root) => toTreeNode(root, rows));
+    };
     const buildChildren = (parentId: any, rows: any[]): any[] =>
       rows
         .filter((r) => r.parentId === parentId)
-        .map((r) => ({ value: r.id, title: r.name, children: buildChildren(r.id, rows) }));
+        .map((r) => toTreeNode(r, rows));
 
     const treeData = toTree(data ?? []);
 
@@ -45,6 +65,8 @@ export const DeptPickerField: FieldType = {
           onChange={(v) => onChange?.(v)}
           treeDefaultExpandAll
           showCheckedStrategy={node.props?.multiple ? 'SHOW_ALL' : 'SHOW_PARENT'}
+          placeholder={node.props?.placeholder}
+          maxCount={node.props?.maxCount}
           style={{ width: '100%' }}
         />
       </div>

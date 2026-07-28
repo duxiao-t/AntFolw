@@ -18,6 +18,9 @@ export const SelectField: FieldType = {
           value={value}
           onChange={(v) => onChange?.(v)}
           options={opts}
+          placeholder={node.props?.placeholder}
+          allowClear={node.props?.allowClear !== false}
+          showSearch={!!node.props?.showSearch}
           style={{ width: '100%' }}
         />
       </div>

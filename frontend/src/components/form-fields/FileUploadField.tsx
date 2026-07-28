@@ -1,4 +1,4 @@
-import { Upload, Button } from 'antd';
+import { Upload, Button, message } from 'antd';
 import type { FieldType } from '../../registry/types';
 
 export const FileUploadField: FieldType = {
@@ -15,8 +15,16 @@ export const FileUploadField: FieldType = {
         disabled={mode !== 'runtime-fill'}
         multiple={!!node.props?.multiple}
         accept={node.props?.accept || undefined}
+        maxCount={node.props?.maxCount ?? (node.props?.multiple ? undefined : 1)}
         fileList={Array.isArray(value) ? value : value ? [{ uid: '0', name: String(value), status: 'done' }] : []}
-        beforeUpload={() => false}   // MVP: skip actual upload server, just keep filename in state
+        beforeUpload={(file) => {
+          const maxSizeMB = node.props?.maxSizeMB;
+          if (maxSizeMB && file.size / 1024 / 1024 > maxSizeMB) {
+            message.error(`单文件不能超过 ${maxSizeMB}MB`);
+            return Upload.LIST_IGNORE;
+          }
+          return false;
+        }}
         onChange={(info) => {
           if (node.props?.multiple) {
             onChange?.(info.fileList as any);
@@ -26,7 +34,7 @@ export const FileUploadField: FieldType = {
           }
         }}
       >
-        <Button>选择文件</Button>
+        <Button>{node.props?.buttonText || '选择文件'}</Button>
       </Upload>
     </div>
   ),

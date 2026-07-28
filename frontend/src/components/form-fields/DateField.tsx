@@ -15,6 +15,8 @@ export const DateField: FieldType = {
         disabled={mode !== 'runtime-fill'}
         value={value ? (window as any).dayjs?.(value) : undefined}
         onChange={(d: any) => onChange?.(d ? d.format(node.props?.format ?? 'YYYY-MM-DD') : undefined)}
+        placeholder={node.props?.placeholder}
+        format={node.props?.format ?? 'YYYY-MM-DD'}
         style={{ width: '100%' }}
       />
     </div>

@@ -8,12 +8,17 @@ export const UserPickerField: FieldType = {
   type: 'user_picker',
   label: '用户选择',
   icon: 'user',
-  defaultProps: { required: false, multiple: false },
+  defaultProps: { required: false, multiple: false, scopeType: 'all' },
   Component: ({ node, mode, value, onChange }) => {
     const [kw, setKw] = useState('');
+    const deptId =
+      node.props?.scopeType === 'department' ? node.props?.scopeDeptId : undefined;
     const { data, isFetching } = useQuery({
-      queryKey: ['users', 'field', kw],
-      queryFn: () => request<any[]>('/api/users', { params: { keyword: kw } }),
+      queryKey: ['users', 'field', kw, deptId],
+      queryFn: () =>
+        request<any[]>('/api/users', {
+          params: { keyword: kw, deptId },
+        }),
     });
     const multi = !!node.props?.multiple;
     return (
@@ -32,6 +37,8 @@ export const UserPickerField: FieldType = {
           filterOption={false}
           options={(data ?? []).map((u: any) => ({ value: u.id, label: u.displayName ?? u.username }))}
           notFoundContent={isFetching ? <Spin size="small" /> : '无匹配用户'}
+          placeholder={node.props?.placeholder}
+          maxCount={node.props?.maxCount}
           style={{ width: '100%' }}
         />
       </div>

@@ -91,6 +91,48 @@ function getPreviewSchema({
   ];
 }
 
+function isEmptyValue(value: any) {
+  return (
+    value == null ||
+    value === '' ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+function matchesDisplayCondition(
+  condition: Record<string, any> | undefined,
+  formValue: Record<string, any>,
+) {
+  if (!condition?.fieldId) return true;
+  const sourceValue = formValue?.[condition.fieldId];
+  const targetValue = condition.value;
+
+  switch (condition.operator ?? 'eq') {
+    case 'ne':
+      return String(sourceValue ?? '') !== String(targetValue ?? '');
+    case 'contains':
+      return Array.isArray(sourceValue)
+        ? sourceValue.map(String).includes(String(targetValue ?? ''))
+        : String(sourceValue ?? '').includes(String(targetValue ?? ''));
+    case 'empty':
+      return isEmptyValue(sourceValue);
+    case 'notEmpty':
+      return !isEmptyValue(sourceValue);
+    default:
+      return String(sourceValue ?? '') === String(targetValue ?? '');
+  }
+}
+
+function shouldRenderNode(
+  node: SchemaNode,
+  mode: FieldMode,
+  formValue: Record<string, any>,
+) {
+  if (mode === 'designer-preview') return true;
+  if (node.props?.hidden) return false;
+  return matchesDisplayCondition(node.props?.displayCondition, formValue);
+}
+
 export function DesignerFieldPreview({
   children,
   node,
@@ -278,7 +320,8 @@ export function FormRenderer({
       {renderSchema.map((node) => {
         const ft = formRegistry[node.type];
         if (!ft) return null;
-        const nodeValue = value?.[node.id];
+        if (!shouldRenderNode(node, mode, value ?? {})) return null;
+        const nodeValue = value?.[node.id] ?? node.props?.defaultValue;
         const renderNode = isDesigner
           ? {
               ...node,

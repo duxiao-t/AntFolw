@@ -12,11 +12,19 @@ export const TextField: FieldType = {
         {node.label}{node.props?.required ? ' *' : ''}
       </div>
       <Input
+        type={node.props?.inputType ?? 'text'}
         disabled={mode !== 'runtime-fill'}
         value={value ?? ''}
         maxLength={node.props?.maxLength}
+        minLength={node.props?.minLength}
+        pattern={node.props?.pattern || undefined}
         placeholder={node.props?.placeholder}
-        onChange={(e) => onChange?.(e.target.value)}
+        onChange={(e) =>
+          onChange?.(node.props?.trim ? e.target.value.trimStart() : e.target.value)
+        }
+        onBlur={(e) =>
+          node.props?.trim ? onChange?.(e.target.value.trim()) : undefined
+        }
       />
     </div>
   ),
