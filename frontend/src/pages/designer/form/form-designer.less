@@ -9,21 +9,38 @@
 }
 
 .form-designer__palette {
-  width: 200px;
-  padding: 8px;
+  width: 240px;
+  padding: 12px;
   border-right: 1px solid var(--form-designer-border);
   overflow-y: auto;
   background: var(--form-designer-surface);
 }
 
+.form-designer__palette h4 {
+  margin: 0 0 16px;
+  color: var(--form-designer-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.form-designer__palette-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .form-designer__palette-card {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
-  margin: 4px;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
   border: 1px solid var(--form-designer-border-strong);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: grab;
   background: var(--form-designer-surface);
   color: var(--form-designer-text);
@@ -54,18 +71,18 @@
 .form-designer__field-icon {
   display: inline-flex;
   flex: 0 0 auto;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
   background: var(--form-designer-primary-bg);
   color: var(--form-designer-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
-.form-designer__palette-card-main,
 .form-designer__drag-preview-main {
   display: grid;
   min-width: 0;
@@ -73,15 +90,19 @@
 
 .form-designer__palette-card-label,
 .form-designer__drag-preview-label {
+  flex: 1 1 auto;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   color: var(--form-designer-text);
-  font-weight: 500;
-  line-height: 20px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.form-designer__palette-card-type,
 .form-designer__drag-preview-type {
   overflow: hidden;
   color: var(--form-designer-text-secondary);
@@ -166,4 +187,10 @@
   transform: scale(1.04);
   pointer-events: none;
   will-change: transform;
+}
+
+@media (max-width: 1279px) {
+  .form-designer__palette {
+    width: 220px;
+  }
 }

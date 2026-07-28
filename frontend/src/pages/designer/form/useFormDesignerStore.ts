@@ -50,6 +50,14 @@ function insertAtIndex(
   ];
 }
 
+function isSameSchemaNode(a: SchemaNode, b: SchemaNode): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function isSameSchema(a: SchemaNode[], b: SchemaNode[]): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export const useFormDesignerStore = create<State>((set) => ({
   schema: [],
   selectedId: null,
@@ -64,7 +72,11 @@ export const useFormDesignerStore = create<State>((set) => ({
     })),
 
   resetSchema: (next) =>
-    set((s) => ({ ...s, schema: next, history: pushPast(s) })),
+    set((s) =>
+      isSameSchema(s.schema, next)
+        ? s
+        : { ...s, schema: next, selectedId: null, history: pushPast(s) },
+    ),
 
   addNode: (parentId, type, defaultProps) => {
     const newNode: SchemaNode = {
@@ -125,20 +137,27 @@ export const useFormDesignerStore = create<State>((set) => ({
       const moving = s.schema[currentIndex];
       const without = s.schema.filter((n) => n.id !== id);
       const targetIndex = clamp(index, 0, without.length);
+      const next = insertAtIndex(without, moving, targetIndex);
+      if (isSameSchema(s.schema, next)) return s;
       return {
         ...s,
-        schema: insertAtIndex(without, moving, targetIndex),
+        schema: next,
         selectedId: id,
         history: pushPast(s),
       };
     }),
 
   updateNode: (id, patch) =>
-    set((s) => ({
-      ...s,
-      schema: updateAt(s.schema, id, patch),
-      history: pushPast(s),
-    })),
+    set((s) => {
+      const current = findNodeById(s.schema, id);
+      const nextNode = current ? { ...current, ...patch } : null;
+      if (current && nextNode && isSameSchemaNode(current, nextNode)) return s;
+      return {
+        ...s,
+        schema: updateAt(s.schema, id, patch),
+        history: pushPast(s),
+      };
+    }),
 
   removeNode: (id) =>
     set((s) => ({
@@ -191,4 +210,13 @@ function recurseAdd(
         ? { ...c, children: recurseAdd(c.children, parentId, newNode) }
         : c,
   );
+}
+
+function findNodeById(nodes: SchemaNode[], id: string): SchemaNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findNodeById(node.children ?? [], id);
+    if (child) return child;
+  }
+  return null;
 }

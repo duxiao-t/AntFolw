@@ -6,6 +6,21 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
+import {
+  AlignLeftOutlined,
+  ApartmentOutlined,
+  CalendarOutlined,
+  CheckSquareOutlined,
+  ColumnWidthOutlined,
+  DollarOutlined,
+  DownSquareOutlined,
+  FieldNumberOutlined,
+  FileTextOutlined,
+  FontSizeOutlined,
+  TableOutlined,
+  UploadOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { App, Button, Space, theme } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from '@umijs/max';
@@ -56,26 +71,26 @@ const FALLBACK_FIELD_GAP = 16;
 const AUTO_SCROLL_EDGE = 72;
 const AUTO_SCROLL_MAX_SPEED = 18;
 
-const iconGlyphs: Record<string, string> = {
-  text: 'T',
-  textarea: 'P',
-  number: '#',
-  money: '$',
-  date: 'D',
-  date_range: 'R',
-  select: 'S',
-  multi_select: 'M',
-  user_picker: 'U',
-  dept_picker: 'O',
-  file_upload: 'F',
-  span_layout: 'L',
-  table_list: 'G',
+const paletteIcons: Record<string, React.ReactNode> = {
+  text: <FontSizeOutlined />,
+  textarea: <AlignLeftOutlined />,
+  number: <FieldNumberOutlined />,
+  money: <DollarOutlined />,
+  date: <CalendarOutlined />,
+  date_range: <CalendarOutlined />,
+  select: <DownSquareOutlined />,
+  multi_select: <CheckSquareOutlined />,
+  user_picker: <UserOutlined />,
+  dept_picker: <ApartmentOutlined />,
+  file_upload: <UploadOutlined />,
+  span_layout: <ColumnWidthOutlined />,
+  table_list: <TableOutlined />,
 };
 
 function FieldTypeIcon({ entry }: { entry: PaletteEntry }) {
   return (
     <span className="form-designer__field-icon" aria-hidden="true">
-      {iconGlyphs[entry.type] ?? entry.icon?.slice(0, 1).toUpperCase() ?? '?'}
+      {paletteIcons[entry.type] ?? <FileTextOutlined />}
     </span>
   );
 }
@@ -105,9 +120,8 @@ function PaletteCard({
       onDoubleClick={onAdd}
     >
       <FieldTypeIcon entry={entry} />
-      <span className="form-designer__palette-card-main">
-        <span className="form-designer__palette-card-label">{entry.label}</span>
-        <span className="form-designer__palette-card-type">{entry.type}</span>
+      <span className="form-designer__palette-card-label" title={entry.label}>
+        {entry.label}
       </span>
     </div>
   );
@@ -452,9 +466,9 @@ function CanvasDrop({
   }, [isDragActive, updateIndicator]);
 
   useEffect(() => {
-    document.querySelectorAll('[data-field-id]').forEach((el) => {
+    document.querySelectorAll('[data-designer-field-id]').forEach((el) => {
       (el as HTMLElement).style.outline =
-        (el as HTMLElement).getAttribute('data-field-id') === selectedId
+        (el as HTMLElement).getAttribute('data-designer-field-id') === selectedId
           ? '2px solid #1677ff'
           : '';
     });
@@ -485,8 +499,8 @@ function CanvasDrop({
       }}
       onClick={(e) => {
         const id = (e.target as HTMLElement)
-          .closest('[data-field-id]')
-          ?.getAttribute('data-field-id');
+          .closest('[data-designer-field-id]')
+          ?.getAttribute('data-designer-field-id');
         if (id) select(id);
       }}
     >
@@ -545,7 +559,7 @@ export function FormDesignerSurface({
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { token } = theme.useToken();
-  const { schema, loadSchema, addNode, insertNode, moveNode, undo, redo } =
+  const { schema, loadSchema, resetSchema, addNode, insertNode, moveNode, undo } =
     useFormDesignerStore();
   const [definition, setDefinition] = useState<FormDefinition | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
@@ -671,21 +685,25 @@ export function FormDesignerSurface({
       <div className="form-designer-shell" style={designerVars}>
         <div className="form-designer">
           <aside className="form-designer__palette">
-            <h4>字段</h4>
-            {paletteEntries
-              .filter((e) => e.type !== 'description')
-              .map((e) => (
-                <PaletteCard
-                  key={e.type}
-                  entry={e}
-                  onAdd={() => addNode(null, e.type, e.defaultProps)}
-                />
-              ))}
+            <h4>基础组件</h4>
+            <div className="form-designer__palette-grid">
+              {paletteEntries
+                .filter((e) => e.type !== 'description')
+                .map((e) => (
+                  <PaletteCard
+                    key={e.type}
+                    entry={e}
+                    onAdd={() => addNode(null, e.type, e.defaultProps)}
+                  />
+                ))}
+            </div>
           </aside>
           <main className="form-designer__workspace">
             <Space className="form-designer__toolbar">
               <Button onClick={undo}>撤销</Button>
-              <Button onClick={redo}>重做</Button>
+              <Button disabled={schema.length === 0} onClick={() => resetSchema([])}>
+                清空
+              </Button>
               <Button
                 type="primary"
                 onClick={() => save.mutate()}
