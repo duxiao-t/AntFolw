@@ -45,12 +45,13 @@ export function buildFormStepGroups(schema: MobileSchemaNode[], values: MobileFo
     }
     if (node.type === 'span_layout') {
       flushLoose();
-      groups.push(toGroup({
+      const group = toGroup({
         id: node.id,
         title: node.label ?? '表单分组',
         description: pendingDescription,
-        nodes: node.children ?? [],
-      }));
+        nodes: visibleDescendantNodes(node.children ?? [], values),
+      });
+      if (group.fieldIds.length > 0) groups.push(group);
       pendingDescription = undefined;
       continue;
     }
@@ -97,6 +98,16 @@ function collectFieldIds(node: MobileSchemaNode): string[] {
     return node.children.flatMap(collectFieldIds);
   }
   return [node.id];
+}
+
+function visibleDescendantNodes(nodes: MobileSchemaNode[], values: MobileFormValues): MobileSchemaNode[] {
+  return nodes.flatMap((node) => {
+    if (!isVisibleNode(node, values)) return [];
+    return [{
+      ...node,
+      children: node.children ? visibleDescendantNodes(node.children, values) : undefined,
+    }];
+  });
 }
 
 function descriptionText(node: MobileSchemaNode): string {

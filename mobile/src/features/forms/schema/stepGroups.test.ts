@@ -26,6 +26,37 @@ describe('buildFormStepGroups', () => {
     expect(fieldIdsInStep(groups[1])).toEqual(['reason']);
   });
 
+  it('filters hidden descendants from visible span_layout steps', () => {
+    const schema: MobileSchemaNode[] = [
+      {
+        id: 'details',
+        type: 'span_layout',
+        label: '明细信息',
+        children: [
+          { id: 'visible', type: 'text', label: '显示字段' },
+          {
+            id: 'hidden',
+            type: 'text',
+            label: '隐藏字段',
+            props: { displayCondition: { field: 'showHidden', operator: 'eq', value: true } },
+          },
+        ],
+      },
+      {
+        id: 'empty-details',
+        type: 'span_layout',
+        label: '空分组',
+        children: [{ id: 'also-hidden', type: 'text', props: { hidden: true } }],
+      },
+    ];
+
+    const groups = buildFormStepGroups(schema, { showHidden: false });
+
+    expect(groups).toHaveLength(1);
+    expect(fieldIdsInStep(groups[0])).toEqual(['visible']);
+    expect(groups[0].nodes[0].id).toBe('visible');
+  });
+
   it('uses a description before fields as step description', () => {
     const schema: MobileSchemaNode[] = [
       { id: 'desc-1', type: 'description', label: '说明', props: { text: '请填写真实金额' } },
