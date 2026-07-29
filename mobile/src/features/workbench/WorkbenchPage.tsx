@@ -74,7 +74,7 @@ export function WorkbenchPage() {
             </button>
           </div>
 
-          <div className="af-workbench__metrics" aria-label="快捷统计">
+          <section className="af-workbench__metrics" aria-label="快捷统计">
             <button type="button" onClick={() => navigate("/apps")}>
               <b>{apps.length}</b>
               <span>常用表单</span>
@@ -87,7 +87,7 @@ export function WorkbenchPage() {
               <b>草稿</b>
               <span>继续填写</span>
             </button>
-          </div>
+          </section>
         </section>
 
         <section className="af-section af-fade-in" aria-label="常用应用">

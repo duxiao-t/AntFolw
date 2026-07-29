@@ -23,6 +23,7 @@ export function SelectField(props: MobileFieldProps) {
           {options.map((option) => {
             const isSelected = selected[0] === option.value;
             return (
+              // biome-ignore lint/a11y/useSemanticElements: Plan requires mobile choice tiles to be semantic button controls with radio state.
               <button
                 key={option.value}
                 type="button"

@@ -25,10 +25,11 @@ export function CheckboxField(props: MobileFieldProps) {
       summary={props.mode === 'readonly' ? <div className="af-field__summary">{selectedLabels.join('、') || '未填写'}</div> : undefined}
     >
       {options.length > 0 ? (
-        <div className="af-choice-grid" role="group" aria-label={label}>
+        <div className="af-choice-grid">
           {options.map((option) => {
             const isSelected = selected.includes(option.value);
             return (
+              // biome-ignore lint/a11y/useSemanticElements: Plan requires mobile choice tiles to be semantic button controls with checkbox state.
               <button
                 key={option.value}
                 type="button"

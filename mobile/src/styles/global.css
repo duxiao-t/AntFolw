@@ -235,7 +235,8 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .af-success-page { display: grid; place-items: center; text-align: center; padding: 70px 30px 30px; min-height: 80vh; }
 .af-success-page__check { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: var(--af-color-icon-bg-alt); color: var(--af-color-success); font-size: 28px; margin: 0 auto 14px; font-weight: 700; }
-.af-success-page h3 { font-size: 18px; margin: 0 0 8px; font-weight: 700; }
+.af-success-page h3,
+.af-success-page__title { font-size: 18px; margin: 0 0 8px; font-weight: 700; }
 .af-success-page p { font-size: 11px; color: var(--af-color-muted); line-height: 1.6; margin: 0 0 22px; white-space: pre-line; }
 .af-success-page__buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 320px; }
 .af-success-page__buttons .af-btn { height: 36px; }
@@ -1132,7 +1133,8 @@ button { -webkit-tap-highlight-color: transparent; }
   color: var(--af-color-muted);
   font-size: 11px;
 }
-.af-form-step-head__title h2 {
+.af-form-step-head__title h2,
+.af-form-step-head__display-title {
   margin: 0;
   color: var(--af-color-text);
   font-size: 17px;

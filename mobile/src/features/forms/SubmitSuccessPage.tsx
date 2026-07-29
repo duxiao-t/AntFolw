@@ -11,7 +11,7 @@ export function SubmitSuccessPage() {
     <AppPage title="提交成功" variant="blank" back={false}>
       <section className="af-success-page">
         <div className="af-success-mark" aria-hidden="true">{"\u2713"}</div>
-        <h1 aria-hidden="true">提交成功</h1>
+        <strong className="af-success-page__title">提交成功</strong>
         <p>{mode === "direct" ? "表单已提交完成。" : "申请已进入审批流程，请等待审批人处理。"}</p>
         <div className="af-success-page__buttons">
           <button

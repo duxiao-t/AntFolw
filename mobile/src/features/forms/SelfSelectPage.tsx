@@ -66,7 +66,7 @@ export function SelfSelectPage() {
       <div className="af-stack">
         <section className="af-form-step-head">
           <div className="af-form-step-head__title">
-            <h2 aria-hidden="true">选择审批人</h2>
+            <strong className="af-form-step-head__display-title">选择审批人</strong>
             <span className="af-tag">流程必填</span>
           </div>
           <p>请选择本次流程需要你指定的审批人</p>
@@ -83,6 +83,7 @@ export function SelfSelectPage() {
                 const selected = (flow.selfSelected[rule.nodeId] ?? []).map(Number).includes(Number(assignee.id));
                 return (
                   <li key={assignee.id}>
+                    {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: Dynamic radio/checkbox role is selected from workflow rule metadata. */}
                     <button
                       type="button"
                       role={rule.multiple ? "checkbox" : "radio"}

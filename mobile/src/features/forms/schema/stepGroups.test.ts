@@ -18,12 +18,14 @@ describe('buildFormStepGroups', () => {
     ];
 
     const groups = buildFormStepGroups(schema, {});
+    const firstGroup = groupAt(groups, 0);
+    const secondGroup = groupAt(groups, 1);
 
     expect(groups).toHaveLength(2);
-    expect(groups[0]).toMatchObject({ id: 'leave-time', title: '请假时间' });
-    expect(fieldIdsInStep(groups[0]!)).toEqual(['start', 'end']);
-    expect(groups[1]).toMatchObject({ id: 'auto-2', title: '补充信息' });
-    expect(fieldIdsInStep(groups[1]!)).toEqual(['reason']);
+    expect(firstGroup).toMatchObject({ id: 'leave-time', title: '请假时间' });
+    expect(fieldIdsInStep(firstGroup)).toEqual(['start', 'end']);
+    expect(secondGroup).toMatchObject({ id: 'auto-2', title: '补充信息' });
+    expect(fieldIdsInStep(secondGroup)).toEqual(['reason']);
   });
 
   it('filters hidden descendants from visible span_layout steps', () => {
@@ -51,10 +53,12 @@ describe('buildFormStepGroups', () => {
     ];
 
     const groups = buildFormStepGroups(schema, { showHidden: false });
+    const firstGroup = groupAt(groups, 0);
+    const firstNode = firstGroup.nodes[0];
 
     expect(groups).toHaveLength(1);
-    expect(fieldIdsInStep(groups[0]!)).toEqual(['visible']);
-    expect(groups[0]!.nodes[0]!.id).toBe('visible');
+    expect(fieldIdsInStep(firstGroup)).toEqual(['visible']);
+    expect(firstNode?.id).toBe('visible');
   });
 
   it('uses a description before fields as step description', () => {
@@ -65,11 +69,12 @@ describe('buildFormStepGroups', () => {
     ];
 
     const groups = buildFormStepGroups(schema, {});
+    const firstGroup = groupAt(groups, 0);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0]!.title).toBe('报销金额');
-    expect(groups[0]!.description).toBe('请填写真实金额');
-    expect(fieldIdsInStep(groups[0]!)).toEqual(['amount', 'invoice']);
+    expect(firstGroup.title).toBe('报销金额');
+    expect(firstGroup.description).toBe('请填写真实金额');
+    expect(fieldIdsInStep(firstGroup)).toEqual(['amount', 'invoice']);
   });
 
   it('keeps table_list as its own step', () => {
@@ -85,9 +90,10 @@ describe('buildFormStepGroups', () => {
     ];
 
     const groups = buildFormStepGroups(schema, {});
+    const secondGroup = groupAt(groups, 1);
 
     expect(groups.map((group) => group.title)).toEqual(['基础信息', '费用明细', '补充信息']);
-    expect(fieldIdsInStep(groups[1]!)).toEqual(['items']);
+    expect(fieldIdsInStep(secondGroup)).toEqual(['items']);
   });
 
   it('chunks ungrouped visible fields into groups of at most six', () => {
@@ -98,10 +104,12 @@ describe('buildFormStepGroups', () => {
     }));
 
     const groups = buildFormStepGroups(schema, {});
+    const firstGroup = groupAt(groups, 0);
+    const secondGroup = groupAt(groups, 1);
 
     expect(groups).toHaveLength(2);
-    expect(fieldIdsInStep(groups[0]!)).toEqual(['field-1', 'field-2', 'field-3', 'field-4', 'field-5', 'field-6']);
-    expect(fieldIdsInStep(groups[1]!)).toEqual(['field-7']);
+    expect(fieldIdsInStep(firstGroup)).toEqual(['field-1', 'field-2', 'field-3', 'field-4', 'field-5', 'field-6']);
+    expect(fieldIdsInStep(secondGroup)).toEqual(['field-7']);
   });
 
   it('excludes fields hidden by visibleWhen rules', () => {
@@ -116,7 +124,17 @@ describe('buildFormStepGroups', () => {
     ];
 
     const groups = buildFormStepGroups(schema, { needBudget: false });
+    const firstGroup = groupAt(groups, 0);
 
-    expect(fieldIdsInStep(groups[0]!)).toEqual(['needBudget']);
+    expect(fieldIdsInStep(firstGroup)).toEqual(['needBudget']);
   });
 });
+
+function groupAt(groups: ReturnType<typeof buildFormStepGroups>, index: number) {
+  const group = groups[index];
+  expect(group).toBeDefined();
+  if (!group) {
+    throw new Error(`Expected group at index ${index}`);
+  }
+  return group;
+}
