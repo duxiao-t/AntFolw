@@ -19,6 +19,7 @@ export type SelfSelectRule = {
 export type SelfSelectAssignee = {
   id: number;
   name: string;
+  department?: string;
 };
 
 export const useSubmitFlowStore = create<SubmitFlowState>((set) => ({
@@ -123,7 +124,11 @@ function assigneesFromProps(props: MobileSchemaNode['props']): SelfSelectAssigne
     if (typeof id !== 'number' || !Number.isSafeInteger(id)) {
       return [];
     }
-    return [{ id, name: String(candidate.name ?? candidate.label ?? `用户#${id}`) }];
+    return [{
+      id,
+      name: String(candidate.name ?? candidate.label ?? `用户#${id}`),
+      department: typeof candidate.department === 'string' ? candidate.department : undefined,
+    }];
   });
 }
 

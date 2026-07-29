@@ -7,6 +7,10 @@ export type StartResult = {
   firstTaskIds: number[];
 };
 
+export type DirectSubmitResult = {
+  dataId: number;
+};
+
 export async function startMobileInstance({
   formCode,
   values,
@@ -29,6 +33,23 @@ export async function startMobileInstance({
       selfSelected,
       draftId,
       files: collectMobileFileRefs(values),
+    }),
+  });
+}
+
+export async function submitMobileFormData({
+  formCode,
+  values,
+}: {
+  formCode: string;
+  values: MobileFormValues;
+}) {
+  return apiRequest<DirectSubmitResult>('/api/forms/data', {
+    method: 'POST',
+    body: JSON.stringify({
+      formCode,
+      status: 'SUBMITTED',
+      data: values,
     }),
   });
 }

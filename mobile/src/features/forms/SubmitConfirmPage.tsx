@@ -9,7 +9,8 @@ import { fetchMobileForm } from "./drafts.api";
 import { removeRecoveryDraft } from "./recoveryDraft.store";
 import { getFieldDefinition } from "./schema/fieldRegistry";
 import type { MobileFormValues, MobileSchemaNode } from "./schema/types";
-import { startMobileInstance } from "./start.api";
+import { isVisibleNode } from "./schema/validators";
+import { startMobileInstance, submitMobileFormData } from "./start.api";
 import {
   clearIdempotencyKeyForPayload,
   findSelfSelectRules,
@@ -43,25 +44,36 @@ export function SubmitConfirmPage() {
   );
   const formName = formQuery.data?.name ?? "申请";
   const formInitial = formName.trim().charAt(0) || "申";
+  const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
 
   const submitMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       setError("");
-      return startMobileInstance({
+      if (!workflowEnabled) {
+        const result = await submitMobileFormData({
+          formCode: flow.formCode ?? code,
+          values: flow.values,
+        });
+        return { mode: "direct" as const, id: result.dataId };
+      }
+      const result = await startMobileInstance({
         formCode: flow.formCode ?? code,
         values: flow.values,
         selfSelected: flow.selfSelected,
         draftId: flow.draftId,
         idempotencyKey: idempotencyKeyForCurrentPayload(),
       });
+      return { mode: "workflow" as const, id: result.instanceId };
     },
     onSuccess(result) {
-      clearIdempotencyKeyForPayload(currentPayload());
+      if (result.mode === "workflow") {
+        clearIdempotencyKeyForPayload(currentPayload());
+      }
       if (user && flow.formCode) {
         removeRecoveryDraft(user.id, flow.formCode, flow.draftId);
       }
       resetFlow();
-      void navigate(`/forms/${encodeURIComponent(code)}/success/${result.instanceId}`, { replace: true });
+      void navigate(`/forms/${encodeURIComponent(code)}/success/${result.id}?mode=${result.mode}`, { replace: true });
     },
     onError(errorValue) {
       setError(errorValue instanceof Error ? errorValue.message : "提交失败");
@@ -98,7 +110,9 @@ export function SubmitConfirmPage() {
           <span className="af-app-grid__icon" aria-hidden="true">{formInitial}</span>
           <div style={{ display: "grid", gap: 2 }}>
             <strong style={{ fontSize: 13 }}>{formName}</strong>
-            <small style={{ fontSize: 10, color: "var(--af-color-muted)" }}>提交后将进入审批流程</small>
+            <small style={{ fontSize: 10, color: "var(--af-color-muted)" }}>
+              {workflowEnabled ? "提交后将进入审批流程" : "提交后直接完成"}
+            </small>
           </div>
         </section>
 
@@ -184,6 +198,9 @@ function summarizeNode(node: MobileSchemaNode, values: MobileFormValues): Array<
   label: string;
   value: string;
 }> {
+  if (!isVisibleNode(node, values)) {
+    return [];
+  }
   if (node.type === "description") {
     return [];
   }

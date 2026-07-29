@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Dialog } from "antd-mobile";
+import { Dialog, Toast } from "antd-mobile";
 import { useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
@@ -26,6 +26,7 @@ import {
   type RecoveryDraftWriter,
 } from "./recoveryDraft.store";
 import { validateSchemaValues } from "./schema/fieldRegistry";
+import { collectVisibleValues } from "./schema/validators";
 import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
 
 export function FormFillPage() {
@@ -73,9 +74,16 @@ export function FormFillPage() {
       setSavedDraftId(nextDraftId);
       setInitialValues(values);
       setStatus("草稿已保存");
+      showToast({ icon: "success", content: "草稿已保存" });
       if (user) {
         removeRecoveryDraft(user.id, code, draftId);
       }
+    },
+    onError(errorValue) {
+      showToast({
+        icon: "fail",
+        content: errorValue instanceof Error ? errorValue.message : "草稿保存失败",
+      });
     },
   });
 
@@ -147,6 +155,8 @@ export function FormFillPage() {
   const process = formQuery.data?.process;
   const formSchema = formSchemaWithoutSelfSelectRules(schema);
   const title = formQuery.data?.name ?? "表单填写";
+  const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
+  const description = typeof formQuery.data?.description === "string" ? formQuery.data.description : "";
 
   if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)) {
     return <PageSkeleton rows={5} />;
@@ -159,20 +169,29 @@ export function FormFillPage() {
   return (
     <AppPage
       title={title}
+      onBack={() => navigateBack(navigate)}
       action={
         <button
           type="button"
           className="af-link-button"
           style={{ fontSize: 13 }}
-          onClick={() => saveDraft()}
+          onClick={() => navigate("/forms/drafts")}
         >
-          草稿
+          草稿箱
         </button>
       }
     >
       <div className="af-stack">
+        <section className="af-form-head">
+          <div>
+            <h2>{title}</h2>
+            {description ? <p>{description}</p> : null}
+          </div>
+          <span className={`af-tag${workflowEnabled ? "" : " af-tag--success"}`}>
+            {workflowEnabled ? "审批流程" : "直接提交"}
+          </span>
+        </section>
         <section className="af-card--form">
-          <h4>请假信息</h4>
           <DynamicFormRenderer
             schema={formSchema}
             values={values}
@@ -189,10 +208,6 @@ export function FormFillPage() {
             }}
           />
         </section>
-        <section className="af-card--form">
-          <h4>附件</h4>
-          <div className="af-upload">+ 添加图片或文件</div>
-        </section>
         {status ? (
           <p role="status" style={{ margin: 0, fontSize: 12, color: "var(--af-color-muted)" }}>
             {status}
@@ -200,8 +215,17 @@ export function FormFillPage() {
         ) : null}
       </div>
 
-      <div className="af-bottom-bar" style={{ position: "fixed", left: 0, right: 0, bottom: 0, padding: "10px 14px 18px", background: "#ffffff", borderTop: "1px solid #edf0f2", boxShadow: "0 -8px 18px rgba(0,0,0,0.06)" }}><button type="button" className="af-btn af-btn--block" onClick={goNext}>
-          下一步
+      <div className="af-action-bar">
+        <button
+          type="button"
+          className="af-btn af-btn--ghost"
+          disabled={saveMutation.isPending}
+          onClick={() => saveDraft()}
+        >
+          {saveMutation.isPending ? "保存中..." : "保存草稿"}
+        </button>
+        <button type="button" className="af-btn" onClick={goNext}>
+          {workflowEnabled ? "下一步" : "提交"}
         </button>
       </div>
 
@@ -241,10 +265,13 @@ export function FormFillPage() {
     const nextErrors = validateSchemaValues(formSchema, values);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
+      showToast({ icon: "fail", content: "请完善必填或格式错误字段" });
+      scrollToFirstError(nextErrors);
       return;
     }
+    const submitValues = collectVisibleValues(formSchema, values);
     recoveryWriterRef.current?.flush();
-    beginSubmitFlow({ formCode: code, draftId, values });
+    beginSubmitFlow({ formCode: code, draftId, values: submitValues });
     const nextPath =
       findSelfSelectRules(process).length > 0
         ? `/forms/${encodeURIComponent(code)}/self-select`
@@ -252,6 +279,24 @@ export function FormFillPage() {
     setSubmitNavigationAllowed(true);
     setPendingSubmitPath(nextPath);
   }
+}
+
+function scrollToFirstError(errors: FieldValidationErrors) {
+  const firstFieldId = Object.keys(errors)[0];
+  if (!firstFieldId || typeof document === "undefined") {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    const target = document.querySelector(`[data-field-id="${escapeCssIdent(firstFieldId)}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
+function escapeCssIdent(value: string) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
 }
 
 function chooseInitialValues({
@@ -304,6 +349,21 @@ function confirmDialog(message: string) {
     return window.confirm(message);
   }
   return true;
+}
+
+function navigateBack(navigate: ReturnType<typeof useNavigate>) {
+  if (typeof window !== "undefined" && window.history.length > 1) {
+    navigate(-1);
+    return;
+  }
+  navigate("/workbench");
+}
+
+function showToast(options: Parameters<typeof Toast.show>[0]) {
+  if (import.meta.env.MODE === "test") {
+    return;
+  }
+  Toast.show(options);
 }
 
 export default FormFillPage;

@@ -101,7 +101,7 @@ describe('FormFillPage', () => {
     expect(await screen.findByText('请填写请假事由')).toBeInTheDocument();
 
     await userEvent.type(input, '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '草稿' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
 
     await waitFor(() => {
       const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
@@ -125,7 +125,7 @@ describe('FormFillPage', () => {
 
     const nextButton = await screen.findByRole('button', { name: '下一步' });
 
-    expect(nextButton.parentElement).toHaveStyle({ position: 'fixed', bottom: '0px' });
+    expect(nextButton.parentElement).toHaveClass('af-action-bar');
   });
 
   it('recovers local values for the current user when schema version matches', async () => {

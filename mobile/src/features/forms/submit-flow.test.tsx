@@ -24,6 +24,7 @@ const FORM_WITHOUT_SELF_SELECT = {
   code: 'leave',
   name: '请假申请',
   version: 3,
+  settings: { workflowEnabled: true },
   schema: [
     { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
     { id: 'attachments', type: 'file_upload', label: '附件' },
@@ -35,6 +36,7 @@ const FORM_WITH_SELF_SELECT = {
   code: 'leave',
   name: '请假申请',
   version: 3,
+  settings: { workflowEnabled: true },
   schema: [
     { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
   ],
@@ -55,6 +57,11 @@ const FORM_WITH_SELF_SELECT = {
       },
     },
   },
+};
+
+const FORM_WITH_DIRECT_SUBMIT = {
+  ...FORM_WITHOUT_SELF_SELECT,
+  settings: { workflowEnabled: false },
 };
 
 const START_RESULT = {
@@ -87,6 +94,9 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
           canWithdraw: true,
           history: [],
         });
+      }
+      if (url.includes('/api/forms/data') && init?.method === 'POST') {
+        return jsonResponse({ dataId: 6001 });
       }
       return jsonResponse({});
     }),
@@ -234,6 +244,27 @@ describe('mobile form submit flow', () => {
         ],
       });
     });
+  });
+
+  it('submits directly when workflow is disabled', async () => {
+    setupFetch(FORM_WITH_DIRECT_SUBMIT);
+    renderSubmitFlow();
+
+    await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(await screen.findByText('提交后直接完成')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '确认提交' }));
+
+    await waitFor(() => {
+      const fetchMock = fetch as unknown as { mock: { calls: unknown[][] } };
+      const directCalls = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).includes('/api/forms/data') && (init as RequestInit).method === 'POST');
+      expect(directCalls).toHaveLength(1);
+      expect(instancePostCalls()).toHaveLength(0);
+    });
+    expect(await screen.findByText('表单已提交完成')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看详情' })).not.toBeInTheDocument();
   });
 
   it('reuses the same idempotency key after remounting confirmation for a failed same-payload retry', async () => {

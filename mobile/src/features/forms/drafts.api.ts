@@ -4,8 +4,10 @@ import type { MobileFlowNode, MobileFormValues, MobileSchemaNode } from './schem
 export type MobileFormDetail = {
   code: string;
   name: string;
+  description?: string;
   version: number;
   schema: MobileSchemaNode[];
+  settings?: Record<string, unknown>;
   process?: MobileFlowNode | null;
 };
 
