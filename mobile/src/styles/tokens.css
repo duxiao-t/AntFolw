@@ -33,6 +33,7 @@
   --af-radius-pill: 999px;
   --af-radius-sheet: 16px;
   --af-color-primary: #1769e0;
+  --af-color-primary-action: #0b57d0;
   --af-shadow-float: 0 14px 28px rgba(24, 35, 48, 0.1);
   --af-shadow-card: 0 6px 18px rgba(24, 35, 48, 0.045), 0 1px 0 rgba(24, 35, 48, 0.04);
   --af-shadow-pop: 0 12px 26px rgba(24, 35, 48, 0.12);

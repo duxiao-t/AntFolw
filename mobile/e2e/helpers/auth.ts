@@ -38,7 +38,7 @@ export async function signIn(
   await expect(account).toBeVisible({ timeout: 20_000 });
   await account.fill(username);
   await page.getByPlaceholder('请输入密码').fill(password);
-  await page.getByRole('button', { name: '登录' }).click();
+  await page.getByRole('button', { name: '登录', exact: true }).click();
 }
 
 export async function signOutViaSecurity(page: Page) {

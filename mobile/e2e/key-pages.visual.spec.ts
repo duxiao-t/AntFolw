@@ -33,7 +33,7 @@ test.describe('key pages visual regression', () => {
 
     // 1 login
     await page.goto('/mobile/login');
-    await expect(page.getByRole('heading', { name: '登录 AntFlow' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Hello!' })).toBeVisible();
     await capture(page, '01-login');
 
     // 2 workbench
@@ -53,7 +53,7 @@ test.describe('key pages visual regression', () => {
 
     // 5 form
     await page.goto(`/mobile/forms/${world.formCode}`);
-    await expect(page.getByRole('heading')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请假申请' })).toBeVisible();
     await page.getByLabel('请假事由').fill('视觉回归');
     await capture(page, '05-form');
 
@@ -64,12 +64,12 @@ test.describe('key pages visual regression', () => {
 
     // 7 confirm
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
-    await page.getByRole('button', { name: '确认选择' }).click();
-    await expect(page.getByRole('heading', { name: '提交确认' })).toBeVisible();
+    await page.getByRole('button', { name: '确认审批人' }).click();
+    await expect(page.getByRole('heading', { name: '确认提交' })).toBeVisible();
     await capture(page, '07-confirm');
 
     // 8 success
-    await page.getByRole('button', { name: '提交' }).click();
+    await page.getByRole('button', { name: '确认提交' }).click();
     await expect(page.getByRole('heading', { name: '提交成功' })).toBeVisible();
     await capture(page, '08-success');
 
@@ -106,7 +106,7 @@ test.describe('key pages visual regression', () => {
 
     // 14 process detail
     await page.goto(`/mobile/processes/${instanceId}`);
-    await expect(page.getByRole('heading')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '流程进度' })).toBeVisible();
     await capture(page, '14-process-detail');
 
     // 15 done

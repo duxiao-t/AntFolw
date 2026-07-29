@@ -22,7 +22,8 @@ button { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: 2px solid color-mix(in srgb, var(--af-color-primary) 72%, white); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--af-color-primary) 18%, transparent); }
 
-.af-shell { min-height: 100dvh; background: var(--af-color-bg); color: var(--af-color-text); }
+.af-shell { min-height: 100dvh; display: flex; flex-direction: column; background: var(--af-color-bg); color: var(--af-color-text); }
+.af-shell .af-page-frame { min-height: 0; flex: 1; }
 .af-stack { display: grid; gap: 12px; }
 .af-row { display: flex; align-items: center; gap: 8px; }
 
@@ -33,8 +34,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .af-nav { position: sticky; top: 0; z-index: 30; height: calc(48px + var(--af-safe-top)); padding-top: var(--af-safe-top); display: grid; grid-template-columns: 48px minmax(0, 1fr) 64px; align-items: center; background: rgba(250, 252, 255, 0.94); border-bottom: 1px solid rgba(23, 33, 43, 0.06); backdrop-filter: blur(16px); }
 .af-nav__back { width: 44px; height: 44px; display: grid; place-items: center; font-size: 24px; font-weight: 300; line-height: 1; color: var(--af-color-text); background: transparent; border: 0; cursor: pointer; }
 .af-nav__title { text-align: center; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.af-nav__action { height: 44px; display: grid; place-items: center; justify-self: end; padding-right: 12px; font-size: 13px; color: var(--af-color-primary); background: transparent; border: 0; cursor: pointer; }
+.af-nav__action { height: 44px; display: grid; place-items: center; justify-self: end; padding-right: 12px; font-size: 13px; color: var(--af-color-primary-action); background: transparent; border: 0; cursor: pointer; }
 .af-nav__action[aria-disabled="true"] { color: var(--af-color-muted); cursor: not-allowed; }
+.af-nav__action-wrap .af-link-button { color: var(--af-color-primary-action); }
 
 .af-hero { border-radius: var(--af-radius-surface); background: var(--af-color-primary); color: var(--af-color-on-primary); padding: 14px 14px 16px; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
 .af-hero b { font-size: 16px; font-weight: 700; display: block; }
@@ -90,7 +92,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .af-input::placeholder { color: var(--af-color-placeholder); }
 .af-input--placeholder { color: var(--af-color-placeholder); }
 
-.af-btn { display: inline-flex; align-items: center; justify-content: center; height: 38px; padding: 0 14px; border-radius: var(--af-radius-control); font-weight: 700; cursor: pointer; border: 1px solid transparent; background: var(--af-color-primary); color: var(--af-color-on-primary); font: inherit; font-size: 12px; box-shadow: 0 8px 16px rgba(23, 103, 232, 0.16); }
+.af-btn { display: inline-flex; align-items: center; justify-content: center; height: 38px; padding: 0 14px; border-radius: var(--af-radius-control); font-weight: 700; cursor: pointer; border: 1px solid transparent; background: var(--af-color-primary-action); color: var(--af-color-on-primary); font: inherit; font-size: 12px; box-shadow: 0 8px 16px rgba(23, 103, 232, 0.16); }
 .af-btn--ghost { background: #f8fafc; border-color: #dbe2ea; color: #354252; box-shadow: none; }
 .af-btn--danger { color: var(--af-color-danger); border-color: #ffccc7; background: var(--af-color-surface); }
 .af-btn--danger-solid { background: var(--af-color-danger); color: #fff; border-color: var(--af-color-danger); }
@@ -110,7 +112,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .af-timeline__event small { font-size: 10px; color: var(--af-color-muted); display: block; margin-top: 2px; }
 
 .af-sheet { position: fixed; inset: 0; background: var(--af-color-overlay); display: flex; align-items: flex-end; z-index: 1000; }
-.af-sheet__panel { width: 100%; background: var(--af-color-surface); border-radius: var(--af-radius-sheet) var(--af-radius-sheet) 0 0; padding: 15px 14px calc(14px + var(--af-safe-bottom)); }
+.af-sheet__panel { position: relative; z-index: 1; width: 100%; background: var(--af-color-surface); border-radius: var(--af-radius-sheet) var(--af-radius-sheet) 0 0; padding: 15px 14px calc(14px + var(--af-safe-bottom)); }
 .af-sheet__panel h3 { font-size: 15px; font-weight: 700; margin: 0 0 12px; text-align: center; }
 .af-sheet__buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 
@@ -300,8 +302,8 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .af-avatar--button {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border: 1px solid rgba(23, 33, 43, 0.08);
   box-shadow: 0 8px 18px rgba(23, 103, 232, 0.18);
   cursor: pointer;
@@ -442,8 +444,9 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .af-section__title .af-link-button {
-  min-height: 28px;
-  padding: 0 9px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
   border-radius: 999px;
   background: #eef5ff;
   font-size: 11px;
@@ -671,8 +674,8 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .af-avatar--button {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
 }
 
@@ -741,7 +744,8 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .af-section__title .af-link-button {
-  min-height: 26px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 999px;
 }
 

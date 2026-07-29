@@ -88,7 +88,7 @@ async function signIn(page: Page, returnUrl: string) {
   await page.goto(`/mobile/login?returnUrl=${encodeURIComponent(returnUrl)}`);
   await page.getByPlaceholder('请输入账号').fill('admin');
   await page.getByPlaceholder('请输入密码').fill('ant.design');
-  await page.getByRole('button', { name: '登录' }).click();
+  await page.getByRole('button', { name: '登录', exact: true }).click();
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -123,7 +123,7 @@ test('shell dimensions stay usable across mobile viewports', async ({ page }) =>
   await expectNoHorizontalOverflow(page);
   const nav = page.getByRole('navigation', { name: '主导航' });
   await expect(nav).toBeVisible();
-  const tabBoxes = await nav.locator('.adm-tab-bar-item').evaluateAll((items) =>
+  const tabBoxes = await nav.locator('.af-tabbar__item').evaluateAll((items) =>
     items.map((item) => {
       const rect = item.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
@@ -144,7 +144,7 @@ test('shell dimensions stay usable across mobile viewports', async ({ page }) =>
 
 test('captures deterministic key page screenshots', async ({ page }) => {
   await page.goto('/mobile/login');
-  await expect(page.getByRole('heading', { name: '登录 AntFlow' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Hello!' })).toBeVisible();
   await expect(page).toHaveScreenshot('login.png', { fullPage: true });
 
   await signIn(page, '/workbench');

@@ -31,14 +31,14 @@ test.describe('draft recovery and offline', () => {
     await page.getByLabel('请假事由').fill('离线保留内容');
     await page.getByRole('button', { name: '下一步' }).click();
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
-    await page.getByRole('button', { name: '确认选择' }).click();
-    await expect(page.getByRole('heading', { name: '提交确认' })).toBeVisible();
+    await page.getByRole('button', { name: '确认审批人' }).click();
+    await expect(page.getByRole('heading', { name: '确认提交' })).toBeVisible();
     await expect(page.getByText('离线保留内容')).toBeVisible();
 
     await page.context().setOffline(true);
     await expect(page.getByText('网络已断开，正在尝试恢复…')).toBeVisible();
-    await page.getByRole('button', { name: '提交' }).click();
-    await expect(page.getByRole('heading', { name: '提交确认' })).toBeVisible();
+    await page.getByRole('button', { name: '确认提交' }).click();
+    await expect(page.getByRole('heading', { name: '确认提交' })).toBeVisible();
     await expect(page.getByText('离线保留内容')).toBeVisible();
     expect(world.startPostCount).toBe(0);
     expect(world.instances.size).toBe(0);

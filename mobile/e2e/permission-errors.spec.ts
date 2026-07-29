@@ -35,11 +35,11 @@ test.describe('permission and idempotency', () => {
     await page.getByLabel('请假事由').fill('幂等提交');
     await page.getByRole('button', { name: '下一步' }).click();
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
-    await page.getByRole('button', { name: '确认选择' }).click();
-    await expect(page.getByRole('heading', { name: '提交确认' })).toBeVisible();
+    await page.getByRole('button', { name: '确认审批人' }).click();
+    await expect(page.getByRole('heading', { name: '确认提交' })).toBeVisible();
 
     // First submit succeeds.
-    await page.getByRole('button', { name: '提交' }).click();
+    await page.getByRole('button', { name: '确认提交' }).click();
     await expect(page.getByRole('heading', { name: '提交成功' })).toBeVisible();
     expect(world.instances.size).toBe(1);
     const firstId = [...world.instances.keys()][0];
