@@ -6,6 +6,7 @@ export function DateField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   return (
     <FieldShell
+      node={props.node}
       label={label}
       controlId={props.node.id}
       required={isRequired(props.node)}

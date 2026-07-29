@@ -1,37 +1,57 @@
 import type { PropsWithChildren, ReactNode } from 'react';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
-import { summarizeValue, validateRequired } from '../schema/validators';
+import {
+  fieldDescription,
+  fieldHelp,
+  fieldLabel as schemaFieldLabel,
+  summarizeValue,
+  validateCommonRules,
+} from '../schema/validators';
 
 type FieldShellProps = PropsWithChildren<{
   label: string;
+  node?: MobileSchemaNode;
   controlId?: string;
   required?: boolean;
   error?: string | null;
   summary?: ReactNode;
+  help?: ReactNode;
+  description?: ReactNode;
 }>;
 
-export function FieldShell({ label, controlId, required, error, summary, children }: FieldShellProps) {
+export function FieldShell({
+  label,
+  node,
+  controlId,
+  required,
+  error,
+  summary,
+  help,
+  description,
+  children,
+}: FieldShellProps) {
+  const resolvedDescription = description ?? (node ? fieldDescription(node) : null);
+  const resolvedHelp = help ?? (node ? fieldHelp(node) : null);
   return (
     <section
-      style={{
-        display: 'grid',
-        gap: 6,
-        padding: '12px 0',
-      }}
+      className={`af-field${error ? ' af-field--error' : ''}${summary ? ' af-field--readonly' : ''}`}
+      data-field-id={node?.id}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+      <div className="af-field__head">
         {controlId ? (
-          <label htmlFor={controlId} style={{ fontSize: 14, fontWeight: 600 }}>
+          <label htmlFor={controlId} className="af-field__label">
             {label}
           </label>
         ) : (
-          <strong style={{ fontSize: 14, fontWeight: 600 }}>{label}</strong>
+          <strong className="af-field__label">{label}</strong>
         )}
-        {required ? <span style={{ color: 'var(--af-color-danger)' }}>*</span> : null}
+        {required ? <span className="af-field__required">*</span> : null}
       </div>
+      {resolvedDescription ? <p className="af-field__desc">{resolvedDescription}</p> : null}
       {summary ?? children}
+      {resolvedHelp ? <p className="af-field__help">{resolvedHelp}</p> : null}
       {error ? (
-        <span role="alert" style={{ color: 'var(--af-color-danger)', fontSize: 12 }}>
+        <span role="alert" className="af-field__error">
           {error}
         </span>
       ) : null}
@@ -40,14 +60,14 @@ export function FieldShell({ label, controlId, required, error, summary, childre
 }
 
 export function fieldLabel(node: MobileSchemaNode) {
-  return node.label ?? node.id;
+  return schemaFieldLabel(node);
 }
 
 export function fieldError(props: MobileFieldProps) {
   if (props.mode === 'readonly') {
     return null;
   }
-  return props.error ?? validateRequired(props.node, props.value);
+  return props.error ?? validateCommonRules(props.node, props.value);
 }
 
 export function isRequired(node: MobileSchemaNode) {
@@ -62,12 +82,13 @@ export function stringValue(value: unknown) {
 }
 
 export function readonlySummary(value: unknown) {
-  return <div style={{ minHeight: 32, color: 'rgba(0,0,0,0.72)' }}>{summarizeValue(value)}</div>;
+  return <div className="af-field__summary">{summarizeValue(value)}</div>;
 }
 
 export type FieldOption = {
   label: string;
   value: string | number;
+  disabled?: boolean;
 };
 
 export function fieldOptions(node: MobileSchemaNode): FieldOption[] {
@@ -84,7 +105,7 @@ export function fieldOptions(node: MobileSchemaNode): FieldOption[] {
     if (typeof value !== 'string' && typeof value !== 'number') {
       return [];
     }
-    return [{ label: String(option.label ?? value), value }];
+    return [{ label: String(option.label ?? value), value, disabled: option.disabled === true }];
   });
 }
 

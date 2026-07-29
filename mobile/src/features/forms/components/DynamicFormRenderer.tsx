@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { getFieldDefinition } from '../schema/fieldRegistry';
+import { isVisibleNode } from '../schema/validators';
 import type {
   FieldMode,
   FieldValidationErrors,
@@ -28,21 +29,25 @@ export function DynamicFormRenderer({
   onValueChange,
 }: DynamicFormRendererProps) {
   function renderNodes(nodes: MobileSchemaNode[]) {
-    return nodes.map((node) => {
+    return nodes.flatMap((node) => {
+      if (!isVisibleNode(node, values)) {
+        return [];
+      }
       const definition = getFieldDefinition(node.type);
       const FieldComponent = definition.Component;
-      return (
-        <FieldComponent
-          key={node.id}
-          node={node}
-          value={values[node.id]}
-          values={values}
-          mode={mode}
-          error={errors[node.id]}
-          onValueChange={onValueChange}
-          renderChildren={renderNodes}
-        />
-      );
+      return [
+        <div key={node.id} data-field-id={node.id}>
+          <FieldComponent
+            node={node}
+            value={values[node.id]}
+            values={values}
+            mode={mode}
+            error={errors[node.id]}
+            onValueChange={onValueChange}
+            renderChildren={renderNodes}
+          />
+        </div>,
+      ];
     });
   }
 

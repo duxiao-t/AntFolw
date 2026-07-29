@@ -1,19 +1,25 @@
 import { createElement, type ChangeEvent, type CSSProperties } from 'react';
+import { CheckboxField } from '../fields/CheckboxField';
 import { DateField } from '../fields/DateField';
 import { DateRangeField } from '../fields/DateRangeField';
 import { DescriptionField } from '../fields/DescriptionField';
 import { DeptPickerField } from '../fields/DeptPickerField';
 import { FileUploadField, hasBlockingUploadQueue } from '../fields/FileUploadField';
+import { ImageUploadField } from '../fields/ImageUploadField';
 import { MoneyField } from '../fields/MoneyField';
 import { MultiSelectField } from '../fields/MultiSelectField';
 import { NumberField } from '../fields/NumberField';
+import { RadioField } from '../fields/RadioField';
+import { SearchField } from '../fields/SearchField';
 import { SelectField } from '../fields/SelectField';
 import { SpanLayoutField } from '../fields/SpanLayoutField';
+import { SwitchField } from '../fields/SwitchField';
 import { TextField } from '../fields/TextField';
 import { TextareaField } from '../fields/TextareaField';
 import { TableListField } from '../fields/TableListField';
+import { TimeField } from '../fields/TimeField';
 import { UserPickerField } from '../fields/UserPickerField';
-import { summarizeValue, validateRequired } from './validators';
+import { isVisibleNode, summarizeValue, validateCommonRules } from './validators';
 import type {
   FieldValidationErrors,
   MobileFieldDefinition,
@@ -95,7 +101,7 @@ function field(
   return {
     type,
     Component,
-    validate: overrides.validate ?? validateRequired,
+    validate: overrides.validate ?? validateCommonRules,
     summarize: overrides.summarize ?? ((_node, value) => summarizeValue(value)),
   };
 }
@@ -110,11 +116,22 @@ export const registeredFields: MobileFieldDefinition[] = [
     validate: validateDateRange,
     summarize: (_node, value) => summarizeDateRange(value),
   }),
+  field('time', TimeField),
   field('select', SelectField, {
+    summarize: (node, value) => optionSummary(node, value),
+  }),
+  field('radio', RadioField, {
     summarize: (node, value) => optionSummary(node, value),
   }),
   field('multi_select', MultiSelectField, {
     summarize: (node, value) => multiOptionSummary(node, value),
+  }),
+  field('checkbox', CheckboxField, {
+    summarize: (node, value) => multiOptionSummary(node, value),
+  }),
+  field('search', SearchField),
+  field('switch', SwitchField, {
+    summarize: (_node, value) => value === true ? '是' : '否',
   }),
   field('user_picker', UserPickerField, {
     validate: validateNumericValue,
@@ -127,6 +144,10 @@ export const registeredFields: MobileFieldDefinition[] = [
   field('file_upload', FileUploadField, {
     validate: validateFileUpload,
     summarize: (_node, value) => summarizeUploadedFiles(value),
+  }),
+  field('image_upload', ImageUploadField, {
+    validate: validateFileUpload,
+    summarize: (_node, value) => summarizeUploadedFiles(value, '张图片'),
   }),
   field('description', DescriptionField, {
     validate: () => null,
@@ -164,6 +185,9 @@ export function validateSchemaValues(schema: MobileSchemaNode[],
 }
 
 function validateNodeInValues(node: MobileSchemaNode, values: MobileFormValues, errors: FieldValidationErrors) {
+  if (!isVisibleNode(node, values)) {
+    return;
+  }
   if (node.type === 'table_list') {
     const error = validateTableList(node, values[node.id]);
     if (error) {
@@ -189,13 +213,14 @@ function stringValue(value: unknown) {
 }
 
 function validateDateRange(node: MobileSchemaNode, value: unknown) {
-  if (node.props?.required !== true) {
-    return null;
+  const commonError = validateCommonRules(node, value);
+  if (commonError && (!Array.isArray(value) || value.length === 0)) {
+    return commonError;
   }
   if (!Array.isArray(value) || value.length < 2 || !value[0] || !value[1]) {
-    return `请填写${node.label ?? node.id}`;
+    return node.props?.required === true ? `请填写${node.label ?? node.id}` : null;
   }
-  return null;
+  return commonError;
 }
 
 function summarizeDateRange(value: unknown) {
@@ -253,17 +278,14 @@ function validateFileUpload(node: MobileSchemaNode, value: unknown) {
   if (hasBlockingUploadQueue(value)) {
     return '仍有文件未完成上传';
   }
-  if (node.props?.required !== true) {
-    return null;
-  }
-  return Array.isArray(value) && value.length > 0 ? null : `请填写${node.label ?? node.id}`;
+  return validateCommonRules(node, value);
 }
 
-function summarizeUploadedFiles(value: unknown) {
+function summarizeUploadedFiles(value: unknown, unit = '个附件') {
   if (!Array.isArray(value) || value.length === 0) {
     return '未填写';
   }
-  return `${value.length}个附件`;
+  return `${value.length}${unit}`;
 }
 
 function validateTableList(node: MobileSchemaNode, value: unknown) {

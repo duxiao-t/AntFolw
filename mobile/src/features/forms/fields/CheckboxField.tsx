@@ -3,17 +3,20 @@ import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, fieldOptions, FieldShell, isRequired } from './fieldShared';
 
-export function MultiSelectField(props: MobileFieldProps) {
+export function CheckboxField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const values = useMemo(() => arrayValue(props.value), [props.value]);
   const [selected, setSelected] = useState<Array<string | number>>(values);
   const options = fieldOptions(props.node);
+
   useEffect(() => {
     setSelected(values);
   }, [values]);
+
   const selectedLabels = options
     .filter((option) => selected.includes(option.value))
     .map((option) => option.label);
+
   return (
     <FieldShell
       node={props.node}

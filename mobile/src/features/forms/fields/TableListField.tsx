@@ -23,7 +23,7 @@ export function TableListField(props: MobileFieldProps) {
   const canAdd = rows.length < maxRows;
 
   return (
-    <FieldShell label={label} error={props.error}>
+    <FieldShell node={props.node} label={label} error={props.error}>
       <div style={{ display: 'grid', gap: 8 }}>
         {rows.map((row, index) => {
           const children = props.node.children ?? [];

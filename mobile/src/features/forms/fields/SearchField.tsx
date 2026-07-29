@@ -2,7 +2,7 @@ import { Input } from 'antd-mobile';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary, stringValue } from './fieldShared';
 
-export function NumberField(props: MobileFieldProps) {
+export function SearchField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   return (
     <FieldShell
@@ -15,8 +15,9 @@ export function NumberField(props: MobileFieldProps) {
     >
       <Input
         id={props.node.id}
-        inputMode="decimal"
-        type="number"
+        clearable
+        type="search"
+        placeholder={String(props.node.props?.placeholder ?? '搜索')}
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}
       />

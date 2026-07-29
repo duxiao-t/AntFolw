@@ -63,6 +63,7 @@ export function UserPickerField(props: MobileFieldProps) {
 
   return (
     <FieldShell
+      node={props.node}
       label={label}
       required={isRequired(props.node)}
       error={fieldError(props)}

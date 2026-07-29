@@ -21,6 +21,7 @@ export function DateRangeField(props: MobileFieldProps) {
   ) : undefined;
   return (
     <FieldShell
+      node={props.node}
       label={label}
       required={isRequired(props.node)}
       error={fieldError({ ...props, value: localStart && localEnd ? [localStart, localEnd] : [] })}

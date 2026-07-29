@@ -3,14 +3,17 @@ import { useEffect, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, fieldOptions, FieldShell, isRequired, optionLabel } from './fieldShared';
 
-export function SelectField(props: MobileFieldProps) {
+export function RadioField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const value = selectedValue(props.value);
   const [selected, setSelected] = useState<Array<string | number>>(value == null ? [] : [value]);
-  const options = fieldOptions(props.node);
+
   useEffect(() => {
     setSelected(value == null ? [] : [value]);
   }, [value]);
+
+  const options = fieldOptions(props.node);
+
   return (
     <FieldShell
       node={props.node}

@@ -37,6 +37,9 @@ export function hasBlockingUploadQueue(value: unknown) {
 export function FileUploadField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const endpoint = String(props.node.props?.uploadEndpoint ?? '/api/mobile/files');
+  const accept = typeof props.node.props?.accept === 'string' ? props.node.props.accept : undefined;
+  const multiple = props.node.props?.multiple !== false;
+  const previewImages = props.node.props?.preview === true;
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const readyValues = useMemo(() => asReadyFiles(props.value), [props.value]);
@@ -47,6 +50,7 @@ export function FileUploadField(props: MobileFieldProps) {
 
   return (
     <FieldShell
+      node={props.node}
       label={label}
       required={isRequired(props.node)}
       error={fieldError(props) || localBlocker(items)}
@@ -58,6 +62,8 @@ export function FileUploadField(props: MobileFieldProps) {
             ref={inputRef}
             aria-label={label}
             type="file"
+            accept={accept}
+            multiple={multiple}
             onChange={(event) => {
               const files = Array.from(event.target.files ?? []);
               event.target.value = '';
@@ -66,17 +72,34 @@ export function FileUploadField(props: MobileFieldProps) {
               }
             }}
           />
-          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+          <div className="af-upload-list">
             {items.map((item) => (
-              <div key={item.localId}>
-                <div>{item.file.name}</div>
-                <div>{statusLabel(item)}</div>
+              <div key={item.localId} className="af-upload-list__item">
+                {previewImages && item.remote?.url ? (
+                  <button
+                    type="button"
+                    className="af-upload-list__thumb"
+                    aria-label={`预览 ${item.file.name}`}
+                    onClick={() => window.open(item.remote?.url, '_blank', 'noopener,noreferrer')}
+                  >
+                    <img src={item.remote.url} alt="" />
+                  </button>
+                ) : null}
+                <div className="af-upload-list__main">
+                  <div className="af-upload-list__name">{item.file.name}</div>
+                  <div className={`af-upload-list__status af-upload-list__status--${item.status}`}>
+                    {statusLabel(item)}
+                  </div>
+                  <div className="af-upload-list__progress" aria-hidden="true">
+                    <span style={{ width: `${item.progress}%` }} />
+                  </div>
+                </div>
                 {item.status === 'failed' ? (
-                  <button type="button" onClick={() => void queueFileUpload(item.file, item.localId)}>
+                  <button type="button" className="af-link-button" onClick={() => void queueFileUpload(item.file, item.localId)}>
                     重试 {item.file.name}
                   </button>
                 ) : null}
-                <button type="button" aria-label={`删除 ${item.file.name}`} onClick={() => removeItem(item.localId)}>
+                <button type="button" className="af-link-button" aria-label={`删除 ${item.file.name}`} onClick={() => removeItem(item.localId)}>
                   删除
                 </button>
               </div>

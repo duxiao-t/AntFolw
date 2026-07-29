@@ -13,7 +13,7 @@ export function SpanLayoutField(props: MobileFieldProps) {
   }, []);
 
   return (
-    <FieldShell label={fieldLabel(props.node)}>
+    <FieldShell node={props.node} label={fieldLabel(props.node)}>
       <section
         data-testid="span-layout"
         style={{

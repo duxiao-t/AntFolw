@@ -6,7 +6,7 @@ describe('mobile field registry', () => {
   it('registers exactly the supported mobile field types once', () => {
     const typeCodes = registeredFields.map((field) => field.type);
 
-    expect(typeCodes).toHaveLength(14);
+    expect(typeCodes).toHaveLength(20);
     expect(new Set(typeCodes).size).toBe(typeCodes.length);
     expect(typeCodes).toEqual([
       'text',
@@ -15,11 +15,17 @@ describe('mobile field registry', () => {
       'money',
       'date',
       'date_range',
+      'time',
       'select',
+      'radio',
       'multi_select',
+      'checkbox',
+      'search',
+      'switch',
       'user_picker',
       'dept_picker',
       'file_upload',
+      'image_upload',
       'description',
       'span_layout',
       'table_list',
