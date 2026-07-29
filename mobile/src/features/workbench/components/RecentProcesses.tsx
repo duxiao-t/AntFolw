@@ -50,7 +50,7 @@ export function RecentProcesses({ processes }: RecentProcessesProps) {
               <span className="af-recent-list__main">
                 <b>{process.formTitle}</b>
                 <small>
-                  {isSuccess ? "审批完成" : "等待审批"} · {formatTime(process.startedAt)}
+                  {isSuccess ? "审批完成" : "等待审批"} · {formatTime(process.startedAt ?? process.updatedAt)}
                 </small>
               </span>
               <span className={`af-tag${isSuccess ? " af-tag--success" : ""}`}>

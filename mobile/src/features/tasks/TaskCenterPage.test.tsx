@@ -123,7 +123,7 @@ describe('TaskCenterPage', () => {
     expect(screen.getByRole('tab', { name: '待我处理' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
     const pendingCard = screen.getByRole('link', { name: /请假申请/ });
-    expect(screen.getByText((text) => text.includes('张三'))).toBeInTheDocument();
+    expect(within(pendingCard).getByText((text) => text.includes('张三'))).toBeInTheDocument();
     expect(within(pendingCard).getByText('待审批')).toBeInTheDocument();
     expect(within(pendingCard).getByText('进行中')).toBeInTheDocument();
     expect(pendingCard).toHaveAttribute(

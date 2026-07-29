@@ -9,22 +9,35 @@ export function TaskCard({ item, returnSearch }: { item: TaskCenterItem; returnS
 }
 
 function ApprovalTaskCard({ task, returnSearch }: { task: TaskListItem; returnSearch: string }) {
+  const taskTone =
+    task.taskStatus === "APPROVED"
+      ? "af-tag--success"
+      : task.taskStatus === "REJECTED"
+        ? "af-tag--danger"
+        : "af-tag--warning";
+  const instanceTone =
+    task.instanceStatus === "APPROVED"
+      ? "af-tag--success"
+      : task.instanceStatus === "REJECTED" || task.instanceStatus === "WITHDRAWN"
+        ? "af-tag--neutral"
+        : "";
   return (
-    <Link to={`/tasks/${task.id}?${returnSearch}`} className="af-task-card">
+    <Link to={`/tasks/${task.id}?${returnSearch}`} className={`af-task-card ${railTone(task.instanceStatus)}`}>
       <div className="af-task-card__meta">
-        <span>{task.formName}</span>
+        <span>{task.nodeName}</span>
         <span>{formatTime(task.createdAt)}</span>
       </div>
-      <strong className="af-task-card__title">{task.applicantName}的{task.formName}</strong>
+      <strong className="af-task-card__title">{task.formName}</strong>
       <p className="af-task-card__summary">节点：{task.nodeName}</p>
       <div className="af-task-card__foot">
         <span className="af-task-card__avatar" aria-hidden="true">{task.applicantName.slice(0, 1)}</span>
-        <span style={{ fontSize: 11 }}>
+        <span className="af-task-card__applicant">
           {task.applicantDepartment ? `${task.applicantDepartment} · ` : ""}
           {task.applicantName}
         </span>
         <span className="af-task-card__tag-spacer" />
-        <span className="af-tag af-tag--warning">待审批</span>
+        <span className={`af-tag ${taskTone}`}>{taskStatusLabel(task.taskStatus)}</span>
+        <span className={`af-tag ${instanceTone}`}>{instanceStatusLabel(task.instanceStatus)}</span>
       </div>
     </Link>
   );
@@ -38,19 +51,19 @@ function StartedProcessCard({ process, returnSearch }: { process: StartedProcess
         ? "af-tag--neutral"
         : "";
   return (
-    <Link to={`/processes/${process.id}?${returnSearch}`} className="af-task-card">
+    <Link to={`/processes/${process.id}?${returnSearch}`} className={`af-task-card ${railTone(process.status)}`}>
       <div className="af-task-card__meta">
-        <span>{process.formName}</span>
+        <span>我发起的</span>
         <span>{formatTime(process.startedAt)}</span>
       </div>
-      <strong className="af-task-card__title">我发起的{process.formName}</strong>
+      <strong className="af-task-card__title">{process.formName}</strong>
       <p className="af-task-card__summary">
-        当前：{process.currentNodeName ?? "已结束"}
+        当前节点：{process.currentNodeName ?? "已结束"}
       </p>
       <div className="af-task-card__foot">
         <span className={`af-tag ${tone}`}>{instanceStatusLabel(process.status)}</span>
         <span className="af-task-card__tag-spacer" />
-        <span style={{ color: "var(--af-color-muted)" }}>查看进度 {"\u203A"}</span>
+        <span className="af-task-card__more">查看进度 {"\u203A"}</span>
       </div>
     </Link>
   );
@@ -89,6 +102,16 @@ function formatTime(value: string): string {
   if (sameDay) return `今天 ${hh}:${mm}`;
   if (yesterday) return `昨天 ${hh}:${mm}`;
   return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function railTone(status: string): string {
+  if (status === "APPROVED") {
+    return "af-task-card--success";
+  }
+  if (status === "REJECTED" || status === "WITHDRAWN") {
+    return "af-task-card--neutral";
+  }
+  return "af-task-card--running";
 }
 
 export default TaskCard;

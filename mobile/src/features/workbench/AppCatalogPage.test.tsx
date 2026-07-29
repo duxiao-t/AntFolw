@@ -84,7 +84,7 @@ describe("AppCatalogPage", () => {
 
     expect(await screen.findByRole("heading", { name: "全部应用" })).toBeInTheDocument();
     expect(await screen.findAllByText("人事")).not.toHaveLength(0);
-    expect(await screen.findByText("财务")).toBeInTheDocument();
+    expect(await screen.findAllByText("财务")).not.toHaveLength(0);
     expect(await screen.findByText("请假申请")).toBeInTheDocument();
   });
 
@@ -105,9 +105,14 @@ describe("AppCatalogPage", () => {
     renderCatalog();
 
     expect(await screen.findByText("请假申请")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("tab", { name: "其他" })[0]);
+    const otherTab = screen.getAllByRole("tab", { name: "其他" })[0];
+    if (!otherTab) {
+      throw new Error("其他 tab not found");
+    }
+    fireEvent.click(otherTab);
     await waitFor(() => {
-      expect(screen.getByText("通用应用 7")).toBeInTheDocument();
+      expect(screen.getByText("加班申请")).toBeInTheDocument();
+      expect(screen.getByText("通用应用 6")).toBeInTheDocument();
       expect(screen.queryByText("请假申请")).not.toBeInTheDocument();
     });
     const fetchMock = fetch as unknown as { mock: { calls: unknown[][] } };

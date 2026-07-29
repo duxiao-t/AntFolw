@@ -21,21 +21,22 @@ export function TaskFilters({
   onStatusChange: (status: string) => void;
 }) {
   return (
-    <div className="af-stack" style={{ gap: 8 }}>
-      <input
-        className="af-input"
-        type="search"
-        aria-label="搜索表单、申请人或节点"
-        placeholder="搜索表单、申请人或节点"
-        value={keyword}
-        onChange={(event) => onKeywordChange(event.currentTarget.value)}
-      />
+    <div className="af-filter-panel">
+      <label className="af-filter-panel__search">
+        <span aria-hidden="true">⌕</span>
+        <input
+          type="search"
+          aria-label="搜索表单、申请人或节点"
+          placeholder="搜索表单、申请人或节点"
+          value={keyword}
+          onChange={(event) => onKeywordChange(event.currentTarget.value)}
+        />
+      </label>
       <select
-        className="af-input"
+        className="af-filter-panel__select"
         aria-label="状态筛选"
         value={status}
         onChange={(event) => onStatusChange(event.currentTarget.value)}
-        style={{ height: 36 }}
       >
         <option value="">全部状态</option>
         {(view === "done"

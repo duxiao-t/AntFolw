@@ -96,7 +96,7 @@ export function RejectSheet({
             onClick={() => {
               const trimmed = comment.trim();
               if (!trimmed) {
-                setLocalError("请填写驳回原因");
+                setLocalError("请输入驳回原因（必填）");
                 return;
               }
               setLocalError("");

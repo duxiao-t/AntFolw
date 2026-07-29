@@ -114,7 +114,7 @@ export function AppCatalogPage() {
         </button>
       }
     >
-      <search className="af-search">{"\u2315 搜索应用"}</search>
+      <div role="search" className="af-search">{"\u2315 搜索应用"}</div>
       <div className="af-chips" role="tablist" aria-label="分类">
         <button
           type="button"

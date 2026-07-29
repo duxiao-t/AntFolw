@@ -13,6 +13,7 @@ export interface MobileUser {
   id: number;
   username: string;
   displayName: string;
+  department?: string;
   avatarUrl?: string;
   roles: string[];
 }
@@ -40,6 +41,7 @@ export interface RecentProcess {
   formCode: string;
   formTitle: string;
   status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+  startedAt?: string;
   updatedAt: string;
 }
 

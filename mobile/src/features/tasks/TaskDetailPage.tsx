@@ -9,6 +9,7 @@ import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ApproveSheet } from "./ApproveSheet";
 import { RejectSheet } from "./RejectSheet";
+import { taskStatusLabel } from "./TaskCard";
 import { TaskTimeline } from "./TaskTimeline";
 import {
   fetchTaskDetail,
@@ -93,6 +94,13 @@ export function TaskDetailPage() {
 
   const detail = detailQuery.data;
   const task = detail.task;
+  const detailStatusLabel = task.taskStatus === "PENDING" && showActions ? "待你处理" : taskStatusLabel(task.taskStatus);
+  const detailStatusTone =
+    task.taskStatus === "APPROVED"
+      ? "af-tag--success"
+      : task.taskStatus === "REJECTED"
+        ? "af-tag--danger"
+        : "af-tag--warning";
 
   return (
     <AppPage
@@ -122,7 +130,7 @@ export function TaskDetailPage() {
           </div>
           <div className="af-detail-head__status">
             <span>当前节点：{task.nodeName}</span>
-            <span className="af-tag af-tag--warning">待你处理</span>
+            <span className={`af-tag ${detailStatusTone}`}>{detailStatusLabel}</span>
           </div>
         </section>
 
@@ -161,7 +169,9 @@ export function TaskDetailPage() {
                 <li key={file.id} className="af-recent-list__item" style={{ padding: "6px 0", borderTop: "0" }}>
                   <i className="af-recent-list__dot" />
                   <span className="af-recent-list__main">
-                    <b>{file.name}</b>
+                    <a href={file.contentUrl} className="af-file-link">
+                      <b>{file.name}</b>
+                    </a>
                     <small>{file.size ? `${Math.round(file.size / 1024)} KB` : ""}</small>
                   </span>
                   <span className="af-tag">查看</span>

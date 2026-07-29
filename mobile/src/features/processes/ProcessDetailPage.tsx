@@ -91,12 +91,12 @@ export function ProcessDetailPage() {
           <div className="af-process-summary__row">
             <span className="af-app-grid__icon" aria-hidden="true">{formInitial}</span>
             <div>
-              <b>{instance.formName ?? `流程#${instance.id}`}</b>
+              <h2 className="af-process-summary__title">{instance.formName ?? `流程#${instance.id}`}</h2>
               <small>实例 #{instance.id}</small>
             </div>
           </div>
           <div className="af-process-summary__status">
-            <span>发起于 {formatTime(instance.startedAt)}</span>
+            <span>发起于 {instance.startedAt ? formatTime(instance.startedAt) : "-"}</span>
             <span className="af-tag">{instanceStatusLabel(instance.status)}</span>
           </div>
         </section>
@@ -144,7 +144,9 @@ export function ProcessDetailPage() {
                 <li key={file.id} className="af-recent-list__item" style={{ padding: "6px 0", borderTop: "0" }}>
                   <i className="af-recent-list__dot" />
                   <span className="af-recent-list__main">
-                    <b>{file.name}</b>
+                    <a href={file.contentUrl} className="af-file-link">
+                      <b>{file.name}</b>
+                    </a>
                   </span>
                   <span className="af-tag">查看</span>
                 </li>

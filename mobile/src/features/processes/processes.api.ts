@@ -23,6 +23,7 @@ export type MobileInstanceDetail = {
   id: number;
   status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
   formName?: string;
+  startedAt?: string;
   schema?: unknown;
   formData?: Record<string, unknown> | null;
   processSnapshot?: unknown;

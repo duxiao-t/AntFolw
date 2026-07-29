@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { queryKeys } from "../../shared/api/queryKeys";
+import { AppPage } from "../../shared/ui/AppPage";
 import { PageEmpty, PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { TaskCard } from "./TaskCard";
 import { TaskFilters } from "./TaskFilters";
@@ -55,10 +56,14 @@ export function TaskCenterPage() {
   });
 
   return (
-    <main className="af-page" data-testid="task-center" style={{ paddingTop: 0 }}>
-      <header className="af-head-bar">
-        <h3>待办</h3>
-        <span className="af-tag">{query.data?.items.length ?? 0}</span>
+    <AppPage back={false} flush>
+      <div className="af-page af-task-center" data-testid="task-center">
+      <header className="af-operational-head">
+        <div>
+          <h3>待办</h3>
+          <small>{view === "pending" ? "需要你处理的审批" : "流程记录与处理结果"}</small>
+        </div>
+        <span className="af-count-pill">{query.data?.items.length ?? 0}</span>
       </header>
 
       <div className="af-tabs" role="tablist" aria-label="任务视图">
@@ -70,14 +75,13 @@ export function TaskCenterPage() {
             aria-selected={view === tab.key}
             className={view === tab.key ? "is-active" : ""}
             onClick={() => changeView(tab.key)}
-            style={{ border: 0, background: "transparent" }}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      <div className="af-section-padding">
+      <div className="af-task-center__body">
         <TaskFilters
           keyword={keyword}
           status={status ?? ""}
@@ -86,7 +90,7 @@ export function TaskCenterPage() {
           onStatusChange={changeStatus}
         />
 
-        <div className="af-stack" style={{ marginTop: 8 }}>
+        <div className="af-stack af-task-center__list">
           {query.isPending ? <PageSkeleton rows={5} /> : null}
           {query.isError ? <PageError onRetry={() => void query.refetch()} /> : null}
           {query.data && query.data.items.length === 0 ? (
@@ -112,7 +116,8 @@ export function TaskCenterPage() {
           ) : null}
         </div>
       </div>
-    </main>
+      </div>
+    </AppPage>
   );
 
   function changeView(nextView: TaskView) {

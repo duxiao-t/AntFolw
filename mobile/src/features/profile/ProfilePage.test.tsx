@@ -56,7 +56,7 @@ describe('ProfilePage', () => {
     expect(screen.getByText((text) => text.includes('3'))).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '草稿箱' })).toHaveAttribute(
       'href',
-      '/tasks?status=draft',
+      '/forms/drafts',
     );
     expect(screen.getByRole('link', { name: '账号与安全' })).toHaveAttribute(
       'href',

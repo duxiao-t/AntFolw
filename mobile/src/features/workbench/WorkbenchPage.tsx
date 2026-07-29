@@ -8,6 +8,7 @@ import {
   useMobileBootstrap,
 } from "./workbench.api";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
+import { AppPage } from "../../shared/ui/AppPage";
 
 function greeting(now: Date): string {
   const hour = now.getHours();
@@ -43,57 +44,79 @@ export function WorkbenchPage() {
   }
 
   return (
-    <main className="af-page" data-testid="workbench">
-      <header className="af-head-bar">
-        <div>
-          <h3>工作台</h3>
-          <small>AntFlow 科技</small>
-        </div>
-        <div className="af-avatar" aria-hidden="true">
-          {userName.slice(0, 1)}
-        </div>
-      </header>
+    <AppPage back={false} flush>
+      <div className="af-page af-workbench" data-testid="workbench">
+        <section className="af-workbench__top" aria-label="工作台概览">
+          <header className="af-head-bar">
+            <div>
+              <h3>工作台</h3>
+              <small>AntFlow 科技</small>
+            </div>
+            <button
+              type="button"
+              className="af-avatar af-avatar--button"
+              aria-label="进入我的"
+              onClick={() => navigate("/profile")}
+            >
+              {userName.slice(0, 1) || "A"}
+            </button>
+          </header>
 
-      <section className="af-hero af-fade-in" aria-label="问候">
-        <div>
-          <b>
-            {greeting(new Date())}，{userName || "同事"}
-          </b>
-          <small>高效完成今天的工作</small>
-        </div>
-        <span className="af-hero__badge">{pendingCount} 项待办</span>
-      </section>
+          <div className="af-workbench__greeting">
+            <div className="af-workbench__today">
+              <span>{greeting(new Date())}</span>
+              <h2>{userName || "同事"}</h2>
+              <p>审批、发起和跟进流程集中处理。</p>
+            </div>
+            <button type="button" className="af-workbench__todo" onClick={() => navigate("/tasks")}>
+              <b>{pendingCount}</b>
+              <small>待办</small>
+            </button>
+          </div>
 
-      <section className="af-card af-fade-in" aria-label="常用应用">
-        <div className="af-card__title">
-          <span>常用应用</span>
-          <button
-            type="button"
-            className="af-link-button"
-            onClick={() => navigate("/apps")}
-            style={{ fontSize: 11, fontWeight: 400 }}
-          >
-            全部应用 {"\u203A"}
-          </button>
-        </div>
-        <AppGrid apps={apps} onSelect={(app) => navigate(`/forms/${encodeURIComponent(app.code)}`)} />
-      </section>
+          <div className="af-workbench__metrics" aria-label="快捷统计">
+            <button type="button" onClick={() => navigate("/apps")}>
+              <b>{apps.length}</b>
+              <span>常用表单</span>
+            </button>
+            <button type="button" onClick={() => navigate("/tasks?view=process")}>
+              <b>{processes.length}</b>
+              <span>最近流程</span>
+            </button>
+            <button type="button" onClick={() => navigate("/forms/drafts")}>
+              <b>草稿</b>
+              <span>继续填写</span>
+            </button>
+          </div>
+        </section>
 
-      <section className="af-card af-fade-in" aria-label="最近流程">
-        <div className="af-card__title">
-          <span>最近流程</span>
-          <button
-            type="button"
-            className="af-link-button"
-            onClick={() => navigate("/tasks?view=process")}
-            style={{ fontSize: 11, fontWeight: 400 }}
-          >
-            查看全部 {"\u203A"}
-          </button>
-        </div>
-        <RecentProcesses processes={processes} />
-      </section>
-    </main>
+        <section className="af-section af-fade-in" aria-label="常用应用">
+          <div className="af-section__title">
+            <div>
+              <h3>常用应用</h3>
+              <small>选择表单快速发起</small>
+            </div>
+            <button type="button" className="af-link-button" onClick={() => navigate("/apps")}>
+              全部
+            </button>
+          </div>
+          <AppGrid apps={apps} onSelect={(app) => navigate(`/forms/${encodeURIComponent(app.code)}`)} />
+        </section>
+
+        <section className="af-section af-fade-in" aria-label="最近流程">
+          <div className="af-section__title">
+            <div>
+              <h3>最近流程</h3>
+              <small>跟进发起后的审批状态</small>
+            </div>
+            <button type="button" className="af-link-button" onClick={() => navigate("/tasks?view=process")}>
+              查看
+            </button>
+          </div>
+          <RecentProcesses processes={processes} />
+        </section>
+      </div>
+    </AppPage>
   );
 }
 

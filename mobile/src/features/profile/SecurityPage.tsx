@@ -6,7 +6,6 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import type { DeviceSession } from "../../shared/api/types";
 import { useAuthStore } from "../auth/auth.store";
 import { revokeSession, useDeviceSessions } from "./profile.api";
-import { useMobileBootstrap } from "../workbench/workbench.api";
 
 const enableWeComBinding = import.meta.env.VITE_ENABLE_WECOM_BINDING === "true";
 
@@ -30,8 +29,8 @@ export function SecurityPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const logout = useAuthStore((state) => state.logout);
+  const user = useAuthStore((state) => state.user);
   const sessionsQuery = useDeviceSessions();
-  const bootstrapQuery = useMobileBootstrap();
 
   const revokeMutation = useMutation({
     mutationFn: revokeSession,
@@ -67,7 +66,6 @@ export function SecurityPage() {
   }
 
   const sessions = sessionsQuery.data ?? [];
-  const user = bootstrapQuery.data?.user;
   const displayName = user?.displayName ?? "—";
   const username = user?.username ?? "";
 

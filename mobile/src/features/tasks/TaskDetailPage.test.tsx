@@ -184,7 +184,7 @@ describe('TaskDetailPage', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
     expect(within(dialog).getByText('请输入驳回原因（必填）')).toBeInTheDocument();
 
-    await userEvent.type(within(dialog).getByPlaceholderText('请输入驳回原因'), '资料不全');
+    await userEvent.type(within(dialog).getByPlaceholderText('请输入驳回原因（必填）'), '资料不全');
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
 
     expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
