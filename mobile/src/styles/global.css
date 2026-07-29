@@ -1112,3 +1112,131 @@ button { -webkit-tap-highlight-color: transparent; }
   min-height: 36px;
   font-size: 12px;
 }
+
+.af-form-step-head {
+  background: var(--af-color-surface);
+  border: 1px solid var(--af-color-border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.af-form-step-head__meta,
+.af-form-step-head__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.af-form-step-head__meta {
+  color: var(--af-color-muted);
+  font-size: 11px;
+}
+.af-form-step-head__title h2 {
+  margin: 0;
+  color: var(--af-color-text);
+  font-size: 17px;
+  font-weight: 800;
+}
+.af-form-step-head p {
+  margin: 0;
+  color: var(--af-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.af-form-step-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--af-radius-pill);
+  background: var(--af-color-primary-soft);
+}
+.af-form-step-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--af-color-primary);
+}
+.af-form-step-nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.af-step-chip {
+  min-width: 92px;
+  min-height: 44px;
+  border: 1px solid var(--af-color-border);
+  border-radius: 12px;
+  background: var(--af-color-surface);
+  color: var(--af-color-text-secondary);
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 4px;
+  align-items: center;
+  padding: 7px 8px;
+  text-align: left;
+}
+.af-step-chip b {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--af-radius-pill);
+  display: grid;
+  place-items: center;
+  background: var(--af-color-primary-soft);
+  color: var(--af-color-primary);
+  font-size: 11px;
+}
+.af-step-chip span {
+  font-size: 12px;
+  font-weight: 700;
+}
+.af-step-chip small {
+  grid-column: 2;
+  color: var(--af-color-danger);
+  font-size: 10px;
+}
+.af-step-chip--current {
+  border-color: var(--af-color-primary);
+  background: #fbfdff;
+}
+.af-step-chip--done b {
+  background: var(--af-color-success-soft);
+  color: var(--af-color-success);
+}
+.af-step-chip--error {
+  border-color: var(--af-color-danger);
+}
+.af-summary-list {
+  margin: 0;
+  display: grid;
+  gap: 0;
+}
+.af-summary-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 32%) 1fr;
+  gap: 10px;
+  min-height: 42px;
+  align-items: center;
+  border-top: 1px solid var(--af-color-line);
+}
+.af-summary-row:first-child {
+  border-top: 0;
+}
+.af-summary-row dt {
+  color: var(--af-color-muted);
+  font-size: 12px;
+}
+.af-summary-row dd {
+  margin: 0;
+  color: var(--af-color-text);
+  font-size: 13px;
+  font-weight: 650;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.af-empty-text {
+  margin: 0;
+  color: var(--af-color-muted);
+  font-size: 12px;
+}
