@@ -117,6 +117,8 @@ describe('ProcessDetailPage', () => {
     renderProcess();
 
     expect(await screen.findByRole('heading', { name: '流程进度' })).toBeInTheDocument();
+    expect(await screen.findByText('申请摘要')).toBeInTheDocument();
+    expect(screen.getByTestId('summary-item')).toHaveTextContent('显示器');
     expect(screen.getByText('显示器')).toBeInTheDocument();
     expect(screen.getByText('到达')).toBeInTheDocument();
     expect(screen.getByText(/部门审批/)).toBeInTheDocument();

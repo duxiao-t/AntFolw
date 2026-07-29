@@ -1336,3 +1336,19 @@ button { -webkit-tap-highlight-color: transparent; }
   font-size: 30px;
   font-weight: 900;
 }
+
+.af-tag--instance-running {
+  background: var(--af-color-primary-soft);
+  color: var(--af-color-primary);
+}
+
+.af-tag--instance-approved {
+  background: var(--af-color-success-soft);
+  color: var(--af-color-success);
+}
+
+.af-tag--instance-rejected,
+.af-tag--instance-withdrawn {
+  background: var(--af-color-danger-soft);
+  color: var(--af-color-danger);
+}

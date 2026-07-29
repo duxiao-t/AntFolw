@@ -5,7 +5,7 @@ import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
+import { ConfirmSummaryList } from "../forms/components/ConfirmSummaryList";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ProcessSnapshotTimeline } from "./ProcessSnapshotTimeline";
 import { fetchMobileInstanceDetail, withdrawMobileInstance } from "./processes.api";
@@ -97,7 +97,9 @@ export function ProcessDetailPage() {
           </div>
           <div className="af-process-summary__status">
             <span>发起于 {instance.startedAt ? formatTime(instance.startedAt) : "-"}</span>
-            <span className="af-tag">{instanceStatusLabel(instance.status)}</span>
+            <span className={`af-tag af-tag--instance-${instance.status.toLowerCase()}`}>
+              {instanceStatusLabel(instance.status)}
+            </span>
           </div>
         </section>
 
@@ -123,12 +125,7 @@ export function ProcessDetailPage() {
         <section className="af-card">
           <div className="af-card__title"><span>申请摘要</span></div>
           {schema.length > 0 ? (
-            <DynamicFormRenderer
-              schema={schema}
-              values={values}
-              mode="readonly"
-              onValueChange={() => undefined}
-            />
+            <ConfirmSummaryList schema={schema} values={values} />
           ) : (
             <p style={{ margin: 0, fontSize: 11, color: "var(--af-color-muted)" }}>暂无表单字段</p>
           )}
