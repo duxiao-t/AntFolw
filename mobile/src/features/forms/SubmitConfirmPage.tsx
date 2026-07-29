@@ -5,11 +5,9 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { useAuthStore } from "../auth/auth.store";
+import { ConfirmSummaryList } from "./components/ConfirmSummaryList";
 import { fetchMobileForm } from "./drafts.api";
 import { removeRecoveryDraft } from "./recoveryDraft.store";
-import { getFieldDefinition } from "./schema/fieldRegistry";
-import type { MobileFormValues, MobileSchemaNode } from "./schema/types";
-import { isVisibleNode } from "./schema/validators";
 import { startMobileInstance, submitMobileFormData } from "./start.api";
 import {
   clearIdempotencyKeyForPayload,
@@ -34,10 +32,6 @@ export function SubmitConfirmPage() {
     retry: 0,
   });
 
-  const formRows = useMemo(
-    () => summarizeRows(formSchemaWithoutSelfSelectRules(formQuery.data?.schema ?? []), flow.values),
-    [flow.values, formQuery.data?.schema],
-  );
   const selfSelectedRows = useMemo(
     () => selectedAssigneeNames(findSelfSelectRules(formQuery.data?.process), flow.selfSelected),
     [flow.selfSelected, formQuery.data?.process],
@@ -121,19 +115,17 @@ export function SubmitConfirmPage() {
             <span>申请摘要</span>
             <button
               type="button"
+              aria-label="返回修改表单"
               className="af-link-button"
-              style={{ fontSize: 11, fontWeight: 400 }}
               onClick={() => navigate(`/forms/${encodeURIComponent(code)}`)}
             >
-              修改
+              返回修改
             </button>
           </div>
-          {formRows.map((row) => (
-            <div key={row.id} className="af-kv">
-              <span className="af-kv__label">{row.label}</span>
-              <span className="af-kv__value">{row.value || "未填写"}</span>
-            </div>
-          ))}
+          <ConfirmSummaryList
+            schema={formSchemaWithoutSelfSelectRules(formQuery.data?.schema ?? [])}
+            values={flow.values}
+          />
         </section>
 
         {selfSelectedRows.length > 0 ? (
@@ -162,10 +154,17 @@ export function SubmitConfirmPage() {
         </p>
       ) : null}
 
-      <div className="af-bottom-bar">
+      <div className="af-bottom-bar af-bottom-bar--split">
         <button
           type="button"
-          className="af-btn af-btn--block"
+          className="af-btn af-btn--ghost"
+          onClick={() => navigate(`/forms/${encodeURIComponent(code)}`)}
+        >
+          返回修改
+        </button>
+        <button
+          type="button"
+          className="af-btn"
           disabled={submitMutation.isPending}
           onClick={() => submitMutation.mutate()}
         >
@@ -187,33 +186,6 @@ export function SubmitConfirmPage() {
       draftId: flow.draftId,
     });
   }
-}
-
-function summarizeRows(schema: MobileSchemaNode[], values: MobileFormValues) {
-  return schema.flatMap((node) => summarizeNode(node, values));
-}
-
-function summarizeNode(node: MobileSchemaNode, values: MobileFormValues): Array<{
-  id: string;
-  label: string;
-  value: string;
-}> {
-  if (!isVisibleNode(node, values)) {
-    return [];
-  }
-  if (node.type === "description") {
-    return [];
-  }
-  if (node.children && node.type !== "table_list") {
-    return node.children.flatMap((child) => summarizeNode(child, values));
-  }
-  return [
-    {
-      id: node.id,
-      label: node.label ?? node.id,
-      value: getFieldDefinition(node.type).summarize(node, values[node.id]),
-    },
-  ];
 }
 
 export default SubmitConfirmPage;

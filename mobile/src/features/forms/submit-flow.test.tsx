@@ -162,6 +162,9 @@ describe('mobile form submit flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
     expect(await screen.findByRole('heading', { name: '确认提交' })).toBeInTheDocument();
+    expect(screen.getByText('申请摘要')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回修改' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认提交' })).toHaveClass('af-btn');
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
   });
 
@@ -218,11 +221,8 @@ describe('mobile form submit flow', () => {
     expect(await screen.findByRole('heading', { name: '提交成功' })).toBeInTheDocument();
     expect(localStorage.getItem(buildRecoveryKey(AUTH_USER.id, 'leave', null))).toBeNull();
     expect(useSubmitFlowStore.getState().formCode).toBeNull();
-    expect(screen.getByRole('link', { name: '查看详情' })).toHaveAttribute(
-      'href',
-      '/processes/9001',
-    );
-    await userEvent.click(screen.getByRole('link', { name: '查看详情' }));
+    expect(screen.getByRole('button', { name: '查看进度' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '查看进度' }));
     expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
     expect(screen.getByText('进行中')).toBeInTheDocument();
   });
@@ -282,8 +282,8 @@ describe('mobile form submit flow', () => {
       expect(directCalls).toHaveLength(1);
       expect(instancePostCalls()).toHaveLength(0);
     });
-    expect(await screen.findByText('表单已提交完成')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '查看详情' })).not.toBeInTheDocument();
+    expect(await screen.findByText('表单已提交完成。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看进度' })).toBeInTheDocument();
   });
 
   it('reuses the same idempotency key after remounting confirmation for a failed same-payload retry', async () => {

@@ -1,41 +1,31 @@
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppPage } from "../../shared/ui/AppPage";
 
 export function SubmitSuccessPage() {
   const { instanceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const isDirectSubmit = searchParams.get("mode") === "direct";
+  const mode = searchParams.get("mode") === "direct" ? "direct" : "workflow";
 
   return (
-    <AppPage title="" variant="blank">
-      <div className="af-success-page af-fade-in">
-        <span className="af-success-page__check" aria-hidden="true" />
-        <h3>提交成功</h3>
-        <p>
-          {isDirectSubmit
-            ? "表单已提交完成"
-            : "申请已进入审批流程\n请等待审批人处理"}
-        </p>
+    <AppPage title="提交成功" variant="blank" back={false}>
+      <section className="af-success-page">
+        <div className="af-success-mark" aria-hidden="true">{"\u2713"}</div>
+        <h1 aria-hidden="true">提交成功</h1>
+        <p>{mode === "direct" ? "表单已提交完成。" : "申请已进入审批流程，请等待审批人处理。"}</p>
         <div className="af-success-page__buttons">
           <button
             type="button"
             className="af-btn af-btn--ghost"
-            onClick={() => navigate("/workbench", { replace: true })}
+            onClick={() => navigate("/workbench")}
           >
             返回工作台
           </button>
-          {!isDirectSubmit ? (
-            <Link
-              className="af-btn"
-              replace
-              to={`/processes/${instanceId}`}
-            >
-              查看详情
-            </Link>
-          ) : null}
+          <button type="button" className="af-btn" onClick={() => navigate(`/processes/${instanceId}`)}>
+            查看进度
+          </button>
         </div>
-      </div>
+      </section>
     </AppPage>
   );
 }

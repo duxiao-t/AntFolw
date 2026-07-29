@@ -1318,3 +1318,21 @@ button { -webkit-tap-highlight-color: transparent; }
 .af-choice-tile--person {
   width: 100%;
 }
+
+.af-bottom-bar--split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.af-success-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--af-radius-pill);
+  display: grid;
+  place-items: center;
+  background: var(--af-color-success-soft);
+  color: var(--af-color-success);
+  font-size: 30px;
+  font-weight: 900;
+}
