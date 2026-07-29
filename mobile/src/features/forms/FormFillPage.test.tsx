@@ -20,7 +20,23 @@ const FORM_RESPONSE = {
   name: '请假申请',
   version: 3,
   schema: [
-    { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+    {
+      id: 'time',
+      type: 'span_layout',
+      label: '请假时间',
+      children: [
+        { id: 'start', type: 'date', label: '开始时间', props: { required: true } },
+        { id: 'end', type: 'date', label: '结束时间', props: { required: true } },
+      ],
+    },
+    {
+      id: 'reason-group',
+      type: 'span_layout',
+      label: '请假事由',
+      children: [
+        { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+      ],
+    },
   ],
 };
 
@@ -38,7 +54,7 @@ function setupFetch() {
           formCode: 'leave',
           formName: '请假申请',
           formVersion: 3,
-          data: { reason: '已保存草稿' },
+          data: { start: '2026-07-30', end: '2026-07-31' },
           updatedAt: '2026-07-21T03:00:00+08:00',
           readOnly: false,
         });
@@ -95,12 +111,15 @@ describe('FormFillPage', () => {
   it('loads a form, validates required fields and creates a server draft', async () => {
     renderForm();
 
-    const input = await screen.findByLabelText('请假事由');
+    const startInput = await screen.findByLabelText('开始时间');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
-    expect(await screen.findByText('请填写请假事由')).toBeInTheDocument();
+    expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
 
-    await userEvent.type(input, '回家探亲');
+    await userEvent.type(startInput, '2026-07-30');
+    await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
+    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
     await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
 
     await waitFor(() => {
@@ -111,13 +130,13 @@ describe('FormFillPage', () => {
         && String((init as RequestInit).body).includes('回家探亲'),
       )).toBe(true);
     });
-    expect(screen.getByRole('status')).toHaveTextContent('草稿已保存');
+    expect(screen.getByText('草稿已保存')).toBeInTheDocument();
   });
 
   it('loads an existing draft into the form values', async () => {
     renderForm('/forms/leave?draftId=101');
 
-    expect(await screen.findByLabelText('请假事由')).toHaveValue('已保存草稿');
+    expect(await screen.findByLabelText('开始时间')).toHaveValue('2026-07-30');
   });
 
   it('keeps next action fixed at the bottom of the viewport', async () => {
@@ -131,19 +150,19 @@ describe('FormFillPage', () => {
   it('recovers local values for the current user when schema version matches', async () => {
     writeRecoveryDraft(7, 'leave', null, {
       schemaVersion: 3,
-      values: { reason: '本地恢复内容' },
+      values: { start: '2026-07-30' },
       timestamp: 1,
     });
 
     renderForm();
 
-    expect(await screen.findByLabelText('请假事由')).toHaveValue('本地恢复内容');
+    expect(await screen.findByLabelText('开始时间')).toHaveValue('2026-07-30');
   });
 
   it('opens a confirmation before navigating away with dirty values', async () => {
     renderForm();
 
-    await userEvent.type(await screen.findByLabelText('请假事由'), '临时填写');
+    await userEvent.type(await screen.findByLabelText('开始时间'), '2026-07-30');
     await userEvent.click(screen.getByRole('button', { name: '返回' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -152,5 +171,36 @@ describe('FormFillPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '继续离开' }));
 
     expect(await screen.findByText('工作台目标页')).toBeInTheDocument();
+  });
+
+  it('renders one form group at a time and advances after current step is valid', async () => {
+    renderForm();
+
+    expect(await screen.findByRole('heading', { name: '请假时间' })).toBeInTheDocument();
+    expect(screen.getByText('第 1 步 / 共 2 步')).toBeInTheDocument();
+    expect(screen.queryByLabelText('请假事由')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+
+    expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('开始时间'), '2026-07-30');
+    await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
+    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+
+    expect(await screen.findByRole('heading', { name: '请假事由' })).toBeInTheDocument();
+    expect(screen.getByText('第 2 步 / 共 2 步')).toBeInTheDocument();
+  });
+
+  it('jumps back to the first step with errors during final validation', async () => {
+    renderForm();
+
+    await userEvent.type(await screen.findByLabelText('开始时间'), '2026-07-30');
+    await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
+    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+
+    expect(await screen.findByText('请填写请假事由')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '请假事由' })).toBeInTheDocument();
   });
 });

@@ -21,9 +21,9 @@ describe('buildFormStepGroups', () => {
 
     expect(groups).toHaveLength(2);
     expect(groups[0]).toMatchObject({ id: 'leave-time', title: '请假时间' });
-    expect(fieldIdsInStep(groups[0])).toEqual(['start', 'end']);
+    expect(fieldIdsInStep(groups[0]!)).toEqual(['start', 'end']);
     expect(groups[1]).toMatchObject({ id: 'auto-2', title: '补充信息' });
-    expect(fieldIdsInStep(groups[1])).toEqual(['reason']);
+    expect(fieldIdsInStep(groups[1]!)).toEqual(['reason']);
   });
 
   it('filters hidden descendants from visible span_layout steps', () => {
@@ -53,8 +53,8 @@ describe('buildFormStepGroups', () => {
     const groups = buildFormStepGroups(schema, { showHidden: false });
 
     expect(groups).toHaveLength(1);
-    expect(fieldIdsInStep(groups[0])).toEqual(['visible']);
-    expect(groups[0].nodes[0].id).toBe('visible');
+    expect(fieldIdsInStep(groups[0]!)).toEqual(['visible']);
+    expect(groups[0]!.nodes[0]!.id).toBe('visible');
   });
 
   it('uses a description before fields as step description', () => {
@@ -67,9 +67,9 @@ describe('buildFormStepGroups', () => {
     const groups = buildFormStepGroups(schema, {});
 
     expect(groups).toHaveLength(1);
-    expect(groups[0].title).toBe('报销金额');
-    expect(groups[0].description).toBe('请填写真实金额');
-    expect(fieldIdsInStep(groups[0])).toEqual(['amount', 'invoice']);
+    expect(groups[0]!.title).toBe('报销金额');
+    expect(groups[0]!.description).toBe('请填写真实金额');
+    expect(fieldIdsInStep(groups[0]!)).toEqual(['amount', 'invoice']);
   });
 
   it('keeps table_list as its own step', () => {
@@ -87,7 +87,7 @@ describe('buildFormStepGroups', () => {
     const groups = buildFormStepGroups(schema, {});
 
     expect(groups.map((group) => group.title)).toEqual(['基础信息', '费用明细', '补充信息']);
-    expect(fieldIdsInStep(groups[1])).toEqual(['items']);
+    expect(fieldIdsInStep(groups[1]!)).toEqual(['items']);
   });
 
   it('chunks ungrouped visible fields into groups of at most six', () => {
@@ -100,8 +100,8 @@ describe('buildFormStepGroups', () => {
     const groups = buildFormStepGroups(schema, {});
 
     expect(groups).toHaveLength(2);
-    expect(fieldIdsInStep(groups[0])).toEqual(['field-1', 'field-2', 'field-3', 'field-4', 'field-5', 'field-6']);
-    expect(fieldIdsInStep(groups[1])).toEqual(['field-7']);
+    expect(fieldIdsInStep(groups[0]!)).toEqual(['field-1', 'field-2', 'field-3', 'field-4', 'field-5', 'field-6']);
+    expect(fieldIdsInStep(groups[1]!)).toEqual(['field-7']);
   });
 
   it('excludes fields hidden by visibleWhen rules', () => {
@@ -117,6 +117,6 @@ describe('buildFormStepGroups', () => {
 
     const groups = buildFormStepGroups(schema, { needBudget: false });
 
-    expect(fieldIdsInStep(groups[0])).toEqual(['needBudget']);
+    expect(fieldIdsInStep(groups[0]!)).toEqual(['needBudget']);
   });
 });

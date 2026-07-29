@@ -38,7 +38,22 @@ const FORM_WITH_SELF_SELECT = {
   version: 3,
   settings: { workflowEnabled: true },
   schema: [
-    { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+    {
+      id: 'reason-group',
+      type: 'span_layout',
+      label: '请假事由',
+      children: [
+        { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+      ],
+    },
+    {
+      id: 'remark-group',
+      type: 'span_layout',
+      label: '补充说明',
+      children: [
+        { id: 'remark', type: 'text', label: '补充说明', props: { required: true } },
+      ],
+    },
   ],
   process: {
     id: 'root',
@@ -155,6 +170,8 @@ describe('mobile form submit flow', () => {
     renderSubmitFlow();
 
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
+    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.type(await screen.findByLabelText('补充说明'), '请尽快审批');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
     expect(await screen.findByRole('heading', { name: '选择审批人' })).toBeInTheDocument();

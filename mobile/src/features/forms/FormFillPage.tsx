@@ -7,6 +7,8 @@ import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { useAuthStore } from "../auth/auth.store";
 import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
+import { FormStepHeader } from "./components/FormStepHeader";
+import { FormStepNavigator } from "./components/FormStepNavigator";
 import {
   createMobileDraft,
   fetchMobileDraft,
@@ -26,6 +28,7 @@ import {
   type RecoveryDraftWriter,
 } from "./recoveryDraft.store";
 import { validateSchemaValues } from "./schema/fieldRegistry";
+import { buildFormStepGroups } from "./schema/stepGroups";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
 
@@ -40,6 +43,8 @@ export function FormFillPage() {
   const [values, setValues] = useState<MobileFormValues>({});
   const [initialValues, setInitialValues] = useState<MobileFormValues>({});
   const [errors, setErrors] = useState<FieldValidationErrors>({});
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [completedStepIds, setCompletedStepIds] = useState<Set<string>>(() => new Set());
   const [initialized, setInitialized] = useState(false);
   const [status, setStatus] = useState("");
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
@@ -154,6 +159,10 @@ export function FormFillPage() {
   const schema = formQuery.data?.schema ?? [];
   const process = formQuery.data?.process;
   const formSchema = formSchemaWithoutSelfSelectRules(schema);
+  const stepGroups = buildFormStepGroups(formSchema, values);
+  const currentStep = stepGroups[Math.min(currentStepIndex, Math.max(stepGroups.length - 1, 0))];
+  const currentStepErrors = currentStep ? pickErrors(errors, currentStep.fieldIds) : {};
+  const stepErrorCounts = errorCountsByStep(stepGroups, errors);
   const title = formQuery.data?.name ?? "表单填写";
   const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
   const description = typeof formQuery.data?.description === "string" ? formQuery.data.description : "";
@@ -182,21 +191,27 @@ export function FormFillPage() {
       }
     >
       <div className="af-stack">
-        <section className="af-form-head">
-          <div>
-            <h2>{title}</h2>
-            {description ? <p>{description}</p> : null}
-          </div>
-          <span className={`af-tag${workflowEnabled ? "" : " af-tag--success"}`}>
-            {workflowEnabled ? "审批流程" : "直接提交"}
-          </span>
-        </section>
+        <FormStepHeader
+          title={currentStep?.title ?? title}
+          description={currentStep?.description ?? description}
+          currentIndex={currentStepIndex}
+          total={stepGroups.length}
+          completedCount={completedStepIds.size}
+          autosaveLabel={status || undefined}
+        />
+        <FormStepNavigator
+          groups={stepGroups}
+          currentIndex={currentStepIndex}
+          completedStepIds={completedStepIds}
+          errorCounts={stepErrorCounts}
+          onSelect={setCurrentStepIndex}
+        />
         <section className="af-card--form">
           <DynamicFormRenderer
-            schema={formSchema}
+            schema={currentStep?.nodes ?? []}
             values={values}
             mode={draftQuery.data?.readOnly ? "readonly" : "fill"}
-            errors={errors}
+            errors={currentStepErrors}
             onValueChange={(fieldId, value) => {
               setValues((current) => ({ ...current, [fieldId]: value }));
               setErrors((current) => {
@@ -208,11 +223,6 @@ export function FormFillPage() {
             }}
           />
         </section>
-        {status ? (
-          <p role="status" style={{ margin: 0, fontSize: 12, color: "var(--af-color-muted)" }}>
-            {status}
-          </p>
-        ) : null}
       </div>
 
       <div className="af-action-bar">
@@ -262,9 +272,32 @@ export function FormFillPage() {
   }
 
   function goNext() {
+    const currentErrors = validateSchemaValues(currentStep?.nodes ?? [], values);
+    if (Object.keys(currentErrors).length > 0) {
+      setErrors((existing) => ({ ...existing, ...currentErrors }));
+      showToast({ icon: "fail", content: "请先完善当前步骤" });
+      scrollToFirstError(currentErrors);
+      return;
+    }
+
+    if (currentStep) {
+      setCompletedStepIds((existing) => new Set(existing).add(currentStep.id));
+    }
+
+    if (currentStepIndex < stepGroups.length - 1) {
+      setCurrentStepIndex((index) => index + 1);
+      return;
+    }
+
     const nextErrors = validateSchemaValues(formSchema, values);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
+      const firstErrorStepIndex = stepGroups.findIndex((group) =>
+        group.fieldIds.some((fieldId) => Boolean(nextErrors[fieldId])),
+      );
+      if (firstErrorStepIndex >= 0) {
+        setCurrentStepIndex(firstErrorStepIndex);
+      }
       showToast({ icon: "fail", content: "请完善必填或格式错误字段" });
       scrollToFirstError(nextErrors);
       return;
@@ -279,6 +312,24 @@ export function FormFillPage() {
     setSubmitNavigationAllowed(true);
     setPendingSubmitPath(nextPath);
   }
+}
+
+function pickErrors(errors: FieldValidationErrors, fieldIds: string[]): FieldValidationErrors {
+  return fieldIds.reduce<FieldValidationErrors>((next, fieldId) => {
+    if (errors[fieldId]) next[fieldId] = errors[fieldId];
+    return next;
+  }, {});
+}
+
+function errorCountsByStep(
+  groups: Array<{ id: string; fieldIds: string[] }>,
+  errors: FieldValidationErrors,
+): Record<string, number> {
+  return groups.reduce<Record<string, number>>((next, group) => {
+    const count = group.fieldIds.filter((fieldId) => Boolean(errors[fieldId])).length;
+    if (count > 0) next[group.id] = count;
+    return next;
+  }, {});
 }
 
 function scrollToFirstError(errors: FieldValidationErrors) {
