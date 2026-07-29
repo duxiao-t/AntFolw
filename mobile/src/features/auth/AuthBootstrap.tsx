@@ -9,10 +9,21 @@ export function AuthBootstrap({ children }: PropsWithChildren) {
   const restore = useAuthStore((state) => state.restore);
 
   useEffect(() => {
+    if (isLoginDocument()) {
+      return;
+    }
     void restore();
   }, [restore]);
 
   return children;
+}
+
+function isLoginDocument(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const pathname = window.location.pathname.replace(/\/$/, '');
+  return pathname === '/login' || pathname === '/mobile/login';
 }
 
 export default AuthBootstrap;

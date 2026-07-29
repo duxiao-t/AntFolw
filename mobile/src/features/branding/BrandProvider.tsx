@@ -7,6 +7,7 @@ import { applyBrandTokens, FALLBACK_BRANDING } from './brandTokens';
 import type { PublicBranding } from '../../shared/api/types';
 
 const BrandContext = createContext<PublicBranding>(FALLBACK_BRANDING);
+const remoteBrandingEnabled = import.meta.env.VITE_REMOTE_BRANDING === 'true';
 
 export interface BrandProviderProps extends PropsWithChildren {
   initial?: PublicBranding;
@@ -18,6 +19,7 @@ export function BrandProvider({ children, initial }: BrandProviderProps) {
   const query = useQuery({
     queryKey: queryKeys.branding,
     queryFn: fetchPublicBranding,
+    enabled: remoteBrandingEnabled,
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
     retry: 0,

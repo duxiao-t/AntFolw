@@ -1,4 +1,4 @@
-import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react-router-dom';
+import { createBrowserRouter, createMemoryRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { LoginPage } from '../features/auth/LoginPage';
 import { WorkbenchPage } from '../features/workbench/WorkbenchPage';
 import { TaskCenterPage } from '../features/tasks/TaskCenterPage';
@@ -20,6 +20,10 @@ import { MobileShell } from './MobileShell';
 const NoHydrate: React.ComponentType = () => null;
 
 const routes: RouteObject[] = [
+  {
+    index: true,
+    element: <Navigate to="/workbench" replace />,
+  },
   {
     path: '/login',
     Component: LoginPage,

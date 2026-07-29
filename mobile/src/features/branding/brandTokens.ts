@@ -52,7 +52,10 @@ export function applyBrandTokens(branding: PublicBranding): void {
   root.style.setProperty('--adm-color-primary', primary);
   document.title = branding.appName;
 
-  const faviconHref = `/api/public/branding/favicon.svg?v=${encodeURIComponent(branding.version)}`;
+  const usesRemoteAssets = branding.version !== FALLBACK_BRANDING.version;
+  const faviconHref = usesRemoteAssets
+    ? `/api/public/branding/favicon.svg?v=${encodeURIComponent(branding.version)}`
+    : '/favicon.svg';
   let iconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
   if (!iconLink) {
     iconLink = document.createElement('link');
@@ -61,8 +64,12 @@ export function applyBrandTokens(branding: PublicBranding): void {
   }
   iconLink.setAttribute('href', faviconHref);
 
-  const manifestHref = `/api/public/branding/manifest.webmanifest?v=${encodeURIComponent(branding.version)}`;
   let manifestLink = document.querySelector<HTMLLinkElement>("link[rel='manifest']");
+  if (!usesRemoteAssets) {
+    manifestLink?.remove();
+    return;
+  }
+  const manifestHref = `/api/public/branding/manifest.webmanifest?v=${encodeURIComponent(branding.version)}`;
   if (!manifestLink) {
     manifestLink = document.createElement('link');
     manifestLink.rel = 'manifest';
