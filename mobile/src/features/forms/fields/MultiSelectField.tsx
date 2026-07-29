@@ -1,4 +1,3 @@
-import { Selector } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, fieldOptions, FieldShell, isRequired } from './fieldShared';
@@ -23,15 +22,30 @@ export function MultiSelectField(props: MobileFieldProps) {
       summary={props.mode === 'readonly' ? <div className="af-field__summary">{selectedLabels.join('、') || '未填写'}</div> : undefined}
     >
       {options.length > 0 ? (
-        <Selector
-          multiple
-          options={options}
-          value={selected}
-          onChange={(next) => {
-            setSelected(next);
-            props.onValueChange(props.node.id, next);
-          }}
-        />
+        <div className="af-choice-grid" role="group" aria-label={label}>
+          {options.map((option) => {
+            const isSelected = selected.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="checkbox"
+                aria-checked={isSelected}
+                className={`af-choice-tile${isSelected ? ' af-choice-tile--selected' : ''}`}
+                disabled={option.disabled}
+                onClick={() => {
+                  const next = isSelected
+                    ? selected.filter((item) => item !== option.value)
+                    : [...selected, option.value];
+                  setSelected(next);
+                  props.onValueChange(props.node.id, next);
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       ) : (
         <div className="af-field__empty-options">暂无可选项</div>
       )}

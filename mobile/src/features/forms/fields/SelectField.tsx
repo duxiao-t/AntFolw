@@ -1,4 +1,3 @@
-import { Selector } from 'antd-mobile';
 import { useEffect, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, fieldOptions, FieldShell, isRequired, optionLabel } from './fieldShared';
@@ -20,14 +19,27 @@ export function SelectField(props: MobileFieldProps) {
       summary={props.mode === 'readonly' ? <div className="af-field__summary">{optionLabel(props.node, props.value)}</div> : undefined}
     >
       {options.length > 0 ? (
-        <Selector
-          options={options}
-          value={selected}
-          onChange={(next) => {
-            setSelected(next);
-            props.onValueChange(props.node.id, next[0] ?? '');
-          }}
-        />
+        <div className="af-choice-grid" role="radiogroup" aria-label={label}>
+          {options.map((option) => {
+            const isSelected = selected[0] === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                className="af-choice-tile"
+                disabled={option.disabled}
+                onClick={() => {
+                  setSelected([option.value]);
+                  props.onValueChange(props.node.id, option.value);
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       ) : (
         <div className="af-field__empty-options">暂无可选项</div>
       )}

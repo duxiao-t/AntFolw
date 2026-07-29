@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { MobileSchemaNode } from '../schema/types';
 import { DateField } from './DateField';
@@ -7,6 +8,7 @@ import { DescriptionField } from './DescriptionField';
 import { MoneyField } from './MoneyField';
 import { MultiSelectField } from './MultiSelectField';
 import { NumberField } from './NumberField';
+import { RadioField } from './RadioField';
 import { SelectField } from './SelectField';
 import { TextField } from './TextField';
 import { TextareaField } from './TextareaField';
@@ -173,6 +175,52 @@ describe('leaf mobile fields', () => {
     fireEvent.click(screen.getByText('张三'));
     fireEvent.click(screen.getByText('李四'));
     expect(onValueChange).toHaveBeenLastCalledWith('cc', ['zhangsan', 'lisi']);
+  });
+
+  it('renders radio options as large touch choices', async () => {
+    const onValueChange = vi.fn();
+    render(
+      <RadioField
+        {...baseProps({
+          id: 'leaveType',
+          type: 'radio',
+          label: '请假类型',
+          props: { options: [{ label: '年假', value: 'annual' }, { label: '调休', value: 'adjust' }] },
+        }, 'annual', onValueChange)}
+      />,
+    );
+
+    const annual = screen.getByRole('radio', { name: '年假' });
+    const adjust = screen.getByRole('radio', { name: '调休' });
+
+    expect(annual).toHaveClass('af-choice-tile');
+    expect(annual).toHaveAttribute('aria-checked', 'true');
+
+    await userEvent.click(adjust);
+
+    expect(onValueChange).toHaveBeenCalledWith('leaveType', 'adjust');
+  });
+
+  it('renders multi-select options as large touch choices', async () => {
+    const onValueChange = vi.fn();
+    render(
+      <MultiSelectField
+        {...baseProps({
+          id: 'supplies',
+          type: 'multi_select',
+          label: '用品',
+          props: { options: [{ label: '纸张', value: 'paper' }, { label: '笔', value: 'pen' }] },
+        }, ['paper'], onValueChange)}
+      />,
+    );
+
+    const pen = screen.getByRole('checkbox', { name: '笔' });
+
+    expect(pen).toHaveClass('af-choice-tile');
+
+    await userEvent.click(pen);
+
+    expect(onValueChange).toHaveBeenCalledWith('supplies', ['paper', 'pen']);
   });
 
   it('renders description field as read-only content', () => {

@@ -1240,3 +1240,67 @@ button { -webkit-tap-highlight-color: transparent; }
   color: var(--af-color-muted);
   font-size: 12px;
 }
+
+/* Comfortable form controls for repeat mobile data entry. */
+.af-field {
+  display: grid;
+  gap: 7px;
+  padding: 12px 0;
+  border-top: 1px solid var(--af-color-line);
+}
+.af-field:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.af-field__head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.af-field__label {
+  color: var(--af-color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.af-field input,
+.af-field textarea,
+.af-field select {
+  min-height: 44px;
+  border: 1px solid var(--af-color-border);
+  border-radius: var(--af-radius-control);
+  background: #fbfdff;
+  color: var(--af-color-text);
+  font-size: 14px;
+}
+.af-field .adm-input {
+  min-height: 44px;
+  border-color: var(--af-color-border);
+  border-radius: var(--af-radius-control);
+  background: #fbfdff;
+}
+.af-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.af-choice-tile {
+  min-height: 44px;
+  border: 1px solid var(--af-color-border);
+  border-radius: var(--af-radius-control);
+  background: #fbfdff;
+  color: var(--af-color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+.af-choice-tile[aria-checked="true"],
+.af-choice-tile--selected {
+  border-color: var(--af-color-primary);
+  background: var(--af-color-primary-soft);
+  color: var(--af-color-primary);
+}
