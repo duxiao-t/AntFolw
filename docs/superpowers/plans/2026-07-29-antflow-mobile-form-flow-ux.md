@@ -148,7 +148,7 @@ describe('buildFormStepGroups', () => {
         id: 'budget',
         type: 'money',
         label: '预算金额',
-        props: { visibleWhen: { field: 'needBudget', operator: 'eq', value: true } },
+        props: { displayCondition: { field: 'needBudget', operator: 'eq', value: true } },
       },
     ];
 
@@ -1240,8 +1240,8 @@ Change the page body to this structure while preserving existing selection state
     {rules.map((rule) => (
       <section key={rule.nodeId} className="af-card af-self-select-card">
         <div className="af-card__title">
-          <span>{rule.nodeName}</span>
-          <small>{rule.mode === 'AND' ? '可多选' : '单选'}</small>
+          <span>{rule.name}</span>
+          <small>{rule.multiple ? '可多选' : '单选'}</small>
         </div>
         {/* keep existing candidate/search rendering here, but use af-choice-tile for candidate rows */}
       </section>
