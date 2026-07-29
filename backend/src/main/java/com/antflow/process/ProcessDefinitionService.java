@@ -26,23 +26,30 @@ public class ProcessDefinitionService {
                                                 Long userId) {
         ProcessDefinition pd;
         if (id == null) {
-            if (mapper.selectCount(new QueryWrapper<ProcessDefinition>().eq("form_def_id", formDefId)) > 0) {
-                throw new BizException("PROCESS_EXISTS",
-                    "Process for this form already exists; edit instead");
+            pd = mapper.selectOne(new QueryWrapper<ProcessDefinition>()
+                .eq("form_def_id", formDefId)
+                .orderByDesc("id")
+                .last("LIMIT 1"));
+            if (pd == null) {
+                pd = new ProcessDefinition();
+                pd.setFormDefId(formDefId);
+                pd.setVersion(1);
+                pd.setProcess(writeJson(process));
+                pd.setStatus("DRAFT");
+                pd.setCreatedBy(userId);
+                mapper.insert(pd);
+            } else {
+                pd.setProcess(writeJson(process));
+                pd.setStatus("DRAFT");
+                mapper.updateById(pd);
             }
-            pd = new ProcessDefinition();
-            pd.setFormDefId(formDefId);
-            pd.setVersion(1);
-            pd.setProcess(writeJson(process));
-            pd.setStatus("DRAFT");
-            pd.setCreatedBy(userId);
-            mapper.insert(pd);
         } else {
             pd = mapper.selectById(id);
-            if (!"DRAFT".equals(pd.getStatus())) {
-                throw new BizException("NOT_DRAFT", "Only DRAFT process can be edited");
+            if (pd == null) {
+                throw new BizException("PROCESS_NOT_FOUND", "Process not found: " + id);
             }
             pd.setProcess(writeJson(process));
+            pd.setStatus("DRAFT");
             mapper.updateById(pd);
         }
         return pd;
@@ -96,7 +103,9 @@ public class ProcessDefinitionService {
             if (!"ROOT".equals(root.path("type").asText())) {
                 throw new BizException("BAD_FLOW", "流程必须以 ROOT 节点开始");
             }
-            walk(root);
+            if (!walk(root)) {
+                throw new BizException("BAD_FLOW", "审批流程至少需要 1 个审批节点");
+            }
         } catch (BizException e) {
             throw e;
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -104,12 +113,16 @@ public class ProcessDefinitionService {
         }
     }
 
-    private void walk(com.fasterxml.jackson.databind.JsonNode n) {
-        if (n == null || n.isNull() || !n.has("id")) return;
+    private boolean walk(com.fasterxml.jackson.databind.JsonNode n) {
+        if (n == null || n.isNull() || !n.has("id")) return false;
+        boolean hasApprovalNode = false;
         String type = n.path("type").asText();
         switch (type) {
             case "ROOT", "CC", "EMPTY" -> {}
-            case "APPROVAL" -> validateApproval(n);
+            case "APPROVAL" -> {
+                validateApproval(n);
+                hasApprovalNode = true;
+            }
             case "CONDITIONS" -> {
                 com.fasterxml.jackson.databind.JsonNode branchs = n.path("branchs");
                 if (!branchs.isArray() || branchs.size() < 1) {
@@ -118,7 +131,7 @@ public class ProcessDefinitionService {
                 boolean hasDefault = false;
                 for (com.fasterxml.jackson.databind.JsonNode b : branchs) {
                     if (b.path("props").path("isDefault").asBoolean(false)) hasDefault = true;
-                    walk(b.path("children"));
+                    hasApprovalNode = walk(b.path("children")) || hasApprovalNode;
                 }
                 if (!hasDefault) {
                     throw new BizException("BAD_FLOW", "条件分支必须包含一个默认分支");
@@ -127,7 +140,7 @@ public class ProcessDefinitionService {
             case "CONDITION" -> {}
             default -> throw new BizException("BAD_NODE_TYPE", "未知节点类型: " + type);
         }
-        walk(n.path("children"));
+        return walk(n.path("children")) || hasApprovalNode;
     }
 
     private void validateApproval(com.fasterxml.jackson.databind.JsonNode n) {

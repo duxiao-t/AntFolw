@@ -66,6 +66,7 @@ public class MobileWorkflowService {
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         return new MobileFormDto(form.getCode(), form.getName(), form.getVersion(),
             readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"),
+            readJsonObject(form.getSettings(), "BAD_SETTINGS_JSON"),
             readJsonObject(process == null ? null : process.getProcess(), "BAD_FLOW_JSON"));
     }
 

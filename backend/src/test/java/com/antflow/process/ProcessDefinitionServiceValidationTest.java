@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,6 +48,14 @@ class ProcessDefinitionServiceValidationTest {
             .matches(e -> "BAD_FLOW".equals(((BizException) e).getCode()));
     }
 
+    @Test void validate_rejects_tree_without_approval_node() {
+        String tree = """
+            {"id":"root","type":"ROOT","props":{},"children":null}""";
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .matches(e -> "BAD_FLOW".equals(((BizException) e).getCode()));
+    }
+
     @Test void validate_accepts_wellformed_tree() {
         String tree = """
             {"id":"root","type":"ROOT","props":{},"children":{"id":"a1","type":"APPROVAL",
@@ -66,5 +77,31 @@ class ProcessDefinitionServiceValidationTest {
 
         assertThat(result).isSameAs(draft);
         verify(mapper).selectOne(any(QueryWrapper.class));
+    }
+
+    @Test void saveOrUpdateDraft_turns_published_process_back_to_draft() {
+        ProcessDefinitionMapper mapper = Mockito.mock(ProcessDefinitionMapper.class);
+        ProcessDefinitionService service =
+            new ProcessDefinitionService(mapper, null, new ObjectMapper());
+        ProcessDefinition published = new ProcessDefinition();
+        published.setId(12L);
+        published.setFormDefId(7L);
+        published.setVersion(2);
+        published.setStatus("PUBLISHED");
+        when(mapper.selectById(12L)).thenReturn(published);
+        Map<String, Object> process = new HashMap<>();
+        process.put("id", "root");
+        process.put("type", "ROOT");
+        process.put("children", null);
+
+        ProcessDefinition result = service.saveOrUpdateDraft(
+            12L,
+            7L,
+            process,
+            1L
+        );
+
+        assertThat(result.getStatus()).isEqualTo("DRAFT");
+        verify(mapper).updateById(published);
     }
 }
