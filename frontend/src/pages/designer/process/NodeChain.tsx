@@ -11,17 +11,10 @@ function AddButton({ parentId }: { parentId: string }) {
   const menu = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 120 }}>
       <Button size="small" block onClick={() => insert(parentId, 'APPROVAL')}>
-        审批人
+        审批节点
       </Button>
       <Button size="small" block onClick={() => insert(parentId, 'CC')}>
-        抄送人
-      </Button>
-      <Button
-        size="small"
-        block
-        onClick={() => insert(parentId, 'CONDITIONS')}
-      >
-        条件分支
+        抄送节点
       </Button>
     </div>
   );
