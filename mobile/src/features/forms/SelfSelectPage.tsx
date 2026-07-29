@@ -57,21 +57,26 @@ export function SelfSelectPage() {
         <button
           type="button"
           className="af-link-button"
-          style={{ fontSize: 13 }}
           onClick={confirmSelection}
         >
           确定
         </button>
       }
     >
-      <div className="af-search">{"\u2315 搜索姓名"}</div>
-
-      <div className="af-stack" style={{ marginTop: 10 }}>
+      <div className="af-stack">
+        <section className="af-form-step-head">
+          <div className="af-form-step-head__title">
+            <h2 aria-hidden="true">选择审批人</h2>
+            <span className="af-tag">流程必填</span>
+          </div>
+          <p>请选择本次流程需要你指定的审批人</p>
+        </section>
+        <div className="af-search">{"\u2315 搜索姓名"}</div>
         {rules.map((rule) => (
-          <section key={rule.nodeId} className="af-card">
+          <section key={rule.nodeId} className="af-card af-self-select-card">
             <div className="af-card__title">
               <span>{rule.name}</span>
-              <small style={{ fontSize: 10, fontWeight: 400 }}>{rule.multiple ? "多选" : "单选"}</small>
+              <small>{rule.multiple ? "可多选" : "单选"}</small>
             </div>
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {rule.assignees.map((assignee) => {
@@ -80,7 +85,9 @@ export function SelfSelectPage() {
                   <li key={assignee.id}>
                     <button
                       type="button"
-                      className="af-radio-row"
+                      role={rule.multiple ? "checkbox" : "radio"}
+                      aria-checked={selected}
+                      className="af-choice-tile af-choice-tile--person"
                       onClick={() => {
                         const current = (flow.selfSelected[rule.nodeId] ?? []).map(Number);
                         let next: number[];
@@ -123,7 +130,7 @@ export function SelfSelectPage() {
 
       <div className="af-bottom-bar">
         <button type="button" className="af-btn af-btn--block" onClick={confirmSelection}>
-          确认选择
+          确认审批人
         </button>
       </div>
     </AppPage>

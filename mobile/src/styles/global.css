@@ -1304,3 +1304,17 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--af-color-primary-soft);
   color: var(--af-color-primary);
 }
+
+.af-self-select-card {
+  display: grid;
+  gap: 10px;
+}
+
+.af-self-select-card .af-choice-tile {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.af-choice-tile--person {
+  width: 100%;
+}

@@ -175,14 +175,16 @@ describe('mobile form submit flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
     expect(await screen.findByRole('heading', { name: '选择审批人' })).toBeInTheDocument();
+    expect(screen.getByText('请选择本次流程需要你指定的审批人')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /确认审批人/ })).toHaveClass('af-btn');
     expect(screen.getByText('直属主管')).toBeInTheDocument();
     expect(screen.getByText('单选')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    await userEvent.click(screen.getByRole('button', { name: '确认审批人' }));
     expect(await screen.findByText('请选择直属主管')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('张经理'));
-    await userEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    await userEvent.click(screen.getByRole('button', { name: '确认审批人' }));
 
     expect(await screen.findByRole('heading', { name: '确认提交' })).toBeInTheDocument();
     expect(screen.getByText('张经理')).toBeInTheDocument();
