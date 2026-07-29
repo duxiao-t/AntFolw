@@ -44,6 +44,7 @@ function renderLogin(initialPath: string) {
 afterEach(() => {
   useAuthStore.getState().reset();
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe('LoginPage', () => {
@@ -101,12 +102,14 @@ describe('LoginPage', () => {
     await screen.findByPlaceholderText('请输入账号');
     await user.type(screen.getByPlaceholderText('请输入账号'), 'admin');
     await user.type(screen.getByPlaceholderText('请输入密码'), 'ant.design');
+    await user.click(screen.getByLabelText('记住我'));
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => {
       expect(screen.getByText('工作台目标页')).toBeInTheDocument();
     });
     expect(useAuthStore.getState().status).toBe('authenticated');
+    expect(localStorage.getItem('antflow-mobile-remembered-username')).toBe('admin');
   });
 
   it('keeps auth anonymous after a 401 from the login endpoint', async () => {
@@ -140,9 +143,53 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => {
-      expect(useAuthStore.getState().status).toBe('anonymous');
+      expect(screen.getByRole('alert')).toHaveTextContent('账号或密码错误');
     });
     expect(screen.queryByText('工作台目标页')).not.toBeInTheDocument();
+  });
+
+  it('toggles password visibility and shows an inline validation error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' })));
+    const user = userEvent.setup();
+    renderLogin('/login');
+
+    const password = await screen.findByPlaceholderText('请输入密码');
+    expect(password).toHaveAttribute('type', 'password');
+    await user.click(screen.getByRole('button', { name: '显示密码' }));
+    expect(password).toHaveAttribute('type', 'text');
+    await user.click(screen.getByRole('button', { name: '隐藏密码' }));
+    expect(password).toHaveAttribute('type', 'password');
+
+    await user.type(screen.getByPlaceholderText('请输入账号'), 'admin');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('请输入密码');
+  });
+
+  it('disables controls while login is loading', async () => {
+    let resolveLogin: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/auth/login') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+        return new Promise<Response>((resolve) => {
+          resolveLogin = resolve;
+        });
+      }
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderLogin('/login');
+
+    await user.type(await screen.findByPlaceholderText('请输入账号'), 'admin');
+    await user.type(screen.getByPlaceholderText('请输入密码'), 'ant.design');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    expect(await screen.findByRole('button', { name: /登录中/ })).toBeDisabled();
+    expect(screen.getByPlaceholderText('请输入账号')).toBeDisabled();
+    resolveLogin?.(jsonResponse(200, { accessToken: 'mem', user: SAMPLE_USER }));
+    await waitFor(() => {
+      expect(screen.getByText('工作台目标页')).toBeInTheDocument();
+    });
   });
 });
 
