@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>18 · 空态</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">18 · Empty State</div>
+  <div class="preview-shell__hint">几何插画 · EmptyHero · 主操作 + 副链接</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <span></span>
+        <div class="app-bar__title">我发起的</div>
+        <button class="app-bar__action" aria-label="新建">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </header>
+
+      <main class="page page--no-tabbar">
+
+        <section style="text-align:center;padding:18px 0 12px;">
+          <h3 style="margin:0;font-size:22px;font-weight:800;">我发起的流程</h3>
+          <small style="color:var(--af-color-muted);">共 0 条 · 还没发起过任何申请</small>
+        </section>
+
+        <div class="empty-hero" style="margin-top:30px;">
+          <div class="empty-hero__art">
+            <svg viewBox="0 0 160 160" fill="none">
+              <circle cx="80" cy="80" r="56" fill="#eef2f7"/>
+              <rect x="44" y="48" width="72" height="64" rx="8" fill="#fff" stroke="#cbd5e0" stroke-width="2"/>
+              <path d="M52 64h56M52 76h44M52 88h36M52 100h28" stroke="#cbd5e0" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="120" cy="48" r="14" fill="#0b57d0"/>
+              <path d="M114 48l4 4 8-8" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </div>
+          <h3>还没有发起的流程</h3>
+          <p>从常用应用或工作台快速发起一份申请,所有流程都会集中在这里跟进。</p>
+          <div class="empty-hero__cta">
+            <button class="btn btn--primary btn--block btn--lg">选择表单发起</button>
+            <button class="link" style="text-align:center;">查看使用指南 ›</button>
+          </div>
+        </div>
+
+        <div class="spacer-24"></div>
+
+      </main>
+
+      <nav class="tabbar" aria-label="主导航">
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h14v-9"/></svg>
+          工作台
+        </button>
+        <button class="tabbar__item is-active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h12M4 12h16M4 17h10"/></svg>
+          待办
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+          我的
+        </button>
+      </nav>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

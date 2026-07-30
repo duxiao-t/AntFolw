@@ -8,7 +8,7 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import { useAuthStore } from "../auth/auth.store";
 import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
 import { FormStepHeader } from "./components/FormStepHeader";
-import { FormStepNavigator } from "./components/FormStepNavigator";
+import { FormNextStepHint, FormStepNavigator } from "./components/FormStepNavigator";
 import {
   createMobileDraft,
   fetchMobileDraft,
@@ -180,23 +180,17 @@ export function FormFillPage() {
       title={title}
       onBack={() => navigateBack(navigate)}
       action={
-        <button
-          type="button"
-          className="af-link-button"
-          style={{ fontSize: 13 }}
-          onClick={() => navigate("/forms/drafts")}
-        >
-          草稿箱
-        </button>
+        <span className="af-form-nav-progress">{currentStepIndex + 1} / {stepGroups.length}</span>
       }
     >
-      <div className="af-stack">
+      <div className="af-form-flow af-stack">
         <FormStepHeader
           title={currentStep?.title ?? title}
           description={currentStep?.description ?? description}
           currentIndex={currentStepIndex}
           total={stepGroups.length}
           completedCount={completedStepIds.size}
+          fieldCount={currentStep?.fieldIds.length ?? 0}
           autosaveLabel={status || undefined}
         />
         <FormStepNavigator
@@ -223,9 +217,14 @@ export function FormFillPage() {
             }}
           />
         </section>
+        <FormNextStepHint
+          groups={stepGroups}
+          currentIndex={currentStepIndex}
+          errorCounts={stepErrorCounts}
+        />
       </div>
 
-      <div className="af-action-bar">
+      <div className="af-action-bar af-form-action-bar">
         <button
           type="button"
           className="af-btn af-btn--ghost"

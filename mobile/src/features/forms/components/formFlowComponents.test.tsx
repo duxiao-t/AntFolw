@@ -5,7 +5,7 @@ import type { FormStepGroup } from '../schema/stepGroups';
 import type { MobileSchemaNode } from '../schema/types';
 import { ConfirmSummaryList } from './ConfirmSummaryList';
 import { FormStepHeader } from './FormStepHeader';
-import { FormStepNavigator } from './FormStepNavigator';
+import { FormNextStepHint, FormStepNavigator } from './FormStepNavigator';
 
 const groups: FormStepGroup[] = [
   { id: 'a', title: '请假时间', nodes: [], fieldIds: ['start', 'end'] },
@@ -21,12 +21,14 @@ describe('form flow components', () => {
         currentIndex={0}
         total={2}
         completedCount={0}
+        fieldCount={2}
         autosaveLabel="已自动保存"
       />,
     );
 
     expect(screen.getByRole('heading', { name: '请假时间' })).toBeInTheDocument();
-    expect(screen.getByText('第 1 步 / 共 2 步')).toBeInTheDocument();
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
+    expect(screen.getByText('本节 2 项，预计 40 秒')).toBeInTheDocument();
     expect(screen.getByText('先确认时间')).toBeInTheDocument();
     expect(screen.getByText('已自动保存')).toBeInTheDocument();
   });
@@ -46,6 +48,13 @@ describe('form flow components', () => {
     await userEvent.click(screen.getByRole('button', { name: /请假事由/ }));
 
     expect(onSelect).toHaveBeenCalledWith(1);
+    expect(screen.getByRole('button', { name: '2. 请假事由，2 项需补充' })).toBeInTheDocument();
+  });
+
+  it('renders the next step hint as a separate card', () => {
+    render(<FormNextStepHint groups={groups} currentIndex={0} errorCounts={{ b: 2 }} />);
+
+    expect(screen.getByText('接下来：请假事由')).toBeInTheDocument();
     expect(screen.getByText('2 项需补充')).toBeInTheDocument();
   });
 

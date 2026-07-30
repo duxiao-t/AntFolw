@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>12 · 提交成功</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">12 · Success</div>
+  <div class="preview-shell__hint">EmptyHero(Success 几何对勾)+ 主次 CTA</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <span></span>
+        <div class="app-bar__title">提交成功</div>
+        <button class="app-bar__action" aria-label="关闭">关闭</button>
+      </header>
+
+      <main class="page page--no-tabbar">
+
+        <div class="empty-hero" style="padding:48px 16px 24px;">
+          <div class="empty-hero__art">
+            <svg class="form-success-mark" viewBox="0 0 160 160" fill="none" aria-hidden="true">
+              <circle class="form-success-mark__halo" cx="80" cy="80" r="62"/>
+              <circle class="form-success-mark__disc" cx="80" cy="80" r="48"/>
+              <path d="M62 82l14 14 24-30" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </div>
+          <h3 style="font-size:20px;">提交成功</h3>
+          <p>流程已进入审批队列,可随时在"我发起的"中查看进度。</p>
+
+          <div style="background:var(--af-color-surface);border:1px solid var(--af-color-line);border-radius:12px;padding:12px 14px;width:100%;max-width:280px;display:grid;gap:6px;text-align:left;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="muted">编号</span><span style="font-weight:700;">BX-2025-0730-018</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="muted">当前节点</span><span style="font-weight:700;color:var(--af-color-primary);">财务复核</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="muted">预计完成</span><span style="font-weight:700;">8 月 2 日</span></div>
+          </div>
+
+          <div class="empty-hero__cta" style="margin-top:14px;">
+            <button class="btn btn--primary btn--lg btn--block">查看流程</button>
+            <button class="btn btn--ghost btn--block">继续填写其他表单</button>
+            <button class="btn btn--ghost btn--block" style="background:transparent;">返回工作台</button>
+          </div>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

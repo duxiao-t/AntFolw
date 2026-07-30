@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>08 · 我的收藏</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">08 · Favorites</div>
+  <div class="preview-shell__hint">品牌语义色 · 卡片排序 · 常用应用管理</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">我的收藏</div>
+        <button class="app-bar__action" aria-label="编辑">编辑</button>
+      </header>
+
+      <main class="page page--no-tabbar favorites-page">
+
+        <p class="muted small" style="margin:4px 4px 14px;">最多收藏 8 个,长按拖动可重新排序。</p>
+
+        <div class="reorder-list">
+
+          <div class="reorder-item">
+            <span class="reorder-item__handle">⋮⋮</span>
+            <div class="reorder-item__icon app-glyph--admin">差</div>
+            <div class="reorder-item__main"><b>出差申请</b><small>本周被发起 12 次</small></div>
+            <div class="reorder-item__btns">
+              <button>↑</button><button style="opacity:.3;cursor:not-allowed;">↓</button>
+            </div>
+          </div>
+
+          <div class="reorder-item">
+            <span class="reorder-item__handle">⋮⋮</span>
+            <div class="reorder-item__icon app-glyph--finance">报</div>
+            <div class="reorder-item__main"><b>报销</b><small>差旅 · 招待 · 办公</small></div>
+            <div class="reorder-item__btns">
+              <button>↑</button><button>↓</button>
+            </div>
+          </div>
+
+          <div class="reorder-item">
+            <span class="reorder-item__handle">⋮⋮</span>
+            <div class="reorder-item__icon app-glyph--people">假</div>
+            <div class="reorder-item__main"><b>请假申请</b><small>事假 · 病假 · 年假</small></div>
+            <div class="reorder-item__btns">
+              <button>↑</button><button>↓</button>
+            </div>
+          </div>
+
+          <div class="reorder-item">
+            <span class="reorder-item__handle">⋮⋮</span>
+            <div class="reorder-item__icon app-glyph--admin">用</div>
+            <div class="reorder-item__main"><b>用印申请</b><small>合同 · 证明 · 公文</small></div>
+            <div class="reorder-item__btns">
+              <button>↑</button><button>↓</button>
+            </div>
+          </div>
+
+          <div class="reorder-item">
+            <span class="reorder-item__handle">⋮⋮</span>
+            <div class="reorder-item__icon app-glyph--operations">采</div>
+            <div class="reorder-item__main"><b>采购申请</b><small>办公用品 · 设备</small></div>
+            <div class="reorder-item__btns">
+              <button>↑</button><button>↓</button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="spacer-24"></div>
+
+        <div class="empty-hero">
+          <div class="empty-hero__art">
+            <svg class="favorites-summary-icon" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <circle class="favorites-summary-icon__disc" cx="60" cy="60" r="44"/>
+              <path class="favorites-summary-icon__check" d="M44 60l12 12 22-26" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </div>
+          <h3>已添加 5 个收藏</h3>
+          <p>还可以再添加 3 个常用表单。</p>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>02 · 工作台</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">02 · Workbench</div>
+  <div class="preview-shell__hint">签名渐变 hero · 3 列 KPI · 4 列 AppTile · 最近流程带状态徽章</div>
+
+  <div class="phone">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <span></span>
+        <div class="app-bar__title">工作台</div>
+        <button class="app-bar__action" aria-label="搜索">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        </button>
+      </header>
+
+      <main class="page">
+
+        <section class="hero hero--bleed">
+          <div class="hero__head">
+            <small>AntFlow 科技 · 7月29日 周二</small>
+            <button class="avatar-btn" aria-label="我的">王</button>
+          </div>
+          <div class="hero__greeting">
+            <h2>下午好,王晓</h2>
+            <p>审批、发起和跟进流程集中处理。</p>
+          </div>
+        </section>
+
+        <section class="kpis">
+          <button class="stat-card stat-card--accent"><b>5</b><span>待办</span></button>
+          <button class="stat-card"><b>12</b><span>最近流程</span></button>
+          <button class="stat-card"><b>2</b><span>草稿</span></button>
+        </section>
+
+        <section class="section">
+          <div class="section__title">
+            <div><h3>常用应用</h3><small>选择表单快速发起</small></div>
+            <button class="link">全部</button>
+          </div>
+          <div class="stripe-card app-grid">
+            <button class="app-tile"><span class="app-tile__icon">差</span><span class="app-tile__name">出差申请</span></button>
+            <button class="app-tile"><span class="app-tile__icon">报</span><span class="app-tile__name">报销</span></button>
+            <button class="app-tile"><span class="app-tile__icon">加</span><span class="app-tile__name">加班</span></button>
+            <button class="app-tile"><span class="app-tile__icon">假</span><span class="app-tile__name">请假</span></button>
+            <button class="app-tile"><span class="app-tile__icon">采</span><span class="app-tile__name">采购</span></button>
+            <button class="app-tile"><span class="app-tile__icon">用</span><span class="app-tile__name">用印</span></button>
+            <button class="app-tile"><span class="app-tile__icon">文</span><span class="app-tile__name">文档</span></button>
+            <button class="app-tile app-tile--more"><span class="app-tile__icon">+</span><span class="app-tile__name">更多</span></button>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section__title">
+            <div><h3>最近流程</h3><small>跟进发起后的审批状态</small></div>
+            <button class="link">查看</button>
+          </div>
+          <div class="recents">
+            <button class="recents__item">
+              <span class="recents__dot recents__dot--success"></span>
+              <div class="recents__main"><b>出差申请 · 北京 → 上海</b><small>财务已通过 · 1 小时前</small></div>
+              <span class="chip chip--success-soft">通过</span>
+              <span class="recents__chev">›</span>
+            </button>
+            <button class="recents__item">
+              <span class="recents__dot"></span>
+              <div class="recents__main"><b>报销 · 6 月差旅</b><small>直属上级审批中 · 4 小时前</small></div>
+              <span class="chip chip--soft">审批中</span>
+              <span class="recents__chev">›</span>
+            </button>
+            <button class="recents__item">
+              <span class="recents__dot recents__dot--danger"></span>
+              <div class="recents__main"><b>加班 · 周末系统升级</b><small>驳回:原因不够详细 · 昨天</small></div>
+              <span class="chip chip--danger-soft">驳回</span>
+              <span class="recents__chev">›</span>
+            </button>
+            <button class="recents__item">
+              <span class="recents__dot recents__dot--success"></span>
+              <div class="recents__main"><b>请假 · 年假 3 天</b><small>HR 已通过 · 昨天</small></div>
+              <span class="chip chip--success-soft">通过</span>
+              <span class="recents__chev">›</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="spacer-24"></div>
+      </main>
+
+      <nav class="tabbar" aria-label="主导航">
+        <button class="tabbar__item is-active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h14v-9"/></svg>
+          工作台
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h12M4 12h16M4 17h10"/></svg>待办
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+          我的
+        </button>
+      </nav>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>
+
+
+

@@ -177,7 +177,8 @@ describe('FormFillPage', () => {
     renderForm();
 
     expect(await screen.findByRole('heading', { name: '请假时间' })).toBeInTheDocument();
-    expect(screen.getByText('第 1 步 / 共 2 步')).toBeInTheDocument();
+    expect(screen.getAllByText(/1\s*\/\s*2/).length).toBeGreaterThan(0);
+    expect(screen.getByText('本节 2 项，预计 40 秒')).toBeInTheDocument();
     expect(screen.queryByLabelText('请假事由')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
@@ -189,7 +190,7 @@ describe('FormFillPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
     expect(await screen.findByRole('heading', { name: '请假事由' })).toBeInTheDocument();
-    expect(screen.getByText('第 2 步 / 共 2 步')).toBeInTheDocument();
+    expect(screen.getAllByText(/2\s*\/\s*2/).length).toBeGreaterThan(0);
   });
 
   it('jumps back to the first step with errors during final validation', async () => {

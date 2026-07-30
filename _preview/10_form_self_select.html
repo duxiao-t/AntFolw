@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>10 · 自选审批人</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">10 · Self-Select</div>
+  <div class="preview-shell__hint">网格选人 · 选中态品牌描边 + 蓝色光晕</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">选择审批人</div>
+        <button class="app-bar__action" aria-label="确认">完成</button>
+      </header>
+
+      <main class="page page--no-tabbar">
+
+        <div class="searchbar" style="margin:8px 0 14px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input placeholder="按姓名 / 工号 / 部门搜索" />
+        </div>
+
+        <div class="chip-row">
+          <button class="chip is-active">直属上级</button>
+          <button class="chip">财务</button>
+          <button class="chip">HR</button>
+          <button class="chip">法务</button>
+          <button class="chip">自定义</button>
+        </div>
+
+        <h4 style="font-size:13px;color:var(--af-color-muted);margin:12px 4px 6px;font-weight:600;">推荐人选 · 财务部</h4>
+        <div class="people-grid">
+          <button class="person is-active"><span class="person__avatar avatar-tone avatar-tone--blue">王</span><span class="person__name">王晓</span><span class="person__sub">财务总监</span></button>
+          <button class="person is-active"><span class="person__avatar avatar-tone avatar-tone--mint">陈</span><span class="person__name">陈昊</span><span class="person__sub">财务 BP</span></button>
+          <button class="person"><span class="person__avatar avatar-tone avatar-tone--amber">李</span><span class="person__name">李莉</span><span class="person__sub">出纳</span></button>
+          <button class="person"><span class="person__avatar avatar-tone avatar-tone--coral">张</span><span class="person__name">张敏</span><span class="person__sub">会计</span></button>
+          <button class="person"><span class="person__avatar avatar-tone avatar-tone--cyan">刘</span><span class="person__name">刘洋</span><span class="person__sub">审计</span></button>
+          <button class="person"><span class="person__avatar avatar-tone avatar-tone--amber">赵</span><span class="person__name">赵宁</span><span class="person__sub">税务</span></button>
+          <button class="person"><span class="person__avatar avatar-tone avatar-tone--blue">周</span><span class="person__name">周健</span><span class="person__sub">财务助理</span></button>
+          <button class="person"><span class="person__avatar avatar-tone avatar-tone--coral">吴</span><span class="person__name">吴洁</span><span class="person__sub">总账</span></button>
+        </div>
+
+        <h4 style="font-size:13px;color:var(--af-color-muted);margin:18px 4px 6px;font-weight:600;">已选 2 人</h4>
+        <div class="list-card">
+          <button class="list-item">
+            <span class="list-item__avatar compact-person-avatar avatar-tone avatar-tone--blue">王</span>
+            <div class="list-item__main"><b>王晓</b><small>财务总监 · 顺序 1</small></div>
+            <span class="chip chip--soft">主审</span>
+          </button>
+          <button class="list-item">
+            <span class="list-item__avatar compact-person-avatar avatar-tone avatar-tone--mint">陈</span>
+            <div class="list-item__main"><b>陈昊</b><small>财务 BP · 顺序 2</small></div>
+            <span class="chip chip--soft">会签</span>
+          </button>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

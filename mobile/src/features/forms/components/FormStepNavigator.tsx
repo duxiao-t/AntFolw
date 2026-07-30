@@ -25,17 +25,41 @@ export function FormStepNavigator({
           <button
             key={group.id}
             type="button"
-            className={`af-step-chip${isCurrent ? ' af-step-chip--current' : ''}${isDone ? ' af-step-chip--done' : ''}${errorCount > 0 ? ' af-step-chip--error' : ''}`}
+            className={`af-step-dot${isCurrent ? ' af-step-dot--current' : ''}${isDone ? ' af-step-dot--done' : ''}${errorCount > 0 ? ' af-step-dot--error' : ''}`}
             aria-current={isCurrent ? 'step' : undefined}
+            aria-label={`${index + 1}. ${group.title}${errorCount > 0 ? `，${errorCount} 项需补充` : ''}`}
             onClick={() => onSelect(index)}
           >
-            <b>{index + 1}</b>
-            <span>{group.title}</span>
-            {errorCount > 0 ? <small>{errorCount} 项需补充</small> : null}
+            {index + 1}
           </button>
         );
       })}
     </nav>
+  );
+}
+
+export function FormNextStepHint({
+  groups,
+  currentIndex,
+  errorCounts,
+}: Pick<FormStepNavigatorProps, 'groups' | 'currentIndex' | 'errorCounts'>) {
+  const nextGroup = groups[currentIndex + 1] ?? null;
+  const nextErrorCount = nextGroup ? errorCounts[nextGroup.id] ?? 0 : 0;
+
+  return (
+    <div className={`af-next-step-card${nextGroup ? '' : ' af-next-step-card--done'}`}>
+      {nextGroup ? (
+        <>
+          <strong>接下来：{nextGroup.title}</strong>
+          <span>{nextErrorCount > 0 ? `${nextErrorCount} 项需补充` : '完成本节后继续填写'}</span>
+        </>
+      ) : (
+        <>
+          <strong>最后一步</strong>
+          <span>完成后进入提交确认</span>
+        </>
+      )}
+    </div>
   );
 }
 

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>21 · 驳回 Sheet</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">21 · Sheet (Reject)</div>
+  <div class="preview-shell__hint">复用 06 审批详情 · 驳回动作面板 · 默认展开</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">审批详情</div>
+        <button class="app-bar__action" aria-label="分享">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
+        </button>
+      </header>
+
+      <main class="page page--no-tabbar approval-detail-page">
+        <section class="approval-hero detail-hero--bleed" aria-labelledby="approval-form-name">
+          <div class="approval-hero__title-block">
+            <span class="approval-hero__label">表单名称</span>
+            <h1 id="approval-form-name">热处理产量统计表</h1>
+          </div>
+
+          <div class="approval-hero__applicant">
+            <div class="approval-hero__avatar" aria-hidden="true">王</div>
+            <div>
+              <span>申请人</span>
+              <strong>王志强</strong>
+            </div>
+          </div>
+
+          <dl class="approval-hero__meta">
+            <div>
+              <dt>工号</dt>
+              <dd>SC-0246</dd>
+            </div>
+            <div>
+              <dt>部门</dt>
+              <dd>生产制造部</dd>
+            </div>
+            <div class="approval-hero__meta-wide">
+              <dt>提交时间</dt>
+              <dd>2026-07-30 08:42</dd>
+            </div>
+          </dl>
+
+          <div class="approval-hero__current">
+            <span class="approval-hero__current-dot" aria-hidden="true"></span>
+            <span>当前审批节点</span>
+            <strong>车间主任审批</strong>
+          </div>
+        </section>
+
+        <section class="approval-panel form-detail-panel" aria-labelledby="form-detail-title">
+          <header class="approval-panel__head form-detail-panel__head">
+            <div>
+              <h2 id="form-detail-title">表单详情</h2>
+              <p>单号 <strong>HT-20260730-018</strong></p>
+            </div>
+            <div class="field-total" aria-label="字段总数 9">
+              <span>字段总数</span>
+              <strong>9</strong>
+            </div>
+          </header>
+
+          <dl class="form-fields">
+            <div class="form-field-row">
+              <dt>工序</dt>
+              <dd>渗碳淬火</dd>
+            </div>
+            <div class="form-field-row">
+              <dt>日期</dt>
+              <dd>2026-07-30</dd>
+            </div>
+            <div class="form-field-row">
+              <dt>人员</dt>
+              <dd>王志强、赵磊</dd>
+            </div>
+            <div class="form-field-row">
+              <dt>产品编码</dt>
+              <dd>HT-AL-6082-017</dd>
+            </div>
+            <div class="form-field-row">
+              <dt>产品名称</dt>
+              <dd>铝合金传动轴套</dd>
+            </div>
+            <div class="form-field-row">
+              <dt>产量</dt>
+              <dd>1,260 件</dd>
+            </div>
+            <div class="form-field-row">
+              <dt>废品</dt>
+              <dd>18 件</dd>
+            </div>
+            <div class="form-field-row form-field-row--emphasis">
+              <dt>总数</dt>
+              <dd>1,278 件</dd>
+            </div>
+            <div class="form-field-row form-field-row--stack">
+              <dt>备注</dt>
+              <dd>2 号炉第二批次，炉温与保温时长均符合工艺卡要求；18 件表面硬度不达标，已单独隔离并提交复检。</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="approval-panel approval-records" aria-labelledby="approval-records-title">
+          <header class="approval-panel__head">
+            <div>
+              <h2 id="approval-records-title">审批记录</h2>
+              <p>已流转 3 个节点</p>
+            </div>
+            <span class="approval-panel__summary">2 已完成 · 1 处理中</span>
+          </header>
+
+          <ol class="approval-records__list">
+            <li class="approval-records__item approval-records__item--done">
+              <span class="approval-records__marker" aria-hidden="true"></span>
+              <article class="approval-record-card">
+                <div class="approval-record-card__top">
+                  <div>
+                    <span class="approval-record-card__node">提交申请</span>
+                    <strong>王志强</strong>
+                  </div>
+                  <span class="approval-record-card__status approval-record-card__status--done">已提交</span>
+                </div>
+                <p>已完成生产数据填报并提交审批。</p>
+                <footer>
+                  <span>生产制造部 · SC-0246</span>
+                  <time datetime="2026-07-30T08:42">07-30 08:42</time>
+                </footer>
+              </article>
+            </li>
+
+            <li class="approval-records__item approval-records__item--done">
+              <span class="approval-records__marker" aria-hidden="true"></span>
+              <button class="approval-record-card approval-record-card--button" type="button" data-open-sheet="sheet-record-approved" aria-label="查看班组长审核详情">
+                <div class="approval-record-card__top">
+                  <div>
+                    <span class="approval-record-card__node">班组长审核</span>
+                    <strong>刘海峰</strong>
+                  </div>
+                  <span class="approval-record-card__status approval-record-card__status--done">已通过</span>
+                </div>
+                <p>产量与交接记录一致，废品数量已核对。</p>
+                <footer>
+                  <span>热处理一组 · SC-0108</span>
+                  <time datetime="2026-07-30T09:06">07-30 09:06</time>
+                </footer>
+              </button>
+            </li>
+
+            <li class="approval-records__item approval-records__item--current">
+              <span class="approval-records__marker" aria-hidden="true"></span>
+              <button class="approval-record-card approval-record-card--button approval-record-card--current" type="button" data-open-sheet="sheet-record-current" aria-label="查看当前审批节点详情">
+                <div class="approval-record-card__top">
+                  <div>
+                    <span class="approval-record-card__node">车间主任审批</span>
+                    <strong>陈建国</strong>
+                  </div>
+                  <span class="approval-record-card__status approval-record-card__status--current">审批中</span>
+                </div>
+                <p>等待核对本批次产量及废品处置情况。</p>
+                <footer>
+                  <span>生产制造部 · SC-0006</span>
+                  <time datetime="2026-07-30T09:06">09:06 接收</time>
+                </footer>
+              </button>
+            </li>
+          </ol>
+        </section>
+
+        <section class="approval-panel attachment-panel" aria-labelledby="attachment-title">
+          <header class="approval-panel__head">
+            <div>
+              <h2 id="attachment-title">附件</h2>
+              <p>共 2 个文件</p>
+            </div>
+            <span class="approval-panel__summary">合计 3.2 MB</span>
+          </header>
+
+          <div class="attachment-list">
+            <article class="attachment-file">
+              <div class="attachment-file__main">
+                <strong title="热处理产量原始记录.xlsx">热处理产量原始记录.xlsx</strong>
+                <span><b>上传人</b> 王志强</span>
+                <span><b>上传时间</b> 2026-07-30 08:40</span>
+              </div>
+              <div class="attachment-file__aside">
+                <span>2.4 MB</span>
+                <button type="button" aria-label="下载热处理产量原始记录">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="attachment-file">
+              <div class="attachment-file__main">
+                <strong title="2号炉温度曲线.pdf">2号炉温度曲线.pdf</strong>
+                <span><b>上传人</b> 赵磊</span>
+                <span><b>上传时间</b> 2026-07-30 08:41</span>
+              </div>
+              <div class="attachment-file__aside">
+                <span>860 KB</span>
+                <button type="button" aria-label="下载2号炉温度曲线">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <div class="action-bar approval-action-bar">
+        <button class="btn btn--ghost btn--lg" data-open-sheet="sheet-reject">驳回</button>
+        <button class="btn btn--success btn--lg" data-open-sheet="sheet-approve">同意</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-mask is-open" id="sheet-reject-mask"></div>
+<div class="sheet is-open" id="sheet-reject">
+  <div class="sheet__inner">
+    <div class="sheet__title"><h3>驳回本次申请</h3><span class="chip chip--danger-soft" style="margin-left:auto;">必填原因</span></div>
+    <p class="muted small" style="margin:6px 0 12px;">请从模板选择或自定义原因,发起人将收到通知。</p>
+    <div class="sheet__form">
+      <div class="chip-row">
+        <button class="chip is-active">缺少询价单</button>
+        <button class="chip">预算超限</button>
+        <button class="chip">资料不完整</button>
+        <button class="chip">需上级签批</button>
+      </div>
+      <textarea>缺少厂商询价单,请补充 3 家以上比价后重新提交。</textarea>
+      <div class="row" style="font-size:11px;color:var(--af-color-muted);margin-top:-4px;">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/></svg>
+        <span>驳回后流程直接关闭,发起人可修改后重新发起</span>
+      </div>
+      <div class="btn-group" style="margin-top:6px;">
+        <button class="btn btn--ghost" data-close-sheet>取消</button>
+        <button class="btn btn--danger btn--lg" data-close-sheet>确认驳回</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>
