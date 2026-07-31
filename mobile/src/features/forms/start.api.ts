@@ -54,13 +54,13 @@ export async function submitMobileFormData({
   });
 }
 
-type MobileFileRef = {
+export type MobileFileRef = {
   fileId: string;
   fieldId: string;
   sortOrder: number;
 };
 
-function collectMobileFileRefs(values: MobileFormValues): MobileFileRef[] {
+export function collectMobileFileRefs(values: MobileFormValues): MobileFileRef[] {
   const refs: MobileFileRef[] = [];
   for (const [fieldId, value] of Object.entries(values)) {
     collectValueFiles(value, fieldId, refs);

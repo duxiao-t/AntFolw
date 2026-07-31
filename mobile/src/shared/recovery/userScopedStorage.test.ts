@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildRecoveryKey,
+  clearUserScopedRecovery,
   readUserScopedRecovery,
   removeUserScopedRecovery,
   writeUserScopedRecovery,
@@ -27,5 +28,21 @@ describe('userScopedStorage', () => {
 
     expect(readUserScopedRecovery(7, 'leave', 101)).toBeNull();
     expect(readUserScopedRecovery(8, 'leave', 101)).toEqual({ values: { reason: '用户8' } });
+  });
+
+  it('clears all current-user recovery keys without touching another user', () => {
+    writeUserScopedRecovery(7, 'leave', null, { saved: true });
+    writeUserScopedRecovery(7, 'expense', 101, { saved: true });
+    writeUserScopedRecovery(8, 'leave', null, { saved: true });
+    localStorage.setItem('antflow-mobile:drafts:7', '{"saved":true}');
+    localStorage.setItem('antflow-mobile:drafts:8', '{"saved":true}');
+
+    clearUserScopedRecovery(7);
+
+    expect(readUserScopedRecovery(7, 'leave', null)).toBeNull();
+    expect(readUserScopedRecovery(7, 'expense', 101)).toBeNull();
+    expect(localStorage.getItem('antflow-mobile:drafts:7')).toBeNull();
+    expect(readUserScopedRecovery(8, 'leave', null)).toEqual({ saved: true });
+    expect(localStorage.getItem('antflow-mobile:drafts:8')).toBe('{"saved":true}');
   });
 });

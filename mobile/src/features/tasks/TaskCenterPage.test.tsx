@@ -119,13 +119,12 @@ describe('TaskCenterPage', () => {
   it('shows pending tasks by default with task and instance status separated', async () => {
     renderTaskCenter();
 
-    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '待我处理' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
     const pendingCard = screen.getByRole('link', { name: /请假申请/ });
     expect(within(pendingCard).getByText((text) => text.includes('张三'))).toBeInTheDocument();
     expect(within(pendingCard).getByText('待审批')).toBeInTheDocument();
-    expect(within(pendingCard).getByText('进行中')).toBeInTheDocument();
     expect(pendingCard).toHaveAttribute(
       'href',
       '/tasks/401?returnView=pending',
@@ -139,11 +138,10 @@ describe('TaskCenterPage', () => {
 
     expect(await screen.findByText('报销申请')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '已处理' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('searchbox', { name: '搜索表单、申请人或节点' })).toHaveValue('报销');
-    expect(screen.getByLabelText('状态筛选')).toHaveValue('SKIPPED');
+    expect(screen.getByRole('searchbox', { name: '搜索申请人或表单名' })).toHaveValue('报销');
+    expect(screen.getByRole('button', { name: '跳过' })).toHaveAttribute('aria-pressed', 'true');
     const doneCard = screen.getByRole('link', { name: /报销申请/ });
-    expect(within(doneCard).getByText((text) => text.includes('已同意'))).toBeInTheDocument();
-    expect(within(doneCard).getByText('已通过')).toBeInTheDocument();
+    expect(within(doneCard).getByText('已完成')).toBeInTheDocument();
     expect(doneCard).toHaveAttribute(
       'href',
       '/tasks/402?returnView=done&returnKeyword=%E6%8A%A5%E9%94%80&returnStatus=SKIPPED',
@@ -152,7 +150,7 @@ describe('TaskCenterPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: '我发起的' }));
 
     expect(await screen.findByText('采购申请')).toBeInTheDocument();
-    expect(screen.getByRole('searchbox', { name: '搜索表单、申请人或节点' })).toHaveValue('报销');
+    expect(screen.getByRole('searchbox', { name: '搜索申请人或表单名' })).toHaveValue('报销');
     expect(router.state.location.pathname + router.state.location.search).toContain('view=process');
     expect(router.state.location.pathname + router.state.location.search).toContain('keyword=%E6%8A%A5%E9%94%80');
     expect(router.state.location.pathname + router.state.location.search).not.toContain('status=SKIPPED');
@@ -164,7 +162,7 @@ describe('TaskCenterPage', () => {
     expect(await screen.findByText('采购申请')).toBeInTheDocument();
     const processCard = screen.getByRole('link', { name: /采购申请/ });
     expect(within(processCard).getByText((text) => text.includes('当前节点'))).toBeInTheDocument();
-    expect(within(processCard).getByText('进行中')).toBeInTheDocument();
+    expect(within(processCard).getByText('审批中')).toBeInTheDocument();
     expect(processCard).toHaveAttribute(
       'href',
       '/processes/9003?returnView=process&returnKeyword=%E9%87%87%E8%B4%AD&returnStatus=RUNNING',
@@ -188,8 +186,24 @@ describe('TaskCenterPage', () => {
     renderTaskCenter();
 
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
-    expect(screen.getByText('还有更多任务，请继续下拉加载')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '还有更多任务，请继续下拉加载' }));
+    expect(screen.getByText('还有更多，请继续下拉加载')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '还有更多，请继续下拉加载' }));
     expect(await screen.findByText('加班申请')).toBeInTheDocument();
+  });
+
+  it('opens a returned original form instead of a new submission', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [{
+      ...PENDING_TASKS[0],
+      id: 410,
+      formCode: 'leave',
+      businessNo: '000000009001',
+      taskType: 'REWORK',
+      nodeName: '待修改原单',
+    }], hasMore: false })));
+    renderTaskCenter();
+
+    const card = await screen.findByRole('link', { name: /请假申请/ });
+    expect(within(card).getByText('待修改')).toBeInTheDocument();
+    expect(card).toHaveAttribute('href', '/forms/leave?reworkTaskId=410');
   });
 });

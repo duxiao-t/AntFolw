@@ -52,16 +52,10 @@ describe('ProfilePage', () => {
       expect(screen.getByText('管理员')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('admin')).toBeInTheDocument();
-    expect(screen.getByText((text) => text.includes('3'))).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '草稿箱' })).toHaveAttribute(
-      'href',
-      '/forms/drafts',
-    );
-    expect(screen.getByRole('link', { name: '账号与安全' })).toHaveAttribute(
-      'href',
-      '/profile/security',
-    );
+    expect(screen.getByText((text) => text.includes('admin'))).toBeInTheDocument();
+    expect(screen.getByText('待办').parentElement).toHaveTextContent('3');
+    expect(screen.getByRole('button', { name: /我的草稿/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /账号安全/ })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/mobile/bootstrap', expect.any(Object));
   });

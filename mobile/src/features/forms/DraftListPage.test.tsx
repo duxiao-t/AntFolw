@@ -74,9 +74,8 @@ describe('DraftListPage', () => {
     renderDrafts();
 
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
-    expect(screen.getByText((text) => text.includes('已填写 1/2'))).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '继续填写 请假申请' }))
-      .toHaveAttribute('href', '/forms/leave?draftId=101');
+    expect(screen.getByText((text) => text.includes('步骤 1/2'))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续填写 请假申请' })).toBeInTheDocument();
   });
 
   it('confirms delete and removes server and local recovery draft', async () => {

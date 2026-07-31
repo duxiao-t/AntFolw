@@ -3,38 +3,20 @@ import type { MobileApp } from "../../../shared/api/types";
 export interface AppGridProps {
   apps: ReadonlyArray<MobileApp>;
   onSelect?: (app: MobileApp) => void;
+  onMore?: () => void;
 }
 
-function initials(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  return trimmed.charAt(0);
-}
-
-export function AppGrid({ apps, onSelect }: AppGridProps) {
-  if (apps.length === 0) {
-    return (
-      <p style={{ margin: 0, fontSize: 11, color: "var(--af-color-muted)" }}>还没有常用应用</p>
-    );
-  }
+export function AppGrid({ apps, onSelect, onMore }: AppGridProps) {
   return (
-    <ul className="af-app-grid" aria-label="常用应用" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+    <div className="stripe-card app-grid">
       {apps.map((app) => (
-        <li key={app.formId} style={{ display: "contents" }}>
-          <button
-            type="button"
-            className="af-app-grid__tile"
-            onClick={() => onSelect?.(app)}
-            aria-label={app.name}
-          >
-            <span className="af-app-grid__icon" aria-hidden="true">
-              {app.iconUrl ? <img src={app.iconUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: 10, objectFit: "cover" }} /> : initials(app.name)}
-            </span>
-            <span className="af-app-grid__name">{app.name}</span>
-          </button>
-        </li>
+        <button key={app.formId} type="button" className="app-tile" onClick={() => onSelect?.(app)} aria-label={app.name}>
+          <span className="app-tile__icon">{app.iconUrl ? <img src={app.iconUrl} alt="" /> : app.name.trim().charAt(0) || "?"}</span>
+          <span className="app-tile__name">{app.name}</span>
+        </button>
       ))}
-    </ul>
+      <button type="button" className="app-tile app-tile--more" onClick={onMore}><span className="app-tile__icon">+</span><span className="app-tile__name">更多</span></button>
+    </div>
   );
 }
 

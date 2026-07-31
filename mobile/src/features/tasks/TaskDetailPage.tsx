@@ -5,17 +5,12 @@ import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
+import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ApproveSheet } from "./ApproveSheet";
+import { ApprovalRecords, approvalSummaryLabel } from "./ApprovalRecords";
 import { RejectSheet } from "./RejectSheet";
-import { taskStatusLabel } from "./TaskCard";
-import { TaskTimeline } from "./TaskTimeline";
-import {
-  fetchTaskDetail,
-  runTaskAction,
-  type TaskActionPayload,
-} from "./tasks.api";
+import { fetchTaskDetail, runTaskAction, type TaskActionPayload } from "./tasks.api";
 
 export function TaskDetailPage() {
   const { taskId = "" } = useParams();
@@ -27,288 +22,67 @@ export function TaskDetailPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const [statusNotice, setStatusNotice] = useState("");
-  const formInitial = "假";
-
-  const detailQuery = useQuery({
-    queryKey: queryKeys.taskDetail(numericTaskId),
-    queryFn: () => fetchTaskDetail(numericTaskId),
-    enabled: Number.isSafeInteger(numericTaskId) && numericTaskId > 0,
-    retry: 0,
-  });
-
+  const detailQuery = useQuery({ queryKey: queryKeys.taskDetail(numericTaskId), queryFn: () => fetchTaskDetail(numericTaskId), enabled: Number.isSafeInteger(numericTaskId) && numericTaskId > 0, retry: 0 });
   const actionMutation = useMutation({
-    mutationFn: async ({
-      action,
-      payload,
-      idempotencyKey,
-    }: {
-      action: "approve" | "reject";
-      payload: TaskActionPayload;
-      idempotencyKey: string;
-    }) => runTaskAction(numericTaskId, action, payload, idempotencyKey),
-    async onSuccess() {
-      setActionError("");
-      setStatusNotice("");
-      setApproveOpen(false);
-      setRejectOpen(false);
-      await invalidateTaskCaches(queryClient, numericTaskId, detailQuery.data?.task.instanceId);
-      navigate(returnPath(searchParams), { replace: true });
-    },
-    async onError(error) {
-      if (isApiError(error) && error.status === 409) {
-        setApproveOpen(false);
-        setRejectOpen(false);
-        setActionError("");
-        setStatusNotice("任务状态已更新");
-        await detailQuery.refetch();
-        return;
-      }
-      setActionError(error instanceof Error ? error.message : "操作失败");
-    },
+    mutationFn: ({ action, payload, idempotencyKey }: { action: "approve" | "reject"; payload: TaskActionPayload; idempotencyKey: string }) => runTaskAction(numericTaskId, action, payload, idempotencyKey),
+    async onSuccess() { setActionError(""); setStatusNotice(""); setApproveOpen(false); setRejectOpen(false); await invalidateTaskCaches(queryClient, numericTaskId, detailQuery.data?.task.instanceId); navigate(returnPath(searchParams), { replace: true }); },
+    async onError(error) { if (isApiError(error) && error.status === 409) { setApproveOpen(false); setRejectOpen(false); setActionError(""); setStatusNotice("任务状态已更新"); await detailQuery.refetch(); return; } setActionError(error instanceof Error ? error.message : "操作失败"); },
   });
+  const schema = useMemo(() => normalizeSchema(detailQuery.data?.schema), [detailQuery.data?.schema]);
+  const values = useMemo(() => normalizeValues(detailQuery.data?.formData), [detailQuery.data?.formData]);
 
-  const schema = useMemo(
-    () => normalizeSchema(detailQuery.data?.schema),
-    [detailQuery.data?.schema],
-  );
-  const values = useMemo(
-    () => normalizeValues(detailQuery.data?.formData),
-    [detailQuery.data?.formData],
-  );
-  const allowedActions = detailQuery.data?.allowedActions ?? [];
-  const canApprove = allowedActions.includes("APPROVE");
-  const canReject = allowedActions.includes("REJECT");
-  const showActions = canApprove || canReject;
-
-  if (!Number.isSafeInteger(numericTaskId) || numericTaskId <= 0) {
-    return <PageError title="任务不存在" message="请返回任务中心重新打开。" />;
-  }
-
-  if (detailQuery.isPending) {
-    return <PageSkeleton rows={5} />;
-  }
-
-  if (detailQuery.isError || !detailQuery.data) {
-    return <PageError onRetry={() => void detailQuery.refetch()} />;
-  }
+  if (!Number.isSafeInteger(numericTaskId) || numericTaskId <= 0) return <PageError title="任务不存在" message="请返回任务中心重新打开。" />;
+  if (detailQuery.isPending) return <PageSkeleton rows={5} />;
+  if (detailQuery.isError || !detailQuery.data) return <PageError onRetry={() => void detailQuery.refetch()} />;
 
   const detail = detailQuery.data;
   const task = detail.task;
-  const detailStatusLabel = task.taskStatus === "PENDING" && showActions ? "待你处理" : taskStatusLabel(task.taskStatus);
-  const detailStatusTone =
-    task.taskStatus === "APPROVED"
-      ? "af-tag--success"
-      : task.taskStatus === "REJECTED"
-        ? "af-tag--danger"
-        : "af-tag--warning";
+  const rows = summarizeSchemaRows(schema, values);
+  const approvalRecords = Array.isArray(detail.approvalRecords) ? detail.approvalRecords : [];
+  const approvalSummary = detail.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
+  const canApprove = detail.allowedActions.includes("APPROVE");
+  const canReject = detail.allowedActions.includes("REJECT");
+  const showActions = canApprove || canReject;
 
   return (
     <AppPage
       title="审批详情"
-      action={
-        <button
-          type="button"
-          className="af-link-button"
-          style={{ fontSize: 16 }}
-          aria-label="更多操作"
-        >
-          {"\u2022\u2022\u2022"}
-        </button>
-      }
+      contentClassName="approval-detail-page"
+      action={<button type="button" className="app-bar__action" aria-label="分享" onClick={() => shareTask(task.formName)}><ShareIcon /></button>}
+      bottomBar={showActions ? <div className="action-bar approval-action-bar">{canReject ? <button type="button" className="btn btn--ghost btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setRejectOpen(true); }}>驳回</button> : <span />}{canApprove ? <button type="button" className="btn btn--success btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setApproveOpen(true); }}>同意</button> : null}</div> : null}
     >
-      <div className="af-section-stack">
-        <section className="af-detail-head">
-          <div className="af-detail-head__row">
-            <span className="af-app-grid__icon" aria-hidden="true">{formInitial}</span>
-            <div>
-              <b>{task.applicantName}的{task.formName}</b>
-              <small>
-                {task.applicantDepartment ? `${task.applicantDepartment} · ` : ""}
-                {formatTime(task.createdAt)}
-              </small>
-            </div>
-          </div>
-          <div className="af-detail-head__status">
-            <span>当前节点：{task.nodeName}</span>
-            <span className={`af-tag ${detailStatusTone}`}>{detailStatusLabel}</span>
-          </div>
-        </section>
+      <section className="approval-hero detail-hero--bleed">
+        <div className="approval-hero__title-block"><span className="approval-hero__label">表单名称</span><h1>{task.formName}</h1></div>
+        <div className="approval-hero__applicant"><div className="approval-hero__avatar">{task.applicantName.slice(0, 1)}</div><div><span>申请人</span><strong>{task.applicantName}</strong></div></div>
+        <dl className="approval-hero__meta"><div><dt>工号</dt><dd>{task.applicantEmployeeNo || "未分配"}</dd></div><div><dt>部门</dt><dd>{task.applicantDepartment || "未填写"}</dd></div><div className="approval-hero__meta-wide"><dt>提交时间</dt><dd>{formatDateTime(approvalRecords[0]?.receivedAt || task.createdAt)}</dd></div></dl>
+        <div className="approval-hero__current"><span className="approval-hero__current-dot" /><span>当前审批节点</span><strong>{task.nodeName}</strong></div>
+      </section>
 
-        {statusNotice ? (
-          <p role="status" style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "var(--af-color-primary-soft)", color: "var(--af-color-primary)", fontSize: 11 }}>
-            {statusNotice}
-          </p>
-        ) : null}
+      {statusNotice ? <p className="status-notice" role="status">{statusNotice}</p> : null}
+      <section className="approval-panel form-detail-panel">
+        <header className="approval-panel__head form-detail-panel__head"><div><h2>表单详情</h2><p>单号 <strong>{task.businessNo}</strong></p></div><div className="field-total"><span>字段总数</span><strong>{rows.length}</strong></div></header>
+        {rows.length > 0 ? <dl className="form-fields">{rows.map((row, index) => <div key={row.id} className={`form-field-row${index === rows.length - 1 && row.value.length > 24 ? " form-field-row--stack" : ""}`}><dt>{row.label}</dt><dd>{row.value || "未填写"}</dd></div>)}</dl> : <p className="muted small">暂无表单字段</p>}
+      </section>
 
-        <section className="af-card">
-          <div className="af-card__title"><span>申请内容</span></div>
-          {schema.length > 0 ? (
-            <DynamicFormRenderer
-              schema={schema}
-              values={values}
-              mode="readonly"
-              onValueChange={() => undefined}
-            />
-          ) : (
-            <p style={{ margin: 0, fontSize: 11, color: "var(--af-color-muted)" }}>暂无表单字段</p>
-          )}
-        </section>
+      <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
-        <section className="af-card">
-          <div className="af-card__title"><span>审批进度</span></div>
-          <TaskTimeline history={detail.history} processSnapshot={detail.processSnapshot} />
-        </section>
+      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {detail.files.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(detail.files.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{detail.files.length === 0 ? <p className="muted small">暂无附件</p> : detail.files.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {task.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><a href={file.contentUrl} aria-label={`下载${file.name}`}><DownloadIcon /></a></div></article>)}</div></section>
 
-        <section className="af-card">
-          <div className="af-card__title"><span>附件</span></div>
-          {detail.files.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 11, color: "var(--af-color-muted)" }}>暂无附件</p>
-          ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
-              {detail.files.map((file) => (
-                <li key={file.id} className="af-recent-list__item" style={{ padding: "6px 0", borderTop: "0" }}>
-                  <i className="af-recent-list__dot" />
-                  <span className="af-recent-list__main">
-                    <a href={file.contentUrl} className="af-file-link">
-                      <b>{file.name}</b>
-                    </a>
-                    <small>{file.size ? `${Math.round(file.size / 1024)} KB` : ""}</small>
-                  </span>
-                  <span className="af-tag">查看</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
-
-      {showActions ? (
-        <div className="af-action-bar af-action-bar--tri">
-          <button
-            type="button"
-            className="af-btn af-btn--ghost"
-            onClick={() => navigate(returnPath(searchParams))}
-          >
-            更多
-          </button>
-          {canReject ? (
-            <button
-              type="button"
-              className="af-btn af-btn--danger"
-              disabled={actionMutation.isPending}
-              onClick={() => {
-                setActionError("");
-                setRejectOpen(true);
-              }}
-            >
-              驳回
-            </button>
-          ) : (
-            <span />
-          )}
-          {canApprove ? (
-            <button
-              type="button"
-              className="af-btn"
-              disabled={actionMutation.isPending}
-              onClick={() => {
-                setActionError("");
-                setApproveOpen(true);
-              }}
-            >
-              同意
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      <ApproveSheet
-        open={approveOpen}
-        loading={actionMutation.isPending}
-        error={approveOpen ? actionError : undefined}
-        onClose={() => {
-          if (!actionMutation.isPending) {
-            setApproveOpen(false);
-            setActionError("");
-          }
-        }}
-        onSubmit={(payload, idempotencyKey) => {
-          actionMutation.mutate({ action: "approve", payload, idempotencyKey });
-        }}
-      />
-
-      <RejectSheet
-        open={rejectOpen}
-        loading={actionMutation.isPending}
-        error={rejectOpen ? actionError : undefined}
-        rejectTargets={detail.rejectTargets}
-        onClose={() => {
-          if (!actionMutation.isPending) {
-            setRejectOpen(false);
-            setActionError("");
-          }
-        }}
-        onSubmit={(payload, idempotencyKey) => {
-          actionMutation.mutate({ action: "reject", payload, idempotencyKey });
-        }}
-      />
+      <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload, idempotencyKey })} />
+      <RejectSheet open={rejectOpen} loading={actionMutation.isPending} error={rejectOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setRejectOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "reject", payload, idempotencyKey })} />
     </AppPage>
   );
 }
 
-async function invalidateTaskCaches(
-  queryClient: ReturnType<typeof useQueryClient>,
-  taskId: number,
-  instanceId?: number,
-) {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }),
-    queryClient.invalidateQueries({ queryKey: ["mobile", "tasks"] }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) }),
-    instanceId
-      ? queryClient.invalidateQueries({ queryKey: queryKeys.instance(instanceId) })
-      : Promise.resolve(),
-  ]);
-}
-
-function returnPath(searchParams: URLSearchParams): string {
-  const params = new URLSearchParams();
-  const view = searchParams.get("returnView");
-  const keyword = searchParams.get("returnKeyword");
-  const status = searchParams.get("returnStatus");
-  if (view) params.set("view", view);
-  if (keyword) params.set("keyword", keyword);
-  if (status) params.set("status", status);
-  const query = params.toString();
-  return query ? `/tasks?${query}` : "/tasks";
-}
-
-function normalizeSchema(schema: unknown): MobileSchemaNode[] {
-  if (Array.isArray(schema)) {
-    return schema as MobileSchemaNode[];
-  }
-  return [];
-}
-
-function normalizeValues(formData: Record<string, unknown> | null | undefined): MobileFormValues {
-  if (!formData || typeof formData !== "object" || Array.isArray(formData)) {
-    return {};
-  }
-  return formData;
-}
-
-function formatTime(value: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-  const yesterday = new Date(now.getTime() - 86400000).toDateString() === date.toDateString();
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mm = String(date.getMinutes()).padStart(2, "0");
-  if (sameDay) return `今天 ${hh}:${mm}`;
-  if (yesterday) return `昨天 ${hh}:${mm}`;
-  return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, "0")}`;
-}
+async function invalidateTaskCaches(queryClient: ReturnType<typeof useQueryClient>, taskId: number, instanceId?: number) { await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }), queryClient.invalidateQueries({ queryKey: ["mobile", "tasks"] }), queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) }), instanceId ? queryClient.invalidateQueries({ queryKey: queryKeys.instance(instanceId) }) : Promise.resolve()]); }
+function returnPath(params: URLSearchParams) { const next = new URLSearchParams(); const view = params.get("returnView"); const keyword = params.get("returnKeyword"); const status = params.get("returnStatus"); if (view) next.set("view", view); if (keyword) next.set("keyword", keyword); if (status) next.set("status", status); return next.size ? `/tasks?${next}` : "/tasks"; }
+function normalizeSchema(schema: unknown): MobileSchemaNode[] { return Array.isArray(schema) ? schema as MobileSchemaNode[] : []; }
+function normalizeValues(data?: Record<string, unknown> | null): MobileFormValues { return data && typeof data === "object" && !Array.isArray(data) ? data : {}; }
+function formatDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false }); }
+function formatSize(size: number) { if (!size) return "0 KB"; return size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`; }
+function fallbackApprovalSummary(flowedCount: number) { return { flowedCount, completedCount: flowedCount, processingCount: 0, complete: false }; }
+function shareTask(title: string) { if (typeof navigator.share === "function") void navigator.share({ title, url: window.location.href }).catch(() => undefined); }
+function ShareIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" /></svg>; }
+function DownloadIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>; }
 
 export default TaskDetailPage;

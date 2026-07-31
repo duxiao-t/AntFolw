@@ -5,11 +5,18 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskCenterPage } from '../tasks/TaskCenterPage';
 import { ProcessDetailPage } from './ProcessDetailPage';
+import type { MobileInstanceDetail } from './processes.api';
 
-const INSTANCE_DETAIL = {
+const INSTANCE_DETAIL: MobileInstanceDetail = {
   id: 9003,
   status: 'RUNNING',
   formName: '采购申请',
+  businessNo: '000000009003',
+  applicantName: '张三',
+  applicantEmployeeNo: '000007',
+  applicantDepartment: '研发部',
+  startedAt: '2026-07-20T09:00:00+08:00',
+  currentNodeName: '部门审批',
   schema: [{ id: 'item', type: 'text', label: '采购物品' }],
   formData: { item: '显示器' },
   processSnapshot: {
@@ -34,12 +41,19 @@ const INSTANCE_DETAIL = {
   ],
   canWithdraw: true,
   files: [],
+  approvalSummary: { flowedCount: 2, completedCount: 1, processingCount: 1, complete: false },
+  approvalRecords: [
+    { id: 'submission', taskId: null, nodeId: 'root', nodeName: '提交申请', status: 'SUBMITTED', operatorName: '张三', employeeNo: '000007', department: '研发部', comment: null, receivedAt: '2026-07-20T09:00:00+08:00', completedAt: '2026-07-20T09:00:00+08:00' },
+    { id: 'task-11', taskId: 11, nodeId: 'a1', nodeName: '部门审批', status: 'PROCESSING', operatorName: '李经理', employeeNo: '000008', department: '研发部', comment: null, receivedAt: '2026-07-21T08:00:00+08:00', completedAt: null },
+  ],
 };
 
 const WITHDRAWN_DETAIL = {
   ...INSTANCE_DETAIL,
   status: 'WITHDRAWN',
+  currentNodeName: null,
   canWithdraw: false,
+  approvalSummary: { flowedCount: 2, completedCount: 1, processingCount: 1, complete: false },
 };
 
 function setupFetch(options: {
@@ -116,12 +130,18 @@ describe('ProcessDetailPage', () => {
   it('renders process snapshot timeline and withdraw when allowed', async () => {
     renderProcess();
 
-    expect(await screen.findByRole('heading', { name: '流程进度' })).toBeInTheDocument();
-    expect(await screen.findByText('申请摘要')).toBeInTheDocument();
-    expect(screen.getByTestId('summary-item')).toHaveTextContent('显示器');
+    expect(await screen.findByText('流程进度')).toBeInTheDocument();
+    expect(await screen.findByText('表单详情')).toBeInTheDocument();
+    expect(screen.getAllByText('张三').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('研发部').length).toBeGreaterThan(0);
+    expect(screen.getByText('2026/7/20 09:00:00')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '分享' })).toBeInTheDocument();
+    expect(screen.getByText('采购物品')).toBeInTheDocument();
     expect(screen.getByText('显示器')).toBeInTheDocument();
-    expect(screen.getByText('到达')).toBeInTheDocument();
-    expect(screen.getByText(/部门审批/)).toBeInTheDocument();
+    expect(screen.getByText('审批中', { selector: '.approval-record-card__status' })).toBeInTheDocument();
+    expect(screen.getAllByText(/部门审批/).length).toBeGreaterThan(0);
+    expect(screen.getByText('暂无附件')).toBeInTheDocument();
+    expect(screen.getByText('合计 0 KB')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '撤回流程' })).toBeInTheDocument();
   });
 
@@ -129,7 +149,7 @@ describe('ProcessDetailPage', () => {
     setupFetch({ detail: WITHDRAWN_DETAIL });
     renderProcess();
 
-    expect(await screen.findByText('已撤回')).toBeInTheDocument();
+    expect((await screen.findAllByText('已撤回')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: '撤回流程' })).not.toBeInTheDocument();
   });
 
@@ -140,7 +160,7 @@ describe('ProcessDetailPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '撤回流程' }));
 
     expect(confirmMock).toHaveBeenCalled();
-    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '我发起的流程' })).toBeInTheDocument();
   });
 
   it('does not withdraw when confirmation is cancelled', async () => {
@@ -187,6 +207,10 @@ describe('ProcessDetailPage', () => {
             comment: null,
             createdAt: '2026-07-21T08:00:00+08:00',
           },
+        ],
+        approvalRecords: [
+          ...INSTANCE_DETAIL.approvalRecords.slice(0, 1),
+          { ...INSTANCE_DETAIL.approvalRecords[1]!, nodeId: 'ghost-node', nodeName: 'ghost-node' },
         ],
       },
     });

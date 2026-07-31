@@ -26,3 +26,13 @@ export function writeUserScopedRecovery(
 export function removeUserScopedRecovery(userId: number, formCode: string, draftId: number | null) {
   localStorage.removeItem(buildRecoveryKey(userId, formCode, draftId));
 }
+
+export function clearUserScopedRecovery(userId: number) {
+  const prefixes = [`af:recovery:${userId}:`, `antflow-mobile:drafts:${userId}`];
+  const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
+  keys.forEach((key) => {
+    if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
+      localStorage.removeItem(key);
+    }
+  });
+}

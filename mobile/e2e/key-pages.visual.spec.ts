@@ -43,12 +43,12 @@ test.describe('key pages visual regression', () => {
 
     // 3 apps
     await page.goto('/mobile/apps');
-    await expect(page.getByRole('heading', { name: '全部应用' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('全部应用');
     await capture(page, '03-apps');
 
     // 4 favorites
     await page.goto('/mobile/apps/favorites');
-    await expect(page.getByRole('heading', { name: '管理常用应用' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('我的收藏');
     await capture(page, '04-favorites');
 
     // 5 form
@@ -59,13 +59,13 @@ test.describe('key pages visual regression', () => {
 
     // 6 self-select
     await page.getByRole('button', { name: '下一步' }).click();
-    await expect(page.getByRole('heading', { name: '选择审批人' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('选择审批人');
     await capture(page, '06-self-select');
 
     // 7 confirm
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
-    await page.getByRole('button', { name: '确认审批人' }).click();
-    await expect(page.getByRole('heading', { name: '确认提交' })).toBeVisible();
+    await page.getByRole('button', { name: '完成' }).click();
+    await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();
     await capture(page, '07-confirm');
 
     // 8 success
@@ -75,7 +75,7 @@ test.describe('key pages visual regression', () => {
 
     // 9 pending
     await page.goto('/mobile/tasks?view=pending');
-    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '需要你处理的审批' })).toBeVisible();
     await capture(page, '09-pending');
 
     // 10 task detail
@@ -101,39 +101,39 @@ test.describe('key pages visual regression', () => {
 
     // 13 started
     await page.goto('/mobile/tasks?view=process');
-    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '我发起的流程' })).toBeVisible();
     await capture(page, '13-started');
 
     // 14 process detail
     await page.goto(`/mobile/processes/${instanceId}`);
-    await expect(page.getByRole('heading', { name: '流程进度' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('流程进度');
     await capture(page, '14-process-detail');
 
     // 15 done
     await page.goto('/mobile/tasks?view=done');
-    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '已处理', exact: true })).toBeVisible();
     await capture(page, '15-done');
 
     // 16 profile
     await page.goto('/mobile/profile');
-    await expect(page.getByRole('heading', { name: '我的' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('我的');
     await capture(page, '16-profile');
 
     // 17 drafts
     await page.goto('/mobile/forms/drafts');
-    await expect(page.getByRole('heading', { name: /草稿/ })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('我的草稿');
     await capture(page, '17-drafts');
 
     // 18 security
     await page.goto('/mobile/profile/security');
-    await expect(page.getByRole('heading', { name: '账号与安全' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('账号安全');
     await capture(page, '18-security');
 
     // 19 offline — set offline while already on a loaded page (goto fails offline).
     await page.goto('/mobile/workbench');
     await expect(page.getByTestId('workbench')).toBeVisible();
     await page.context().setOffline(true);
-    await expect(page.getByText('网络已断开，正在尝试恢复…')).toBeVisible();
+    await expect(page.getByText('网络暂时不可用')).toBeVisible();
     await capture(page, '19-offline');
     await page.context().setOffline(false);
   });

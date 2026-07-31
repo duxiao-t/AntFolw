@@ -30,13 +30,25 @@ function applyAnonymous(set: (partial: Partial<AuthState>) => void): void {
   set({ status: 'anonymous', accessToken: null, user: null });
 }
 
+let refreshRequest: Promise<SessionPayload | null> | null = null;
+
+function requestSessionRefresh(): Promise<SessionPayload | null> {
+  if (refreshRequest) return refreshRequest;
+  const request = authApi.refresh();
+  const tracked = request.finally(() => {
+    if (refreshRequest === tracked) refreshRequest = null;
+  });
+  refreshRequest = tracked;
+  return tracked;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'unknown',
   accessToken: null,
   user: null,
   async restore() {
     try {
-      const payload = await authApi.refresh();
+      const payload = await requestSessionRefresh();
       if (payload) {
         applySession(set, payload);
       } else {
@@ -55,7 +67,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     applySession(set, payload);
   },
   async refresh() {
-    const payload = await authApi.refresh();
+    const payload = await requestSessionRefresh();
     if (!payload) {
       applyAnonymous(set);
       throw new ApiError(401, { code: 'TOKEN_EXPIRED', message: '会话已过期' });

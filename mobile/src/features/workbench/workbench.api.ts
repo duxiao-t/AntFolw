@@ -6,7 +6,7 @@ import type { MobileBootstrap, MobileApp, RecentProcess } from '../../shared/api
 export type { MobileBootstrap, MobileApp, RecentProcess };
 
 export const MAX_FAVORITE_APPS = 8;
-export const MAX_RECENT_PROCESSES = 3;
+export const MAX_RECENT_PROCESSES = 4;
 
 export async function fetchMobileBootstrap(): Promise<MobileBootstrap> {
   return apiRequest<MobileBootstrap>('/api/mobile/bootstrap');

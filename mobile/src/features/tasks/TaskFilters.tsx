@@ -1,65 +1,23 @@
 import type { TaskView } from "./tasks.api";
 
-const STATUS_LABELS: Record<string, string> = {
-  RUNNING: "进行中",
-  APPROVED: "已通过",
-  REJECTED: "已拒绝",
-  WITHDRAWN: "已撤回",
+const FILTERS: Record<TaskView, Array<{ value: string; label: string }>> = {
+  pending: [{ value: "", label: "全部" }, { value: "RUNNING", label: "进行中" }, { value: "APPROVED", label: "已通过" }, { value: "PENDING", label: "我审批" }, { value: "URGENT", label: "紧急" }],
+  process: [{ value: "", label: "全部" }, { value: "RUNNING", label: "审批中" }, { value: "APPROVED", label: "通过" }, { value: "REJECTED", label: "驳回" }, { value: "WITHDRAWN", label: "已撤回" }],
+  done: [{ value: "", label: "全部" }, { value: "APPROVED", label: "通过" }, { value: "REJECTED", label: "驳回" }, { value: "SKIPPED", label: "跳过" }, { value: "CC", label: "抄送" }],
 };
 
-export function TaskFilters({
-  keyword,
-  status,
-  view,
-  onKeywordChange,
-  onStatusChange,
-}: {
-  keyword: string;
-  status: string;
-  view: TaskView;
-  onKeywordChange: (keyword: string) => void;
-  onStatusChange: (status: string) => void;
-}) {
+export function TaskFilters({ keyword, status, view, onKeywordChange, onStatusChange }: { keyword: string; status: string; view: TaskView; onKeywordChange: (keyword: string) => void; onStatusChange: (status: string) => void }) {
   return (
-    <div className="af-filter-panel">
-      <label className="af-filter-panel__search">
-        <span aria-hidden="true">⌕</span>
-        <input
-          type="search"
-          aria-label="搜索表单、申请人或节点"
-          placeholder="搜索表单、申请人或节点"
-          value={keyword}
-          onChange={(event) => onKeywordChange(event.currentTarget.value)}
-        />
+    <>
+      <label className="searchbar" style={{ marginBottom: 10 }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+        <input type="search" aria-label="搜索申请人或表单名" placeholder="搜索申请人 / 表单名" value={keyword} onChange={(event) => onKeywordChange(event.currentTarget.value)} />
       </label>
-      <select
-        className="af-filter-panel__select"
-        aria-label="状态筛选"
-        value={status}
-        onChange={(event) => onStatusChange(event.currentTarget.value)}
-      >
-        <option value="">全部状态</option>
-        {(view === "done"
-          ? [
-              { value: "APPROVED", label: "已同意" },
-              { value: "REJECTED", label: "已驳回" },
-              { value: "SKIPPED", label: "已跳过" },
-              { value: "CC", label: "抄送" },
-            ]
-          : [
-              { value: "RUNNING", label: "进行中" },
-              { value: "APPROVED", label: "已通过" },
-              { value: "REJECTED", label: "已拒绝" },
-              { value: "WITHDRAWN", label: "已撤回" },
-            ]
-        ).map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
+      <div className="chip-row">
+        {FILTERS[view].map((option) => <button key={option.value || "all"} type="button" className={`chip${status === option.value ? " is-active" : ""}`} aria-pressed={status === option.value} onClick={() => onStatusChange(option.value)}>{option.label}</button>)}
+      </div>
+    </>
   );
 }
 
-export { STATUS_LABELS };
+export const STATUS_LABELS: Record<string, string> = { RUNNING: "进行中", APPROVED: "已通过", REJECTED: "已拒绝", WITHDRAWN: "已撤回" };

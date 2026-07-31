@@ -27,10 +27,9 @@ describe('form flow components', () => {
     );
 
     expect(screen.getByRole('heading', { name: '请假时间' })).toBeInTheDocument();
-    expect(screen.getByText('1 / 2')).toBeInTheDocument();
-    expect(screen.getByText('本节 2 项，预计 40 秒')).toBeInTheDocument();
-    expect(screen.getByText('先确认时间')).toBeInTheDocument();
-    expect(screen.getByText('已自动保存')).toBeInTheDocument();
+    expect(screen.getByText('步骤 1 / 2 · 2 项内容')).toBeInTheDocument();
+    expect(screen.getByText('第 1 步')).toBeInTheDocument();
+    expect(screen.getByText('先确认时间 · 已自动保存')).toBeInTheDocument();
   });
 
   it('lets the user switch to a step and exposes error counts', async () => {
@@ -54,7 +53,7 @@ describe('form flow components', () => {
   it('renders the next step hint as a separate card', () => {
     render(<FormNextStepHint groups={groups} currentIndex={0} errorCounts={{ b: 2 }} />);
 
-    expect(screen.getByText('接下来：请假事由')).toBeInTheDocument();
+    expect(screen.getByText('下一步：请假事由')).toBeInTheDocument();
     expect(screen.getByText('2 项需补充')).toBeInTheDocument();
   });
 

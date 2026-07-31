@@ -31,6 +31,7 @@ import { validateSchemaValues } from "./schema/fieldRegistry";
 import { buildFormStepGroups } from "./schema/stepGroups";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
+import { fetchReworkTask, saveReworkTask } from "./rework.api";
 
 export function FormFillPage() {
   const { code = "" } = useParams();
@@ -38,6 +39,7 @@ export function FormFillPage() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const draftIdFromUrl = numberParam(searchParams.get("draftId"));
+  const reworkTaskId = numberParam(searchParams.get("reworkTaskId"));
   const [savedDraftId, setSavedDraftId] = useState<number | null>(draftIdFromUrl);
   const draftId = savedDraftId;
   const [values, setValues] = useState<MobileFormValues>({});
@@ -63,25 +65,35 @@ export function FormFillPage() {
     enabled: draftIdFromUrl != null,
     retry: 0,
   });
+  const reworkQuery = useQuery({
+    queryKey: ["mobile", "rework-task", reworkTaskId ?? 0],
+    queryFn: () => fetchReworkTask(reworkTaskId ?? 0),
+    enabled: reworkTaskId != null,
+    retry: 0,
+  });
 
   const isDirty = initialized && !submitNavigationAllowed && !sameValues(values, initialValues);
   const blocker = useBlocker(isDirty);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (reworkTaskId != null) {
+        await saveReworkTask(reworkTaskId, values);
+        return { draftId: null, rework: true };
+      }
       if (draftId != null) {
         await updateMobileDraft(draftId, code, values);
-        return draftId;
+        return { draftId, rework: false };
       }
-      return createMobileDraft(code, values);
+      return { draftId: await createMobileDraft(code, values), rework: false };
     },
-    onSuccess(nextDraftId) {
-      setSavedDraftId(nextDraftId);
+    onSuccess(result) {
+      if (!result.rework) setSavedDraftId(result.draftId);
       setInitialValues(values);
-      setStatus("草稿已保存");
-      showToast({ icon: "success", content: "草稿已保存" });
+      setStatus(result.rework ? "原单已保存" : "草稿已保存");
+      showToast({ icon: "success", content: result.rework ? "原单已保存" : "草稿已保存" });
       if (user) {
-        removeRecoveryDraft(user.id, code, draftId);
+        removeRecoveryDraft(user.id, code, recoveryId(reworkTaskId, draftId));
       }
     },
     onError(errorValue) {
@@ -93,21 +105,22 @@ export function FormFillPage() {
   });
 
   useEffect(() => {
-    if (!formQuery.data || (draftIdFromUrl != null && draftQuery.isPending)) {
+    if (!formQuery.data || (draftIdFromUrl != null && draftQuery.isPending)
+      || (reworkTaskId != null && reworkQuery.isPending)) {
       return;
     }
-    const baseValues = draftQuery.data?.data ?? {};
+    const baseValues = reworkQuery.data?.formData ?? draftQuery.data?.data ?? {};
     const nextValues = chooseInitialValues({
       baseValues,
       code,
-      draftId: draftIdFromUrl,
+      draftId: recoveryId(reworkTaskId, draftIdFromUrl),
       schemaVersion: formQuery.data.version,
       userId: user?.id ?? null,
     });
     setValues(nextValues);
     setInitialValues(nextValues);
     setInitialized(true);
-  }, [code, draftIdFromUrl, draftQuery.data, draftQuery.isPending, formQuery.data, user?.id]);
+  }, [code, draftIdFromUrl, draftQuery.data, draftQuery.isPending, formQuery.data, reworkQuery.data, reworkQuery.isPending, reworkTaskId, user?.id]);
 
   useEffect(() => {
     if (!user || !formQuery.data) {
@@ -116,7 +129,7 @@ export function FormFillPage() {
     const writer = createRecoveryDraftWriter({
       userId: user.id,
       formCode: code,
-      draftId,
+      draftId: recoveryId(reworkTaskId, draftId),
       schemaVersion: formQuery.data.version,
     });
     recoveryWriterRef.current = writer;
@@ -126,7 +139,7 @@ export function FormFillPage() {
         recoveryWriterRef.current = null;
       }
     };
-  }, [code, draftId, formQuery.data, user]);
+  }, [code, draftId, formQuery.data, reworkTaskId, user]);
 
   useEffect(() => {
     if (!isDirty) {
@@ -165,42 +178,54 @@ export function FormFillPage() {
   const stepErrorCounts = errorCountsByStep(stepGroups, errors);
   const title = formQuery.data?.name ?? "表单填写";
   const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
+  const hasSelfSelect = findSelfSelectRules(process).length > 0;
   const description = typeof formQuery.data?.description === "string" ? formQuery.data.description : "";
 
-  if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)) {
+  if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)
+    || (reworkTaskId != null && reworkQuery.isPending)) {
     return <PageSkeleton rows={5} />;
   }
 
-  if (formQuery.isError || draftQuery.isError) {
+  if (formQuery.isError || draftQuery.isError || reworkQuery.isError) {
     return <PageError onRetry={() => void formQuery.refetch()} />;
   }
 
   return (
     <AppPage
-      title={title}
+      title="填写表单"
       onBack={() => navigateBack(navigate)}
+      contentClassName="form-fill-page"
       action={
-        <span className="af-form-nav-progress">{currentStepIndex + 1} / {stepGroups.length}</span>
+        <button type="button" className="app-bar__action" disabled={saveMutation.isPending} onClick={() => saveDraft()}>{saveMutation.isPending ? "保存中" : reworkTaskId ? "保存" : "草稿"}</button>
       }
     >
-      <div className="af-form-flow af-stack">
+      <div>
         <FormStepHeader
-          title={currentStep?.title ?? title}
-          description={currentStep?.description ?? description}
+          title={title}
+          description={currentStep?.description ?? currentStep?.title ?? description}
           currentIndex={currentStepIndex}
           total={stepGroups.length}
           completedCount={completedStepIds.size}
           fieldCount={currentStep?.fieldIds.length ?? 0}
+          sectionLabel={currentStep?.title}
           autosaveLabel={status || undefined}
-        />
-        <FormStepNavigator
+        >
+          <FormStepNavigator
+            groups={stepGroups}
+            currentIndex={currentStepIndex}
+            completedStepIds={completedStepIds}
+            errorCounts={stepErrorCounts}
+            onSelect={setCurrentStepIndex}
+          />
+        </FormStepHeader>
+        <FormNextStepHint
           groups={stepGroups}
           currentIndex={currentStepIndex}
-          completedStepIds={completedStepIds}
           errorCounts={stepErrorCounts}
-          onSelect={setCurrentStepIndex}
+          finalTitle={hasSelfSelect ? "下一步：审批人确认" : undefined}
+          finalHint={hasSelfSelect ? "表单填写完成后，选择审批人与抄送人。" : undefined}
         />
-        <section className="af-card--form">
+        <section className="af-card--form form-main-card">
           <DynamicFormRenderer
             schema={currentStep?.nodes ?? []}
             values={values}
@@ -217,23 +242,17 @@ export function FormFillPage() {
             }}
           />
         </section>
-        <FormNextStepHint
-          groups={stepGroups}
-          currentIndex={currentStepIndex}
-          errorCounts={stepErrorCounts}
-        />
       </div>
 
-      <div className="af-action-bar af-form-action-bar">
+      <div className="action-bar form-fill-action-bar">
         <button
           type="button"
-          className="af-btn af-btn--ghost"
-          disabled={saveMutation.isPending}
-          onClick={() => saveDraft()}
+          className="btn btn--ghost btn--lg"
+          onClick={() => currentStepIndex > 0 ? setCurrentStepIndex((index) => index - 1) : navigateBack(navigate)}
         >
-          {saveMutation.isPending ? "保存中..." : "保存草稿"}
+          上一步
         </button>
-        <button type="button" className="af-btn" onClick={goNext}>
+        <button type="button" className="btn btn--success btn--lg" onClick={goNext}>
           {workflowEnabled ? "下一步" : "提交"}
         </button>
       </div>
@@ -303,9 +322,9 @@ export function FormFillPage() {
     }
     const submitValues = collectVisibleValues(formSchema, values);
     recoveryWriterRef.current?.flush();
-    beginSubmitFlow({ formCode: code, draftId, values: submitValues });
+    beginSubmitFlow({ formCode: code, draftId: reworkTaskId ? null : draftId, reworkTaskId, values: submitValues });
     const nextPath =
-      findSelfSelectRules(process).length > 0
+      reworkTaskId == null && findSelfSelectRules(process).length > 0
         ? `/forms/${encodeURIComponent(code)}/self-select`
         : `/forms/${encodeURIComponent(code)}/confirm`;
     setSubmitNavigationAllowed(true);
@@ -388,6 +407,10 @@ function numberParam(value: string | null) {
   }
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function recoveryId(reworkTaskId: number | null, draftId: number | null) {
+  return reworkTaskId == null ? draftId : -reworkTaskId;
 }
 
 function sameValues(left: MobileFormValues, right: MobileFormValues) {

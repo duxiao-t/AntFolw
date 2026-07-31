@@ -82,6 +82,7 @@ const FORM_WITH_DIRECT_SUBMIT = {
 const START_RESULT = {
   instanceId: 9001,
   formDataId: 5001,
+  businessNo: '000000005001',
   firstTaskIds: [3001],
 };
 
@@ -106,8 +107,23 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
           id: 9001,
           status: 'RUNNING',
           formName: '请假申请',
+          businessNo: '000000005001',
+          applicantName: '张三',
+          applicantEmployeeNo: '000007',
+          applicantDepartment: '研发部',
+          startedAt: '2026-07-21T09:00:00+08:00',
+          currentNodeName: '直属主管',
+          schema: FORM_WITHOUT_SELF_SELECT.schema,
+          formData: { reason: '回家探亲' },
+          processSnapshot: FORM_WITHOUT_SELF_SELECT.process,
           canWithdraw: true,
           history: [],
+          files: [],
+          approvalSummary: { flowedCount: 2, completedCount: 1, processingCount: 1, complete: false },
+          approvalRecords: [
+            { id: 'submission', taskId: null, nodeId: 'root', nodeName: '提交申请', status: 'SUBMITTED', operatorName: '张三', employeeNo: '000007', department: '研发部', comment: null, receivedAt: '2026-07-21T09:00:00+08:00', completedAt: '2026-07-21T09:00:00+08:00' },
+            { id: 'task-3001', taskId: 3001, nodeId: 'manager', nodeName: '直属主管', status: 'PROCESSING', operatorName: '李经理', employeeNo: '000008', department: '研发部', comment: null, receivedAt: '2026-07-21T09:01:00+08:00', completedAt: null },
+          ],
         });
       }
       if (url.includes('/api/forms/data') && init?.method === 'POST') {
@@ -161,11 +177,26 @@ describe('mobile form submit flow', () => {
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
-    expect(await screen.findByRole('heading', { name: '确认提交' })).toBeInTheDocument();
-    expect(screen.getByText('申请摘要')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '返回修改' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '确认提交' })).toHaveClass('af-btn');
+    expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
+    expect(screen.getByText('表单编号将在提交后生成')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回编辑' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认提交' })).toHaveClass('btn', 'btn--success');
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
+  });
+
+  it('shows that rework submission keeps the original business number', async () => {
+    useSubmitFlowStore.setState({
+      formCode: 'leave',
+      draftId: null,
+      reworkTaskId: 401,
+      values: { reason: '修改后的请假事由' },
+      selfSelected: {},
+    });
+    renderSubmitFlow('/forms/leave/confirm');
+
+    expect(await screen.findByText('本次提交将保留原单号')).toBeInTheDocument();
+    expect(screen.queryByText('表单编号将在提交后生成')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认重提' })).toBeInTheDocument();
   });
 
   it('requires self-select assignees before confirmation when schema has self-select nodes', async () => {
@@ -177,20 +208,20 @@ describe('mobile form submit flow', () => {
     await userEvent.type(await screen.findByLabelText('补充说明'), '请尽快审批');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
-    expect(await screen.findByRole('heading', { name: '选择审批人' })).toBeInTheDocument();
-    expect(screen.getByText('请选择本次流程需要你指定的审批人')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /确认审批人/ })).toHaveClass('af-btn');
+    expect(await screen.findByText('选择审批人')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '搜索审批人' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '完成' })).toHaveClass('app-bar__action');
     expect(screen.getByText('直属主管')).toBeInTheDocument();
-    expect(screen.getByText('单选')).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('直属主管') && text.includes('单选'))).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '确认审批人' }));
+    await userEvent.click(screen.getByRole('button', { name: '完成' }));
     expect(await screen.findByText('请选择直属主管')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('张经理'));
-    await userEvent.click(screen.getByRole('button', { name: '确认审批人' }));
+    await userEvent.click(screen.getByRole('button', { name: '完成' }));
 
-    expect(await screen.findByRole('heading', { name: '确认提交' })).toBeInTheDocument();
-    expect(screen.getByText('张经理')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('张经理'))).toBeInTheDocument();
   });
 
   it('submits with a stable idempotency key on retry, then clears state and recovery on success', async () => {
@@ -221,10 +252,10 @@ describe('mobile form submit flow', () => {
     expect(await screen.findByRole('heading', { name: '提交成功' })).toBeInTheDocument();
     expect(localStorage.getItem(buildRecoveryKey(AUTH_USER.id, 'leave', null))).toBeNull();
     expect(useSubmitFlowStore.getState().formCode).toBeNull();
-    expect(screen.getByRole('button', { name: '查看进度' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '查看进度' }));
+    expect(screen.getByRole('button', { name: '查看流程' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '查看流程' }));
     expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
-    expect(screen.getByText('进行中')).toBeInTheDocument();
+    expect(screen.getAllByText('审批中').length).toBeGreaterThan(0);
   });
 
   it('submits uploaded files through the mobile start files contract', async () => {
@@ -272,7 +303,8 @@ describe('mobile form submit flow', () => {
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
     await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
-    expect(await screen.findByText('提交后直接完成')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
+    expect(screen.queryByText(/审批流（/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '确认提交' }));
 
     await waitFor(() => {
@@ -282,8 +314,8 @@ describe('mobile form submit flow', () => {
       expect(directCalls).toHaveLength(1);
       expect(instancePostCalls()).toHaveLength(0);
     });
-    expect(await screen.findByText('表单已提交完成。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '查看进度' })).toBeInTheDocument();
+    expect(await screen.findByText('表单数据已提交完成。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看流程' })).not.toBeInTheDocument();
   });
 
   it('reuses the same idempotency key after remounting confirmation for a failed same-payload retry', async () => {

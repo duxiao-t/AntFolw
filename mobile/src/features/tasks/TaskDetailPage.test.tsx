@@ -5,15 +5,20 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPage } from './TaskDetailPage';
 import { TaskCenterPage } from './TaskCenterPage';
+import type { MobileTaskDetail } from './tasks.api';
 
-const TASK_DETAIL = {
+const TASK_DETAIL: MobileTaskDetail = {
   task: {
     id: 401,
     instanceId: 9001,
+    formCode: 'leave',
     formName: '请假申请',
+    businessNo: '000000009001',
     applicantName: '张三',
+    applicantEmployeeNo: '000007',
     applicantDepartment: '研发部',
     nodeName: '直属主管',
+    taskType: 'APPROVAL',
     taskStatus: 'PENDING',
     instanceStatus: 'RUNNING',
     createdAt: '2026-07-21T09:00:00+08:00',
@@ -54,6 +59,11 @@ const TASK_DETAIL = {
       contentUrl: '/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content',
     },
   ],
+  approvalSummary: { flowedCount: 2, completedCount: 1, processingCount: 1, complete: false },
+  approvalRecords: [
+    { id: 'submission', taskId: null, nodeId: 'root', nodeName: '提交申请', status: 'SUBMITTED', operatorName: '张三', employeeNo: '000007', department: '研发部', comment: null, receivedAt: '2026-07-21T08:55:00+08:00', completedAt: '2026-07-21T08:55:00+08:00' },
+    { id: 'task-401', taskId: 401, nodeId: 'a1', nodeName: '直属主管', status: 'PROCESSING', operatorName: '李主管', employeeNo: '000008', department: '研发部', comment: null, receivedAt: '2026-07-21T09:00:00+08:00', completedAt: null },
+  ],
 };
 
 const READONLY_DETAIL = {
@@ -64,6 +74,10 @@ const READONLY_DETAIL = {
     instanceStatus: 'APPROVED',
   },
   allowedActions: [] as string[],
+  approvalSummary: { flowedCount: 2, completedCount: 2, processingCount: 0, complete: true },
+  approvalRecords: TASK_DETAIL.approvalRecords.map((record) => record.taskId
+    ? { ...record, status: 'APPROVED', completedAt: '2026-07-21T10:00:00+08:00' }
+    : record),
 };
 
 function setupFetch(options: {
@@ -97,7 +111,7 @@ function setupFetch(options: {
         if (options.failRejectValidation) {
           return jsonResponse({ code: 'VALIDATION', message: '驳回失败' }, 400);
         }
-        expect(body.rejectToNodeId).toBe('root');
+        expect(body.rejectToNodeId).toBeUndefined();
         return new Response(null, { status: 204 });
       }
       if (url.includes('/api/mobile/tasks?')) {
@@ -142,14 +156,14 @@ describe('TaskDetailPage', () => {
   it('renders readonly form, files, timeline and allowed actions', async () => {
     renderDetail();
 
-    expect(await screen.findByRole('heading', { name: '审批详情' })).toBeInTheDocument();
-    expect(screen.getByText((text) => text.includes('张三'))).toBeInTheDocument();
+    expect(await screen.findByText('审批详情')).toBeInTheDocument();
+    expect(screen.getAllByText((text) => text.includes('张三')).length).toBeGreaterThan(0);
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '证明.pdf' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '下载证明.pdf' })).toHaveAttribute(
       'href',
       '/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content',
     );
-    expect(screen.getByText('到达')).toBeInTheDocument();
+    expect(screen.getByText('审批中')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '同意' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '驳回' })).toBeInTheDocument();
   });
@@ -158,7 +172,7 @@ describe('TaskDetailPage', () => {
     setupFetch({ detail: READONLY_DETAIL });
     renderDetail();
 
-    expect(await screen.findByText('已同意')).toBeInTheDocument();
+    expect((await screen.findAllByText('已完成')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: '同意' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '驳回' })).not.toBeInTheDocument();
   });
@@ -169,13 +183,13 @@ describe('TaskDetailPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '同意' }));
 
     const dialog = await screen.findByRole('dialog', { name: '同意审批' });
-    await userEvent.type(within(dialog).getByPlaceholderText('填写审批意见（选填）'), '同意申请');
+    await userEvent.type(within(dialog).getByPlaceholderText('请输入审批意见'), '同意申请');
     await userEvent.click(within(dialog).getByRole('button', { name: '确认同意' }));
 
-    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
   });
 
-  it('requires reject comment and posts selected reject target', async () => {
+  it('requires reject comment and lets the server choose the previous level', async () => {
     renderDetail();
     await screen.findByRole('button', { name: '驳回' });
     await userEvent.click(screen.getByRole('button', { name: '驳回' }));
@@ -184,10 +198,10 @@ describe('TaskDetailPage', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
     expect(within(dialog).getByText('请输入驳回原因（必填）')).toBeInTheDocument();
 
-    await userEvent.type(within(dialog).getByPlaceholderText('请输入驳回原因（必填）'), '资料不全');
+    await userEvent.type(within(dialog).getByPlaceholderText('请输入驳回原因'), '资料不全');
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
 
-    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
   });
 
   it('handles 409 by showing notice and refetching readonly state', async () => {
@@ -236,6 +250,6 @@ describe('TaskDetailPage', () => {
     expect(loadingButtons.some((button) => button.hasAttribute('disabled'))).toBe(true);
     expect(screen.getByRole('button', { name: '驳回' })).toBeDisabled();
     resolveApprove?.();
-    expect(await screen.findByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
   });
 });

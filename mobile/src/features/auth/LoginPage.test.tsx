@@ -148,18 +148,13 @@ describe('LoginPage', () => {
     expect(screen.queryByText('工作台目标页')).not.toBeInTheDocument();
   });
 
-  it('toggles password visibility and shows an inline validation error', async () => {
+  it('keeps the password masked and shows an inline validation error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' })));
     const user = userEvent.setup();
     renderLogin('/login');
 
     const password = await screen.findByPlaceholderText('请输入密码');
     expect(password).toHaveAttribute('type', 'password');
-    await user.click(screen.getByRole('button', { name: '显示密码' }));
-    expect(password).toHaveAttribute('type', 'text');
-    await user.click(screen.getByRole('button', { name: '隐藏密码' }));
-    expect(password).toHaveAttribute('type', 'password');
-
     await user.type(screen.getByPlaceholderText('请输入账号'), 'admin');
     await user.click(screen.getByRole('button', { name: '登录' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('请输入密码');

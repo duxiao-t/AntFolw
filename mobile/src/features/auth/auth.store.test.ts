@@ -85,6 +85,26 @@ describe('useAuthStore', () => {
     }
   });
 
+  it('coalesces concurrent restore and refresh calls into one rotation request', async () => {
+    let resolveResponse!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    const fetchMock = vi.fn().mockReturnValue(response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = useAuthStore.getState().restore();
+    const second = useAuthStore.getState().restore();
+    const third = useAuthStore.getState().refresh();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveResponse(jsonResponse(200, { accessToken: 'coalesced-token', user: SAMPLE_USER }));
+    await Promise.all([first, second, third]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().accessToken).toBe('coalesced-token');
+  });
+
   it('marks anonymous on refresh failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(emptyResponse(401)));
     await useAuthStore.getState().refresh().catch(() => undefined);

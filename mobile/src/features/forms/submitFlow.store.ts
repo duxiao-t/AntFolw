@@ -4,6 +4,7 @@ import type { MobileFlowNode, MobileFormValues, MobileSchemaNode } from './schem
 export type SubmitFlowState = {
   formCode: string | null;
   draftId: number | null;
+  reworkTaskId: number | null;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
   reset(): void;
@@ -25,10 +26,11 @@ export type SelfSelectAssignee = {
 export const useSubmitFlowStore = create<SubmitFlowState>((set) => ({
   formCode: null,
   draftId: null,
+  reworkTaskId: null,
   values: {},
   selfSelected: {},
   reset() {
-    set({ formCode: null, draftId: null, values: {}, selfSelected: {} });
+    set({ formCode: null, draftId: null, reworkTaskId: null, values: {}, selfSelected: {} });
   },
 }));
 
@@ -36,14 +38,17 @@ export function beginSubmitFlow({
   formCode,
   draftId,
   values,
+  reworkTaskId = null,
 }: {
   formCode: string;
   draftId: number | null;
   values: MobileFormValues;
+  reworkTaskId?: number | null;
 }) {
   useSubmitFlowStore.setState({
     formCode,
     draftId,
+    reworkTaskId,
     values,
     selfSelected: {},
   });

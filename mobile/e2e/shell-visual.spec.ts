@@ -123,7 +123,7 @@ test('shell dimensions stay usable across mobile viewports', async ({ page }) =>
   await expectNoHorizontalOverflow(page);
   const nav = page.getByRole('navigation', { name: '主导航' });
   await expect(nav).toBeVisible();
-  const tabBoxes = await nav.locator('.af-tabbar__item').evaluateAll((items) =>
+  const tabBoxes = await nav.locator('.tabbar__item').evaluateAll((items) =>
     items.map((item) => {
       const rect = item.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
@@ -153,12 +153,12 @@ test('captures deterministic key page screenshots', async ({ page }) => {
   await expect(page).toHaveScreenshot('workbench.png', { fullPage: true });
 
   await signIn(page, '/apps');
-  await expect(page.getByRole('heading', { name: '全部应用' })).toBeVisible();
+  await expect(page.locator('.app-bar__title')).toHaveText('全部应用');
   await expectNoHorizontalOverflow(page);
   await expect(page).toHaveScreenshot('app-catalog.png', { fullPage: true });
 
   await signIn(page, '/profile');
-  await expect(page.getByRole('heading', { name: '我的' })).toBeVisible();
+  await expect(page.locator('.app-bar__title')).toHaveText('我的');
   await expectNoHorizontalOverflow(page);
   await expect(page).toHaveScreenshot('profile.png', { fullPage: true });
 });

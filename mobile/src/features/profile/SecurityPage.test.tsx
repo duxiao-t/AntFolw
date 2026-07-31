@@ -84,6 +84,7 @@ describe('SecurityPage', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, SESSIONS));
     renderSecurity(fetchMock);
 
+    fireEvent.click(await screen.findByRole('button', { name: /登录设备/ }));
     expect(await screen.findByText('Chrome Windows')).toBeInTheDocument();
     expect(screen.getByText('当前设备')).toBeInTheDocument();
     expect(screen.getByText('iPhone Safari')).toBeInTheDocument();
@@ -99,6 +100,7 @@ describe('SecurityPage', () => {
       .mockResolvedValueOnce(jsonResponse(200, [SESSIONS[0]]));
     renderSecurity(fetchMock);
 
+    fireEvent.click(await screen.findByRole('button', { name: /登录设备/ }));
     await screen.findByText('iPhone Safari');
     fireEvent.click(screen.getByRole('button', { name: '移除' }));
 
@@ -119,11 +121,12 @@ describe('SecurityPage', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(200, SESSIONS))
+      .mockResolvedValueOnce(emptyResponse(204))
       .mockResolvedValueOnce(emptyResponse(204));
     renderSecurity(fetchMock, queryClient);
 
-    await screen.findByText('Chrome Windows');
-    fireEvent.click(screen.getByRole('button', { name: '退出当前设备' }));
+    await screen.findByRole('button', { name: '退出全部设备' });
+    fireEvent.click(screen.getByRole('button', { name: '退出全部设备' }));
 
     await waitFor(() => {
       expect(screen.getByText('登录页')).toBeInTheDocument();

@@ -120,7 +120,7 @@ describe('FormFillPage', () => {
     await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await userEvent.click(screen.getByRole('button', { name: '草稿' }));
 
     await waitFor(() => {
       const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
@@ -130,7 +130,7 @@ describe('FormFillPage', () => {
         && String((init as RequestInit).body).includes('回家探亲'),
       )).toBe(true);
     });
-    expect(screen.getByText('草稿已保存')).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('草稿已保存'))).toBeInTheDocument();
   });
 
   it('loads an existing draft into the form values', async () => {
@@ -144,7 +144,7 @@ describe('FormFillPage', () => {
 
     const nextButton = await screen.findByRole('button', { name: '下一步' });
 
-    expect(nextButton.parentElement).toHaveClass('af-action-bar');
+    expect(nextButton.parentElement).toHaveClass('action-bar', 'form-fill-action-bar');
   });
 
   it('recovers local values for the current user when schema version matches', async () => {
@@ -176,9 +176,10 @@ describe('FormFillPage', () => {
   it('renders one form group at a time and advances after current step is valid', async () => {
     renderForm();
 
-    expect(await screen.findByRole('heading', { name: '请假时间' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1. 请假时间' })).toHaveAttribute('aria-current', 'step');
     expect(screen.getAllByText(/1\s*\/\s*2/).length).toBeGreaterThan(0);
-    expect(screen.getByText('本节 2 项，预计 40 秒')).toBeInTheDocument();
+    expect(screen.getByText('步骤 1 / 2 · 请假时间')).toBeInTheDocument();
     expect(screen.queryByLabelText('请假事由')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
@@ -189,7 +190,7 @@ describe('FormFillPage', () => {
     await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
-    expect(await screen.findByRole('heading', { name: '请假事由' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '2. 请假事由' })).toHaveAttribute('aria-current', 'step');
     expect(screen.getAllByText(/2\s*\/\s*2/).length).toBeGreaterThan(0);
   });
 
@@ -202,6 +203,6 @@ describe('FormFillPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '下一步' }));
 
     expect(await screen.findByText('请填写请假事由')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '请假事由' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /2\. 请假事由/ })).toHaveAttribute('aria-current', 'step');
   });
 });

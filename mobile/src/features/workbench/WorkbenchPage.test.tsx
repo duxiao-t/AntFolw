@@ -68,15 +68,14 @@ describe("WorkbenchPage", () => {
     );
     wrapWithQuery(<WorkbenchPage />, fetchMock);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("workbench")).toBeInTheDocument();
-    });
-    expect(screen.getByTestId("workbench").textContent ?? "").toContain("管理员");
-    expect(screen.getByText("App 8")).toBeInTheDocument();
-    expect(screen.queryByText("App 9")).not.toBeInTheDocument();
+    expect(await screen.findByText("App 1")).toBeInTheDocument();
+    expect(screen.getByText("管理员", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("App 7")).toBeInTheDocument();
+    expect(screen.queryByText("App 8")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();
     expect(screen.getByText("流程 1")).toBeInTheDocument();
-    expect(screen.getByText("流程 3")).toBeInTheDocument();
-    expect(screen.queryByText("流程 4")).not.toBeInTheDocument();
+    expect(screen.getByText("流程 4")).toBeInTheDocument();
+    expect(screen.queryByText("流程 5")).not.toBeInTheDocument();
   });
 
   it("reports error state with retry capability", async () => {
@@ -110,14 +109,12 @@ describe("WorkbenchPage", () => {
     );
     wrapWithQuery(<WorkbenchPage />, fetchMock);
 
-    await waitFor(() => {
-      expect(screen.getByText("还没有常用应用")).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument());
     expect(screen.getByText("还没有最近的流程")).toBeInTheDocument();
   });
 
   it("exposes the documented caps so the page can rely on them", () => {
     expect(MAX_FAVORITE_APPS).toBe(8);
-    expect(MAX_RECENT_PROCESSES).toBe(3);
+    expect(MAX_RECENT_PROCESSES).toBe(4);
   });
 });

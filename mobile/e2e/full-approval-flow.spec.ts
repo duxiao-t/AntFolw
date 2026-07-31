@@ -8,7 +8,7 @@ import {
 import { createMockWorld, installApiMocks, USERS } from './helpers/fixtures';
 
 test.describe('full approval flow', () => {
-  test('bob submits and admin approves to APPROVED timeline', async ({ page }) => {
+  test('bob submits and admin approves to completed approval records', async ({ page }) => {
     const world = createMockWorld();
     await installDeterministicRuntime(page);
     await installApiMocks(page, world);
@@ -22,17 +22,17 @@ test.describe('full approval flow', () => {
     await page.getByLabel('请假事由').fill('E2E回家探亲');
     await page.getByRole('button', { name: '下一步' }).click();
 
-    await expect(page.getByRole('heading', { name: '选择审批人' })).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('选择审批人');
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
-    await page.getByRole('button', { name: '确认审批人' }).click();
+    await page.getByRole('button', { name: '完成' }).click();
 
-    await expect(page.getByRole('heading', { name: '确认提交' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();
     await expect(page.getByText('E2E回家探亲')).toBeVisible();
     await expect(page.getByText(USERS.admin.displayName)).toBeVisible();
     await page.getByRole('button', { name: '确认提交' }).click();
 
     await expect(page.getByRole('heading', { name: '提交成功' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '查看进度' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '查看流程' })).toBeVisible();
     expect(world.startPostCount).toBe(1);
     expect(world.instances.size).toBe(1);
     expect(world.tasks.size).toBe(1);
@@ -42,7 +42,7 @@ test.describe('full approval flow', () => {
 
     await signOutViaSecurity(page);
     await signIn(page, USERS.admin.username, 'ant.design', '/tasks?view=pending');
-    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '需要你处理的审批' })).toBeVisible();
     await expect(page.getByText('请假申请')).toBeVisible();
     await page.getByRole('link', { name: /请假申请/ }).first().click();
 
@@ -51,18 +51,19 @@ test.describe('full approval flow', () => {
     await expect(page.getByLabel('同意审批')).toBeVisible();
     await page.getByRole('button', { name: '确认同意' }).click();
 
-    await expect(page.getByRole('heading', { name: '待办' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: '需要你处理的审批' })).toBeVisible({ timeout: 15_000 });
     expect(world.tasks.get(taskId)?.taskStatus).toBe('APPROVED');
     expect(world.instances.get(instanceId)?.status).toBe('APPROVED');
 
     await signOutViaSecurity(page);
     await signIn(page, USERS.bob.username, 'ant.design', `/processes/${instanceId}`);
-    await expect(page.getByRole('heading', { name: '流程进度' })).toBeVisible();
-    await expect(page.getByText('已通过')).toBeVisible();
-    await expect(page.getByRole('list', { name: '流程快照进度' })).toBeVisible();
-    await expect(page.getByRole('listitem').filter({ hasText: '到达' })).toBeVisible();
-    await expect(page.getByRole('listitem').filter({ hasText: '同意' })).toBeVisible();
-    await expect(page.getByText('root → 直属主管')).toBeVisible();
+    await expect(page.locator('.app-bar__title')).toHaveText('流程进度');
+    await expect(page.getByText('已通过').first()).toBeVisible();
+    await expect(page.locator('.approval-records__list')).toBeVisible();
+    await expect(page.locator('.approval-records .approval-panel__summary')).toHaveText('已完成');
+    await expect(page.getByRole('listitem').filter({ hasText: '审批中' })).toHaveCount(0);
+    await expect(page.getByRole('listitem').filter({ hasText: '已通过' })).toBeVisible();
+    await expect(page.getByText(world.instances.get(instanceId)?.businessNo ?? '', { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 });

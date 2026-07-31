@@ -45,8 +45,7 @@ describe('mobile accessibility contracts', () => {
     renderShell('/workbench');
 
     const nav = screen.getByLabelText('主导航');
-    expect(nav).toHaveClass('touchSafeNav');
-    expect(nav.className).toContain('af-tabbar');
+    expect(nav).toHaveClass('tabbar', 'touchSafeNav');
     expect(nav).toHaveAttribute('aria-label', '主导航');
   });
 

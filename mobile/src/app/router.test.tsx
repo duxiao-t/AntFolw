@@ -42,6 +42,12 @@ beforeEach(() => {
           headers: { 'content-type': 'application/json' },
         });
       }
+      if (url.includes('/api/mobile/tasks')) {
+        return new Response(JSON.stringify({ items: [], hasMore: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({}), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -69,15 +75,15 @@ describe('router smoke tests for authenticated nested routes', () => {
     render(wrapWithProviders(<RouterProvider router={router} />, queryClient));
     await waitFor(
       () => {
-        expect(screen.getByTestId('workbench')).toBeInTheDocument();
+        expect(screen.getByText('常用应用')).toBeInTheDocument();
       },
       { timeout: 8000 },
     );
   });
 
   it.each([
-    ['/tasks', '待办'],
-    ['/profile', '我的'],
+    ['/tasks', '需要你处理的审批'],
+    ['/profile', '我的草稿'],
   ])('renders %s when authenticated', async (path: string, marker: string) => {
     useAuthStore.setState({
       status: 'authenticated',

@@ -83,13 +83,18 @@ export type MockWorldOptions = {
 type TaskRecord = {
   id: number;
   instanceId: number;
+  businessNo: string;
   formName: string;
   applicantName: string;
+  applicantEmployeeNo: string;
   applicantDepartment: string;
   nodeName: string;
+  taskType: string;
   taskStatus: string;
   instanceStatus: string;
   createdAt: string;
+  completedAt?: string | null;
+  comment?: string | null;
   formCode: string;
   formData: Record<string, unknown>;
   allowedActions: string[];
@@ -99,6 +104,7 @@ type TaskRecord = {
 
 type InstanceRecord = {
   id: number;
+  businessNo: string;
   status: string;
   formName: string;
   formCode: string;
@@ -215,6 +221,7 @@ export function createMockWorld(options: MockWorldOptions = {}): MockWorld {
   if (options.forbiddenInstanceId) {
     world.instances.set(options.forbiddenInstanceId, {
       id: options.forbiddenInstanceId,
+      businessNo: formalBusinessNo(options.forbiddenInstanceId),
       status: 'RUNNING',
       formName: form.name,
       formCode,
@@ -245,6 +252,7 @@ function seedInstance(
   const id = world.nextInstanceId++;
   const record: InstanceRecord = {
     id,
+    businessNo: formalBusinessNo(id),
     status: partial.status,
     formName: world.form.name,
     formCode: world.formCode,
@@ -294,10 +302,13 @@ function seedTask(
   const task: TaskRecord = {
     id: taskId,
     instanceId: instance.id,
+    businessNo: instance.businessNo,
     formName: world.form.name,
     applicantName: partial.applicantName,
+    applicantEmployeeNo: formalEmployeeNo(partial.starterUserId),
     applicantDepartment: '研发部',
     nodeName: '直属主管',
+    taskType: 'APPROVAL',
     taskStatus: partial.status,
     instanceStatus: partial.instanceStatus,
     createdAt: '2026-07-20T09:05:00+08:00',
@@ -378,14 +389,20 @@ function appsFor(world: MockWorld) {
 }
 
 function taskDetail(task: TaskRecord, world: MockWorld) {
+  const instance = world.instances.get(task.instanceId)!;
+  const approval = approvalData(instance, world);
   return {
     task: {
       id: task.id,
       instanceId: task.instanceId,
+      formCode: task.formCode,
       formName: task.formName,
+      businessNo: task.businessNo,
       applicantName: task.applicantName,
+      applicantEmployeeNo: task.applicantEmployeeNo,
       applicantDepartment: task.applicantDepartment,
       nodeName: task.nodeName,
+      taskType: task.taskType,
       taskStatus: task.taskStatus,
       instanceStatus: task.instanceStatus,
       createdAt: task.createdAt,
@@ -405,21 +422,104 @@ function taskDetail(task: TaskRecord, world: MockWorld) {
         contentUrl: '/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content',
       },
     ],
+    approvalSummary: approval.summary,
+    approvalRecords: approval.records,
   };
 }
 
-function instanceDetail(instance: InstanceRecord) {
+function reworkTaskDetail(task: TaskRecord, world: MockWorld) {
+  const instance = world.instances.get(task.instanceId)!;
+  return {
+    taskId: task.id,
+    instanceId: task.instanceId,
+    formCode: task.formCode,
+    formName: task.formName,
+    businessNo: task.businessNo,
+    schema: world.form.schema,
+    formData: instance.formData,
+    processSnapshot: world.form.process,
+    files: instance.files,
+  };
+}
+
+function instanceDetail(instance: InstanceRecord, world: MockWorld) {
+  const applicant = Object.values(USERS).find((user) => user.id === instance.starterUserId);
+  const approval = approvalData(instance, world);
   return {
     id: instance.id,
     status: instance.status,
     formName: instance.formName,
+    businessNo: instance.businessNo,
+    applicantName: applicant?.displayName ?? null,
+    applicantEmployeeNo: formalEmployeeNo(instance.starterUserId),
+    applicantDepartment: '研发部',
+    startedAt: instance.startedAt,
+    currentNodeName: instance.currentNodeName ?? null,
     schema: instance.schema,
     formData: instance.formData,
     processSnapshot: instance.processSnapshot,
     history: instance.history,
     canWithdraw: instance.canWithdraw,
     files: instance.files,
+    approvalSummary: approval.summary,
+    approvalRecords: approval.records,
   };
+}
+
+function approvalData(instance: InstanceRecord, world: MockWorld) {
+  const applicant = Object.values(USERS).find((user) => user.id === instance.starterUserId);
+  const records = [
+    {
+      id: 'submission',
+      taskId: null,
+      nodeId: 'root',
+      nodeName: '提交申请',
+      status: 'SUBMITTED',
+      operatorName: applicant?.displayName ?? '未记录',
+      employeeNo: formalEmployeeNo(instance.starterUserId),
+      department: '研发部',
+      comment: null,
+      receivedAt: instance.startedAt,
+      completedAt: instance.startedAt,
+    },
+    ...[...world.tasks.values()]
+      .filter((task) => task.instanceId === instance.id && task.taskStatus !== 'SKIPPED')
+      .map((task) => ({
+        id: `task-${task.id}`,
+        taskId: task.id,
+        nodeId: task.nodeName,
+        nodeName: task.taskType === 'REWORK' ? '退回修改' : task.nodeName,
+        status: task.taskStatus === 'PENDING'
+          ? (task.taskType === 'REWORK' ? 'RETURNED' : 'PROCESSING')
+          : task.taskStatus,
+        operatorName: Object.values(USERS).find((user) => user.id === task.ownerUserId)?.displayName
+          ?? '未记录',
+        employeeNo: formalEmployeeNo(task.ownerUserId),
+        department: '研发部',
+        comment: task.comment ?? null,
+        receivedAt: task.createdAt,
+        completedAt: task.completedAt ?? null,
+      })),
+  ];
+  const processingCount = records.filter((record) =>
+    record.status === 'PROCESSING' || record.status === 'RETURNED').length;
+  return {
+    records,
+    summary: {
+      flowedCount: records.length,
+      completedCount: records.length - processingCount,
+      processingCount,
+      complete: instance.status === 'APPROVED' && processingCount === 0,
+    },
+  };
+}
+
+function formalEmployeeNo(userId: number) {
+  return String(userId).padStart(6, '0');
+}
+
+function formalBusinessNo(instanceId: number) {
+  return String(instanceId).padStart(12, '0');
 }
 
 export async function installApiMocks(page: Page, world: MockWorld) {
@@ -578,6 +678,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
           return json(route, {
             instanceId: existing.id,
             formDataId: existing.id + 1000,
+            businessNo: existing.businessNo,
             firstTaskIds: existing.firstTaskId ? [existing.firstTaskId] : [],
           });
         }
@@ -601,10 +702,13 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         const task: TaskRecord = {
           id: taskId,
           instanceId: instance.id,
+          businessNo: instance.businessNo,
           formName: world.form.name,
           applicantName: authUser.displayName,
+          applicantEmployeeNo: formalEmployeeNo(authUser.id),
           applicantDepartment: '研发部',
           nodeName: '直属主管',
+          taskType: 'APPROVAL',
           taskStatus: 'PENDING',
           instanceStatus: 'RUNNING',
           createdAt: '2026-07-20T12:00:00+08:00',
@@ -622,6 +726,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         return json(route, {
           instanceId: instance.id,
           formDataId: instance.id + 1000,
+          businessNo: instance.businessNo,
           firstTaskIds: [taskId],
         });
       }
@@ -636,6 +741,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
             id: item.id,
             status: item.status,
             formName: item.formName,
+            businessNo: item.businessNo,
             currentNodeName: item.currentNodeName,
             startedAt: item.startedAt,
             finishedAt: item.finishedAt ?? null,
@@ -658,7 +764,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         if (instance.starterUserId !== authUser.id && !relatedTask && authUser.username === 'alice') {
           return error(route, 403, 'FORBIDDEN', '无权查看该流程');
         }
-        return json(route, instanceDetail(instance));
+        return json(route, instanceDetail(instance, world));
       }
 
       if (path.match(/^\/api\/mobile\/instances\/\d+\/withdraw$/) && method === 'POST') {
@@ -702,10 +808,14 @@ export async function installApiMocks(page: Page, world: MockWorld) {
           .map((task) => ({
             id: task.id,
             instanceId: task.instanceId,
+            formCode: task.formCode,
             formName: task.formName,
+            businessNo: task.businessNo,
             applicantName: task.applicantName,
+            applicantEmployeeNo: task.applicantEmployeeNo,
             applicantDepartment: task.applicantDepartment,
             nodeName: task.nodeName,
+            taskType: task.taskType,
             taskStatus: task.taskStatus,
             instanceStatus: task.instanceStatus,
             createdAt: task.createdAt,
@@ -744,6 +854,8 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         }
         task.taskStatus = 'APPROVED';
         task.instanceStatus = 'APPROVED';
+        task.completedAt = '2026-07-20T12:10:00+08:00';
+        task.comment = (request.postDataJSON() as { comment?: string } | null)?.comment ?? null;
         task.allowedActions = [];
         task.history = [
           ...task.history,
@@ -753,7 +865,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
             toNodeId: null,
             action: 'APPROVE',
             operatorId: authUser?.id ?? USERS.admin.id,
-            comment: (request.postDataJSON() as { comment?: string } | null)?.comment ?? null,
+            comment: task.comment,
             createdAt: '2026-07-20T12:10:00+08:00',
           },
         ];
@@ -782,16 +894,114 @@ export async function installApiMocks(page: Page, world: MockWorld) {
           return error(route, 400, 'VALIDATION', '请填写驳回原因');
         }
         task.taskStatus = 'REJECTED';
-        task.instanceStatus = 'REJECTED';
+        task.instanceStatus = 'RUNNING';
+        task.completedAt = '2026-07-20T12:15:00+08:00';
+        task.comment = body.comment;
         task.allowedActions = [];
         const instance = world.instances.get(task.instanceId);
         if (instance) {
-          instance.status = 'REJECTED';
+          instance.status = 'RUNNING';
           instance.canWithdraw = false;
-          instance.currentNodeName = undefined;
-          instance.finishedAt = '2026-07-20T12:15:00+08:00';
+          instance.currentNodeName = '待修改原单';
+          instance.finishedAt = null;
+          const reworkTaskId = world.nextTaskId++;
+          world.tasks.set(reworkTaskId, {
+            id: reworkTaskId,
+            instanceId: instance.id,
+            businessNo: instance.businessNo,
+            formName: instance.formName,
+            applicantName: Object.values(USERS).find((user) => user.id === instance.starterUserId)
+              ?.displayName ?? '未记录',
+            applicantEmployeeNo: formalEmployeeNo(instance.starterUserId),
+            applicantDepartment: '研发部',
+            nodeName: '待修改原单',
+            taskType: 'REWORK',
+            taskStatus: 'PENDING',
+            instanceStatus: 'RUNNING',
+            createdAt: '2026-07-20T12:15:00+08:00',
+            formCode: instance.formCode,
+            formData: instance.formData,
+            allowedActions: [],
+            ownerUserId: instance.starterUserId,
+            history: instance.history,
+          });
         }
         return empty(route, 204);
+      }
+
+      if (path.match(/^\/api\/mobile\/rework-tasks\/\d+$/) && method === 'GET') {
+        const id = Number(path.split('/').pop());
+        const task = world.tasks.get(id);
+        if (!task || task.taskType !== 'REWORK') {
+          return error(route, 404, 'TASK_NOT_FOUND', '待修改任务不存在');
+        }
+        if (!authUser || task.ownerUserId !== authUser.id) {
+          return error(route, 403, 'FORBIDDEN', '无权修改该原单');
+        }
+        return json(route, reworkTaskDetail(task, world));
+      }
+
+      if (path.match(/^\/api\/mobile\/rework-tasks\/\d+$/) && method === 'PUT') {
+        const id = Number(path.split('/').pop());
+        const task = world.tasks.get(id);
+        if (!task || task.taskType !== 'REWORK' || task.taskStatus !== 'PENDING') {
+          return error(route, 409, 'TASK_NOT_PENDING', '待修改任务已处理');
+        }
+        if (!authUser || task.ownerUserId !== authUser.id) {
+          return error(route, 403, 'FORBIDDEN', '无权修改该原单');
+        }
+        const body = request.postDataJSON() as { data?: Record<string, unknown> };
+        const instance = world.instances.get(task.instanceId)!;
+        instance.formData = body.data ?? {};
+        task.formData = instance.formData;
+        return json(route, reworkTaskDetail(task, world));
+      }
+
+      if (path.match(/^\/api\/mobile\/rework-tasks\/\d+\/resubmit$/) && method === 'POST') {
+        const id = Number(path.split('/')[4]);
+        const task = world.tasks.get(id);
+        if (!task || task.taskType !== 'REWORK' || task.taskStatus !== 'PENDING') {
+          return error(route, 409, 'TASK_NOT_PENDING', '待修改任务已处理');
+        }
+        if (!authUser || task.ownerUserId !== authUser.id) {
+          return error(route, 403, 'FORBIDDEN', '无权修改该原单');
+        }
+        const body = request.postDataJSON() as { data?: Record<string, unknown> };
+        const instance = world.instances.get(task.instanceId)!;
+        instance.formData = body.data ?? {};
+        task.formData = instance.formData;
+        task.taskStatus = 'RESUBMITTED';
+        task.completedAt = '2026-07-20T12:25:00+08:00';
+        task.comment = '修改后重新提交';
+        const nextTaskId = world.nextTaskId++;
+        world.tasks.set(nextTaskId, {
+          id: nextTaskId,
+          instanceId: instance.id,
+          businessNo: instance.businessNo,
+          formName: instance.formName,
+          applicantName: task.applicantName,
+          applicantEmployeeNo: task.applicantEmployeeNo,
+          applicantDepartment: task.applicantDepartment,
+          nodeName: '直属主管',
+          taskType: 'APPROVAL',
+          taskStatus: 'PENDING',
+          instanceStatus: 'RUNNING',
+          createdAt: '2026-07-20T12:25:00+08:00',
+          formCode: instance.formCode,
+          formData: instance.formData,
+          allowedActions: ['APPROVE', 'REJECT'],
+          ownerUserId: USERS.admin.id,
+          history: instance.history,
+        });
+        instance.status = 'RUNNING';
+        instance.currentNodeName = '直属主管';
+        instance.finishedAt = null;
+        return json(route, {
+          instanceId: instance.id,
+          formDataId: instance.id + 1000,
+          businessNo: instance.businessNo,
+          firstTaskIds: [nextTaskId],
+        });
       }
 
       // favicon / manifest / unknown public assets

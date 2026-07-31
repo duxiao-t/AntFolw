@@ -3,14 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../../shared/api/http";
 import { queryKeys } from "../../shared/api/queryKeys";
-import type { MobileApp, AppFilters } from "../../shared/api/types";
+import type { AppFilters, MobileApp } from "../../shared/api/types";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageEmpty, PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { useMobileBootstrap } from "./workbench.api";
 
 const SEARCH_DEBOUNCE_MS = 250;
 
-export async function fetchAppCatalog(filters: AppFilters): Promise<MobileApp[]> {
+export async function fetchAppCatalog(filters: AppFilters) {
   const params = new URLSearchParams();
   if (filters.keyword) params.set("keyword", filters.keyword);
   if (filters.category) params.set("category", filters.category);
@@ -19,175 +18,49 @@ export async function fetchAppCatalog(filters: AppFilters): Promise<MobileApp[]>
 }
 
 export function useAppCatalog(filters: AppFilters) {
-  return useQuery({
-    queryKey: queryKeys.apps(filters),
-    queryFn: () => fetchAppCatalog(filters),
-    staleTime: 30_000,
-    refetchOnWindowFocus: false,
-    retry: 0,
-  });
-}
-
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const handle = window.setTimeout(() => setDebounced(value), delay);
-    return () => window.clearTimeout(handle);
-  }, [value, delay]);
-  return debounced;
-}
-
-function initials(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  return trimmed.charAt(0);
+  return useQuery({ queryKey: queryKeys.apps(filters), queryFn: () => fetchAppCatalog(filters), staleTime: 30_000, refetchOnWindowFocus: false, retry: 0 });
 }
 
 export function AppCatalogPage() {
   const navigate = useNavigate();
-  const [keyword] = useState("");
-  const [category, setCategory] = useState<string | undefined>(undefined);
+  const [keyword, setKeyword] = useState("");
+  const [category, setCategory] = useState("");
   const debouncedKeyword = useDebouncedValue(keyword, SEARCH_DEBOUNCE_MS);
-
-  const filters: AppFilters = useMemo(
-    () => ({ keyword: debouncedKeyword.trim() || undefined, category }),
-    [debouncedKeyword, category],
-  );
-
-  const query = useAppCatalog(filters);
-  const bootstrapQuery = useMobileBootstrap();
-  const recentIds = useMemo(() => {
-    const ids = bootstrapQuery.data?.recentProcesses ?? [];
-    return Array.from(new Set(ids.map((p) => p.formCode)));
-  }, [bootstrapQuery.data]);
-
+  const query = useAppCatalog({ keyword: debouncedKeyword.trim() || undefined });
   const apps = query.data ?? [];
+  const groups = useMemo(() => {
+    const filtered = category ? apps.filter((app) => (app.category?.trim() || "other") === category) : apps;
+    const map = new Map<string, MobileApp[]>();
+    filtered.forEach((app) => { const code = app.category?.trim() || "other"; map.set(code, [...(map.get(code) ?? []), app]); });
+    return Array.from(map, ([code, values]) => ({ code, label: values[0]?.categoryLabel?.trim() || (code === "other" ? "其他" : code), apps: values }));
+  }, [apps, category]);
+  const categories = useMemo(() => Array.from(new Map(apps.map((app) => [app.category?.trim() || "other", app.categoryLabel?.trim() || app.category?.trim() || "其他"])), ([code, label]) => ({ code, label })), [apps]);
 
-  const groupedApps = useMemo(() => {
-    const groups = new Map<string, MobileApp[]>();
-    apps.forEach((app) => {
-      const code = app.category?.trim() || "other";
-      const list = groups.get(code) ?? [];
-      list.push(app);
-      groups.set(code, list);
-    });
-    return Array.from(groups, ([code, list]) => ({ code, label: list[0]?.categoryLabel?.trim() || (code === "other" ? "\u5176\u4ed6" : code), apps: list }));
-  }, [apps]);
-
-  const recentApps = useMemo(
-    () => apps.filter((app) => recentIds.includes(app.code)).slice(0, 4),
-    [apps, recentIds],
-  );
-
-  if (query.isPending) {
-    return (
-      <AppPage title="全部应用" variant="default">
-        <PageSkeleton rows={6} />
-      </AppPage>
-    );
-  }
-
-  if (query.isError) {
-    return (
-      <AppPage title="全部应用">
-        <PageError onRetry={() => void query.refetch()} />
-      </AppPage>
-    );
-  }
-
-  const noResults = apps.length === 0;
-  const allCategories = Array.from(
-    new Map(groupedApps.map((g) => [g.code, g.label])).entries(),
-  );
+  if (query.isPending) return <PageSkeleton rows={6} />;
+  if (query.isError) return <PageError onRetry={() => void query.refetch()} />;
 
   return (
-    <AppPage
-      title="全部应用"
-      action={
-        <button
-          type="button"
-          className="af-link-button"
-          onClick={() => navigate("/apps/favorites")}
-          style={{ fontSize: 13 }}
-        >
-          管理
-        </button>
-      }
-    >
-      <search className="af-search">{"\u2315 搜索应用"}</search>
-      <div className="af-chips" role="tablist" aria-label="分类">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={category === undefined}
-          className={category === undefined ? "is-active" : ""}
-          onClick={() => setCategory(undefined)}
-          style={{ border: 0 }}
-        >
-          全部
-        </button>
-        {allCategories.map((entry) => (
-          <button
-            key={entry[0]}
-            type="button"
-            role="tab"
-            aria-selected={category === entry[0]}
-            className={category === entry[0] ? "is-active" : ""}
-            onClick={() => setCategory(entry[0])}
-            style={{ border: 0 }}
-          >
-            {entry[1]}
-          </button>
-        ))}
+    <AppPage title="全部应用" contentClassName="catalog-page" action={<button type="button" className="app-bar__action" aria-label="查看收藏" onClick={() => navigate("/apps/favorites")}><StarIcon /></button>}>
+      <label className="searchbar catalog-search"><SearchIcon /><input value={keyword} onChange={(event) => setKeyword(event.currentTarget.value)} placeholder="搜索表单或应用" aria-label="搜索表单或应用" /></label>
+      <div className="chip-row catalog-filter">
+        <button className={`chip${category === "" ? " is-active" : ""}`} type="button" onClick={() => setCategory("")}>全部</button>
+        {categories.map((item) => <button key={item.code} className={`chip${category === item.code ? " is-active" : ""}`} type="button" onClick={() => setCategory(item.code)}>{item.label}</button>)}
       </div>
-
-      {noResults ? (
-        <PageEmpty title="没有匹配的应用" hint="调整关键字或分类" />
-      ) : (
-        <div className="af-stack">
-          {recentApps.length > 0 ? (
-            <section className="af-card">
-              <div className="af-card__title">最近使用</div>
-              <ul className="af-app-grid" aria-label="最近使用" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {recentApps.map((app) => (
-                  <li key={app.formId} style={{ display: "contents" }}>
-                    <button
-                      type="button"
-                      className="af-app-grid__tile"
-                      onClick={() => navigate(`/forms/${encodeURIComponent(app.code)}`)}
-                    >
-                      <span className="af-app-grid__icon">{initials(app.name)}</span>
-                      <span className="af-app-grid__name">{app.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          {groupedApps.map((group) => (
-            <section key={group.code} className="af-card">
-              <div className="af-card__title">{group.label}</div>
-              <ul className="af-app-grid" aria-label={group.label} style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {group.apps.map((app) => (
-                  <li key={app.formId} style={{ display: "contents" }}>
-                    <button
-                      type="button"
-                      className="af-app-grid__tile"
-                      onClick={() => navigate(`/forms/${encodeURIComponent(app.code)}`)}
-                    >
-                      <span className="af-app-grid__icon">{initials(app.name)}</span>
-                      <span className="af-app-grid__name">{app.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      )}
+      {groups.length === 0 ? <PageEmpty title="没有匹配的应用" hint="调整搜索词或分类后重试。" /> : groups.map((group) => (
+        <section className="catalog-section" key={group.code}>
+          <header className="catalog-section__head"><h2>{group.label}</h2><span>{group.apps.length} 个应用</span></header>
+          <div className="catalog-card-grid">
+            {group.apps.map((app) => <button key={app.formId} className="catalog-app-card" type="button" onClick={() => navigate(`/forms/${encodeURIComponent(app.code)}`)}><span className={`catalog-app-card__icon ${glyphTone(group.label)}`}>{app.iconUrl ? <img src={app.iconUrl} alt="" /> : app.name.trim().charAt(0) || "?"}</span><span className="catalog-app-card__name">{app.name}</span><span className="catalog-app-card__chev">›</span></button>)}
+          </div>
+        </section>
+      ))}
     </AppPage>
   );
 }
+
+function useDebouncedValue<T>(value: T, delay: number) { const [debounced, setDebounced] = useState(value); useEffect(() => { const handle = window.setTimeout(() => setDebounced(value), delay); return () => window.clearTimeout(handle); }, [delay, value]); return debounced; }
+function glyphTone(label: string) { if (/财务/.test(label)) return "app-glyph--finance"; if (/人事/.test(label)) return "app-glyph--people"; if (/IT|技术/.test(label)) return "app-glyph--it"; if (/业务|运营|采购/.test(label)) return "app-glyph--operations"; return "app-glyph--admin"; }
+function SearchIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>; }
+function StarIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 17.3 6.18 21l1.64-7.03L2 9.74l7.19-.61L12 2.5l2.81 6.63L22 9.74l-5.82 4.23L17.82 21z" /></svg>; }
 
 export default AppCatalogPage;

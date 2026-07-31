@@ -1,20 +1,11 @@
 import { useEffect, useState } from "react";
-import { SafeArea, Toast } from "antd-mobile";
-import {
-  CheckShieldOutline,
-  EyeInvisibleOutline,
-  EyeOutline,
-  LockOutline,
-  UserContactOutline,
-} from "antd-mobile-icons";
+import { Toast } from "antd-mobile";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuthStore, safeReturnUrl } from "./auth.store";
-import { useBranding } from "../branding/BrandProvider";
 import { isApiError } from "../../shared/api/errors";
-import "./LoginPage.css";
+import { useBranding } from "../branding/BrandProvider";
+import { safeReturnUrl, useAuthStore } from "./auth.store";
 
 const REMEMBERED_USERNAME_KEY = "antflow-mobile-remembered-username";
-const LOGIN_ICON_BASE = `${import.meta.env.BASE_URL}login-icons`;
 
 export function LoginPage() {
   const branding = useBranding();
@@ -23,25 +14,21 @@ export function LoginPage() {
   const login = useAuthStore((state) => state.login);
   const status = useAuthStore((state) => state.status);
   const [submitting, setSubmitting] = useState(false);
-  const [username, setUsername] = useState(() => readRememberedUsername());
+  const [username, setUsername] = useState(readRememberedUsername);
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(() => readRememberedUsername().length > 0);
-  const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     if (status === "authenticated") {
-      const target = safeReturnUrl(params.get("returnUrl")) ?? "/workbench";
-      navigate(target, { replace: true });
+      navigate(safeReturnUrl(params.get("returnUrl")) ?? "/workbench", { replace: true });
     }
-  }, [status, params, navigate]);
+  }, [navigate, params, status]);
 
-  async function handleSubmit(): Promise<void> {
+  async function handleSubmit() {
     const nextUsername = username.trim();
     if (!nextUsername || !password) {
-      const message = !nextUsername ? "请输入账号" : "请输入密码";
-      setErrorMessage(message);
-      showLoginToast({ icon: "fail", content: message });
+      setErrorMessage(!nextUsername ? "请输入账号" : "请输入密码");
       return;
     }
     setErrorMessage("");
@@ -49,176 +36,68 @@ export function LoginPage() {
     try {
       await login(nextUsername, password);
       writeRememberedUsername(rememberMe ? nextUsername : "");
-      const target = safeReturnUrl(params.get("returnUrl")) ?? "/workbench";
-      navigate(target, { replace: true });
+      navigate(safeReturnUrl(params.get("returnUrl")) ?? "/workbench", { replace: true });
     } catch (error) {
       const message = isApiError(error) && error.status === 401 ? "账号或密码错误" : "登录失败，请稍后再试";
       setErrorMessage(message);
-      showLoginToast({
-        icon: "fail",
-        content: message,
-      });
+      if (import.meta.env.MODE !== "test") Toast.show({ icon: "fail", content: message });
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="af-login page page-login">
-      <SafeArea position="top" />
-      <section className="af-login__hero" aria-labelledby="login-title">
-        <div className="af-login__hero-copy">
-          <p className="af-login__eyebrow">{branding.companyName || "AntFlow"}</p>
-          <h1 id="login-title" className="af-login__title">Hello!</h1>
-          <p className="af-login__subtitle">{branding.loginTitle || "欢迎使用移动审批工作台"}</p>
-        </div>
-        <div className="af-login__illustration" aria-hidden="true">
-          <div className="af-login__moon" />
-          <div className="af-login__person">
-            <span className="af-login__person-hair" />
-            <span className="af-login__person-face" />
-            <span className="af-login__person-body" />
-            <span className="af-login__person-arm" />
-          </div>
-          <div className="af-login__approval-card">
-            <span />
-            <span />
-            <span />
-          </div>
-          <i />
-        </div>
+    <main className="login">
+      <section className="login__hero">
+        <p className="login__eyebrow">{branding.companyName || "ANTFLOW"}</p>
+        <h1 className="login__title">Hello!</h1>
+        <p className="login__subtitle">{branding.loginTitle || "欢迎使用移动审批工作台"}</p>
+        <div className="login__art" aria-hidden="true" />
       </section>
 
-      <section className="af-login__panel" aria-label="账号登录">
-        <form
-          className="af-login__form"
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleSubmit();
-          }}
-        >
-          <div className="af-login__field">
-            <label htmlFor="login-username">用户名</label>
-            <UserContactOutline aria-hidden="true" className="af-login__field-icon" />
-            <input
-              id="login-username"
-              className="af-login__input"
-              placeholder="请输入账号"
-              autoComplete="username"
-              inputMode="text"
-              value={username}
-              disabled={submitting}
-              onChange={(event) => {
-                setUsername(event.currentTarget.value);
-                setErrorMessage("");
-              }}
-            />
+      <form className="login__panel" noValidate onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
+        <div className="login__field">
+          <label htmlFor="login-username">用户名</label>
+          <div className="login__field__box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-7 8-7s8 3 8 7" /></svg>
+            <input id="login-username" placeholder="请输入账号" autoComplete="username" value={username} disabled={submitting} onChange={(event) => { setUsername(event.currentTarget.value); setErrorMessage(""); }} />
           </div>
-          <div className="af-login__field">
-            <label htmlFor="login-password">密码</label>
-            <LockOutline aria-hidden="true" className="af-login__field-icon" />
-            <input
-              id="login-password"
-              className="af-login__input"
-              placeholder="请输入密码"
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              value={password}
-              disabled={submitting}
-              onChange={(event) => {
-                setPassword(event.currentTarget.value);
-                setErrorMessage("");
-              }}
-            />
-            <button
-              type="button"
-              className="af-login__password-toggle"
-              aria-label={showPassword ? "隐藏密码" : "显示密码"}
-              disabled={submitting}
-              onClick={() => setShowPassword((current) => !current)}
-            >
-              {showPassword ? <EyeInvisibleOutline /> : <EyeOutline />}
-            </button>
-          </div>
-          <div className="af-login__form-row">
-            <label className="af-login__remember">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                disabled={submitting}
-                onChange={(event) => setRememberMe(event.currentTarget.checked)}
-              />
-              <span>记住我</span>
-            </label>
-            <button type="button" className="af-login__link" disabled={submitting}>
-              忘记密码
-            </button>
-          </div>
-          {errorMessage ? (
-            <p role="alert" className="af-login__error">
-              <CheckShieldOutline aria-hidden="true" />
-              <span>{errorMessage}</span>
-            </p>
-          ) : null}
-          <button type="submit" className="af-btn af-btn--block af-login__submit" disabled={submitting}>
-            {submitting ? (
-              <>
-                <span className="af-login__spinner" aria-hidden="true" />
-                登录中...
-              </>
-            ) : (
-              "登录"
-            )}
-          </button>
-        </form>
-      </section>
-
-      <p className="af-login__agreement">
-        登录即代表你已阅读并同意 <button type="button">用户协议</button> 与 <button type="button">隐私政策</button>
-      </p>
-
-      <section className="af-login__third-party" aria-label="第三方登录">
-        <div className="af-login__divider"><span>第三方登录</span></div>
-        <div className="af-login__socials">
-          <button type="button" className="af-login__social af-login__social--wechat" aria-label="企业微信登录">
-            <img className="af-login__social-icon" src={`${LOGIN_ICON_BASE}/wechat.png`} alt="" aria-hidden="true" />
-          </button>
-          <button type="button" className="af-login__social af-login__social--dingtalk" aria-label="钉钉登录">
-            <img className="af-login__social-icon" src={`${LOGIN_ICON_BASE}/dingtalk.png`} alt="" aria-hidden="true" />
-          </button>
         </div>
-      </section>
+        <div className="login__field">
+          <label htmlFor="login-password">密码</label>
+          <div className="login__field__box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+            <input id="login-password" type="password" placeholder="请输入密码" autoComplete="current-password" value={password} disabled={submitting} onChange={(event) => { setPassword(event.currentTarget.value); setErrorMessage(""); }} />
+          </div>
+        </div>
+        <div className="login__row">
+          <label><input type="checkbox" checked={rememberMe} disabled={submitting} onChange={(event) => setRememberMe(event.currentTarget.checked)} /> 记住我</label>
+          <button className="link" type="button">忘记密码</button>
+        </div>
+        {errorMessage ? <div className="login__error" role="alert"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16v.5" /></svg><span>{errorMessage}</span></div> : null}
+        <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={submitting}>{submitting ? "登录中..." : "登录"}</button>
+      </form>
 
-      {branding.showLoginFooter ? <footer className="af-login__footer">{branding.footerText}</footer> : null}
-      <SafeArea position="bottom" />
+      <div className="login__third">
+        <span>第三方登录</span>
+        <div className="login__socials">
+          <button className="login__social" type="button" aria-label="企业微信"><svg viewBox="0 0 24 24" fill="#1aad19" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg></button>
+          <button className="login__social" type="button" aria-label="钉钉"><svg viewBox="0 0 24 24" fill="#1989fa" aria-hidden="true"><path d="M4 6h12v8H8l-2 3v-3H4V6Zm14 2h2v6l-2 .5v2.5l-1.5-2H14V8h4Z" /></svg></button>
+        </div>
+      </div>
+      <p className="login__agreement">登录即代表你已阅读并同意 <button className="link" type="button">用户协议</button> 与 <button className="link" type="button">隐私政策</button></p>
     </main>
   );
 }
 
 function readRememberedUsername() {
-  if (typeof localStorage === "undefined") {
-    return "";
-  }
-  return localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? "";
+  return typeof localStorage === "undefined" ? "" : localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? "";
 }
 
 function writeRememberedUsername(username: string) {
-  if (typeof localStorage === "undefined") {
-    return;
-  }
-  if (username) {
-    localStorage.setItem(REMEMBERED_USERNAME_KEY, username);
-    return;
-  }
-  localStorage.removeItem(REMEMBERED_USERNAME_KEY);
-}
-
-function showLoginToast(options: Parameters<typeof Toast.show>[0]) {
-  if (import.meta.env.MODE === "test") {
-    return;
-  }
-  Toast.show(options);
+  if (typeof localStorage === "undefined") return;
+  if (username) localStorage.setItem(REMEMBERED_USERNAME_KEY, username);
+  else localStorage.removeItem(REMEMBERED_USERNAME_KEY);
 }
 
 export default LoginPage;

@@ -1,4 +1,5 @@
 import { apiRequest } from '../../shared/api/http';
+import type { ApprovalRecord, ApprovalSummary } from '../tasks/tasks.api';
 
 export type MobileHistoryItem = {
   id: number;
@@ -23,13 +24,20 @@ export type MobileInstanceDetail = {
   id: number;
   status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
   formName?: string;
+  businessNo?: string;
+  applicantName?: string | null;
+  applicantEmployeeNo?: string | null;
+  applicantDepartment?: string | null;
   startedAt?: string;
+  currentNodeName?: string | null;
   schema?: unknown;
   formData?: Record<string, unknown> | null;
   processSnapshot?: unknown;
   history?: MobileHistoryItem[];
   canWithdraw: boolean;
   files?: MobileProcessFile[];
+  approvalSummary: ApprovalSummary;
+  approvalRecords: ApprovalRecord[];
 };
 
 export async function fetchMobileInstanceDetail(instanceId: number) {

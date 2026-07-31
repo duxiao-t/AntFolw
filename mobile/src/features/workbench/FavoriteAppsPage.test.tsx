@@ -121,7 +121,7 @@ describe('FavoriteAppsPage', () => {
     });
 
     const user = userEvent.setup();
-    const downButtons = await screen.findAllByLabelText('下移');
+    const downButtons = await screen.findAllByRole('button', { name: /^下移 / });
     const firstDownButton = downButtons[0];
     if (!firstDownButton) throw new Error('expected a down button');
     await user.click(firstDownButton);
@@ -141,20 +141,12 @@ describe('FavoriteAppsPage', () => {
     expect(screen.getByText('应用 1')).toBeInTheDocument();
   });
 
-  it('clears displayed apps when the last favourite is removed', async () => {
-    setupFetch(APPS.slice(0, 1));
-    useFavoriteDraftStore.setState({ ids: [1], source: [1], isDirty: false });
-    vi.stubGlobal('confirm', vi.fn(() => true));
+  it('shows the designed empty state when there are no favourites', async () => {
+    setupFetch([]);
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('应用 1')).toBeInTheDocument();
-    });
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: '移除' }));
-
-    expect(screen.getByText('还没有常用应用')).toBeInTheDocument();
+    expect(await screen.findByText('还没有收藏')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '浏览应用' })).toBeInTheDocument();
   });
 
   it('persists via PUT when the user saves', async () => {

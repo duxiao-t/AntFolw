@@ -82,7 +82,7 @@ describe("AppCatalogPage", () => {
     setupFetch(APPS);
     renderCatalog();
 
-    expect(await screen.findByRole("heading", { name: "全部应用" })).toBeInTheDocument();
+    expect(await screen.findByText("全部应用")).toBeInTheDocument();
     expect(await screen.findAllByText("人事")).not.toHaveLength(0);
     expect(await screen.findAllByText("财务")).not.toHaveLength(0);
     expect(await screen.findByText("请假申请")).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("AppCatalogPage", () => {
     renderCatalog();
 
     expect(await screen.findByText("请假申请")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "财务" }));
+    fireEvent.click(screen.getByRole("button", { name: "财务" }));
     await waitFor(() => {
       expect(screen.getByText("报销审批")).toBeInTheDocument();
       expect(screen.queryByText("请假申请")).not.toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("AppCatalogPage", () => {
     renderCatalog();
 
     expect(await screen.findByText("请假申请")).toBeInTheDocument();
-    const otherTab = screen.getAllByRole("tab", { name: "其他" })[0];
+    const otherTab = screen.getByRole("button", { name: "其他" });
     if (!otherTab) {
       throw new Error("其他 tab not found");
     }
@@ -115,10 +115,6 @@ describe("AppCatalogPage", () => {
       expect(screen.getByText("通用应用 6")).toBeInTheDocument();
       expect(screen.queryByText("请假申请")).not.toBeInTheDocument();
     });
-    const fetchMock = fetch as unknown as { mock: { calls: unknown[][] } };
-    const calledOther = fetchMock.mock.calls.some((entry) =>
-      String(entry[0]).includes("category=other"),
-    );
-    expect(calledOther).toBe(true);
+    expect(otherTab).toHaveClass("is-active");
   });
 });

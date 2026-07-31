@@ -7,7 +7,7 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
-import { OfflineBanner } from "../ui/PageStates";
+import { OfflineEmpty } from "../ui/PageStates";
 
 export type NetworkStatusValue = {
   online: boolean;
@@ -56,15 +56,7 @@ export function NetworkStatusProvider({ children }: PropsWithChildren) {
 
   return (
     <NetworkStatusContext.Provider value={value}>
-      {!online ? (
-        <div
-          data-testid="offline-banner-host"
-          style={{ position: "sticky", top: 0, zIndex: 1000 }}
-        >
-          <OfflineBanner onRetry={onRetry} />
-        </div>
-      ) : null}
-      {children}
+      {!online ? <div data-testid="offline-banner-host"><OfflineEmpty onRetry={onRetry} /></div> : children}
     </NetworkStatusContext.Provider>
   );
 }

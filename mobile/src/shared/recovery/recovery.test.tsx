@@ -148,7 +148,7 @@ describe('offline network status', () => {
     });
   });
 
-  it('shows offline banner and disables writes when offline', () => {
+  it('replaces the app with the offline state and restores it when online', () => {
     let online = true;
     Object.defineProperty(window.navigator, 'onLine', {
       configurable: true,
@@ -170,10 +170,11 @@ describe('offline network status', () => {
       window.dispatchEvent(new Event('offline'));
     });
 
-    expect(screen.getByTestId('online')).toHaveTextContent('false');
-    expect(screen.getByTestId('can-write')).toHaveTextContent('false');
+    expect(screen.queryByTestId('online')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('can-write')).not.toBeInTheDocument();
     expect(screen.getByTestId('offline-banner-host')).toBeInTheDocument();
-    expect(screen.getByText(/网络已断开/)).toBeInTheDocument();
+    expect(screen.getByText('网络暂时不可用')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新加载' })).toBeInTheDocument();
 
     act(() => {
       online = true;
@@ -181,6 +182,7 @@ describe('offline network status', () => {
     });
 
     expect(screen.getByTestId('can-write')).toHaveTextContent('true');
+    expect(screen.getByTestId('online')).toHaveTextContent('true');
     expect(screen.queryByTestId('offline-banner-host')).not.toBeInTheDocument();
   });
 });

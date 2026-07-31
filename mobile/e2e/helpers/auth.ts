@@ -43,8 +43,8 @@ export async function signIn(
 
 export async function signOutViaSecurity(page: Page) {
   await page.goto('/mobile/profile/security');
-  await expect(page.getByRole('heading', { name: '账号与安全' })).toBeVisible();
-  await page.getByRole('button', { name: '退出当前设备' }).click();
+  await expect(page.locator('.app-bar__title')).toHaveText('账号安全');
+  await page.getByRole('button', { name: '退出全部设备' }).click();
   await expect(page.getByPlaceholder('请输入账号')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -99,12 +99,34 @@ export async function expectVisualIntegrity(page: Page) {
       return el === top || el.contains(top) || top.contains(el);
     };
 
+    const visibleRect = (el: Element) => {
+      const rect = el.getBoundingClientRect();
+      let top = Math.max(0, rect.top);
+      let left = Math.max(0, rect.left);
+      let right = Math.min(viewportWidth, rect.right);
+      let bottom = Math.min(viewportHeight, rect.bottom);
+      let parent = el.parentElement;
+      while (parent && parent !== document.documentElement) {
+        const style = window.getComputedStyle(parent);
+        if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+          const parentRect = parent.getBoundingClientRect();
+          top = Math.max(top, parentRect.top);
+          left = Math.max(left, parentRect.left);
+          right = Math.min(right, parentRect.right);
+          bottom = Math.min(bottom, parentRect.bottom);
+        }
+        parent = parent.parentElement;
+      }
+      return { top, left, right, bottom };
+    };
+
     const candidates = Array.from(
       document.querySelectorAll('button, [role="button"], a.adm-button, .adm-tab-bar-item'),
     )
       .map((el) => {
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
+        const clipped = visibleRect(el);
         const visible =
           style.visibility !== 'hidden' &&
           style.display !== 'none' &&
@@ -120,10 +142,10 @@ export async function expectVisualIntegrity(page: Page) {
           text: (el.textContent ?? '').trim().slice(0, 40),
           position: style.position,
           visible,
-          top: rect.top,
-          left: rect.left,
-          right: rect.right,
-          bottom: rect.bottom,
+          top: clipped.top,
+          left: clipped.left,
+          right: clipped.right,
+          bottom: clipped.bottom,
           width: rect.width,
           height: rect.height,
         };
