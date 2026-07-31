@@ -13,6 +13,7 @@ import { UserPickerField } from './UserPickerField';
 import { DynamicFormRenderer } from '../components/DynamicFormRenderer';
 
 beforeEach(() => {
+  vi.stubGlobal('XMLHttpRequest', undefined);
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -194,7 +195,7 @@ describe('advanced mobile fields', () => {
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
 
     expect(screen.getByText('hello.pdf')).toBeInTheDocument();
-    expect(screen.getByText('上传中 0%')).toBeInTheDocument();
+    expect(screen.getByText('上传中 8%')).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [

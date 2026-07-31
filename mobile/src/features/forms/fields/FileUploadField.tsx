@@ -125,14 +125,16 @@ export function FileUploadField(props: MobileFieldProps) {
   );
 
   async function queueFileUpload(file: File, localId = createLocalId()) {
-    const uploadingItem: UploadItem = { localId, file, status: 'uploading', progress: 0 };
+    const uploadingItem: UploadItem = { localId, file, status: 'uploading', progress: 8 };
     commitItems([
       ...itemsRef.current.filter((item) => item.localId !== localId),
       uploadingItem,
     ]);
     await wait(20);
     try {
-      const remote = await uploadMobileFile(endpoint, file);
+      const remote = await uploadMobileFile(endpoint, file, (progress) => {
+        updateUploadProgress(localId, progress);
+      });
       commitItems(
         itemsRef.current.map((item): UploadItem =>
           item.localId === localId
@@ -148,6 +150,21 @@ export function FileUploadField(props: MobileFieldProps) {
             : item,
         ),
       );
+    }
+  }
+
+  function updateUploadProgress(localId: string, progress: number) {
+    const bounded = Math.min(99, Math.max(8, Math.round(progress)));
+    let changed = false;
+    const next = itemsRef.current.map((item): UploadItem => {
+      if (item.localId !== localId || item.status !== 'uploading' || item.progress >= bounded) {
+        return item;
+      }
+      changed = true;
+      return { ...item, progress: bounded };
+    });
+    if (changed) {
+      commitItems(next, false);
     }
   }
 
@@ -178,10 +195,12 @@ export function FileUploadField(props: MobileFieldProps) {
     commitItems(itemsRef.current.filter((item) => item.localId !== localId));
   }
 
-  function commitItems(nextItems: UploadItem[]) {
+  function commitItems(nextItems: UploadItem[], emitValue = true) {
     itemsRef.current = nextItems;
     setItems(nextItems);
-    emitUploadValue(nextItems);
+    if (emitValue) {
+      emitUploadValue(nextItems);
+    }
   }
 
   function emitUploadValue(nextItems: UploadItem[]) {
