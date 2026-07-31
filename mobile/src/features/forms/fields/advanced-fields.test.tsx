@@ -6,6 +6,7 @@ import { validateSchemaValues } from '../schema/fieldRegistry';
 import type { MobileSchemaNode } from '../schema/types';
 import { DeptPickerField } from './DeptPickerField';
 import { FileUploadField } from './FileUploadField';
+import { ImageUploadField } from './ImageUploadField';
 import { SpanLayoutField } from './SpanLayoutField';
 import { TableListField } from './TableListField';
 import { UserPickerField } from './UserPickerField';
@@ -25,7 +26,7 @@ beforeEach(() => {
       if (url.startsWith('/api/mobile/files') && init?.method === 'POST') {
         const formData = init.body as FormData;
         const file = formData.get('file') as File;
-        if (file.name === 'oops.txt') {
+        if (file.name.startsWith('oops.')) {
           return jsonResponse({ message: '上传失败' }, 500);
         }
         return jsonResponse({
@@ -46,6 +47,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function jsonResponse(body: unknown, status = 200) {
@@ -189,27 +191,93 @@ describe('advanced mobile fields', () => {
       />,
     );
 
-    await user.upload(screen.getByLabelText('附件'), new File(['hello'], 'hello.txt', { type: 'text/plain' }));
+    await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
 
-    expect(screen.getByText('hello.txt')).toBeInTheDocument();
+    expect(screen.getByText('hello.pdf')).toBeInTheDocument();
     expect(screen.getByText('上传中 0%')).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
       expect.objectContaining({
-        id: 'remote-hello.txt',
-        name: 'hello.txt',
-        contentUrl: '/api/mobile/files/remote-hello.txt/content',
-        size: 5,
+        id: 'remote-hello.pdf',
+        name: 'hello.pdf',
+        contentUrl: '/api/mobile/files/remote-hello.pdf/content',
+        size: 10,
       }),
     ]);
 
-    await user.click(screen.getByRole('button', { name: '删除 hello.txt' }));
+    await user.click(screen.getByRole('button', { name: '删除 hello.pdf' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      '/api/mobile/files/remote-hello.txt',
+      '/api/mobile/files/remote-hello.pdf',
       expect.objectContaining({ method: 'DELETE' }),
     ));
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', []);
+  });
+
+  it('uses backend-compatible default file type filters', () => {
+    render(
+      <>
+        <FileUploadField
+          {...baseProps(
+            {
+              id: 'attachments',
+              type: 'file_upload',
+              label: '附件',
+            },
+            [],
+          )}
+        />
+        <ImageUploadField
+          {...baseProps(
+            {
+              id: 'photo',
+              type: 'image_upload',
+              label: '图片',
+            },
+            [],
+          )}
+        />
+      </>,
+    );
+
+    expect(screen.getByLabelText('附件')).toHaveAttribute(
+      'accept',
+      'image/jpeg,image/png,application/pdf',
+    );
+    expect(screen.getByLabelText('图片')).toHaveAttribute('accept', 'image/jpeg,image/png');
+  });
+
+  it('does not notify the parent form from a React state updater while uploading', async () => {
+    const user = userEvent.setup();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    function StatefulUpload() {
+      const [value, setValue] = useState<unknown[]>([]);
+      return (
+        <FileUploadField
+          {...baseProps(
+            {
+              id: 'attachments',
+              type: 'file_upload',
+              label: '附件',
+              props: {
+                uploadEndpoint: '/api/mobile/files',
+              },
+            },
+            value,
+            (_fieldId, nextValue) => setValue(nextValue as unknown[]),
+          )}
+        />
+      );
+    }
+
+    render(<StatefulUpload />);
+
+    await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
+    await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
+
+    expect(consoleError.mock.calls.flat().join('\n')).not.toContain('Cannot update a component');
+    consoleError.mockRestore();
   });
 
   it('previews uploaded image files through the backend content URL', async () => {
@@ -309,11 +377,11 @@ describe('advanced mobile fields', () => {
       />,
     );
 
-    await user.upload(screen.getByLabelText('附件'), new File(['oops'], 'oops.txt', { type: 'text/plain' }));
+    await user.upload(screen.getByLabelText('附件'), new File(['%PDF-oops'], 'oops.pdf', { type: 'application/pdf' }));
 
     await waitFor(() => expect(screen.getByText('上传失败')).toBeInTheDocument());
     expect(onValueChange).not.toHaveBeenCalledWith('attachments', expect.arrayContaining([expect.anything()]));
-    expect(screen.getByRole('button', { name: '重试 oops.txt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试 oops.pdf' })).toBeInTheDocument();
   });
 
   it('exposes non-ready upload queue state to schema validation without storing it as ready files', async () => {
@@ -330,7 +398,7 @@ describe('advanced mobile fields', () => {
 
     render(<FileUploadField {...baseProps(node, [], onValueChange)} />);
 
-    await user.upload(screen.getByLabelText('附件'), new File(['oops'], 'oops.txt', { type: 'text/plain' }));
+    await user.upload(screen.getByLabelText('附件'), new File(['%PDF-oops'], 'oops.pdf', { type: 'application/pdf' }));
 
     await waitFor(() => expect(screen.getByText('上传失败')).toBeInTheDocument());
     const emittedValue = onValueChange.mock.calls.at(-1)?.[1];

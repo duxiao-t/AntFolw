@@ -15,6 +15,7 @@ export type UploadItem = {
 };
 
 const uploadQueueBlockedSymbol = Symbol('antflowUploadQueueBlocked');
+const DEFAULT_FILE_ACCEPT = 'image/jpeg,image/png,application/pdf';
 
 export type FileUploadValue = MobileFileDto[] & {
   [uploadQueueBlockedSymbol]?: boolean;
@@ -38,15 +39,18 @@ export function hasBlockingUploadQueue(value: unknown) {
 export function FileUploadField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const endpoint = String(props.node.props?.uploadEndpoint ?? '/api/mobile/files');
-  const accept = typeof props.node.props?.accept === 'string' ? props.node.props.accept : undefined;
+  const accept = typeof props.node.props?.accept === 'string' ? props.node.props.accept : DEFAULT_FILE_ACCEPT;
   const multiple = props.node.props?.multiple !== false;
   const previewImages = props.node.props?.preview === true;
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
+  const itemsRef = useRef<UploadItem[]>([]);
   const readyValues = useMemo(() => asReadyFiles(props.value), [props.value]);
 
   useEffect(() => {
-    setItems((current) => mergeReadyItems(current, readyValues));
+    const next = mergeReadyItems(itemsRef.current, readyValues);
+    itemsRef.current = next;
+    setItems(next);
   }, [readyValues]);
 
   return (
@@ -122,72 +126,62 @@ export function FileUploadField(props: MobileFieldProps) {
 
   async function queueFileUpload(file: File, localId = createLocalId()) {
     const uploadingItem: UploadItem = { localId, file, status: 'uploading', progress: 0 };
-    setItems((current) => {
-      const next = [
-        ...current.filter((item) => item.localId !== localId),
-        uploadingItem,
-      ];
-      emitUploadValue(next);
-      return next;
-    });
+    commitItems([
+      ...itemsRef.current.filter((item) => item.localId !== localId),
+      uploadingItem,
+    ]);
     await wait(20);
     try {
       const remote = await uploadMobileFile(endpoint, file);
-      setItems((current) => {
-        const next = current.map((item): UploadItem =>
+      commitItems(
+        itemsRef.current.map((item): UploadItem =>
           item.localId === localId
             ? { ...item, status: 'ready', progress: 100, remote, error: undefined, createdInSession: true }
             : item,
-        );
-        emitUploadValue(next);
-        return next;
-      });
+        ),
+      );
     } catch (error) {
-      setItems((current) => {
-        const next = current.map((item): UploadItem =>
+      commitItems(
+        itemsRef.current.map((item): UploadItem =>
           item.localId === localId
             ? { ...item, status: 'failed', progress: 100, error: errorMessage(error) }
             : item,
-        );
-        emitUploadValue(next);
-        return next;
-      });
+        ),
+      );
     }
   }
 
   async function removeItem(localId: string) {
-    const target = items.find((item) => item.localId === localId);
+    const target = itemsRef.current.find((item) => item.localId === localId);
     if (target?.status === 'deleting') {
       return;
     }
     if (target?.remote && target.createdInSession) {
-      setItems((current) => {
-        const next = current.map((item): UploadItem =>
+      commitItems(
+        itemsRef.current.map((item): UploadItem =>
           item.localId === localId ? { ...item, status: 'deleting', progress: 100 } : item,
-        );
-        emitUploadValue(next);
-        return next;
-      });
+        ),
+      );
       try {
         await deleteMobileFile(target.remote.id);
       } catch (error) {
-        setItems((current) => {
-          const next = current.map((item): UploadItem =>
+        commitItems(
+          itemsRef.current.map((item): UploadItem =>
             item.localId === localId
               ? { ...item, status: 'delete_failed', progress: 100, error: errorMessage(error) }
               : item,
-          );
-          emitUploadValue(next);
-          return next;
-        });
+          ),
+        );
         return;
       }
     }
-    setItems((current) => {
-      const next = current.filter((item) => item.localId !== localId);
-      emitUploadValue(next);
-      return next;
-    });
+    commitItems(itemsRef.current.filter((item) => item.localId !== localId));
+  }
+
+  function commitItems(nextItems: UploadItem[]) {
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+    emitUploadValue(nextItems);
   }
 
   function emitUploadValue(nextItems: UploadItem[]) {
@@ -255,7 +249,7 @@ function localBlocker(items: UploadItem[]) {
 
 function statusLabel(item: UploadItem) {
   if (item.status === 'failed') {
-    return '上传失败';
+    return item.error || '上传失败';
   }
   if (item.status === 'ready') {
     return '100%';
@@ -264,7 +258,7 @@ function statusLabel(item: UploadItem) {
     return '删除中';
   }
   if (item.status === 'delete_failed') {
-    return '删除失败';
+    return item.error || '删除失败';
   }
   return `上传中 ${item.progress}%`;
 }
