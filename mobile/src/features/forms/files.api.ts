@@ -103,6 +103,11 @@ function uploadMobileFileWithProgress(
     xhr.onerror = () => rejectOnce(new Error('网络异常，文件上传失败'));
     xhr.onabort = () => rejectOnce(new Error('文件上传已取消'));
     xhr.onload = handleResponse;
+    xhr.onloadend = () => {
+      if (xhr.readyState === 4) {
+        handleResponse();
+      }
+    };
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {
         handleResponse();

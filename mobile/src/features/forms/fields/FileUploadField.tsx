@@ -197,8 +197,16 @@ export function FileUploadField(props: MobileFieldProps) {
                     <div className={`af-upload-list__status af-upload-list__status--${item.status}`}>
                       {statusLabel(item)}
                     </div>
-                    <div className={`af-upload-list__progress af-upload-list__progress--${progressTone(item)}`} aria-hidden="true">
-                      <span style={{ width: `${item.progress}%` }} />
+                    <div className="af-upload-list__progress-row">
+                      <div
+                        className={`af-upload-list__progress af-upload-list__progress--${progressTone(item)}`}
+                        aria-hidden="true"
+                      >
+                        <span style={{ width: `${progressPercent(item)}%` }} />
+                      </div>
+                      <span className={`af-upload-list__progress-value af-upload-list__progress-value--${progressTone(item)}`}>
+                        {progressPercent(item)}%
+                      </span>
                     </div>
                     {item.error ? <div className="af-upload-list__error">{item.error}</div> : null}
                   </div>
@@ -255,6 +263,9 @@ export function FileUploadField(props: MobileFieldProps) {
   }
 
   function updateUploadProgress(localId: string, event: UploadProgressEvent) {
+    if (event.phase === 'done') {
+      return;
+    }
     const bounded = Math.min(100, Math.max(0, Math.round(event.progress)));
     const nextStatus = event.phase === 'uploading' ? 'uploading' : 'processing';
     let changed = false;
@@ -343,7 +354,13 @@ function asReadyFiles(value: unknown): MobileFileDto[] {
 
 function mergeReadyItems(items: UploadItem[], readyValues: MobileFileDto[]) {
   const readyById = new Map(readyValues.map((item) => [item.id, item]));
-  const keep = items.filter((item) => item.status !== 'ready' || !item.remote || readyById.has(item.remote.id));
+  const hasBlockingLocalItems = items.some((item) =>
+    item.status !== 'ready' && item.status !== 'delete_failed');
+  const keep = items.filter((item) =>
+    item.status !== 'ready'
+    || !item.remote
+    || readyById.has(item.remote.id)
+    || (item.createdInSession === true && hasBlockingLocalItems));
   const existingIds = new Set(
     keep
       .filter((item): item is UploadItem & { remote: MobileFileDto } => item.remote != null)
@@ -401,10 +418,10 @@ function statusLabel(item: UploadItem) {
     return '上传失败';
   }
   if (item.status === 'ready') {
-    return '已完成';
+    return '已完成 100%';
   }
   if (item.status === 'processing') {
-    return '处理中';
+    return `处理中 ${progressPercent(item)}%`;
   }
   if (item.status === 'deleting') {
     return '删除中';
@@ -415,7 +432,11 @@ function statusLabel(item: UploadItem) {
   if (item.status === 'queued') {
     return '等待上传';
   }
-  return item.progress > 0 ? `上传中 ${item.progress}%` : '上传中';
+  return `上传中 ${progressPercent(item)}%`;
+}
+
+function progressPercent(item: UploadItem) {
+  return Math.min(100, Math.max(0, Math.round(item.status === 'ready' ? 100 : item.progress)));
 }
 
 function progressTone(item: UploadItem) {

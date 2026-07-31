@@ -9,7 +9,7 @@ const noop = async () => {
 class MockXMLHttpRequest {
   static latest: MockXMLHttpRequest | null = null;
   static requests: MockXMLHttpRequest[] = [];
-  static completionMode: 'load' | 'readystatechange' = 'load';
+  static completionMode: 'load' | 'readystatechange' | 'loadend' = 'load';
   static loaded = 50;
   static statuses = [200];
 
@@ -27,6 +27,7 @@ class MockXMLHttpRequest {
   responseText = '';
   readyState = 0;
   onload: (() => void) | null = null;
+  onloadend: (() => void) | null = null;
   onreadystatechange: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
@@ -76,6 +77,8 @@ class MockXMLHttpRequest {
       this.readyState = 4;
       if (MockXMLHttpRequest.completionMode === 'readystatechange') {
         this.onreadystatechange?.();
+      } else if (MockXMLHttpRequest.completionMode === 'loadend') {
+        this.onloadend?.();
       } else {
         this.onload?.();
       }
@@ -149,6 +152,24 @@ describe('mobile file api', () => {
       { phase: 'processing', progress: 96 },
       { phase: 'done', progress: 100 },
     ]);
+  });
+
+  it('settles uploads that only report completion through loadend', async () => {
+    vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest);
+    MockXMLHttpRequest.completionMode = 'loadend';
+    setAuthController({
+      authorizationHeader: () => ({}),
+      refresh: noop,
+      isAuthEndpoint: () => false,
+    });
+
+    const result = await uploadMobileFile(
+      '/api/mobile/files',
+      new File(['%PDF-proof'], 'proof.pdf', { type: 'application/pdf' }),
+      () => undefined,
+    );
+
+    expect(result.id).toBe('file-1');
   });
 
   it('keeps progress monotonic when auth refresh retries the upload', async () => {

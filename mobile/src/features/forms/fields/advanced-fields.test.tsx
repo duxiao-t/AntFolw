@@ -39,6 +39,9 @@ beforeEach(() => {
         });
       }
       if (url.startsWith('/api/mobile/files/') && url.endsWith('/content')) {
+        if (url.includes('remote-broken-preview.png')) {
+          return jsonResponse({ message: '预览失败' }, 500);
+        }
         return new Response(new Blob(['image'], { type: 'image/png' }), {
           status: 200,
           headers: { 'Content-Type': 'image/png' },
@@ -82,6 +85,7 @@ class ManualXMLHttpRequest {
   responseText = '';
   readyState = 0;
   onload: (() => void) | null = null;
+  onloadend: (() => void) | null = null;
   onreadystatechange: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
@@ -123,6 +127,7 @@ class ManualXMLHttpRequest {
     this.responseText = JSON.stringify(body);
     this.readyState = 4;
     this.onload?.();
+    this.onloadend?.();
   }
 }
 
@@ -263,9 +268,9 @@ describe('advanced mobile fields', () => {
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
 
     expect(screen.getByText('hello.pdf')).toBeInTheDocument();
-    expect(screen.getByText('上传中')).toBeInTheDocument();
+    expect(screen.getByText('上传中 0%')).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
       expect.objectContaining({
         id: 'remote-hello.pdf',
@@ -343,7 +348,7 @@ describe('advanced mobile fields', () => {
     const { container } = render(<StatefulUpload />);
 
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
-    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
     expect(container.querySelector('.af-upload-list__progress')).toHaveClass(
       'af-upload-list__progress--success',
     );
@@ -391,7 +396,7 @@ describe('advanced mobile fields', () => {
       request?.emitProgress(100);
       request?.emitUploadComplete();
     });
-    expect(screen.getByText('处理中')).toBeInTheDocument();
+    expect(screen.getByText('处理中 96%')).toBeInTheDocument();
     expect(container.querySelector('.af-upload-list__progress span')).toHaveStyle({ width: '96%' });
 
     await act(async () => {
@@ -403,13 +408,60 @@ describe('advanced mobile fields', () => {
         size: 10,
       });
     });
-    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
 
     await act(async () => {
       request?.emitProgress(8);
     });
-    expect(screen.getByText('已完成')).toBeInTheDocument();
+    expect(screen.getByText('已完成 100%')).toBeInTheDocument();
     expect(screen.queryByText('上传中 8%')).not.toBeInTheDocument();
+  });
+
+  it('keeps a completed session upload visible while the parent value is still stale', async () => {
+    vi.stubGlobal('XMLHttpRequest', ManualXMLHttpRequest);
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+
+    render(
+      <FileUploadField
+        {...baseProps(
+          {
+            id: 'attachments',
+            type: 'file_upload',
+            label: '附件',
+            props: {
+              uploadEndpoint: '/api/mobile/files',
+            },
+          },
+          [],
+          onValueChange,
+        )}
+      />,
+    );
+
+    await user.upload(screen.getByLabelText('附件'), new File(['image'], 'proof.png', { type: 'image/png' }));
+    await waitFor(() => expect(ManualXMLHttpRequest.latest).not.toBeNull());
+    const request = ManualXMLHttpRequest.latest;
+
+    await act(async () => {
+      request?.respond(200, {
+        id: 'remote-proof.png',
+        name: 'proof.png',
+        contentUrl: '/api/mobile/files/remote-proof.png/content',
+        contentType: 'image/png',
+        size: 5,
+      });
+    });
+    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('proof.png')).toBeInTheDocument();
+    expect(screen.getByText('已完成 100%')).toBeInTheDocument();
+    expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
+      expect.objectContaining({ id: 'remote-proof.png' }),
+    ]);
   });
 
   it('previews uploaded image files through the backend content URL', async () => {
@@ -454,6 +506,33 @@ describe('advanced mobile fields', () => {
       '_blank',
       'noopener,noreferrer',
     );
+  });
+
+  it('keeps image uploads completed when thumbnail loading fails', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <FileUploadField
+        {...baseProps(
+          {
+            id: 'photo',
+            type: 'image_upload',
+            label: '图片',
+            props: {
+              uploadEndpoint: '/api/mobile/files',
+              preview: true,
+            },
+          },
+          [],
+        )}
+      />,
+    );
+
+    await user.upload(screen.getByLabelText('图片'), new File(['image'], 'broken-preview.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '预览 broken-preview.png' })).not.toBeInTheDocument();
+    expect(screen.queryByText('上传中 0%')).not.toBeInTheDocument();
   });
 
   it('unlinks historical files from the form value without deleting backend content', async () => {

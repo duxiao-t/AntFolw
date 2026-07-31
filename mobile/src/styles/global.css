@@ -3062,10 +3062,13 @@ body {
 .af-upload-list__status { color: var(--af-color-muted); font-size: 10px; }
 .af-upload-list__status--uploading, .af-upload-list__status--processing, .af-upload-list__status--ready { color: var(--af-color-success); }
 .af-upload-list__status--failed, .af-upload-list__status--delete_failed { color: var(--af-color-danger); }
+.af-upload-list__progress-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; gap: 8px; margin-top: 3px; }
 .af-upload-list__progress { height: 3px; overflow: hidden; border-radius: 3px; background: var(--af-color-line); }
 .af-upload-list__progress span { display: block; height: 100%; background: var(--af-color-success); transition: width .16s ease; }
 .af-upload-list__progress--error { background: color-mix(in srgb, var(--af-color-danger) 18%, var(--af-color-line)); }
 .af-upload-list__progress--error span { background: var(--af-color-danger); }
+.af-upload-list__progress-value { justify-self: end; color: var(--af-color-success); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 1; text-align: right; }
+.af-upload-list__progress-value--error { color: var(--af-color-danger); }
 .af-upload-list__error { margin-top: 4px; color: var(--af-color-danger); font-size: 10px; line-height: 1.35; word-break: break-word; }
 .af-link-button { border: 0; background: transparent; color: var(--af-color-primary-action); cursor: pointer; }
 .form-fill-page { padding-bottom: 0; }
