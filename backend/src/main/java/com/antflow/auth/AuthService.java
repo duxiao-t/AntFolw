@@ -37,6 +37,14 @@ public class AuthService {
         return Optional.of(new Authenticated(token, u, roles));
     }
 
+    public Optional<Authenticated> resume(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || !"ACTIVE".equals(user.getStatus())) return Optional.empty();
+        List<String> roles = rolesOf(user.getId());
+        return Optional.of(new Authenticated(
+            jwtService.issue(user.getId(), user.getUsername(), roles), user, roles));
+    }
+
     public List<String> rolesOf(Long userId) {
         return userRoleMapper.selectList(new QueryWrapper<UserRole>().eq("user_id", userId))
             .stream()

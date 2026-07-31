@@ -14,11 +14,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 
 @RequiredArgsConstructor
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final AuthSessionService sessionService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
@@ -29,16 +31,19 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             try {
                 Claims c = jwtService.parse(token);
                 long userId = Long.parseLong(c.getSubject());
-                String username = c.get("username", String.class);
-                @SuppressWarnings("unchecked")
-                List<String> roles = (List<String>) c.get("roles", List.class);
-                PrincipalHolder.set(new PrincipalHolder.Principal(userId, username, roles));
-                var authorities = roles.stream()
-                    .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
-                    .toList();
-                var auth = new UsernamePasswordAuthenticationToken(username, null, authorities);
-                SecurityContextHolder.getContext().setAuthentication(auth);
-            } catch (JwtException ignored) {
+                String sessionId = c.get("sid", String.class);
+                if (sessionId != null && sessionService.isActive(userId, UUID.fromString(sessionId))) {
+                    String username = c.get("username", String.class);
+                    @SuppressWarnings("unchecked")
+                    List<String> roles = (List<String>) c.get("roles", List.class);
+                    PrincipalHolder.set(new PrincipalHolder.Principal(userId, username, roles));
+                    var authorities = roles.stream()
+                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                        .toList();
+                    var auth = new UsernamePasswordAuthenticationToken(username, null, authorities);
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                }
+            } catch (JwtException | IllegalArgumentException ignored) {
                 // invalid token → leave anonymous; SecurityConfig rejects with 401
             }
         }

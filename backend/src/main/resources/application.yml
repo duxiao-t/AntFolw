@@ -38,10 +38,12 @@ antflow:
     ttl-seconds: 86400
     clock-skew-seconds: 30
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8000}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8000,http://localhost:5173,http://127.0.0.1:5173}
   login:
     per-minute: 5
     per-hour: 30
+  auth:
+    session-ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:2592000}
   mobile:
     files:
       directory: ${MOBILE_FILE_DIRECTORY:./data/mobile-files}

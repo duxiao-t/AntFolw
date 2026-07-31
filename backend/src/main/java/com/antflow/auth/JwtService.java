@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class JwtService {
@@ -37,15 +38,20 @@ public class JwtService {
     }
 
     public String issue(Long userId, String username, List<String> roles) {
+        return issue(userId, username, roles, null);
+    }
+
+    public String issue(Long userId, String username, List<String> roles, UUID sessionId) {
         Instant now = Instant.now();
-        return Jwts.builder()
+        var builder = Jwts.builder()
+            .id(java.util.UUID.randomUUID().toString())
             .subject(String.valueOf(userId))
             .claim("username", username)
             .claim("roles", roles)
             .issuedAt(Date.from(now))
-            .expiration(Date.from(now.plusSeconds(ttlSeconds)))
-            .signWith(key)
-            .compact();
+            .expiration(Date.from(now.plusSeconds(ttlSeconds)));
+        if (sessionId != null) builder.claim("sid", sessionId.toString());
+        return builder.signWith(key).compact();
     }
 
     public Claims parse(String token) throws JwtException {
