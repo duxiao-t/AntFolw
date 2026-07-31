@@ -16,6 +16,17 @@ $env:PORT='8081'
 mvn -B spring-boot:run
 ```
 
+附件默认可落到本地目录；需要按 MinIO 验证时先启动 `infra/docker-compose.yml`
+里的 `minio` 服务，并给后端增加以下环境变量：
+
+```powershell
+$env:MOBILE_FILE_STORAGE='minio'
+$env:MINIO_ENDPOINT='http://localhost:9000'
+$env:MINIO_ACCESS_KEY='minioadmin'
+$env:MINIO_SECRET_KEY='minioadmin'
+$env:MINIO_BUCKET='antflow-mobile-files'
+```
+
 移动端开发服务器使用 `5173`，Vite base 固定为 `/mobile/`：
 
 ```powershell

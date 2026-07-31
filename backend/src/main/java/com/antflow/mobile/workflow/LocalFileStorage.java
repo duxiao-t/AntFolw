@@ -6,17 +6,21 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(prefix = "antflow.mobile.files", name = "storage",
+    havingValue = "local", matchIfMissing = true)
 @RequiredArgsConstructor
 public class LocalFileStorage implements FileStorage {
     private final MobileFileProperties properties;
 
     @Override
-    public StoredObject put(String storageKey, InputStream content, long size) throws IOException {
+    public StoredObject put(String storageKey, InputStream content, long size,
+                            String contentType) throws IOException {
         Path target = resolve(storageKey);
         Files.createDirectories(target.getParent());
         Files.copy(content, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);

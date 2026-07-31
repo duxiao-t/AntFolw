@@ -5,7 +5,7 @@ Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterp
 ## Status (2026-07-22)
 
 - ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway) — unit tests green (**88** tests, 1 skipped).
-- ✅ PostgreSQL 17 schema (Flyway V1+) — ready to apply.
+- ✅ PostgreSQL 17 schema (Flyway V1+) + optional MinIO object storage for mobile attachments.
 - ✅ Custom approval engine — tree process, OR/AND, SELF_SELECT, withdraw, optimistic locking.
 - ✅ Form designer storage + runtime snapshot (`form_def_version`).
 - ✅ Org module — Company / Department (ltree) / User / Role + JWT + login rate limit.
@@ -24,7 +24,7 @@ Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterp
 
 ## Quick start
 
-### 1. Start the database
+### 1. Start database and object storage
 
 ```bash
 cd infra
@@ -32,6 +32,11 @@ docker compose up -d
 docker exec antflow-postgres psql -U antflow -d antflow -c "SELECT extname FROM pg_extension WHERE extname IN ('ltree','pgcrypto');"
 # Expected: 2 rows (ltree, pgcrypto)
 ```
+
+MinIO is exposed at `http://localhost:9000`; the console is at `http://localhost:9001`.
+The backend still defaults to local file storage. To store mobile attachments in MinIO,
+set `MOBILE_FILE_STORAGE=minio` plus the `MINIO_*` variables from `infra/.env.example`
+before starting the backend.
 
 ### 2. Start the backend
 

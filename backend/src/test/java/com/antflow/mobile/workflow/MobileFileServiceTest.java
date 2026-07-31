@@ -111,6 +111,7 @@ class MobileFileServiceTest {
         assertThat(row.getStorageKey()).contains(row.getId().toString());
         assertThat(row.getSha256()).hasSize(64);
         assertThat(row.getStatus()).isEqualTo("READY");
+        assertThat(storage.contentType).isEqualTo("image/png");
     }
 
     @Test
@@ -191,10 +192,13 @@ class MobileFileServiceTest {
 
     private static final class CapturingStorage implements FileStorage {
         private int putCount;
+        private String contentType;
 
         @Override
-        public StoredObject put(String storageKey, InputStream content, long size) throws IOException {
+        public StoredObject put(String storageKey, InputStream content, long size,
+                                String contentType) throws IOException {
             putCount++;
+            this.contentType = contentType;
             content.transferTo(OutputStream.nullOutputStream());
             return new StoredObject(storageKey, size);
         }

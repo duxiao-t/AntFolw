@@ -50,7 +50,8 @@ public class MobileFileService {
         String originalName = sanitizeName(file.getOriginalFilename());
         String storageKey = ownerId + "/" + id + "-" + originalName;
         try {
-            storage.put(storageKey, new ByteArrayInputStream(content), content.length);
+            storage.put(storageKey, new ByteArrayInputStream(content), content.length,
+                submittedContentType);
         } catch (IOException exception) {
             throw new BizException("FILE_STORAGE_FAILED", exception.getMessage());
         }
