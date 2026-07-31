@@ -1,8 +1,6 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
-import com.antflow.form.FormDefinition;
-import com.antflow.form.FormDefinitionMapper;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.antflow.task.TaskEntity;
@@ -20,14 +18,14 @@ import java.util.List;
 @RequestMapping("/api/mobile")
 @RequiredArgsConstructor
 public class MobileBootstrapController {
-    private static final int MAX_FAVORITE_APPS = 8;
+    private static final int MAX_RECENT_PROCESSES = 4;
     private static final String PENDING_STATUS = "PENDING";
-    private static final String PUBLISHED_STATUS = "PUBLISHED";
     private static final String BUILTIN_BRANDING_VERSION = "builtin-1";
 
     private final UserMapper userMapper;
     private final TaskMapper taskMapper;
-    private final FormDefinitionMapper formDefinitionMapper;
+    private final MobileAppService mobileAppService;
+    private final MobileWorkflowMapper workflowMapper;
 
     @GetMapping("/bootstrap")
     public MobileBootstrapDto bootstrap() {
@@ -40,15 +38,9 @@ public class MobileBootstrapController {
         Long pendingCount = taskMapper.selectCount(new QueryWrapper<TaskEntity>()
             .eq("assignee_id", principal.userId())
             .eq("status", PENDING_STATUS));
-        List<MobileAppDto> favoriteApps = formDefinitionMapper.selectList(
-                new QueryWrapper<FormDefinition>()
-                    .eq("status", PUBLISHED_STATUS)
-                    .orderByDesc("updated_at")
-                    .orderByDesc("id"))
-            .stream()
-            .limit(MAX_FAVORITE_APPS)
-            .map(MobileBootstrapController::toMobileApp)
-            .toList();
+        List<MobileAppDto> favoriteApps = mobileAppService.favorites(principal.userId());
+        List<RecentProcessDto> recentProcesses = workflowMapper.selectRecentProcesses(
+            principal.userId(), MAX_RECENT_PROCESSES);
 
         MobileUserDto mobileUser = new MobileUserDto(
             user.getId(), user.getUsername(), user.getDisplayName(), principal.roles());
@@ -56,19 +48,8 @@ public class MobileBootstrapController {
             mobileUser,
             pendingCount.intValue(),
             favoriteApps,
-            List.of(),
+            recentProcesses,
             BUILTIN_BRANDING_VERSION);
-    }
-
-    private static MobileAppDto toMobileApp(FormDefinition formDefinition) {
-        return new MobileAppDto(
-            formDefinition.getId(),
-            formDefinition.getCode(),
-            formDefinition.getName(),
-            null,
-            "other",
-            "其他",
-            null);
     }
 
     private static PrincipalHolder.Principal principal() {
@@ -91,5 +72,5 @@ record MobileAppDto(Long formId, String code, String name, String iconUrl,
 }
 
 record RecentProcessDto(Long instanceId, String formCode, String formTitle,
-                        String status, String updatedAt) {
+                        String status, java.time.OffsetDateTime updatedAt) {
 }

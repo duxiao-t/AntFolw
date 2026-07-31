@@ -10,6 +10,7 @@ public class FormData {
     @TableId(type = IdType.AUTO) private Long id;
     private Long formDefId;
     private Integer formDefVersion;
+    private String businessNo;
     @TableField(typeHandler = JsonbJacksonTypeHandler.class)
     private String data;        // JSONB
     private String status;      // DRAFT or SUBMITTED

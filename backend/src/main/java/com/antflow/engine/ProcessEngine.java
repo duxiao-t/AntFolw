@@ -1,5 +1,6 @@
 package com.antflow.engine;
 
+import com.antflow.common.FormalNumberService;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.engine.handler.NodeContext;
@@ -24,9 +25,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 钉钉式流程树的运行时引擎（Task 7）。
@@ -42,7 +45,7 @@ import java.util.Objects;
  *       从 ROOT 出发首次 {@code resolveAndLand}。</li>
  *   <li>{@link #approve(CompleteCmd, long)} — 标记 PENDING 任务 APPROVED，按节点 mode
  *       （OR→跳兄弟+推进；AND→等全员再推进）处理后继续 {@code resolveAndLand}。</li>
- *   <li>{@link #reject(CompleteCmd, long)} — 标记 REJECTED、跳兄弟、实例 REJECTED。</li>
+ *   <li>{@link #reject(CompleteCmd, long)} — 标记当前任务 REJECTED，并退回直接上一级。</li>
  *   <li>{@link #withdraw(long, long)} — 发起人在任意任务被处理前撤回。</li>
  * </ul>
  */
@@ -60,6 +63,7 @@ public class ProcessEngine {
     private final List<NodeHandler> nodeHandlers;
     private final NotificationPublisher notifier;
     private final ObjectMapper json;
+    private final FormalNumberService formalNumberService;
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
@@ -75,6 +79,7 @@ public class ProcessEngine {
         FormData fd2 = new FormData();
         fd2.setFormDefId(fd.getId());
         fd2.setFormDefVersion(fd.getVersion());
+        fd2.setBusinessNo(formalNumberService.businessNo());
         fd2.setData(writeJson(cmd.data()));
         fd2.setStatus("SUBMITTED");
         fd2.setCreatedBy(userId);
@@ -110,6 +115,7 @@ public class ProcessEngine {
         return Map.of(
             "instanceId", pi.getId(),
             "formDataId", fd2.getId(),
+            "businessNo", fd2.getBusinessNo(),
             "firstTaskIds", firstTasks
         );
     }
@@ -119,6 +125,9 @@ public class ProcessEngine {
         TaskEntity t = taskMapper.selectById(cmd.taskId());
         if (t == null || !"PENDING".equals(t.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "Task not pending");
+        }
+        if ("REWORK".equals(t.getTaskType())) {
+            throw new BizException("BAD_TASK_TYPE", "Rework task must be resubmitted from the form");
         }
         if (!Objects.equals(t.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
@@ -179,6 +188,9 @@ public class ProcessEngine {
         if (t == null || !"PENDING".equals(t.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "Task not pending");
         }
+        if ("REWORK".equals(t.getTaskType())) {
+            throw new BizException("BAD_TASK_TYPE", "Rework task cannot be rejected as approval");
+        }
         if (!Objects.equals(t.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
         }
@@ -188,7 +200,6 @@ public class ProcessEngine {
         t.setApprovedAt(OffsetDateTime.now());
         t.setComment(cmd.comment());
         taskMapper.updateById(t);
-        insertHistory(t, null, t.getNodeId(), "REJECT", operatorId, cmd.comment());
 
         ProcessInstance pi = taskMapperExt.selectInstanceById(t.getProcInstId()).orElseThrow();
         // 同节点兄弟一律 SKIPPED
@@ -202,46 +213,109 @@ public class ProcessEngine {
                 "SKIP", operatorId, null);
         }
 
-        // === 驳回路由 ===
-        // 默认 TO_END（保持 MVP 行为）；TO_NODE 表示驳回到指定节点重审。
         JsonNode root = readTree(pi.getProcessSnapshot());
         JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
         if (cur == null) {
             throw new BizException("BAD_FLOW", "current node not in tree: " + t.getNodeId());
         }
-        String refuseMode = cur.path("props").path("refuse").path("mode").asText("TO_END");
-        String refuseTarget = cur.path("props").path("refuse").path("targetNodeId").asText(null);
+        TaskEntity previous = previousApproval(t);
+        TaskEntity returned = new TaskEntity();
+        returned.setProcInstId(pi.getId());
+        returned.setStatus("PENDING");
+        returned.setTaskType(previous == null ? "REWORK" : "APPROVAL");
+        returned.setNodeId(previous == null ? "__rework__" : previous.getNodeId());
+        returned.setAssigneeId(previous == null ? pi.getStartedBy() : previous.getAssigneeId());
+        returned.setApprovalMode(previous == null ? "OR_SIGN" : previous.getApprovalMode());
+        taskMapper.insert(returned);
 
-        // 运行时覆盖：前端传入 rejectToNodeId 时优先
-        if (cmd.rejectToNodeId() != null && !cmd.rejectToNodeId().isBlank()) {
-            refuseMode = "TO_NODE";
-            refuseTarget = cmd.rejectToNodeId();
-        }
-
-        if ("TO_NODE".equals(refuseMode) && refuseTarget != null && !refuseTarget.isBlank()) {
-            JsonNode target = ProcessTreeNav.findById(root, refuseTarget);
-            if (target == null) {
-                throw new BizException("BAD_FLOW",
-                    "refuse target node not in tree: " + refuseTarget);
-            }
-            insertHistoryOnInstance(pi.getId(), t.getNodeId(), refuseTarget,
-                "REJECT_TO_NODE", operatorId, cmd.comment());
-            // 沿 target 重新推进：把 target 当作"起点节点"（不是其 children），
-            // 这样 target 自身会被重新评估（建任务或继续走）。
-            JsonNode formData = readFormData(pi.getFormDataId());
-            resolveAndLandFromNode(root, pi, formData, pi.getStartedBy(), Map.of(), target);
-            return;
-        }
-
-        // TO_END 或未配置 —— 实例终止（保持 MVP 行为）
-        pi.setStatus("REJECTED");
-        pi.setFinishedAt(OffsetDateTime.now());
-        pi.setCurrentNodeId(null);
+        pi.setStatus("RUNNING");
+        pi.setFinishedAt(null);
+        pi.setCurrentNodeId(returned.getNodeId());
         processInstanceMapper.updateById(pi);
-        insertHistoryOnInstance(pi.getId(), t.getNodeId(), null,
-            "REJECT", operatorId, cmd.comment());
-        notifier.publish(new NotificationEvent(this, "INSTANCE_REJECTED",
-            pi.getId(), null, pi.getStartedBy(), "实例 #" + pi.getId() + " 已驳回"));
+        insertHistory(t, t.getNodeId(), returned.getNodeId(), "REJECT", operatorId,
+            cmd.comment());
+
+        if (previous == null) {
+            FormData formData = formDataMapper.selectById(pi.getFormDataId());
+            if (formData == null) {
+                throw new BizException("NOT_FOUND", "form data not found");
+            }
+            formData.setStatus("NEEDS_REVISION");
+            formDataMapper.updateById(formData);
+        }
+        notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
+            pi.getId(), returned.getId(), returned.getAssigneeId(),
+            previous == null ? "申请已退回修改" : "审批已退回上一级"));
+    }
+
+    @Transactional
+    public List<Long> resubmitRework(long taskId, long operatorId) {
+        TaskEntity task = taskMapper.selectById(taskId);
+        if (task == null || !"PENDING".equals(task.getStatus())
+            || !"REWORK".equals(task.getTaskType())) {
+            throw new BizException("TASK_NOT_PENDING", "Rework task not pending");
+        }
+        if (!Objects.equals(task.getAssigneeId(), operatorId)) {
+            throw new AccessDeniedException("not your task");
+        }
+        ProcessInstance instance = taskMapperExt.selectInstanceById(task.getProcInstId())
+            .orElseThrow(() -> new BizException("NOT_FOUND", "instance not found"));
+        FormData formDataRow = formDataMapper.selectById(instance.getFormDataId());
+        if (formDataRow == null) {
+            throw new BizException("NOT_FOUND", "form data not found");
+        }
+
+        task.setStatus("RESUBMITTED");
+        task.setApprovedBy(operatorId);
+        task.setApprovedAt(OffsetDateTime.now());
+        task.setComment("修改后重新提交");
+        taskMapper.updateById(task);
+        formDataRow.setStatus("SUBMITTED");
+        formDataMapper.updateById(formDataRow);
+
+        JsonNode root = readTree(instance.getProcessSnapshot());
+        JsonNode formData = readTreeOrEmpty(formDataRow.getData());
+        Map<String, List<Long>> previousSelections = taskMapper.selectList(
+                new QueryWrapper<TaskEntity>()
+                    .eq("proc_inst_id", instance.getId())
+                    .eq("task_type", "APPROVAL")
+                    .orderByAsc("id"))
+            .stream()
+            .collect(Collectors.groupingBy(TaskEntity::getNodeId, LinkedHashMap::new,
+                Collectors.mapping(TaskEntity::getAssigneeId,
+                    Collectors.collectingAndThen(Collectors.toList(), values -> values.stream()
+                        .distinct().toList()))));
+
+        instance.setStatus("RUNNING");
+        instance.setFinishedAt(null);
+        processInstanceMapper.updateById(instance);
+        List<Long> taskIds = resolveAndLand(root, instance, formData, instance.getStartedBy(),
+            previousSelections, root);
+        insertHistory(task, "__rework__", root.path("id").asText(null), "RESUBMIT",
+            operatorId, task.getComment());
+        for (Long newTaskId : taskIds) {
+            TaskEntity next = taskMapper.selectById(newTaskId);
+            if (next != null) {
+                notifier.publish(new NotificationEvent(this, "TASK_ASSIGNED",
+                    instance.getId(), next.getId(), next.getAssigneeId(),
+                    "重新提交的审批任务 #" + next.getId()));
+            }
+        }
+        return taskIds;
+    }
+
+    private TaskEntity previousApproval(TaskEntity current) {
+        OffsetDateTime before = current.getCreatedAt() == null
+            ? current.getApprovedAt() : current.getCreatedAt();
+        QueryWrapper<TaskEntity> query = new QueryWrapper<TaskEntity>()
+            .eq("proc_inst_id", current.getProcInstId())
+            .eq("status", "APPROVED")
+            .ne("node_id", current.getNodeId());
+        if (before != null) {
+            query.lt("approved_at", before);
+        }
+        query.orderByDesc("approved_at").orderByDesc("id").last("LIMIT 1");
+        return taskMapper.selectOne(query);
     }
 
     @Transactional

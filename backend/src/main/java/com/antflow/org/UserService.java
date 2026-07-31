@@ -1,5 +1,6 @@
 package com.antflow.org;
 
+import com.antflow.common.FormalNumberService;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -22,12 +23,14 @@ public class UserService {
     private final DepartmentMapper departmentMapper;
     private final DepartmentLeaderMapper leaderMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final FormalNumberService formalNumberService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds) {
         validateUsernameAvailable(u.getUsername(), null);
         validateDisplayName(u.getDisplayName());
         validateDepartment(u.getDeptId());
+        u.setEmployeeNo(formalNumberService.employeeNo(u.getEmployeeNo(), null));
         u.setUsername(u.getUsername().trim());
         u.setDisplayName(u.getDisplayName().trim());
         // MVP demo default — production must require explicit password
@@ -81,6 +84,10 @@ public class UserService {
         if (departmentId != null && departmentMapper.selectById(departmentId) == null) {
             throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
         }
+    }
+
+    String normalizeEmployeeNo(String employeeNo, Long excludedUserId) {
+        return formalNumberService.employeeNo(employeeNo, excludedUserId);
     }
 
     private void validateDisplayName(String displayName) {

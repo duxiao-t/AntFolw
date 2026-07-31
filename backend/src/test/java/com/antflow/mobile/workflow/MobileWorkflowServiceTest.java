@@ -104,6 +104,8 @@ class MobileWorkflowServiceTest {
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class)))
             .thenReturn(List.of(history("ARRIVE", "root", "a1")));
         Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
+        Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
 
         MobileInstanceDetailDto detail = service.getInstanceDetail(501L, 7L, List.of("user"));
 
@@ -111,6 +113,27 @@ class MobileWorkflowServiceTest {
         assertThat(detail.formData().path("days").asInt()).isEqualTo(2);
         assertThat(detail.schema().get(0).path("id").asText()).isEqualTo("days");
         assertThat(detail.history()).extracting(MobileHistoryDto::action).containsExactly("ARRIVE");
+        assertThat(detail.applicantName()).isEqualTo("张三");
+        assertThat(detail.applicantDepartment()).isEqualTo("研发部");
+        assertThat(detail.startedAt()).isEqualTo(
+            OffsetDateTime.parse("2026-07-20T09:00:00+08:00"));
+        assertThat(detail.currentNodeName()).isEqualTo("部门审批");
+    }
+
+    @Test
+    void reworkInstanceUsesUserFacingCurrentNodeName() {
+        ProcessInstance reworkInstance = instance(501L, 7L, "RUNNING");
+        reworkInstance.setCurrentNodeId("__rework__");
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(reworkInstance);
+        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
+        Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+
+        MobileInstanceDetailDto detail = service.getInstanceDetail(501L, 7L, List.of("user"));
+
+        assertThat(detail.currentNodeName()).isEqualTo("待修改原单");
     }
 
     @Test
@@ -178,8 +201,7 @@ class MobileWorkflowServiceTest {
         MobileTaskDetailDto detail = service.getTaskDetail(401L, 8L, List.of("user"));
 
         assertThat(detail.allowedActions()).containsExactly("APPROVE", "REJECT");
-        assertThat(detail.rejectTargets()).extracting(RejectTargetDto::nodeId)
-            .containsExactly("a1");
+        assertThat(detail.rejectTargets()).isEmpty();
         assertThat(detail.task().nodeName()).isEqualTo("部门审批");
     }
 
@@ -191,6 +213,32 @@ class MobileWorkflowServiceTest {
 
         assertThatThrownBy(() -> service.getTaskDetail(401L, 9L, List.of("user")))
             .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void resubmitReworkUpdatesOriginalFormDataAndReusesInstance() {
+        TaskEntity rework = task(410L, 501L, "__rework__", 7L, "PENDING");
+        rework.setTaskType("REWORK");
+        Mockito.when(taskMapper.selectById(410L)).thenReturn(rework);
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
+        FormData original = formData(301L);
+        original.setBusinessNo("000000000301");
+        original.setStatus("NEEDS_REVISION");
+        Mockito.when(formDataMapper.selectById(301L)).thenReturn(original);
+        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
+        Mockito.when(engine.resubmitRework(410L, 7L)).thenReturn(List.of(411L));
+        JsonNode changed = objectMapper.createObjectNode().put("days", 3);
+
+        ReworkResult result = service.resubmitRework(410L,
+            new ReworkTaskRequest(changed, List.of()), 7L);
+
+        assertThat(result.instanceId()).isEqualTo(501L);
+        assertThat(result.formDataId()).isEqualTo(301L);
+        assertThat(result.businessNo()).isEqualTo("000000000301");
+        assertThat(result.firstTaskIds()).containsExactly(411L);
+        assertThat(original.getData()).contains("\"days\":3");
+        Mockito.verify(workflowMapper).deleteFileLinks(301L);
+        Mockito.verify(engine).resubmitRework(410L, 7L);
     }
 
     @Test

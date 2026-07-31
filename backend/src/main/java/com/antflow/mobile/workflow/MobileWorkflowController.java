@@ -107,6 +107,23 @@ public class MobileWorkflowController {
         workflowService.reject(id, request, principal().userId());
     }
 
+    @GetMapping("/rework-tasks/{id}")
+    public ReworkTaskDto reworkTask(@PathVariable Long id) {
+        return workflowService.getReworkTask(id, principal().userId());
+    }
+
+    @PutMapping("/rework-tasks/{id}")
+    public ReworkTaskDto saveReworkTask(@PathVariable Long id,
+                                        @RequestBody ReworkTaskRequest request) {
+        return workflowService.saveRework(id, request, principal().userId());
+    }
+
+    @PostMapping("/rework-tasks/{id}/resubmit")
+    public ReworkResult resubmitReworkTask(@PathVariable Long id,
+                                           @RequestBody ReworkTaskRequest request) {
+        return workflowService.resubmitRework(id, request, principal().userId());
+    }
+
     private static PrincipalHolder.Principal principal() {
         return PrincipalHolder.current()
             .orElseThrow(() -> new AccessDeniedException("authentication required"));

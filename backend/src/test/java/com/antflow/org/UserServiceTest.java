@@ -3,6 +3,7 @@ package com.antflow.org;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.antflow.engine.BizException;
+import com.antflow.common.FormalNumberService;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
@@ -30,7 +31,7 @@ class UserServiceTest {
         DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class));
         User user = new User();
         user.setUsername("duplicate");
         user.setDisplayName("Duplicate User");
@@ -52,7 +53,7 @@ class UserServiceTest {
         DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class));
         User user = new User();
         user.setUsername("new-user");
         user.setDisplayName("New User");
@@ -75,7 +76,7 @@ class UserServiceTest {
         DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class));
         User user = new User();
         user.setId(9L);
         when(userMapper.selectById(9L)).thenReturn(user);
@@ -103,7 +104,7 @@ class UserServiceTest {
         DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class));
         User user = new User();
         user.setId(1L);
         Role admin = new Role();
@@ -127,7 +128,7 @@ class UserServiceTest {
         DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate);
+        UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper, leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class));
         User user = new User();
         user.setId(9L);
         when(userMapper.selectById(9L)).thenReturn(user);

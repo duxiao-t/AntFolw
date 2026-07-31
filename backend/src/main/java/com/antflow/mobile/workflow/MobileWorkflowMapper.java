@@ -3,6 +3,7 @@ package com.antflow.mobile.workflow;
 import java.util.List;
 import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -36,7 +37,9 @@ public interface MobileWorkflowMapper {
           AND (
             form.name ILIKE CONCAT('%', #{keyword}, '%')
             OR applicant.display_name ILIKE CONCAT('%', #{keyword}, '%')
+            OR applicant.employee_no ILIKE CONCAT('%', #{keyword}, '%')
             OR dept.name ILIKE CONCAT('%', #{keyword}, '%')
+            OR data.business_no ILIKE CONCAT('%', #{keyword}, '%')
             OR t.node_id ILIKE CONCAT('%', #{keyword}, '%')
           )
         </if>
@@ -64,6 +67,7 @@ public interface MobileWorkflowMapper {
         <if test="keyword != null and keyword != ''">
           AND (
             form.name ILIKE CONCAT('%', #{keyword}, '%')
+            OR data.business_no ILIKE CONCAT('%', #{keyword}, '%')
             OR pi.current_node_id ILIKE CONCAT('%', #{keyword}, '%')
           )
         </if>
@@ -77,6 +81,22 @@ public interface MobileWorkflowMapper {
                                              @Param("limit") int limit,
                                              @Param("offset") int offset);
 
+    @Select("""
+        SELECT pi.id AS instance_id,
+               form.code AS form_code,
+               form.name AS form_title,
+               pi.status,
+               COALESCE(pi.finished_at, pi.started_at) AS updated_at
+        FROM t_process_instance pi
+        JOIN t_form_data data ON data.id = pi.form_data_id
+        JOIN t_form_definition form ON form.id = data.form_def_id
+        WHERE pi.started_by = #{userId}
+        ORDER BY pi.started_at DESC, pi.id DESC
+        LIMIT #{limit}
+        """)
+    List<RecentProcessDto> selectRecentProcesses(@Param("userId") long userId,
+                                                 @Param("limit") int limit);
+
     @Insert("""
         INSERT INTO t_form_data_file(form_data_id, file_id, field_id, sort_order)
         VALUES (#{formDataId}, #{fileId}, #{fieldId}, #{sortOrder})
@@ -85,6 +105,9 @@ public interface MobileWorkflowMapper {
                         @Param("fileId") UUID fileId,
                         @Param("fieldId") String fieldId,
                         @Param("sortOrder") int sortOrder);
+
+    @Delete("DELETE FROM t_form_data_file WHERE form_data_id = #{formDataId}")
+    void deleteFileLinks(@Param("formDataId") Long formDataId);
 
     @Select("""
         SELECT mf.*

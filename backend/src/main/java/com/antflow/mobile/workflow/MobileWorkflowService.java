@@ -26,9 +26,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -89,6 +91,7 @@ public class MobileWorkflowService {
             userId);
         Long formDataId = asLong(result.get("formDataId"));
         Long instanceId = asLong(result.get("instanceId"));
+        String businessNo = Objects.toString(result.get("businessNo"), null);
         List<Long> firstTaskIds = asLongList(result.get("firstTaskIds"));
 
         for (MobileFileRef file : filesOf(request)) {
@@ -99,7 +102,7 @@ public class MobileWorkflowService {
         if (request.draftId() != null) {
             draftService.deleteAfterSubmit(request.draftId(), userId);
         }
-        return new MobileStartResult(instanceId, formDataId, firstTaskIds);
+        return new MobileStartResult(instanceId, formDataId, businessNo, firstTaskIds);
     }
 
     public MobilePageDto<MobileInstanceDto> listInstances(long userId, int page, int size,
@@ -126,16 +129,28 @@ public class MobileWorkflowService {
         FormData formData = requireFormData(instance.getFormDataId());
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
         JsonNode snapshot = readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON");
+        User applicant = userMapper.selectById(instance.getStartedBy());
+        Department department = applicant == null || applicant.getDeptId() == null
+            ? null : departmentMapper.selectById(applicant.getDeptId());
+        List<ApprovalRecordDto> records = approvalRecords(instance, snapshot);
         return new MobileInstanceDetailDto(
             instance.getId(),
             instance.getStatus(),
             form == null ? null : form.getName(),
+            formData.getBusinessNo(),
+            applicant == null ? null : applicant.getDisplayName(),
+            applicant == null ? null : applicant.getEmployeeNo(),
+            department == null ? null : department.getName(),
+            instance.getStartedAt(),
+            nodeName(snapshot, instance.getCurrentNodeId()),
             readJsonArray(form == null ? null : form.getSchema(), "BAD_SCHEMA_JSON"),
             readJsonObject(formData.getData(), "BAD_JSON"),
             snapshot,
             history(instance.getId()),
             canWithdraw(instance, userId),
-            files(instance.getFormDataId())
+            files(instance.getFormDataId()),
+            approvalSummary(instance, records),
+            records
         );
     }
 
@@ -168,6 +183,7 @@ public class MobileWorkflowService {
         FormData formData = requireFormData(instance.getFormDataId());
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
         JsonNode snapshot = readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON");
+        List<ApprovalRecordDto> records = approvalRecords(instance, snapshot);
         return new MobileTaskDetailDto(
             toTaskDto(task, instance, form, snapshot),
             readJsonArray(form == null ? null : form.getSchema(), "BAD_SCHEMA_JSON"),
@@ -175,8 +191,10 @@ public class MobileWorkflowService {
             snapshot,
             history(instance.getId()),
             allowedActions(task, userId),
-            rejectTargets(snapshot, task.getNodeId()),
-            files(instance.getFormDataId())
+            List.of(),
+            files(instance.getFormDataId()),
+            approvalSummary(instance, records),
+            records
         );
     }
 
@@ -190,7 +208,39 @@ public class MobileWorkflowService {
     public void reject(Long taskId, MobileTaskActionRequest request, long userId) {
         engine.reject(new CompleteCmd(taskId, "REJECT",
             request == null ? null : request.comment(),
-            request == null ? null : request.rejectToNodeId()), userId);
+            null), userId);
+    }
+
+    public ReworkTaskDto getReworkTask(Long taskId, long userId) {
+        TaskEntity task = requireOwnedReworkTask(taskId, userId);
+        ProcessInstance instance = requireExistingInstance(task.getProcInstId());
+        FormData formData = requireFormData(instance.getFormDataId());
+        FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
+        if (form == null) {
+            throw new BizException("NOT_FOUND", "form definition not found");
+        }
+        return new ReworkTaskDto(task.getId(), instance.getId(), form.getCode(), form.getName(),
+            formData.getBusinessNo(),
+            readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"),
+            readJsonObject(formData.getData(), "BAD_JSON"),
+            readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON"),
+            files(formData.getId()));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ReworkTaskDto saveRework(Long taskId, ReworkTaskRequest request, long userId) {
+        TaskEntity task = requireOwnedReworkTask(taskId, userId);
+        updateRework(task, request, userId, false);
+        return getReworkTask(taskId, userId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ReworkResult resubmitRework(Long taskId, ReworkTaskRequest request, long userId) {
+        TaskEntity task = requireOwnedReworkTask(taskId, userId);
+        FormData formData = updateRework(task, request, userId, true);
+        List<Long> firstTaskIds = engine.resubmitRework(taskId, userId);
+        return new ReworkResult(task.getProcInstId(), formData.getId(), formData.getBusinessNo(),
+            firstTaskIds);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -217,6 +267,62 @@ public class MobileWorkflowService {
             return instance;
         }
         throw new AccessDeniedException("instance is not readable");
+    }
+
+    private TaskEntity requireOwnedReworkTask(Long taskId, long userId) {
+        TaskEntity task = requireExistingTask(taskId);
+        if (!"PENDING".equals(task.getStatus()) || !"REWORK".equals(task.getTaskType())) {
+            throw new BizException("TASK_NOT_PENDING", "待修改任务已处理");
+        }
+        if (!Objects.equals(task.getAssigneeId(), userId)) {
+            throw new AccessDeniedException("not your rework task");
+        }
+        return task;
+    }
+
+    private FormData updateRework(TaskEntity task, ReworkTaskRequest request, long userId,
+                                  boolean validate) {
+        if (request == null) {
+            throw new BizException("BAD_REQUEST", "表单内容不能为空");
+        }
+        ProcessInstance instance = requireExistingInstance(task.getProcInstId());
+        FormData formData = requireFormData(instance.getFormDataId());
+        JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
+        if (validate) {
+            FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
+            if (form == null) {
+                throw new BizException("NOT_FOUND", "form definition not found");
+            }
+            formDefinitionService.validateSubmission(form.getSchema(), data);
+        }
+        formData.setData(writeJson(data));
+        formData.setStatus("NEEDS_REVISION");
+        formDataMapper.updateById(formData);
+        if (request.files() != null) {
+            reconcileFileLinks(formData.getId(), request.files(), userId);
+        }
+        return formData;
+    }
+
+    private void reconcileFileLinks(Long formDataId, List<MobileFileRef> fileRefs, long userId) {
+        List<MobileFileRef> normalized = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (MobileFileRef ref : fileRefs) {
+            if (ref == null || ref.fileId() == null || ref.fieldId() == null
+                || ref.fieldId().isBlank() || ref.sortOrder() < 0) {
+                throw new BizException("BAD_FILE_REF", "附件关联无效");
+            }
+            requireReadyOwnedFile(ref.fileId(), userId);
+            String key = ref.fileId() + "\u0000" + ref.fieldId();
+            if (seen.add(key)) {
+                normalized.add(ref);
+            }
+        }
+        workflowMapper.deleteFileLinks(formDataId);
+        for (MobileFileRef ref : normalized) {
+            workflowMapper.insertFileLink(formDataId, ref.fileId(), ref.fieldId(),
+                ref.sortOrder());
+        }
     }
 
     private ProcessInstance requireExistingInstance(Long instanceId) {
@@ -268,8 +374,9 @@ public class MobileWorkflowService {
         JsonNode snapshot = readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON");
         String currentNodeName = nodeName(snapshot, instance.getCurrentNodeId());
         return new MobileInstanceDto(instance.getId(), instance.getStatus(),
-            form == null ? null : form.getName(), currentNodeName, instance.getStartedAt(),
-            instance.getFinishedAt());
+            form == null ? null : form.getName(),
+            formData == null ? null : formData.getBusinessNo(), currentNodeName,
+            instance.getStartedAt(), instance.getFinishedAt());
     }
 
     private MobileTaskDto toTaskDto(TaskEntity task) {
@@ -288,10 +395,14 @@ public class MobileWorkflowService {
         return new MobileTaskDto(
             task.getId(),
             task.getProcInstId(),
+            form == null ? null : form.getCode(),
             form == null ? null : form.getName(),
+            form == null ? null : requireFormData(instance.getFormDataId()).getBusinessNo(),
             applicant == null ? null : applicant.getDisplayName(),
+            applicant == null ? null : applicant.getEmployeeNo(),
             department == null ? null : department.getName(),
-            nodeName(snapshot, task.getNodeId()),
+            "REWORK".equals(task.getTaskType()) ? "待修改原单" : nodeName(snapshot, task.getNodeId()),
+            task.getTaskType() == null ? "APPROVAL" : task.getTaskType(),
             task.getStatus(),
             instance.getStatus(),
             task.getCreatedAt()
@@ -310,6 +421,76 @@ public class MobileWorkflowService {
             .toList();
     }
 
+    private List<ApprovalRecordDto> approvalRecords(ProcessInstance instance, JsonNode snapshot) {
+        List<ApprovalRecordDto> records = new ArrayList<>();
+        User applicant = userMapper.selectById(instance.getStartedBy());
+        Department applicantDepartment = department(applicant);
+        records.add(new ApprovalRecordDto(
+            "submission", null, snapshot.path("id").asText("root"), "提交申请", "SUBMITTED",
+            displayName(applicant), applicant == null ? null : applicant.getEmployeeNo(),
+            applicantDepartment == null ? null : applicantDepartment.getName(), null,
+            instance.getStartedAt(), instance.getStartedAt()));
+
+        List<TaskEntity> tasks = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+            .eq("proc_inst_id", instance.getId())
+            .orderByAsc("created_at")
+            .orderByAsc("id"));
+        for (TaskEntity task : tasks) {
+            String status = approvalRecordStatus(task);
+            if (status == null) {
+                continue;
+            }
+            Long operatorId = task.getApprovedBy() == null
+                ? task.getAssigneeId() : task.getApprovedBy();
+            User operator = userMapper.selectById(operatorId);
+            Department operatorDepartment = department(operator);
+            records.add(new ApprovalRecordDto(
+                "task-" + task.getId(), task.getId(), task.getNodeId(),
+                "REWORK".equals(task.getTaskType()) ? "退回修改"
+                    : nodeName(snapshot, task.getNodeId()),
+                status, displayName(operator), operator == null ? null : operator.getEmployeeNo(),
+                operatorDepartment == null ? null : operatorDepartment.getName(),
+                task.getComment(), task.getCreatedAt(), task.getApprovedAt()));
+        }
+        return records;
+    }
+
+    private ApprovalSummaryDto approvalSummary(ProcessInstance instance,
+                                                List<ApprovalRecordDto> records) {
+        int processing = (int) records.stream()
+            .filter(record -> "PROCESSING".equals(record.status())
+                || "RETURNED".equals(record.status()))
+            .count();
+        int completed = records.size() - processing;
+        return new ApprovalSummaryDto(records.size(), completed, processing,
+            "APPROVED".equals(instance.getStatus()) && processing == 0);
+    }
+
+    private static String approvalRecordStatus(TaskEntity task) {
+        if ("PENDING".equals(task.getStatus())) {
+            return "REWORK".equals(task.getTaskType()) ? "RETURNED" : "PROCESSING";
+        }
+        return switch (task.getStatus()) {
+            case "APPROVED" -> "APPROVED";
+            case "REJECTED" -> "REJECTED";
+            case "RESUBMITTED" -> "RESUBMITTED";
+            default -> null;
+        };
+    }
+
+    private Department department(User user) {
+        return user == null || user.getDeptId() == null
+            ? null : departmentMapper.selectById(user.getDeptId());
+    }
+
+    private static String displayName(User user) {
+        if (user == null) {
+            return "未记录";
+        }
+        return user.getDisplayName() == null || user.getDisplayName().isBlank()
+            ? user.getUsername() : user.getDisplayName();
+    }
+
     private List<MobileFileDto> files(Long formDataId) {
         return workflowMapper.selectFilesByFormDataId(formDataId).stream()
             .map(MobileWorkflowService::toFileDto)
@@ -318,6 +499,7 @@ public class MobileWorkflowService {
 
     private List<String> allowedActions(TaskEntity task, long userId) {
         if (!PENDING_STATUS.equals(task.getStatus())
+            || "REWORK".equals(task.getTaskType())
             || !Objects.equals(task.getAssigneeId(), userId)
             || "CC".equals(task.getStatus())) {
             return List.of();
@@ -357,6 +539,9 @@ public class MobileWorkflowService {
         if (nodeId == null || nodeId.isBlank()) {
             return null;
         }
+        if ("__rework__".equals(nodeId)) {
+            return "待修改原单";
+        }
         JsonNode node = ProcessTreeNav.findById(root, nodeId);
         return node == null ? nodeId : nodeName(node);
     }
@@ -391,6 +576,14 @@ public class MobileWorkflowService {
             return objectMapper.readTree(value);
         } catch (JsonProcessingException exception) {
             throw new BizException(code, exception.getMessage());
+        }
+    }
+
+    private String writeJson(JsonNode value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new BizException("BAD_JSON", exception.getMessage());
         }
     }
 

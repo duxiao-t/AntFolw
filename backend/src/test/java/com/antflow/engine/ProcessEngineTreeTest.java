@@ -1,6 +1,7 @@
 package com.antflow.engine;
 
 import com.antflow.engine.condition.ConditionEvaluator;
+import com.antflow.common.FormalNumberService;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.engine.resolver.AssigneeResolver;
@@ -27,6 +28,7 @@ import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -60,6 +62,7 @@ class ProcessEngineTreeTest {
     private TaskHistoryMapper historyMapper;
     private AssigneeResolver assigneeResolver;
     private ObjectMapper json;
+    private FormalNumberService formalNumberService;
 
     private final ConditionEvaluator evaluator = new ConditionEvaluator();
 
@@ -79,7 +82,8 @@ class ProcessEngineTreeTest {
         return new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
-            historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class), json
+            historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class),
+            json, formalNumberService
         );
     }
 
@@ -92,6 +96,8 @@ class ProcessEngineTreeTest {
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         assigneeResolver = Mockito.mock(AssigneeResolver.class);
         json = new ObjectMapper();
+        formalNumberService = Mockito.mock(FormalNumberService.class);
+        Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
 
         // Auto-increment ids for inserts.
         Mockito.doAnswer(inv -> {
@@ -425,7 +431,7 @@ class ProcessEngineTreeTest {
         assertThat(pi.getCurrentNodeId()).isEqualTo("a2");
     }
 
-    // ---------- 7. reject writes instance-level REJECT history ----------
+    // ---------- 7. first approval rejects to starter rework ----------
     @Test
     void reject_writesInstanceLevelRejectHistory() {
         String processJson = """
@@ -446,34 +452,42 @@ class ProcessEngineTreeTest {
             ProcessInstance pi = new ProcessInstance();
             pi.setId(1L); pi.setProcDefId(10L); pi.setStatus("RUNNING");
             pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
-            pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            pi.setStartedBy(7L); pi.setCurrentNodeId("a1"); pi.setFormDataId(1L);
             return pi;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData data = new FormData();
+            data.setId(1L);
+            data.setData("{\"k\":\"v\"}");
+            data.setStatus("SUBMITTED");
+            return data;
         });
 
         eng.reject(new CompleteCmd(1L, "reject", "not ok", null), 42L);
 
-        // Instance must be REJECTED.
-        assertThat(lastInstance().getStatus()).isEqualTo("REJECTED");
+        assertThat(lastInstance().getStatus()).isEqualTo("RUNNING");
+        assertThat(lastInstance().getCurrentNodeId()).isEqualTo("__rework__");
+        assertThat(capturesOfTaskInsert()).anyMatch(task -> "REWORK".equals(task.getTaskType())
+            && "__rework__".equals(task.getNodeId()) && task.getAssigneeId() == 7L);
 
-        // Verify an instance-level REJECT history row was inserted (taskId == null).
         ArgumentCaptor<TaskHistoryEntity> cap = ArgumentCaptor.forClass(TaskHistoryEntity.class);
         Mockito.verify(historyMapper, Mockito.atLeastOnce()).insert(cap.capture());
         List<TaskHistoryEntity> all = cap.getAllValues();
         TaskHistoryEntity instReject = all.stream()
-            .filter(h -> "REJECT".equals(h.getAction()) && h.getTaskId() == null)
+            .filter(h -> "REJECT".equals(h.getAction()) && Long.valueOf(1L).equals(h.getTaskId()))
             .findFirst()
             .orElseThrow(() -> new AssertionError(
-                "no instance-level REJECT history (taskId==null) found in: " + all));
+                "no task REJECT history found in: " + all));
         assertThat(instReject.getProcInstId()).isEqualTo(1L);
         assertThat(instReject.getFromNodeId()).isEqualTo("a1");
-        assertThat(instReject.getToNodeId()).isNull();
+        assertThat(instReject.getToNodeId()).isEqualTo("__rework__");
         assertThat(instReject.getOperatorId()).isEqualTo(42L);
         assertThat(instReject.getComment()).isEqualTo("not ok");
     }
 
-    // ---------- 8. reject to specified node (props.refuse = TO_NODE) ----------
+    // ---------- 8. later approval rejects to actual previous approval ----------
     @Test
-    void reject_toConfiguredNode_resumesAtTarget() {
+    void reject_returnsToPreviousCompletedApproval() {
         // ROOT -> a1 (ASSIGN_USER [42], refuse={mode:TO_NODE,targetNodeId:a1})
         //   -> a2 (ASSIGN_USER [99]) -> null
         String processJson = """
@@ -493,14 +507,21 @@ class ProcessEngineTreeTest {
         ProcessEngine eng = engine();
         eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
 
-        // Task id=1, 42's PENDING on a1.
-        Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> {
+            TaskEntity current = taskWithId(1L, "a2", 99L, "PENDING");
+            current.setCreatedAt(OffsetDateTime.parse("2026-07-30T10:00:00+08:00"));
+            return current;
+        });
         Mockito.when(taskMapper.selectList(any())).thenAnswer(inv -> List.of());
+        TaskEntity previous = taskWithId(8L, "a1", 42L, "APPROVED");
+        previous.setApprovedAt(OffsetDateTime.parse("2026-07-30T09:00:00+08:00"));
+        previous.setApprovalMode("OR_SIGN");
+        Mockito.when(taskMapper.selectOne(any())).thenReturn(previous);
         Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
             ProcessInstance pi = new ProcessInstance();
             pi.setId(1L); pi.setProcDefId(10L); pi.setProcessSnapshot(processJson);
             pi.setProcessDefVersion(1);
-            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a2");
             return pi;
         });
         Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
@@ -509,37 +530,34 @@ class ProcessEngineTreeTest {
             return fd;
         });
 
-        eng.reject(new CompleteCmd(1L, "reject", "请重审", null), 42L);
+        eng.reject(new CompleteCmd(1L, "reject", "请重审", "not-used"), 99L);
 
         // Instance must STILL be RUNNING (驳回到节点未结束).
         assertThat(lastInstance().getStatus()).isEqualTo("RUNNING");
 
-        // 应该有 1 条 PENDING 任务：a1 上的新任务（id=2）
         List<TaskEntity> tasks = capturesOfTaskInsert();
-        TaskEntity reborn = tasks.stream()
-            .filter(t -> "a1".equals(t.getNodeId()) && "PENDING".equals(t.getStatus()))
-            .findFirst()
-            .orElseThrow(() -> new AssertionError("no reborn PENDING on a1 in: " + tasks));
+        TaskEntity reborn = tasks.get(tasks.size() - 1);
+        assertThat(reborn.getNodeId()).isEqualTo("a1");
+        assertThat(reborn.getTaskType()).isEqualTo("APPROVAL");
         assertThat(reborn.getAssigneeId()).isEqualTo(42L);
 
-        // 历史记录里应有 REJECT_TO_NODE
         ArgumentCaptor<TaskHistoryEntity> cap = ArgumentCaptor.forClass(TaskHistoryEntity.class);
         Mockito.verify(historyMapper, Mockito.atLeastOnce()).insert(cap.capture());
         List<TaskHistoryEntity> all = cap.getAllValues();
         TaskHistoryEntity rtn = all.stream()
-            .filter(h -> "REJECT_TO_NODE".equals(h.getAction()))
+            .filter(h -> "REJECT".equals(h.getAction()) && "a1".equals(h.getToNodeId()))
             .findFirst()
             .orElseThrow(() -> new AssertionError(
-                "no REJECT_TO_NODE history in: " + all));
-        assertThat(rtn.getFromNodeId()).isEqualTo("a1");
+                "no previous-level REJECT history in: " + all));
+        assertThat(rtn.getFromNodeId()).isEqualTo("a2");
         assertThat(rtn.getToNodeId()).isEqualTo("a1");
-        assertThat(rtn.getOperatorId()).isEqualTo(42L);
+        assertThat(rtn.getOperatorId()).isEqualTo(99L);
         assertThat(rtn.getComment()).isEqualTo("请重审");
     }
 
-    // ---------- 9. reject with runtime rejectToNodeId override ----------
+    // ---------- 9. client target cannot override direct-previous routing ----------
     @Test
-    void reject_runtimeOverride_routesToChosenNode() {
+    void reject_ignoresClientSelectedTarget() {
         // Process tree 没有 props.refuse，但运行时传 rejectToNodeId="a1"，应驳回到 a1。
         // a1 之后还有 a2，所以驳回到 a1 重审后会新建 a1 的任务。
         String processJson = """
@@ -565,6 +583,7 @@ class ProcessEngineTreeTest {
             pi.setId(1L); pi.setProcDefId(10L); pi.setProcessSnapshot(processJson);
             pi.setProcessDefVersion(1);
             pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            pi.setFormDataId(1L);
             return pi;
         });
         Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
@@ -573,20 +592,20 @@ class ProcessEngineTreeTest {
             return fd;
         });
 
-        // 运行时传 rejectToNodeId="a1"，即使树里没配 refuse，也应驳回到 a1
+        // 首节点没有上一级，即使客户端传目标，也必须退回发起人修改原单。
         eng.reject(new CompleteCmd(1L, "reject", "再看看", "a1"), 42L);
 
-        // 实例仍 RUNNING，新任务在 a1 上
         assertThat(lastInstance().getStatus()).isEqualTo("RUNNING");
         boolean hasReborn = capturesOfTaskInsert().stream()
-            .anyMatch(t -> "a1".equals(t.getNodeId()) && "PENDING".equals(t.getStatus()));
+            .anyMatch(t -> "__rework__".equals(t.getNodeId())
+                && "REWORK".equals(t.getTaskType()) && t.getAssigneeId() == 7L);
         assertThat(hasReborn).isTrue();
 
-        // 历史有 REJECT_TO_NODE
         ArgumentCaptor<TaskHistoryEntity> cap = ArgumentCaptor.forClass(TaskHistoryEntity.class);
         Mockito.verify(historyMapper, Mockito.atLeastOnce()).insert(cap.capture());
         boolean hasRtn = cap.getAllValues().stream()
-            .anyMatch(h -> "REJECT_TO_NODE".equals(h.getAction()));
+            .anyMatch(h -> "REJECT".equals(h.getAction())
+                && "__rework__".equals(h.getToNodeId()));
         assertThat(hasRtn).isTrue();
     }
 }

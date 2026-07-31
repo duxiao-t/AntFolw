@@ -54,6 +54,7 @@ public class ApprovalHandler implements NodeHandler {
             nt.setProcInstId(pi.getId());
             nt.setNodeId(nodeId);
             nt.setAssigneeId(a);
+            nt.setTaskType("APPROVAL");
             nt.setStatus("PENDING");
             nt.setApprovalMode(mode);
             taskMapper.insert(nt);

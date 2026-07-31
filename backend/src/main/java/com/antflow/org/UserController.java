@@ -22,7 +22,9 @@ public class UserController {
                            @RequestParam(required = false) Long deptId) {
         var q = new QueryWrapper<User>();
         if (keyword != null && !keyword.isBlank()) {
-            q.and(w -> w.like("username", keyword).or().like("display_name", keyword));
+            q.and(w -> w.like("username", keyword)
+                .or().like("display_name", keyword)
+                .or().like("employee_no", keyword));
         }
         if (deptId != null) {
             q.eq("dept_id", deptId);
@@ -33,6 +35,7 @@ public class UserController {
     @PostMapping
     public Map<String, Object> create(@RequestBody Map<String, Object> body) {
         User u = new User();
+        u.setEmployeeNo((String) body.get("employeeNo"));
         u.setUsername((String) body.get("username"));
         u.setDisplayName((String) body.get("displayName"));
         u.setEmail((String) body.get("email"));
@@ -55,6 +58,9 @@ public class UserController {
         if (body.containsKey("phone")) u.setPhone((String) body.get("phone"));
         if (body.containsKey("position")) u.setPosition((String) body.get("position"));
         if (body.containsKey("gender")) u.setGender((String) body.get("gender"));
+        if (body.containsKey("employeeNo")) {
+            u.setEmployeeNo(userService.normalizeEmployeeNo((String) body.get("employeeNo"), id));
+        }
         if (body.containsKey("deptId")) {
             Long departmentId = body.get("deptId") == null
                 ? null

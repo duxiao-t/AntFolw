@@ -1,5 +1,6 @@
 package com.antflow.form.runtime;
 
+import com.antflow.common.FormalNumberService;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
@@ -18,6 +19,7 @@ public class FormDataService {
     private final FormDataMapper mapper;
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper json;
+    private final FormalNumberService formalNumberService;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -33,8 +35,12 @@ public class FormDataService {
         var fd2 = new FormData();
         fd2.setFormDefId(fd.getId());
         fd2.setFormDefVersion(fd.getVersion());
+        String normalizedStatus = status == null ? "SUBMITTED" : status;
+        if (!"DRAFT".equals(normalizedStatus)) {
+            fd2.setBusinessNo(formalNumberService.businessNo());
+        }
         fd2.setData(writeJson(data));
-        fd2.setStatus(status == null ? "SUBMITTED" : status);
+        fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
         mapper.insert(fd2);
         return fd2.getId();

@@ -1,8 +1,6 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
-import com.antflow.form.FormDefinition;
-import com.antflow.form.FormDefinitionMapper;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.antflow.task.TaskMapper;
@@ -13,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,13 +25,16 @@ class MobileBootstrapControllerTest {
     @Mock
     private TaskMapper taskMapper;
     @Mock
-    private FormDefinitionMapper formDefinitionMapper;
+    private MobileAppService mobileAppService;
+    @Mock
+    private MobileWorkflowMapper workflowMapper;
 
     private MobileBootstrapController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new MobileBootstrapController(userMapper, taskMapper, formDefinitionMapper);
+        controller = new MobileBootstrapController(userMapper, taskMapper, mobileAppService,
+            workflowMapper);
         PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("user", "admin")));
     }
 
@@ -47,14 +49,13 @@ class MobileBootstrapControllerTest {
         user.setId(1L);
         user.setUsername("admin");
         user.setDisplayName("AntFlow Admin");
-        FormDefinition form = new FormDefinition();
-        form.setId(11L);
-        form.setCode("leave");
-        form.setName("请假申请");
-
         when(userMapper.selectById(1L)).thenReturn(user);
         when(taskMapper.selectCount(any())).thenReturn(2L);
-        when(formDefinitionMapper.selectList(any())).thenReturn(List.of(form));
+        when(mobileAppService.favorites(1L)).thenReturn(List.of(
+            new MobileAppDto(11L, "leave", "请假申请", null, "other", "其他", null)));
+        when(workflowMapper.selectRecentProcesses(1L, 4)).thenReturn(List.of(
+            new RecentProcessDto(21L, "leave", "请假申请", "RUNNING",
+                OffsetDateTime.parse("2026-07-30T10:00:00+08:00"))));
 
         MobileBootstrapDto result = controller.bootstrap();
 
@@ -62,6 +63,8 @@ class MobileBootstrapControllerTest {
         assertEquals(2, result.pendingCount());
         assertEquals(1, result.favoriteApps().size());
         assertEquals("leave", result.favoriteApps().get(0).code());
+        assertEquals(1, result.recentProcesses().size());
+        assertEquals(21L, result.recentProcesses().get(0).instanceId());
         assertEquals("builtin-1", result.brandingVersion());
     }
 }

@@ -14,21 +14,23 @@ record StartMobileInstanceRequest(String formCode, JsonNode data,
                                   Long draftId, List<MobileFileRef> files) {
 }
 
-record MobileStartResult(Long instanceId, Long formDataId, List<Long> firstTaskIds) {
+record MobileStartResult(Long instanceId, Long formDataId, String businessNo,
+                         List<Long> firstTaskIds) {
 }
 
 record MobileFormDto(String code, String name, Integer version, JsonNode schema,
                      JsonNode settings, JsonNode process) {
 }
 
-record MobileTaskActionRequest(String comment, String rejectToNodeId) {
+record MobileTaskActionRequest(String comment) {
 }
 
 record MobileDraftRequest(String formCode, JsonNode data) {
 }
 
-record MobileTaskDto(Long id, Long instanceId, String formName,
-                     String applicantName, String applicantDepartment, String nodeName,
+record MobileTaskDto(Long id, Long instanceId, String formCode, String formName,
+                     String businessNo, String applicantName, String applicantEmployeeNo,
+                     String applicantDepartment, String nodeName, String taskType,
                      String taskStatus, String instanceStatus, OffsetDateTime createdAt) {
 }
 
@@ -43,18 +45,48 @@ record MobileHistoryDto(Long id, String fromNodeId, String toNodeId, Long taskId
 record RejectTargetDto(String nodeId, String name) {
 }
 
+record ApprovalSummaryDto(int flowedCount, int completedCount, int processingCount,
+                          boolean complete) {
+}
+
+record ApprovalRecordDto(String id, Long taskId, String nodeId, String nodeName,
+                         String status, String operatorName, String employeeNo,
+                         String department, String comment, OffsetDateTime receivedAt,
+                         OffsetDateTime completedAt) {
+}
+
 record MobileTaskDetailDto(MobileTaskDto task, JsonNode schema,
                            JsonNode formData, JsonNode processSnapshot,
                            List<MobileHistoryDto> history, List<String> allowedActions,
-                           List<RejectTargetDto> rejectTargets, List<MobileFileDto> files) {
+                           List<RejectTargetDto> rejectTargets, List<MobileFileDto> files,
+                           ApprovalSummaryDto approvalSummary,
+                           List<ApprovalRecordDto> approvalRecords) {
 }
 
-record MobileInstanceDto(Long id, String status, String formName, String currentNodeName,
+record MobileInstanceDto(Long id, String status, String formName, String businessNo,
+                         String currentNodeName,
                          OffsetDateTime startedAt, OffsetDateTime finishedAt) {
 }
 
 record MobileInstanceDetailDto(Long id, String status, String formName,
+                               String businessNo, String applicantName,
+                               String applicantEmployeeNo, String applicantDepartment,
+                               OffsetDateTime startedAt, String currentNodeName,
                                JsonNode schema, JsonNode formData, JsonNode processSnapshot,
                                List<MobileHistoryDto> history, boolean canWithdraw,
-                               List<MobileFileDto> files) {
+                               List<MobileFileDto> files,
+                               ApprovalSummaryDto approvalSummary,
+                               List<ApprovalRecordDto> approvalRecords) {
+}
+
+record ReworkTaskDto(Long taskId, Long instanceId, String formCode, String formName,
+                     String businessNo, JsonNode schema, JsonNode formData,
+                     JsonNode processSnapshot, List<MobileFileDto> files) {
+}
+
+record ReworkTaskRequest(JsonNode data, List<MobileFileRef> files) {
+}
+
+record ReworkResult(Long instanceId, Long formDataId, String businessNo,
+                    List<Long> firstTaskIds) {
 }
