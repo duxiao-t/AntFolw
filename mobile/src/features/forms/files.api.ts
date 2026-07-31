@@ -1,6 +1,6 @@
 import type { MobileFile } from '../../shared/api/types';
 import { getAuthController } from '../../shared/api/auth';
-import { ApiError, type ApiErrorBody } from '../../shared/api/errors';
+import { ApiError, ApiErrorFactory, type ApiErrorBody } from '../../shared/api/errors';
 import { apiRequest } from '../../shared/api/http';
 
 export type MobileFileDto = MobileFile;
@@ -49,6 +49,10 @@ export async function deleteMobileFile(fileId: string): Promise<void> {
   await apiRequest<void>(`/api/mobile/files/${encodeURIComponent(fileId)}`, {
     method: 'DELETE',
   });
+}
+
+export async function fetchMobileFileBlob(contentUrl: string): Promise<Blob> {
+  return fetchMobileFileBlobWithAuth(contentUrl);
 }
 
 function withKeyword(endpoint: string, keyword: string) {
@@ -139,6 +143,30 @@ function uploadMobileFileWithProgress(
     }
     xhr.send(formData);
   });
+}
+
+async function fetchMobileFileBlobWithAuth(contentUrl: string, retry = false): Promise<Blob> {
+  const controller = getAuthController();
+  const headers = new Headers({ Accept: '*/*' });
+  const auth = controller.authorizationHeader();
+  if (auth.Authorization) {
+    headers.set('Authorization', auth.Authorization);
+  }
+  if (retry) {
+    headers.set('X-AF-Retry', '1');
+  }
+  const response = await fetch(contentUrl, {
+    headers,
+    credentials: 'include',
+  });
+  if (response.status === 401 && !retry && !controller.isAuthEndpoint(contentUrl)) {
+    await controller.refresh();
+    return fetchMobileFileBlobWithAuth(contentUrl, true);
+  }
+  if (!response.ok) {
+    throw await ApiErrorFactory.fromResponse(response);
+  }
+  return response.blob();
 }
 
 type UploadProgressState = {

@@ -38,6 +38,12 @@ beforeEach(() => {
           size: file.size,
         });
       }
+      if (url.startsWith('/api/mobile/files/') && url.endsWith('/content')) {
+        return new Response(new Blob(['image'], { type: 'image/png' }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        });
+      }
       if (url.startsWith('/api/mobile/files/') && init?.method === 'DELETE') {
         return new Response(null, { status: 204 });
       }
@@ -409,6 +415,8 @@ describe('advanced mobile fields', () => {
   it('previews uploaded image files through the backend content URL', async () => {
     const user = userEvent.setup();
     const open = vi.fn();
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:http://localhost/preview-photo');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     vi.stubGlobal('open', open);
     const { container } = render(
       <FileUploadField
@@ -429,15 +437,20 @@ describe('advanced mobile fields', () => {
 
     await user.upload(screen.getByLabelText('图片'), new File(['image'], 'photo.png', { type: 'image/png' }));
     const preview = await screen.findByRole('button', { name: '预览 photo.png' });
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/mobile/files/remote-photo.png/content',
+      expect.objectContaining({ credentials: 'include' }),
+    );
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(container.querySelector('img')).toHaveAttribute(
       'src',
-      '/api/mobile/files/remote-photo.png/content',
+      'blob:http://localhost/preview-photo',
     );
 
     await user.click(preview);
 
     expect(open).toHaveBeenCalledWith(
-      '/api/mobile/files/remote-photo.png/content',
+      'blob:http://localhost/preview-photo',
       '_blank',
       'noopener,noreferrer',
     );

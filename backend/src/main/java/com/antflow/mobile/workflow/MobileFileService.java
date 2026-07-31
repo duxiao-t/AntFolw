@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import javax.imageio.ImageIO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -129,6 +130,12 @@ public class MobileFileService {
         if (!submittedContentType.equals(detectedContentType)) {
             throw new BizException("BAD_FILE", "content type mismatch");
         }
+        if (detectedContentType.startsWith("image/") && !isReadableImage(content)) {
+            throw new BizException("BAD_FILE", "unsupported file content");
+        }
+        if ("application/pdf".equals(detectedContentType) && !hasPdfTrailer(content)) {
+            throw new BizException("BAD_FILE", "unsupported file content");
+        }
     }
 
     private static boolean hasExecutableSignature(byte[] content) {
@@ -152,6 +159,37 @@ public class MobileFileService {
             return "application/pdf";
         }
         return null;
+    }
+
+    private static boolean isReadableImage(byte[] content) {
+        try {
+            return ImageIO.read(new ByteArrayInputStream(content)) != null;
+        } catch (IOException exception) {
+            return false;
+        }
+    }
+
+    private static boolean hasPdfTrailer(byte[] content) {
+        byte[] marker = "%%EOF".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        int start = Math.max(0, content.length - 2048);
+        for (int index = content.length - marker.length; index >= start; index--) {
+            if (matchesAt(content, marker, index)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesAt(byte[] content, byte[] marker, int start) {
+        if (start < 0 || start + marker.length > content.length) {
+            return false;
+        }
+        for (int index = 0; index < marker.length; index++) {
+            if (content[start + index] != marker[index]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean startsWith(byte[] content, byte[] signature) {

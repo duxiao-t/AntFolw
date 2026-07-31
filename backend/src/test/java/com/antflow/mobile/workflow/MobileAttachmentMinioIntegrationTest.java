@@ -1,8 +1,12 @@
 package com.antflow.mobile.workflow;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import javax.imageio.ImageIO;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.junit.jupiter.api.Test;
@@ -61,9 +65,9 @@ class MobileAttachmentMinioIntegrationTest {
         String formCode = "attach_" + UUID.randomUUID().toString().replace("-", "");
         publishSingleLevelFlow(adminToken, formCode);
 
-        byte[] draftContent = pngBytes((byte) 0x01);
-        byte[] originalContent = pngBytes((byte) 0x02);
-        byte[] replacementContent = pngBytes((byte) 0x03);
+        byte[] draftContent = pngBytes(0x0B57D0);
+        byte[] originalContent = pngBytes(0x21A67A);
+        byte[] replacementContent = pngBytes(0xC0392B);
 
         Map<String, Object> draftFile = upload(adminToken, "draft.png", draftContent,
             MediaType.IMAGE_PNG);
@@ -312,9 +316,15 @@ class MobileAttachmentMinioIntegrationTest {
         return value == null || value.isBlank() ? defaultValue : value;
     }
 
-    private static byte[] pngBytes(byte marker) {
-        return new byte[] {
-            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, marker
-        };
+    private static byte[] pngBytes(int rgb) {
+        try {
+            BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+            image.setRGB(0, 0, rgb);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ImageIO.write(image, "png", output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("could not create test png", exception);
+        }
     }
 }

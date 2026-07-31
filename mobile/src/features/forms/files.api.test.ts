@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setAuthController } from '../../shared/api/auth';
-import { uploadMobileFile, type UploadProgressEvent } from './files.api';
+import { fetchMobileFileBlob, uploadMobileFile, type UploadProgressEvent } from './files.api';
 
 const noop = async () => {
   /* noop */
@@ -179,5 +179,43 @@ describe('mobile file api', () => {
       { phase: 'processing', progress: 96 },
       { phase: 'done', progress: 100 },
     ]);
+  });
+
+  it('fetches protected file content as a blob with auth refresh retry', async () => {
+    let token = 'expired-token';
+    const refresh = vi.fn(async () => {
+      token = 'rotated-token';
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        if (headers.get('Authorization') === 'Bearer expired-token') {
+          return new Response(JSON.stringify({ code: 'TOKEN_EXPIRED', message: 'expired' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        expect(headers.get('Authorization')).toBe('Bearer rotated-token');
+        expect(headers.get('X-AF-Retry')).toBe('1');
+        expect(init?.credentials).toBe('include');
+        return new Response(new Blob(['image-bytes'], { type: 'image/png' }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        });
+      }),
+    );
+    setAuthController({
+      authorizationHeader: () => ({ Authorization: `Bearer ${token}` }),
+      refresh,
+      isAuthEndpoint: () => false,
+    });
+
+    const blob = await fetchMobileFileBlob('/api/mobile/files/file-1/content');
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(blob.type).toBe('image/png');
+    expect(await blob.text()).toBe('image-bytes');
   });
 });

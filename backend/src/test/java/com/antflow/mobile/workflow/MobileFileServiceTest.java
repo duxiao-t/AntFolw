@@ -1,12 +1,16 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.engine.BizException;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -73,11 +77,23 @@ class MobileFileServiceTest {
 
     @Test
     void uploadRejectsMismatchedContentType() {
-        MockMultipartFile file = new MockMultipartFile("file", "fake.png", "image/png", "%PDF-1.7".getBytes());
+        MockMultipartFile file = new MockMultipartFile("file", "fake.png", "image/png", pdfBytes());
 
         assertThatThrownBy(() -> service.upload(file, 7L))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("content type mismatch");
+    }
+
+    @Test
+    void uploadRejectsMalformedImageWithOnlyMagicHeader() {
+        MockMultipartFile file = pngFile("broken.png", new byte[] {
+            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01
+        });
+
+        assertThatThrownBy(() -> service.upload(file, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("unsupported file content");
+        assertThat(storage.putCount).isZero();
     }
 
     @Test
@@ -172,9 +188,20 @@ class MobileFileServiceTest {
     }
 
     private static byte[] pngBytes() {
-        return new byte[] {
-            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01
-        };
+        try {
+            BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+            image.setRGB(0, 0, 0x0B57D0);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ImageIO.write(image, "png", output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("could not create test png", exception);
+        }
+    }
+
+    private static byte[] pdfBytes() {
+        return "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+            .getBytes(StandardCharsets.US_ASCII);
     }
 
     private static MobileFile existingFile(UUID id, long ownerId) {
