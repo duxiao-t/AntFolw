@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setAuthController } from '../../shared/api/auth';
-import { uploadMobileFile } from './files.api';
+import { uploadMobileFile, type UploadProgressEvent } from './files.api';
 
 const noop = async () => {
   /* noop */
@@ -8,12 +8,15 @@ const noop = async () => {
 
 class MockXMLHttpRequest {
   static latest: MockXMLHttpRequest | null = null;
+  static requests: MockXMLHttpRequest[] = [];
   static completionMode: 'load' | 'readystatechange' = 'load';
   static loaded = 50;
+  static statuses = [200];
 
   readonly upload: {
     onprogress: ((event: ProgressEvent) => void) | null;
-  } = { onprogress: null };
+    onload: ((event: ProgressEvent) => void) | null;
+  } = { onprogress: null, onload: null };
 
   method = '';
   url = '';
@@ -50,20 +53,26 @@ class MockXMLHttpRequest {
   send(body: Document | XMLHttpRequestBodyInit | null) {
     this.body = body;
     MockXMLHttpRequest.latest = this;
+    MockXMLHttpRequest.requests.push(this);
+    const requestIndex = MockXMLHttpRequest.requests.length - 1;
+    const status = MockXMLHttpRequest.statuses[Math.min(requestIndex, MockXMLHttpRequest.statuses.length - 1)] ?? 200;
     queueMicrotask(() => {
       this.upload.onprogress?.(new ProgressEvent('progress', {
         lengthComputable: true,
         loaded: MockXMLHttpRequest.loaded,
         total: 100,
       }));
-      this.status = 200;
-      this.responseText = JSON.stringify({
-        id: 'file-1',
-        name: 'proof.pdf',
-        contentUrl: '/api/mobile/files/file-1/content',
-        contentType: 'application/pdf',
-        size: 10,
-      });
+      this.upload.onload?.(new ProgressEvent('load'));
+      this.status = status;
+      this.responseText = status >= 200 && status < 300
+        ? JSON.stringify({
+          id: 'file-1',
+          name: 'proof.pdf',
+          contentUrl: '/api/mobile/files/file-1/content',
+          contentType: 'application/pdf',
+          size: 10,
+        })
+        : JSON.stringify({ code: 'TOKEN_EXPIRED', message: 'expired' });
       this.readyState = 4;
       if (MockXMLHttpRequest.completionMode === 'readystatechange') {
         this.onreadystatechange?.();
@@ -79,8 +88,10 @@ describe('mobile file api', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     MockXMLHttpRequest.latest = null;
+    MockXMLHttpRequest.requests = [];
     MockXMLHttpRequest.completionMode = 'load';
     MockXMLHttpRequest.loaded = 50;
+    MockXMLHttpRequest.statuses = [200];
   });
 
   it('uploads files with XHR progress and shared auth headers', async () => {
@@ -90,17 +101,22 @@ describe('mobile file api', () => {
       refresh: noop,
       isAuthEndpoint: () => false,
     });
-    const progress: number[] = [];
+    const progress: UploadProgressEvent[] = [];
 
     const result = await uploadMobileFile(
       '/api/mobile/files',
       new File(['%PDF-proof'], 'proof.pdf', { type: 'application/pdf' }),
-      (value) => progress.push(value),
+      (event) => progress.push(event),
     );
 
     const request = MockXMLHttpRequest.latest;
     expect(result.id).toBe('file-1');
-    expect(progress).toEqual([8, 50, 100]);
+    expect(progress).toEqual([
+      { phase: 'uploading', progress: 0 },
+      { phase: 'uploading', progress: 50 },
+      { phase: 'processing', progress: 96 },
+      { phase: 'done', progress: 100 },
+    ]);
     expect(request?.method).toBe('POST');
     expect(request?.url).toBe('/api/mobile/files');
     expect(request?.body).toBeInstanceOf(FormData);
@@ -118,15 +134,50 @@ describe('mobile file api', () => {
       refresh: noop,
       isAuthEndpoint: () => false,
     });
-    const progress: number[] = [];
+    const progress: UploadProgressEvent[] = [];
 
     const result = await uploadMobileFile(
       '/api/mobile/files',
       new File(['%PDF-proof'], 'proof.pdf', { type: 'application/pdf' }),
-      (value) => progress.push(value),
+      (event) => progress.push(event),
     );
 
     expect(result.id).toBe('file-1');
-    expect(progress).toEqual([8, 99, 100]);
+    expect(progress).toEqual([
+      { phase: 'uploading', progress: 0 },
+      { phase: 'uploading', progress: 95 },
+      { phase: 'processing', progress: 96 },
+      { phase: 'done', progress: 100 },
+    ]);
+  });
+
+  it('keeps progress monotonic when auth refresh retries the upload', async () => {
+    vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest);
+    MockXMLHttpRequest.loaded = 100;
+    MockXMLHttpRequest.statuses = [401, 200];
+    const refresh = vi.fn(noop);
+    setAuthController({
+      authorizationHeader: () => ({ Authorization: 'Bearer rotated-token' }),
+      refresh,
+      isAuthEndpoint: () => false,
+    });
+    const progress: UploadProgressEvent[] = [];
+
+    const result = await uploadMobileFile(
+      '/api/mobile/files',
+      new File(['%PDF-proof'], 'proof.pdf', { type: 'application/pdf' }),
+      (event) => progress.push(event),
+    );
+
+    expect(result.id).toBe('file-1');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(MockXMLHttpRequest.requests).toHaveLength(2);
+    expect(MockXMLHttpRequest.requests[1]?.getRequestHeader('X-AF-Retry')).toBe('1');
+    expect(progress).toEqual([
+      { phase: 'uploading', progress: 0 },
+      { phase: 'uploading', progress: 95 },
+      { phase: 'processing', progress: 96 },
+      { phase: 'done', progress: 100 },
+    ]);
   });
 });

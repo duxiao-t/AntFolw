@@ -4,7 +4,11 @@ import { ApiError, type ApiErrorBody } from '../../shared/api/errors';
 import { apiRequest } from '../../shared/api/http';
 
 export type MobileFileDto = MobileFile;
-export type UploadProgressHandler = (progress: number) => void;
+export type UploadProgressEvent =
+  | { phase: 'uploading'; progress: number }
+  | { phase: 'processing'; progress: number }
+  | { phase: 'done'; progress: 100 };
+export type UploadProgressHandler = (event: UploadProgressEvent) => void;
 
 export type MobilePickerUser = {
   id: number;
@@ -61,6 +65,7 @@ function uploadMobileFileWithProgress(
   formData: FormData,
   onProgress: UploadProgressHandler,
   retry = false,
+  progressState: UploadProgressState = createUploadProgressState(),
 ): Promise<MobileFileDto> {
   const controller = getAuthController();
   return new Promise((resolve, reject) => {
@@ -78,10 +83,18 @@ function uploadMobileFileWithProgress(
     }
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || event.total <= 0) {
-        onProgress(35);
         return;
       }
-      onProgress(Math.min(99, Math.max(8, Math.round((event.loaded / event.total) * 100))));
+      if (event.loaded >= event.total) {
+        emitProgress(onProgress, progressState, { phase: 'uploading', progress: 95 });
+        emitProgress(onProgress, progressState, { phase: 'processing', progress: 96 });
+        return;
+      }
+      const progress = Math.min(95, Math.max(1, Math.round((event.loaded / event.total) * 100)));
+      emitProgress(onProgress, progressState, { phase: 'uploading', progress });
+    };
+    xhr.upload.onload = () => {
+      emitProgress(onProgress, progressState, { phase: 'processing', progress: 96 });
     };
     xhr.onerror = () => rejectOnce(new Error('网络异常，文件上传失败'));
     xhr.onabort = () => rejectOnce(new Error('文件上传已取消'));
@@ -98,14 +111,14 @@ function uploadMobileFileWithProgress(
       settled = true;
       if (xhr.status === 401 && !retry && !controller.isAuthEndpoint(endpoint)) {
         void controller.refresh()
-          .then(() => uploadMobileFileWithProgress(endpoint, formData, onProgress, true))
+          .then(() => uploadMobileFileWithProgress(endpoint, formData, onProgress, true, progressState))
           .then(resolve, reject);
         return;
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const metadata = JSON.parse(xhr.responseText || '{}') as MobileFileDto;
-          onProgress(100);
+          emitProgress(onProgress, progressState, { phase: 'done', progress: 100 });
           resolve(metadata);
         } catch {
           reject(new Error('文件上传响应解析失败'));
@@ -121,9 +134,49 @@ function uploadMobileFileWithProgress(
       settled = true;
       reject(error);
     }
-    onProgress(8);
+    if (!retry) {
+      emitProgress(onProgress, progressState, { phase: 'uploading', progress: 0 });
+    }
     xhr.send(formData);
   });
+}
+
+type UploadProgressState = {
+  phase: UploadProgressEvent['phase'];
+  progress: number;
+};
+
+function createUploadProgressState(): UploadProgressState {
+  return {
+    phase: 'uploading',
+    progress: -1,
+  };
+}
+
+function emitProgress(
+  onProgress: UploadProgressHandler,
+  state: UploadProgressState,
+  event: UploadProgressEvent,
+) {
+  if (state.phase === 'done') {
+    return;
+  }
+  if (event.phase === 'done') {
+    state.phase = 'done';
+    state.progress = 100;
+    onProgress(event);
+    return;
+  }
+  if (state.phase === 'processing' && event.phase === 'uploading') {
+    return;
+  }
+  const progress = Math.max(state.progress, event.progress);
+  if (event.phase === state.phase && progress === state.progress) {
+    return;
+  }
+  state.phase = event.phase;
+  state.progress = progress;
+  onProgress({ phase: event.phase, progress } as UploadProgressEvent);
 }
 
 function apiErrorFromXhr(xhr: XMLHttpRequest) {

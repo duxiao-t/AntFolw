@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MobileFileDto } from '../files.api';
+import type { MobileFileDto, UploadProgressEvent } from '../files.api';
 import { deleteMobileFile, uploadMobileFile } from '../files.api';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
@@ -7,7 +7,7 @@ import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from 
 export type UploadItem = {
   localId: string;
   file: File;
-  status: 'queued' | 'uploading' | 'ready' | 'failed' | 'deleting' | 'delete_failed';
+  status: 'queued' | 'uploading' | 'processing' | 'ready' | 'failed' | 'deleting' | 'delete_failed';
   progress: number;
   remote?: MobileFileDto;
   error?: string;
@@ -49,6 +49,9 @@ export function FileUploadField(props: MobileFieldProps) {
 
   useEffect(() => {
     const next = mergeReadyItems(itemsRef.current, readyValues);
+    if (sameUploadItems(itemsRef.current, next)) {
+      return;
+    }
     itemsRef.current = next;
     setItems(next);
   }, [readyValues]);
@@ -126,15 +129,15 @@ export function FileUploadField(props: MobileFieldProps) {
   );
 
   async function queueFileUpload(file: File, localId = createLocalId()) {
-    const uploadingItem: UploadItem = { localId, file, status: 'uploading', progress: 8 };
+    const uploadingItem: UploadItem = { localId, file, status: 'uploading', progress: 0 };
     commitItems([
       ...itemsRef.current.filter((item) => item.localId !== localId),
       uploadingItem,
     ]);
     await wait(20);
     try {
-      const remote = await uploadMobileFile(endpoint, file, (progress) => {
-        updateUploadProgress(localId, progress);
+      const remote = await uploadMobileFile(endpoint, file, (event) => {
+        updateUploadProgress(localId, event);
       });
       commitItems(
         itemsRef.current.map((item): UploadItem =>
@@ -147,22 +150,29 @@ export function FileUploadField(props: MobileFieldProps) {
       commitItems(
         itemsRef.current.map((item): UploadItem =>
           item.localId === localId
-            ? { ...item, status: 'failed', progress: 100, error: errorMessage(error) }
+            ? { ...item, status: 'failed', error: errorMessage(error) }
             : item,
         ),
       );
     }
   }
 
-  function updateUploadProgress(localId: string, progress: number) {
-    const bounded = Math.min(100, Math.max(8, Math.round(progress)));
+  function updateUploadProgress(localId: string, event: UploadProgressEvent) {
+    const bounded = Math.min(100, Math.max(0, Math.round(event.progress)));
+    const nextStatus = event.phase === 'uploading' ? 'uploading' : 'processing';
     let changed = false;
     const next = itemsRef.current.map((item): UploadItem => {
-      if (item.localId !== localId || item.status !== 'uploading' || item.progress >= bounded) {
+      if (item.localId !== localId || !isUploadActive(item)) {
+        return item;
+      }
+      if (item.status === 'processing' && event.phase === 'uploading') {
+        return item;
+      }
+      if (item.progress >= bounded && item.status === nextStatus) {
         return item;
       }
       changed = true;
-      return { ...item, progress: bounded };
+      return { ...item, status: nextStatus, progress: Math.max(item.progress, bounded), error: undefined };
     });
     if (changed) {
       commitItems(next, false);
@@ -210,6 +220,7 @@ export function FileUploadField(props: MobileFieldProps) {
       item.status === 'failed'
       || item.status === 'queued'
       || item.status === 'uploading'
+      || item.status === 'processing'
       || item.status === 'deleting'
       || item.status === 'delete_failed');
     props.onValueChange(props.node.id, createFileUploadValue(ready, blocked));
@@ -237,9 +248,7 @@ function mergeReadyItems(items: UploadItem[], readyValues: MobileFileDto[]) {
   const keep = items.filter((item) => item.status !== 'ready' || !item.remote || readyById.has(item.remote.id));
   const existingIds = new Set(
     keep
-      .filter((item): item is UploadItem & { remote: MobileFileDto; status: 'ready' } =>
-        item.status === 'ready' && item.remote != null,
-      )
+      .filter((item): item is UploadItem & { remote: MobileFileDto } => item.remote != null)
       .map((item) => item.remote.id),
   );
   const missing = readyValues
@@ -260,6 +269,7 @@ function localBlocker(items: UploadItem[]) {
     item.status === 'failed'
     || item.status === 'queued'
     || item.status === 'uploading'
+    || item.status === 'processing'
     || item.status === 'deleting'
     || item.status === 'delete_failed')) {
     return '仍有文件未完成上传';
@@ -272,7 +282,10 @@ function statusLabel(item: UploadItem) {
     return '上传失败';
   }
   if (item.status === 'ready') {
-    return '100%';
+    return '已完成';
+  }
+  if (item.status === 'processing') {
+    return '处理中';
   }
   if (item.status === 'deleting') {
     return '删除中';
@@ -280,11 +293,30 @@ function statusLabel(item: UploadItem) {
   if (item.status === 'delete_failed') {
     return '删除失败';
   }
-  return `上传中 ${item.progress}%`;
+  if (item.status === 'queued') {
+    return '等待上传';
+  }
+  return item.progress > 0 ? `上传中 ${item.progress}%` : '上传中';
 }
 
 function progressTone(item: UploadItem) {
   return item.status === 'failed' || item.status === 'delete_failed' ? 'error' : 'success';
+}
+
+function isUploadActive(item: UploadItem) {
+  return item.status === 'uploading' || item.status === 'processing';
+}
+
+function sameUploadItems(left: UploadItem[], right: UploadItem[]) {
+  return left.length === right.length && left.every((item, index) => {
+    const other = right[index];
+    return other
+      && item.localId === other.localId
+      && item.status === other.status
+      && item.progress === other.progress
+      && item.error === other.error
+      && item.remote?.id === other.remote?.id;
+  });
 }
 
 function fileContentUrl(file: MobileFileDto) {

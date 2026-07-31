@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  ManualXMLHttpRequest.latest = null;
 });
 
 function jsonResponse(body: unknown, status = 200) {
@@ -56,6 +57,67 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+class ManualXMLHttpRequest {
+  static latest: ManualXMLHttpRequest | null = null;
+
+  readonly upload: {
+    onprogress: ((event: ProgressEvent) => void) | null;
+    onload: ((event: ProgressEvent) => void) | null;
+  } = { onprogress: null, onload: null };
+
+  method = '';
+  url = '';
+  body: Document | XMLHttpRequestBodyInit | null = null;
+  withCredentials = false;
+  status = 0;
+  statusText = '';
+  responseText = '';
+  readyState = 0;
+  onload: (() => void) | null = null;
+  onreadystatechange: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+
+  private readonly headers = new Map<string, string>();
+
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name: string, value: string) {
+    this.headers.set(name.toLowerCase(), value);
+  }
+
+  getResponseHeader() {
+    return null;
+  }
+
+  send(body: Document | XMLHttpRequestBodyInit | null) {
+    this.body = body;
+    ManualXMLHttpRequest.latest = this;
+  }
+
+  emitProgress(loaded: number, total = 100) {
+    this.upload.onprogress?.(new ProgressEvent('progress', {
+      lengthComputable: true,
+      loaded,
+      total,
+    }));
+  }
+
+  emitUploadComplete() {
+    this.upload.onload?.(new ProgressEvent('load'));
+  }
+
+  respond(status: number, body: unknown) {
+    this.status = status;
+    this.responseText = JSON.stringify(body);
+    this.readyState = 4;
+    this.onload?.();
+  }
 }
 
 function baseProps(
@@ -195,9 +257,9 @@ describe('advanced mobile fields', () => {
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
 
     expect(screen.getByText('hello.pdf')).toBeInTheDocument();
-    expect(screen.getByText('上传中 8%')).toBeInTheDocument();
+    expect(screen.getByText('上传中')).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
       expect.objectContaining({
         id: 'remote-hello.pdf',
@@ -275,13 +337,73 @@ describe('advanced mobile fields', () => {
     const { container } = render(<StatefulUpload />);
 
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
-    await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     expect(container.querySelector('.af-upload-list__progress')).toHaveClass(
       'af-upload-list__progress--success',
     );
 
     expect(consoleError.mock.calls.flat().join('\n')).not.toContain('Cannot update a component');
     consoleError.mockRestore();
+  });
+
+  it('keeps completed upload state when late progress events arrive', async () => {
+    vi.stubGlobal('XMLHttpRequest', ManualXMLHttpRequest);
+    const user = userEvent.setup();
+
+    function StatefulUpload() {
+      const [value, setValue] = useState<unknown[]>([]);
+      return (
+        <FileUploadField
+          {...baseProps(
+            {
+              id: 'attachments',
+              type: 'file_upload',
+              label: '附件',
+              props: {
+                uploadEndpoint: '/api/mobile/files',
+              },
+            },
+            value,
+            (_fieldId, nextValue) => setValue(nextValue as unknown[]),
+          )}
+        />
+      );
+    }
+
+    const { container } = render(<StatefulUpload />);
+    await user.upload(screen.getByLabelText('附件'), new File(['%PDF-proof'], 'proof.pdf', { type: 'application/pdf' }));
+    await waitFor(() => expect(ManualXMLHttpRequest.latest).not.toBeNull());
+    const request = ManualXMLHttpRequest.latest;
+    expect(request).not.toBeNull();
+
+    await act(async () => {
+      request?.emitProgress(10);
+    });
+    expect(screen.getByText('上传中 10%')).toBeInTheDocument();
+
+    await act(async () => {
+      request?.emitProgress(100);
+      request?.emitUploadComplete();
+    });
+    expect(screen.getByText('处理中')).toBeInTheDocument();
+    expect(container.querySelector('.af-upload-list__progress span')).toHaveStyle({ width: '96%' });
+
+    await act(async () => {
+      request?.respond(200, {
+        id: 'remote-proof.pdf',
+        name: 'proof.pdf',
+        contentUrl: '/api/mobile/files/remote-proof.pdf/content',
+        contentType: 'application/pdf',
+        size: 10,
+      });
+    });
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
+
+    await act(async () => {
+      request?.emitProgress(8);
+    });
+    expect(screen.getByText('已完成')).toBeInTheDocument();
+    expect(screen.queryByText('上传中 8%')).not.toBeInTheDocument();
   });
 
   it('previews uploaded image files through the backend content URL', async () => {

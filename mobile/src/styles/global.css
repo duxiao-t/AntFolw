@@ -3060,10 +3060,11 @@ body {
 .af-upload-list__main { min-width: 0; flex: 1; }
 .af-upload-list__name { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .af-upload-list__status { color: var(--af-color-muted); font-size: 10px; }
-.af-upload-list__status--ready { color: var(--af-color-success); }
+.af-upload-list__status--uploading, .af-upload-list__status--processing, .af-upload-list__status--ready { color: var(--af-color-success); }
 .af-upload-list__status--failed, .af-upload-list__status--delete_failed { color: var(--af-color-danger); }
 .af-upload-list__progress { height: 3px; overflow: hidden; border-radius: 3px; background: var(--af-color-line); }
 .af-upload-list__progress span { display: block; height: 100%; background: var(--af-color-success); transition: width .16s ease; }
+.af-upload-list__progress--error { background: color-mix(in srgb, var(--af-color-danger) 18%, var(--af-color-line)); }
 .af-upload-list__progress--error span { background: var(--af-color-danger); }
 .af-upload-list__error { margin-top: 4px; color: var(--af-color-danger); font-size: 10px; line-height: 1.35; word-break: break-word; }
 .af-link-button { border: 0; background: transparent; color: var(--af-color-primary-action); cursor: pointer; }
