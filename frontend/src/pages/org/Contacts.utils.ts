@@ -25,6 +25,7 @@ export type DeptDropAction =
 
 export interface MemberCsvItem {
   id?: number;
+  employeeNo?: string;
   username: string;
   displayName: string;
   email?: string;
@@ -49,12 +50,14 @@ export interface DeptTreeItem {
   parentId: number | null;
 }
 
-const exportHeaders = ['姓名', '账号', '手机', '邮箱', '职务', '性别'];
+const exportHeaders = ['姓名', '工号', '账号', '手机', '邮箱', '职务', '性别'];
 
 const headerMap: Record<string, keyof Omit<MemberCsvItem, 'id' | 'deptId'>> = {
   姓名: 'displayName',
   displayName: 'displayName',
   name: 'displayName',
+  工号: 'employeeNo',
+  employeeNo: 'employeeNo',
   账号: 'username',
   username: 'username',
   手机: 'phone',
@@ -132,6 +135,7 @@ export function collectDepartmentIds(list: DeptTreeItem[], selectedId: number | 
 export function buildMembersCsv(members: MemberCsvItem[]): string {
   const rows = members.map((m) => [
     m.displayName ?? '',
+    m.employeeNo ?? '',
     m.username ?? '',
     m.phone ?? '',
     m.email ?? '',
@@ -179,9 +183,11 @@ export function parseMembersCsv(content: string, deptId: number): MemberCsvParse
     const rowNumber = i + 1;
     if (!item.displayName) errors.push(`第 ${rowNumber} 行缺少姓名`);
     if (!item.username) errors.push(`第 ${rowNumber} 行缺少账号`);
+    if (item.employeeNo && !/^[0-9]{6}$/.test(item.employeeNo)) errors.push(`第 ${rowNumber} 行工号必须为 6 位数字`);
     if (item.displayName && item.username) {
       rows.push({
         displayName: item.displayName,
+        employeeNo: item.employeeNo ?? '',
         username: item.username,
         phone: item.phone ?? '',
         email: item.email ?? '',

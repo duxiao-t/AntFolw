@@ -30,7 +30,7 @@ interface Dept {
   sortOrder?: number;
 }
 interface UserItem {
-  id: number; username: string; displayName: string; email: string;
+  id: number; employeeNo: string; username: string; displayName: string; email: string;
   phone: string; position: string; gender: string; deptId: number;
 }
 

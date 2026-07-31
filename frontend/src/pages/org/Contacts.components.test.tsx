@@ -50,6 +50,7 @@ describe('Contacts components', () => {
           breadcrumb="Tech"
           members={[{
             id: 1,
+            employeeNo: '000001',
             username: 'bob',
             displayName: 'Bob',
             email: '',

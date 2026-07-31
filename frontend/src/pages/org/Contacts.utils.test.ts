@@ -109,6 +109,7 @@ describe('Contacts CSV helpers', () => {
     const csv = buildMembersCsv([
       {
         id: 1,
+        employeeNo: '000001',
         username: 'zhangsan',
         displayName: '张三,主管',
         email: 'z"s@example.com',
@@ -119,16 +120,17 @@ describe('Contacts CSV helpers', () => {
       },
     ]);
 
-    expect(csv).toBe('姓名,账号,手机,邮箱,职务,性别\r\n"张三,主管",zhangsan,13800000000,"z""s@example.com",研发,男');
+    expect(csv).toBe('姓名,工号,账号,手机,邮箱,职务,性别\r\n"张三,主管",000001,zhangsan,13800000000,"z""s@example.com",研发,男');
   });
 
   it('imports Chinese-header CSV rows into the selected department', () => {
-    const result = parseMembersCsv('姓名,账号,手机,邮箱,职务,性别\n李四,lisi,13900000000,lisi@example.com,产品,女', 7);
+    const result = parseMembersCsv('姓名,工号,账号,手机,邮箱,职务,性别\n李四,000002,lisi,13900000000,lisi@example.com,产品,女', 7);
 
     expect(result.errors).toEqual([]);
     expect(result.rows).toEqual([
       {
         displayName: '李四',
+        employeeNo: '000002',
         username: 'lisi',
         phone: '13900000000',
         email: 'lisi@example.com',

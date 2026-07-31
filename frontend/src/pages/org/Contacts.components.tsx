@@ -10,6 +10,7 @@ import { formatGender, normalizeGender } from './Contacts.utils';
 
 export interface MemberListItem {
   id: number;
+  employeeNo: string;
   username: string;
   displayName: string;
   email: string;
@@ -128,6 +129,7 @@ export function MembersSection({
         rowKey="id"
         columns={[
           { title: '姓名', dataIndex: 'displayName' },
+          { title: '工号', dataIndex: 'employeeNo' },
           { title: '账号', dataIndex: 'username' },
           { title: '手机', dataIndex: 'phone' },
           { title: '部门', dataIndex: 'deptId', render: (_, r) => deptNameById[r.deptId] ?? '-' },
@@ -183,6 +185,7 @@ export function MemberFormModal({
       <Form form={form} layout="vertical" preserve={false}
         initialValues={editing ? { ...editing, gender: normalizeGender(editing.gender) } : undefined}>
         <Form.Item label="姓名" name="displayName" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item label="工号" name="employeeNo" rules={[{ pattern: /^[0-9]{6}$/, message: '工号必须为 6 位数字' }]} extra="留空时由系统自动生成"><Input inputMode="numeric" maxLength={6} /></Form.Item>
         <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input disabled={!!editing} /></Form.Item>
         <Form.Item label="手机" name="phone"><Input /></Form.Item>
         <Form.Item label="邮箱" name="email"><Input /></Form.Item>
