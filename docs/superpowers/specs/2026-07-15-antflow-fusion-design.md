@@ -101,7 +101,7 @@ antflow/
 │   │                                  # don't compound with DDL on a fresh DB.
 │   └── pom.xml
 ├── infra/
-│   ├── docker-compose.yml              # postgres:17 (+ optional redis, minio)
+│   ├── local-runtime.md                 # local PostgreSQL and MinIO notes
 │   ├── .env.example
 │   └── seed/                           # default super-admin loader
 ├── docs/superpowers/specs/…
@@ -489,7 +489,7 @@ In MVP, all of org management, form design, and process design are gated behind 
 
 ### Backend
 - **Unit** — services + engine handlers with Mockito. Engine `approve()` algorithm covered with golden-path + 4 negative paths: wrong operator, already-approved task, no successor (→ APPROVED), `NoAssigneeFoundException` (→ 422). Reject sibling SKIP behavior covered.
-- **Repository** — Testcontainers (PG 17 image) runs Flyway migrations; write/read/delete per entity. Crucially exercises the `@Version` columns: insert, update with matching version (success), update with stale version (throws `OptimisticLockException`).
+- **Repository** — local PostgreSQL integration tests run Flyway migrations; write/read/delete per entity. Crucially exercises the `@Version` columns: insert, update with matching version (success), update with stale version (throws `OptimisticLockException`).
 - **API** — `@SpringBootTest` + MockMvc for CRUD; full happy-path start→approve via `RestAssured`. A separate test asserts that `POST /api/instances/start` returns `422 FOR_FORM_NOT_PUBLISHED` when the form is still `DRAFT`, and `422 NO_ASSIGNEE` when the node has an empty user list.
 - **Engine integration** — single test per phase-end: starts container, loads a fixture `process_definition`, fires HTTP, asserts DB rows. One combined scenario: 2-assignee OR-sign node → first approver advances → second task marked `SKIPPED` with `t_task_history` row.
 - **Security** — JwtService bean creation fails the Spring context when secret missing/short. Bucket4j login rate limit verified with a 6-call burst returning `429` after the 5th minute-bucket.
@@ -499,13 +499,13 @@ In MVP, all of org management, form design, and process design are gated behind 
 - **playwright** — one end-to-end: login → design form "补卡申请" → publish → start instance → approve as assignee → instance shows APPROVED.
 
 ### CI
-- One GitHub Actions / equivalent workflow: `lint (backend & frontend) + backend test + frontend test + frontend build`. Docker compose-up PG required for backend tests via Testcontainers (CI service container).
+- One GitHub Actions / equivalent workflow: `lint (backend & frontend) + backend test + frontend test + frontend build`. Live integration tests require explicitly configured local-style PostgreSQL and MinIO services.
 
 ## Implementation Roadmap (sequential phases)
 
 | Phase | Scope | Demonstrable |
 |---|---|---|
-| **P0 — baseline** | repo scaffold, `docker-compose` for PG 17, Flyway init schema, Spring Security 6 + JWT login working, frontend shell login page wired, three-file patch on ant-design-pro | Login → empty antd-pro home |
+| **P0 — baseline** | repo scaffold, local PG 17 runbook, Flyway init schema, Spring Security 6 + JWT login working, frontend shell login page wired, three-file patch on ant-design-pro | Login → empty antd-pro home |
 | **P1 — org** | company/dept/user/role CRUD via ProTable, menu filtered by `access.canAdmin` | Admin can register a colleague and assign them to a department |
 | **P2 — form designer** | all MVP field types in registry, @dnd-kit palette/canvas/inspector, save-as-draft, publish, preview | Design a "补卡申请", save, publish |
 | **P3 — form runtime** | FormRenderer controlled mode, validation, submit, list-my-submissions | alice fills and submits the form |

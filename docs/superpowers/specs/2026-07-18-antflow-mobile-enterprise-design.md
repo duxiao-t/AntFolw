@@ -554,7 +554,7 @@ interface PlatformAdapter {
 - 品牌草稿、发布、历史恢复和并发发布。
 - 文件上传类型欺骗、超限和恶意 SVG。
 - `SELF_SELECT`、流程快照和条件分支集成测试。
-- PostgreSQL Testcontainers 覆盖 Flyway V1 到最新版本。
+- 本机 PostgreSQL 集成测试覆盖 Flyway V1 到最新版本。
 
 ### 16.3 发布门禁
 

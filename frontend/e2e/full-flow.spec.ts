@@ -10,9 +10,8 @@ import { expect, request, test } from '@playwright/test';
  *   5. admin sees the task in inbox, approves it
  *   6. instance detail shows APPROVED
  *
- * Requires the dev infra (Postgres) to be running. Run:
- *   cd infra && docker compose up -d
- * Then: cd frontend && npx playwright test
+ * Requires local PostgreSQL, local MinIO, backend, and frontend dev servers.
+ * Then run: cd frontend && npx playwright test
  */
 test('design → publish → submit → approve end-to-end', async ({
   page,

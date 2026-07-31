@@ -4,7 +4,17 @@
 
 ## 本地开发
 
-后端开发端口按移动端约定使用 `8081`：
+后端开发端口按移动端约定使用 `8081`。附件存储默认并且必须走本机
+MinIO；先在另一个终端启动 MinIO：
+
+```powershell
+$env:MINIO_ROOT_USER='minioadmin'
+$env:MINIO_ROOT_PASSWORD='minioadmin'
+minio.exe server E:\minio-data --address ':9000' --console-address ':9001'
+```
+
+MinIO 控制台：`http://localhost:9001`，默认账号密码：
+`minioadmin / minioadmin`。
 
 ```powershell
 Set-Location D:\code\ant-flow\backend
@@ -13,18 +23,12 @@ $env:SPRING_DATASOURCE_USERNAME='antflow'
 $env:SPRING_DATASOURCE_PASSWORD='antflow'
 $env:JWT_SECRET='local-dev-secret-0123456789-local-dev-secret'
 $env:PORT='8081'
-mvn -B spring-boot:run
-```
-
-附件默认可落到本地目录；需要按 MinIO 验证时先启动 `infra/docker-compose.yml`
-里的 `minio` 服务，并给后端增加以下环境变量：
-
-```powershell
 $env:MOBILE_FILE_STORAGE='minio'
 $env:MINIO_ENDPOINT='http://localhost:9000'
 $env:MINIO_ACCESS_KEY='minioadmin'
 $env:MINIO_SECRET_KEY='minioadmin'
 $env:MINIO_BUCKET='antflow-mobile-files'
+mvn -B spring-boot:run
 ```
 
 移动端开发服务器使用 `5173`，Vite base 固定为 `/mobile/`：

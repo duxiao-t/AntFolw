@@ -11,7 +11,7 @@ ant-flow/
 ├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway + PostgreSQL；自研轻量审批引擎
 ├── frontend/    # Umi Max 4 + React 18 + antd 6 + zustand（ant-design-pro 底座）；有自己的 CLAUDE.md
 ├── mobile/      # 独立移动端 Vite + React + Ant Design Mobile；base `/mobile/`；企业级审批闭环
-├── infra/       # docker-compose（postgres:17）+ initdb 扩展脚本
+├── infra/       # nginx 示例
 └── docs/        # superpowers/specs、plans；mobile-enterprise-verification.md
 ```
 
@@ -20,10 +20,13 @@ ant-flow/
 ## 运行 / 构建
 
 ```bash
-# 数据库
-cd infra && docker compose up -d          # postgres:17，含 ltree/pgcrypto 扩展
+# 数据库与对象存储
+# PostgreSQL 17 使用本机服务，库名 antflow。
+$env:MINIO_ROOT_USER='minioadmin'
+$env:MINIO_ROOT_PASSWORD='minioadmin'
+minio.exe server E:\minio-data --address ':9000' --console-address ':9001'
 
-# 后端（首次启动自动跑 Flyway V1..V4）
+# 后端（首次启动自动跑 Flyway，附件默认写入本机 MinIO）
 cd backend && mvn -B spring-boot:run       # http://localhost:8080
 cd backend && mvn test                     # 单元测试（不需 PG）
 

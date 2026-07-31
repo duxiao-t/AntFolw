@@ -6,6 +6,7 @@ import java.util.UUID;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -18,12 +19,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
@@ -31,28 +26,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers(disabledWithoutDocker = true)
+@EnabledIfEnvironmentVariable(named = "ANTFLOW_LIVE_MINIO_TESTS", matches = "true")
 @SuppressWarnings({"unchecked", "rawtypes"})
 class MobileAttachmentMinioIntegrationTest {
-    private static final String MINIO_ACCESS_KEY = "minioadmin";
-    private static final String MINIO_SECRET_KEY = "minioadmin";
-    private static final String MINIO_BUCKET = "antflow-test-files";
-
-    @Container
-    private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
-        DockerImageName.parse("postgres:17-alpine"))
-        .withDatabaseName("antflow")
-        .withUsername("antflow")
-        .withPassword("antflow");
-
-    @Container
-    private static final GenericContainer<?> MINIO = new GenericContainer<>(
-        DockerImageName.parse("minio/minio:latest"))
-        .withEnv("MINIO_ROOT_USER", MINIO_ACCESS_KEY)
-        .withEnv("MINIO_ROOT_PASSWORD", MINIO_SECRET_KEY)
-        .withCommand("server", "/data")
-        .withExposedPorts(9000)
-        .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000));
+    private static final String MINIO_ACCESS_KEY = env("MINIO_ACCESS_KEY", "minioadmin");
+    private static final String MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", "minioadmin");
+    private static final String MINIO_BUCKET = env("MINIO_BUCKET", "antflow-test-files");
+    private static final String MINIO_ENDPOINT = env("MINIO_ENDPOINT", "http://localhost:9000");
 
     @LocalServerPort
     private int port;
@@ -65,13 +45,8 @@ class MobileAttachmentMinioIntegrationTest {
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
-        POSTGRES.start();
-        MINIO.start();
-        registry.add("spring.datasource.url", () -> withStringType(POSTGRES.getJdbcUrl()));
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("antflow.mobile.files.storage", () -> "minio");
-        registry.add("antflow.mobile.files.minio.endpoint", MobileAttachmentMinioIntegrationTest::minioEndpoint);
+        registry.add("antflow.mobile.files.minio.endpoint", () -> MINIO_ENDPOINT);
         registry.add("antflow.mobile.files.minio.access-key", () -> MINIO_ACCESS_KEY);
         registry.add("antflow.mobile.files.minio.secret-key", () -> MINIO_SECRET_KEY);
         registry.add("antflow.mobile.files.minio.bucket", () -> MINIO_BUCKET);
@@ -307,7 +282,7 @@ class MobileAttachmentMinioIntegrationTest {
 
     private MinioClient minioClient() {
         return MinioClient.builder()
-            .endpoint(minioEndpoint())
+            .endpoint(MINIO_ENDPOINT)
             .credentials(MINIO_ACCESS_KEY, MINIO_SECRET_KEY)
             .build();
     }
@@ -332,12 +307,9 @@ class MobileAttachmentMinioIntegrationTest {
         return asLong(values.get(0));
     }
 
-    private static String withStringType(String jdbcUrl) {
-        return jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "stringtype=unspecified";
-    }
-
-    private static String minioEndpoint() {
-        return "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000);
+    private static String env(String name, String defaultValue) {
+        String value = System.getenv(name);
+        return value == null || value.isBlank() ? defaultValue : value;
     }
 
     private static byte[] pngBytes(byte marker) {

@@ -8,7 +8,7 @@
 
 **Tech Stack (recap from spec):**
 - Frontend: React 18, Umi Max 4, TypeScript strict, antd 6, ProComponents 3, Tailwind v4, @dnd-kit, @xyflow/react (v12), zustand, @tanstack/react-query, vitest, playwright
-- Backend: Spring Boot 3.3+, Java 17, Spring Security 6, Spring Data JPA/Validation, MyBatis-Plus 3.5.5+, Flyway, jjwt 0.12.x, springdoc-openapi, Bucket4j, BCrypt, Lombok, Testcontainers, RestAssured, JUnit 5
+- Backend: Spring Boot 3.3+, Java 17, Spring Security 6, Spring Data JPA/Validation, MyBatis-Plus 3.5.5+, Flyway, jjwt 0.12.x, springdoc-openapi, Bucket4j, BCrypt, Lombok, local integration tests, RestAssured, JUnit 5
 - DB: PostgreSQL 17 with `ltree` extension and JSONB columns
 
 **Source spec:** `docs/superpowers/specs/2026-07-15-antflow-fusion-design.md`
@@ -88,7 +88,7 @@ Ant Design Pro + wflow fusion. Visual form designer + approval workflow.
 
 - `frontend/` — Umi Max 4 + React 18 + TS
 - `backend/` — Spring Boot 3 + Java 17
-- `infra/` — docker-compose (PG 17, etc.)
+- `infra/` — local runtime notes and nginx example
 - `docs/` — specs, plans
 
 ## Run
@@ -141,7 +141,7 @@ Expected: `[main (root-commit) ...] chore: initialize antflow monorepo`
         <jjwt.version>0.12.6</jjwt.version>
         <springdoc.version>2.6.0</springdoc.version>
         <bucket4j.version>8.10.0</bucket4j.version>
-        <testcontainers.version>1.20.2</testcontainers.version>
+        <local.integration.tests>true</local.integration.tests>
     </properties>
     <dependencies>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
@@ -162,8 +162,7 @@ Expected: `[main (root-commit) ...] chore: initialize antflow monorepo`
         <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><scope>provided</scope></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
         <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
-        <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><version>${testcontainers.version}</version><scope>test</scope></dependency>
-        <dependency><groupId>org.testcontainers</groupId><artifactId>postgresql</artifactId><version>${testcontainers.version}</version><scope>test</scope></dependency>
+        <!-- Live integration tests use explicitly configured local PostgreSQL and MinIO. -->
         <dependency><groupId>io.rest-assured</groupId><artifactId>rest-assured</artifactId><version>5.5.0</version><scope>test</scope></dependency>
     </dependencies>
     <build>
@@ -266,7 +265,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
-@Disabled("smoke test for P0.T6 — requires PG; remove @Disabled when docker-compose PG is up")
+@Disabled("smoke test for P0.T6 — requires local PG")
 @SpringBootTest
 @TestPropertySource(properties = "spring.flyway.enabled=false")
 class AntFlowApplicationTests {
@@ -332,72 +331,38 @@ git commit -m "feat(backend): spring boot 3 + mybatis-plus scaffold + optimistic
 
 ---
 
-### Task P0.3 — docker-compose for PostgreSQL 17
+### Task P0.3 — Local PostgreSQL 17 Setup
 
 **Files:**
-- Create: `infra/docker-compose.yml`
-- Create: `infra/.env.example`
+- Create: `docs/local-runtime.md`
 
-- [ ] **Step 1: Write `infra/docker-compose.yml`**
+- [ ] **Step 1: Start local PostgreSQL 17**
 
-```yaml
-services:
-  postgres:
-    image: postgres:17-alpine
-    container_name: antflow-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-antflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-antflow}
-      POSTGRES_DB: ${POSTGRES_DB:-antflow}
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./initdb.d:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-volumes:
-  pgdata: {}
+```powershell
+psql -U postgres -d postgres -c "CREATE DATABASE antflow;"
 ```
 
-- [ ] **Step 2: Write `initdb.d/01-extensions.sql`**
+- [ ] **Step 2: Ensure extensions**
 
 ```sql
--- Runs once on first container start as the superuser
 CREATE EXTENSION IF NOT EXISTS ltree;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- for gen_random_uuid()
 ```
 
-- [ ] **Step 3: Write `infra/.env.example`**
+- [ ] **Step 3: Write local runtime notes**
 
-```
-POSTGRES_USER=antflow
-POSTGRES_PASSWORD=antflow
-POSTGRES_DB=antflow
-JWT_SECRET=please-set-a-secret-of-at-least-32-bytes-here
-CORS_ALLOWED_ORIGINS=http://localhost:8000
-```
-
-- [ ] **Step 4: Bring up the DB**
-
-```bash
-cd "E:/code/ant-flow/infra"
-docker compose up -d
-docker exec antflow-postgres psql -U antflow -d antflow -c "SELECT extname FROM pg_extension WHERE extname IN ('ltree','pgcrypto');"
+```powershell
+psql -U postgres -d antflow -c "SELECT extname FROM pg_extension WHERE extname IN ('ltree','pgcrypto');"
 ```
 
 Expected: two rows returned, `ltree` and `pgcrypto`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 cd "E:/code/ant-flow"
-git add infra/docker-compose.yml infra/initdb.d infra/.env.example
-git commit -m "feat(infra): postgres 17 + ltree + pgcrypto via docker-compose"
+git add docs/local-runtime.md
+git commit -m "文档: 增加本机 PostgreSQL 运行说明"
 ```
 
 ---
@@ -545,7 +510,7 @@ Expected: console shows `Successfully applied 1 migration to schema "public"` an
 - [ ] **Step 3: Verify schema in PG**
 
 ```bash
-docker exec antflow-postgres psql -U antflow -d antflow -c "\dt"
+psql -U postgres -d antflow -c "\dt"
 ```
 
 Expected: list includes `t_company, t_department, t_role, t_user, t_user_role, t_form_definition, t_form_data, t_process_definition, t_process_instance, t_task, t_task_history, flyway_schema_history`.
@@ -621,7 +586,7 @@ SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/antflow \
   SPRING_DATASOURCE_USERNAME=antflow SPRING_DATASOURCE_PASSWORD=antflow \
   mvn -B spring-boot:run
 # In another terminal:
-docker exec antflow-postgres psql -U antflow -d antflow -c "SELECT username, role_code FROM t_user JOIN t_user_role ON ... -- see step 4"
+psql -U postgres -d antflow -c "SELECT username, role_code FROM t_user JOIN t_user_role ON ... -- see step 4"
 ```
 
 Expected: Flyway logs `Successfully applied 2 migrations`.
@@ -629,7 +594,7 @@ Expected: Flyway logs `Successfully applied 2 migrations`.
 - [ ] **Step 4: Verify role assignments**
 
 ```bash
-docker exec antflow-postgres psql -U antflow -d antflow -c "
+psql -U postgres -d antflow -c "
 SELECT u.username, r.code FROM t_user u JOIN t_user_role ur ON u.id=ur.user_id
 JOIN t_role r ON r.id=ur.role_id ORDER BY u.username;"
 ```
@@ -1352,7 +1317,7 @@ git commit -m "ci: backend mvn test + frontend lint/tsc/build"
 
 ### Phase P0 demo
 
-Run `docker compose up -d` in `infra/`, then in two shells:
+Start local PostgreSQL and local MinIO, then in two shells:
 
 - `cd backend && mvn -B spring-boot:run`
 - `cd frontend && npm start`
@@ -4612,7 +4577,7 @@ mvn -B spring-boot:run   # logs: "Successfully applied 3 migrations"
 - [ ] **Step 3: Verify `\di`**
 
 ```bash
-docker exec antflow-postgres psql -U antflow -d antflow -c "\di"
+psql -U postgres -d antflow -c "\di"
 ```
 
 Expected: ix_form_schema, ix_form_data, ix_proc_nodes, ix_proc_edges, ix_dept_path, ix_dept_company, ix_user_dept, ix_user_role, ux_pdef_form_version.

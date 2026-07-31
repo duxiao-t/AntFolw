@@ -6,7 +6,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
 /**
- * One-shot bootstrap for local (non-docker) PostgreSQL deployments.
+ * One-shot bootstrap for local PostgreSQL deployments.
  *
  * Connects to the `postgres` system DB as the configured user and ensures
  * the target database (`antflow` by default) exists. Idempotent.

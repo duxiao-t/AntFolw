@@ -9,7 +9,7 @@ ant-flow/
 ├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway + PostgreSQL
 ├── frontend/    # Umi Max 4 桌面管理端（表单/流程设计、组织、任务）
 ├── mobile/      # 独立移动端（Vite + React + Ant Design Mobile），base `/mobile/`
-├── infra/       # docker-compose、nginx 示例
+├── infra/       # nginx 示例
 └── docs/        # superpowers specs/plans、企业级验收记录
 ```
 
@@ -17,12 +17,16 @@ ant-flow/
 
 ## 本地运行
 
-### 数据库
+### 数据库与对象存储
 
 ```powershell
-Set-Location infra
-docker compose up -d
+$env:MINIO_ROOT_USER='minioadmin'
+$env:MINIO_ROOT_PASSWORD='minioadmin'
+minio.exe server E:\minio-data --address ':9000' --console-address ':9001'
 ```
+
+PostgreSQL 使用本机 17 版本，默认库名 `antflow`。附件存储默认走本机
+MinIO，不能落项目目录。
 
 ### 后端
 
@@ -31,6 +35,11 @@ docker compose up -d
 ```powershell
 Set-Location backend
 $env:PORT='8081'
+$env:MOBILE_FILE_STORAGE='minio'
+$env:MINIO_ENDPOINT='http://localhost:9000'
+$env:MINIO_ACCESS_KEY='minioadmin'
+$env:MINIO_SECRET_KEY='minioadmin'
+$env:MINIO_BUCKET='antflow-mobile-files'
 mvn -B spring-boot:run
 # 测试
 mvn -B test

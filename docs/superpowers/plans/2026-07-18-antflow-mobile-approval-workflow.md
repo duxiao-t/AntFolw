@@ -102,7 +102,7 @@ git commit -m "功能(后端): 增加移动草稿与文件元数据"
 - Create: `backend/src/main/java/com/antflow/mobile/workflow/MobileFileService.java`
 - Create: `backend/src/main/java/com/antflow/mobile/workflow/MobileFileController.java`
 - Create: `backend/src/main/java/com/antflow/mobile/workflow/FileStorage.java`
-- Create: `backend/src/main/java/com/antflow/mobile/workflow/LocalFileStorage.java`
+- Create: `backend/src/main/java/com/antflow/mobile/workflow/MinioFileStorage.java`
 - Modify: `backend/src/main/resources/application.yml`
 - Test: `backend/src/test/java/com/antflow/mobile/workflow/MobileFileServiceTest.java`
 
@@ -120,7 +120,7 @@ public interface FileStorage {
 }
 ```
 
-Keep local filesystem implementation in this plan; the interface permits S3 later without changing services.
+Use MinIO for the concrete storage implementation; do not write uploaded files into the repository.
 
 - [ ] **Step 3: Implement upload endpoint**
 
@@ -148,7 +148,10 @@ spring.servlet.multipart:
   max-file-size: 10MB
   max-request-size: 12MB
 antflow.mobile.files:
-  directory: ${MOBILE_FILE_DIRECTORY:./data/mobile-files}
+  storage: ${MOBILE_FILE_STORAGE:minio}
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    bucket: ${MINIO_BUCKET:antflow-mobile-files}
   allowed-types: image/jpeg,image/png,application/pdf
 ```
 
@@ -764,7 +767,7 @@ Set-Location backend
 mvn -B test
 ```
 
-Expected: all tests pass, including PostgreSQL/Testcontainers integration tests when Docker is available.
+Expected: all tests pass. Live attachment integration tests use local PostgreSQL and local MinIO when explicitly enabled.
 
 - [ ] **Step 2: Run desktop verification**
 

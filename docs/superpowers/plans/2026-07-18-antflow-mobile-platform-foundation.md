@@ -832,9 +832,9 @@ Inject `CorsProperties` into SecurityConfig and remove the current always-localh
 
 Use backend `8081`, desktop `8000`, mobile `5173` for the development documentation and proxy configuration. Keep production configurable by environment.
 
-- [ ] **Step 3: Document Docker credentials explicitly**
+- [ ] **Step 3: Document local credentials explicitly**
 
-README commands must set datasource username/password to Docker defaults or change Docker defaults and application defaults in the same commit. Do not leave two contradictory quick starts.
+README commands must set datasource username/password and MinIO credentials to local defaults or change application defaults in the same commit. Do not leave two contradictory quick starts.
 
 - [ ] **Step 4: Verify and commit**
 

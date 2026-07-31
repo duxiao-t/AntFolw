@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-// Prefer 5174: host 5173 is often claimed by Docker published services on this machine.
+// Prefer 5174: host 5173 is often claimed by local dev services on this machine.
 const e2ePort = Number(process.env.E2E_PORT || 5174);
 const origin = `http://127.0.0.1:${e2ePort}`;
 

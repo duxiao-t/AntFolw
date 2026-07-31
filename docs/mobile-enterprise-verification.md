@@ -75,8 +75,9 @@
 ### 4.2 Live HTTP 冒烟（2026-07-22，本 worktree 重启后端）
 
 环境：
-- infra/docker-compose up -d → ntflow-postgres 健康（Postgres 17-alpine）。本机曾有一个 Windows 原生 postgres-x64-17（PID 26432）误占 5432，导致容器 PG 端口映射被静默吃掉，JDBC 落到一个陈旧的同名 antflow DB（11 行 → 1 行）。kill 后容器 PG 接管，JDBC 与 docker exec psql 看到一致数据
-- 后端：cd backend; mvn -DskipTests package 后用 java -jar target/antflow-backend-0.1.0-SNAPSHOT.jar 在 8091 启动，应用 V1…V11 全部 Flyway 迁移
+- 本机 PostgreSQL 17：数据库 `antflow`，JDBC 使用 `jdbc:postgresql://localhost:5432/antflow?stringtype=unspecified`
+- 本机 MinIO：API `http://localhost:9000`，Console `http://localhost:9001`，附件 bucket `antflow-mobile-files`
+- 后端：cd backend; mvn -DskipTests package 后用 java -jar target/antflow-backend-0.1.0-SNAPSHOT.jar 在 8091 启动，应用 V1…V11 全部 Flyway 迁移，附件存储走 MinIO
 - 脚本：ackend/smoke-live.py（urllib 直连，45 个用例）
 
 | 用例 | 结果 | 说明 |
@@ -90,12 +91,12 @@
 
 #### Live 冒烟中暴露并修复的真实 bug
 
-1. **@MapperScan("com.antflow") 误扫**：com.antflow.mobile.workflow.FileStorage 接口也被当成 mapper 注入，撞上 LocalFileStorage 导致 APPLICATION FAILED TO START: 2 beans found。改为 @MapperScan(value = "com.antflow", annotationClass = Mapper.class) 后正常启动。
+1. **@MapperScan("com.antflow") 误扫**：com.antflow.mobile.workflow.FileStorage 接口也被当成 mapper 注入，撞上文件存储 bean 导致 APPLICATION FAILED TO START。改为 @MapperScan(value = "com.antflow", annotationClass = Mapper.class) 后正常启动。
 2. **	_mobile_file.id UUID 无 TypeHandler**：上传 PNG 走到 MobileFileMapper.insert 报 Type handler was null on parameter mapping for property 'id'，整条上传链路回 500。补 com.antflow.common.UuidTypeHandler（@MappedTypes(UUID.class) + PGobject）后写入正常。
 3. **未知路由 500**：NoResourceFoundException 没被映射，PUT /api/branding 等都返回 500。GlobalExceptionHandler 加 @ExceptionHandler(NoResourceFoundException.class) → 404 NOT_FOUND。
 4. **超大文件 500**：Tomcat FileSizeLimitExceededException 走 Exception.class 回 500。加 @ExceptionHandler({MaxUploadSizeExceededException.class, MultipartException.class}) → 413 FILE_TOO_LARGE。
 5. **IdempotencyService 未挂到 HTTP**：IdempotencyService.executeOrReplay 单测通过，但 controller 不读 Idempotency-Key，实际线上重放照样新建实例。新增 IdempotencyFilter（OncePerRequestFilter），注册在 JwtAuthFilter 之后以拿到 PrincipalHolder.current().userId()，通过 ContentCachingResponseWrapper 抓响应体存回 IdempotencyService。
-6. **Windows 原生 postgres 占 5432**：本机 D:/Program Files/PostgreSQL/17/bin/postgres.exe -D "D:/Program Files/PostgreSQL/17/data"（服务 Stopped 仍残留）让 docker ntflow-postgres 端口映射落到同名 antflow 数据库的两个不同副本，JDBC 看到 1 行 vs docker exec psql 看到 11 行；kill 进程后容器 PG 接管，11 行统一可见。
+6. **本机 PostgreSQL 端口需确认**：验证前要确认 `localhost:5432` 指向预期的本机 PostgreSQL 数据目录，避免后端连接到旧库导致验收数据不一致。
 
 #### 安全语义小结
 

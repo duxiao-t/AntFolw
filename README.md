@@ -5,7 +5,7 @@ Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterp
 ## Status (2026-07-22)
 
 - ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway) — unit tests green (**88** tests, 1 skipped).
-- ✅ PostgreSQL 17 schema (Flyway V1+) + optional MinIO object storage for mobile attachments.
+- ✅ PostgreSQL 17 schema (Flyway V1+) + MinIO object storage for mobile attachments.
 - ✅ Custom approval engine — tree process, OR/AND, SELF_SELECT, withdraw, optimistic locking.
 - ✅ Form designer storage + runtime snapshot (`form_def_version`).
 - ✅ Org module — Company / Department (ltree) / User / Role + JWT + login rate limit.
@@ -13,30 +13,35 @@ Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterp
 - ✅ **Mobile client (`mobile/`)** — independent Vite app at `/mobile/`: workbench, dynamic form fill/draft, self-select, submit, task approve/reject, process detail, offline recovery, branding fallback, enterprise gates (bundle/perf/a11y/e2e).
 - ✅ CI — backend `mvn test` + frontend lint/tsc/build + mobile enterprise checks.
 - 📄 Mobile acceptance evidence — `docs/mobile-enterprise-verification.md`.
-- ⏸ Full live integration depends on Docker + backend started from this branch.
+- ⏸ Full live integration depends on local PostgreSQL, local MinIO, and backend started from this branch.
 
 ## Prerequisites
 
 - Node.js >= 22
 - Java 17
 - Maven 3.9
-- Docker Desktop (daemon running)
+- PostgreSQL 17 running locally on `localhost:5432`
+- MinIO Server running locally on `localhost:9000` with console on `localhost:9001`
 
 ## Quick start
 
-### 1. Start database and object storage
+### 1. Start local database and object storage
 
-```bash
-cd infra
-docker compose up -d
-docker exec antflow-postgres psql -U antflow -d antflow -c "SELECT extname FROM pg_extension WHERE extname IN ('ltree','pgcrypto');"
-# Expected: 2 rows (ltree, pgcrypto)
+Create or reuse a local PostgreSQL database named `antflow`. The default backend
+credentials are `postgres / Tao@1234`; override them with Spring datasource
+environment variables if your local database uses different credentials.
+
+Start a local MinIO server outside this repository:
+
+```powershell
+$env:MINIO_ROOT_USER='minioadmin'
+$env:MINIO_ROOT_PASSWORD='minioadmin'
+minio.exe server E:\minio-data --address ':9000' --console-address ':9001'
 ```
 
 MinIO is exposed at `http://localhost:9000`; the console is at `http://localhost:9001`.
-The backend still defaults to local file storage. To store mobile attachments in MinIO,
-set `MOBILE_FILE_STORAGE=minio` plus the `MINIO_*` variables from `infra/.env.example`
-before starting the backend.
+The backend defaults to MinIO storage. Mobile attachments are not written to a
+project-local file directory.
 
 ### 2. Start the backend
 
@@ -91,7 +96,7 @@ antflow/
 ├── backend/                 # Spring Boot 3 + Java 17
 ├── frontend/                # Umi Max desktop — port 8000
 ├── mobile/                  # Vite mobile SPA — base /mobile/
-├── infra/                   # docker-compose, nginx example
+├── infra/                   # nginx example
 ├── docs/
 │   ├── mobile-enterprise-verification.md
 │   └── superpowers/         # specs + implementation plans
@@ -137,7 +142,7 @@ npm run test:e2e
 
 ### Desktop E2E (optional live)
 
-Pre-req: docker compose up, backend on :8080.
+Pre-req: local PostgreSQL, local MinIO, backend on :8080.
 
 ```bash
 cd frontend

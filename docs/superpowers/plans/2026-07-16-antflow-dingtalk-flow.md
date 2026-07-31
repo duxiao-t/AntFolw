@@ -1429,7 +1429,7 @@ git commit -m "功能(前端): 发起流程时为自选审批节点选择审批�
 
 ```bash
 # 1. 起库 + 后端
-cd infra && docker compose up -d
+Start local PostgreSQL and local MinIO before running the backend.
 cd ../backend && mvn -q -o spring-boot:run &   # 应用 V1..V4
 # 2. 登录取 token
 TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \

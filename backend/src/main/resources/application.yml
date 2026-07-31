@@ -46,8 +46,7 @@ antflow:
     session-ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:2592000}
   mobile:
     files:
-      storage: ${MOBILE_FILE_STORAGE:local}
-      directory: ${MOBILE_FILE_DIRECTORY:./data/mobile-files}
+      storage: ${MOBILE_FILE_STORAGE:minio}
       max-bytes: ${MOBILE_FILE_MAX_BYTES:10485760}
       allowed-types: ${MOBILE_FILE_ALLOWED_TYPES:image/jpeg,image/png,application/pdf}
       minio:
