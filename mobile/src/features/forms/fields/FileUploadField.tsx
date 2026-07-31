@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MobileFileDto } from '../files.api';
-import { uploadMobileFile } from '../files.api';
+import { deleteMobileFile, uploadMobileFile } from '../files.api';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
 
 export type UploadItem = {
   localId: string;
   file: File;
-  status: 'queued' | 'uploading' | 'ready' | 'failed';
+  status: 'queued' | 'uploading' | 'ready' | 'failed' | 'deleting' | 'delete_failed';
   progress: number;
   remote?: MobileFileDto;
   error?: string;
+  createdInSession?: boolean;
 };
 
 const uploadQueueBlockedSymbol = Symbol('antflowUploadQueueBlocked');
@@ -73,37 +74,46 @@ export function FileUploadField(props: MobileFieldProps) {
             }}
           />
           <div className="af-upload-list">
-            {items.map((item) => (
-              <div key={item.localId} className="af-upload-list__item">
-                {previewImages && item.remote?.url ? (
+            {items.map((item) => {
+              const previewUrl = previewImages && item.remote ? fileContentUrl(item.remote) : '';
+              return (
+                <div key={item.localId} className="af-upload-list__item">
+                  {previewUrl ? (
+                    <button
+                      type="button"
+                      className="af-upload-list__thumb"
+                      aria-label={`预览 ${item.file.name}`}
+                      onClick={() => window.open(previewUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      <img src={previewUrl} alt="" />
+                    </button>
+                  ) : null}
+                  <div className="af-upload-list__main">
+                    <div className="af-upload-list__name">{item.file.name}</div>
+                    <div className={`af-upload-list__status af-upload-list__status--${item.status}`}>
+                      {statusLabel(item)}
+                    </div>
+                    <div className="af-upload-list__progress" aria-hidden="true">
+                      <span style={{ width: `${item.progress}%` }} />
+                    </div>
+                  </div>
+                  {item.status === 'failed' ? (
+                    <button type="button" className="af-link-button" onClick={() => void queueFileUpload(item.file, item.localId)}>
+                      重试 {item.file.name}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    className="af-upload-list__thumb"
-                    aria-label={`预览 ${item.file.name}`}
-                    onClick={() => window.open(item.remote?.url, '_blank', 'noopener,noreferrer')}
+                    className="af-link-button"
+                    aria-label={`删除 ${item.file.name}`}
+                    disabled={item.status === 'deleting'}
+                    onClick={() => void removeItem(item.localId)}
                   >
-                    <img src={item.remote.url} alt="" />
+                    删除
                   </button>
-                ) : null}
-                <div className="af-upload-list__main">
-                  <div className="af-upload-list__name">{item.file.name}</div>
-                  <div className={`af-upload-list__status af-upload-list__status--${item.status}`}>
-                    {statusLabel(item)}
-                  </div>
-                  <div className="af-upload-list__progress" aria-hidden="true">
-                    <span style={{ width: `${item.progress}%` }} />
-                  </div>
                 </div>
-                {item.status === 'failed' ? (
-                  <button type="button" className="af-link-button" onClick={() => void queueFileUpload(item.file, item.localId)}>
-                    重试 {item.file.name}
-                  </button>
-                ) : null}
-                <button type="button" className="af-link-button" aria-label={`删除 ${item.file.name}`} onClick={() => removeItem(item.localId)}>
-                  删除
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -126,7 +136,7 @@ export function FileUploadField(props: MobileFieldProps) {
       setItems((current) => {
         const next = current.map((item): UploadItem =>
           item.localId === localId
-            ? { ...item, status: 'ready', progress: 100, remote, error: undefined }
+            ? { ...item, status: 'ready', progress: 100, remote, error: undefined, createdInSession: true }
             : item,
         );
         emitUploadValue(next);
@@ -145,7 +155,34 @@ export function FileUploadField(props: MobileFieldProps) {
     }
   }
 
-  function removeItem(localId: string) {
+  async function removeItem(localId: string) {
+    const target = items.find((item) => item.localId === localId);
+    if (target?.status === 'deleting') {
+      return;
+    }
+    if (target?.remote && target.createdInSession) {
+      setItems((current) => {
+        const next = current.map((item): UploadItem =>
+          item.localId === localId ? { ...item, status: 'deleting', progress: 100 } : item,
+        );
+        emitUploadValue(next);
+        return next;
+      });
+      try {
+        await deleteMobileFile(target.remote.id);
+      } catch (error) {
+        setItems((current) => {
+          const next = current.map((item): UploadItem =>
+            item.localId === localId
+              ? { ...item, status: 'delete_failed', progress: 100, error: errorMessage(error) }
+              : item,
+          );
+          emitUploadValue(next);
+          return next;
+        });
+        return;
+      }
+    }
     setItems((current) => {
       const next = current.filter((item) => item.localId !== localId);
       emitUploadValue(next);
@@ -156,7 +193,11 @@ export function FileUploadField(props: MobileFieldProps) {
   function emitUploadValue(nextItems: UploadItem[]) {
     const ready = readyFiles(nextItems);
     const blocked = nextItems.some((item) =>
-      item.status === 'failed' || item.status === 'queued' || item.status === 'uploading');
+      item.status === 'failed'
+      || item.status === 'queued'
+      || item.status === 'uploading'
+      || item.status === 'deleting'
+      || item.status === 'delete_failed');
     props.onValueChange(props.node.id, createFileUploadValue(ready, blocked));
   }
 }
@@ -191,16 +232,22 @@ function mergeReadyItems(items: UploadItem[], readyValues: MobileFileDto[]) {
     .filter((item) => !existingIds.has(item.id))
     .map((item) => ({
       localId: item.id,
-      file: new File([], item.id),
+      file: new File([], item.name || item.id),
       status: 'ready' as const,
       progress: 100,
       remote: item,
+      createdInSession: false,
     }));
   return [...keep, ...missing];
 }
 
 function localBlocker(items: UploadItem[]) {
-  if (items.some((item) => item.status === 'failed' || item.status === 'queued' || item.status === 'uploading')) {
+  if (items.some((item) =>
+    item.status === 'failed'
+    || item.status === 'queued'
+    || item.status === 'uploading'
+    || item.status === 'deleting'
+    || item.status === 'delete_failed')) {
     return '仍有文件未完成上传';
   }
   return null;
@@ -213,7 +260,17 @@ function statusLabel(item: UploadItem) {
   if (item.status === 'ready') {
     return '100%';
   }
+  if (item.status === 'deleting') {
+    return '删除中';
+  }
+  if (item.status === 'delete_failed') {
+    return '删除失败';
+  }
   return `上传中 ${item.progress}%`;
+}
+
+function fileContentUrl(file: MobileFileDto) {
+  return file.contentUrl || file.url || '';
 }
 
 function errorMessage(error: unknown) {

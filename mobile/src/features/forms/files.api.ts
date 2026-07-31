@@ -31,6 +31,12 @@ export async function uploadMobileFile(endpoint: string, file: File): Promise<Mo
   });
 }
 
+export async function deleteMobileFile(fileId: string): Promise<void> {
+  await apiRequest<void>(`/api/mobile/files/${encodeURIComponent(fileId)}`, {
+    method: 'DELETE',
+  });
+}
+
 function withKeyword(endpoint: string, keyword: string) {
   const trimmed = keyword.trim();
   if (!trimmed) {

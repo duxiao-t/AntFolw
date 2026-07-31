@@ -3055,6 +3055,8 @@ body {
 .af-choice-tile[aria-checked="true"] { border-color: var(--af-color-primary); background: #eaf2ff; color: var(--af-color-primary); }
 .af-upload-list { display: grid; gap: 8px; }
 .af-upload-list__item { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid var(--af-color-line); border-radius: 8px; }
+.af-upload-list__thumb { width: 44px; height: 44px; flex: 0 0 44px; overflow: hidden; padding: 0; border: 1px solid var(--af-color-line); border-radius: 8px; background: var(--af-color-bg-soft); cursor: pointer; }
+.af-upload-list__thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .af-upload-list__main { min-width: 0; flex: 1; }
 .af-upload-list__name { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .af-upload-list__status { color: var(--af-color-muted); font-size: 10px; }

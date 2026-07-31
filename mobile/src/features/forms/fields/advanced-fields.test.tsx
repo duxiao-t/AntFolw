@@ -30,10 +30,14 @@ beforeEach(() => {
         }
         return jsonResponse({
           id: `remote-${file.name}`,
-          url: `/files/remote-${file.name}`,
+          name: file.name,
+          contentUrl: `/api/mobile/files/remote-${file.name}/content`,
           contentType: file.type,
-          sizeBytes: file.size,
+          size: file.size,
         });
+      }
+      if (url.startsWith('/api/mobile/files/') && init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
       }
       return jsonResponse({ message: 'Not found' }, 404);
     }),
@@ -192,10 +196,95 @@ describe('advanced mobile fields', () => {
 
     await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
-      expect.objectContaining({ id: 'remote-hello.txt', url: '/files/remote-hello.txt' }),
+      expect.objectContaining({
+        id: 'remote-hello.txt',
+        name: 'hello.txt',
+        contentUrl: '/api/mobile/files/remote-hello.txt/content',
+        size: 5,
+      }),
     ]);
 
     await user.click(screen.getByRole('button', { name: '删除 hello.txt' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/mobile/files/remote-hello.txt',
+      expect.objectContaining({ method: 'DELETE' }),
+    ));
+    expect(onValueChange).toHaveBeenLastCalledWith('attachments', []);
+  });
+
+  it('previews uploaded image files through the backend content URL', async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    const { container } = render(
+      <FileUploadField
+        {...baseProps(
+          {
+            id: 'photo',
+            type: 'image_upload',
+            label: '图片',
+            props: {
+              uploadEndpoint: '/api/mobile/files',
+              preview: true,
+            },
+          },
+          [],
+        )}
+      />,
+    );
+
+    await user.upload(screen.getByLabelText('图片'), new File(['image'], 'photo.png', { type: 'image/png' }));
+    const preview = await screen.findByRole('button', { name: '预览 photo.png' });
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      '/api/mobile/files/remote-photo.png/content',
+    );
+
+    await user.click(preview);
+
+    expect(open).toHaveBeenCalledWith(
+      '/api/mobile/files/remote-photo.png/content',
+      '_blank',
+      'noopener,noreferrer',
+    );
+  });
+
+  it('unlinks historical files from the form value without deleting backend content', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const fetchMock = vi.mocked(fetch);
+
+    render(
+      <FileUploadField
+        {...baseProps(
+          {
+            id: 'attachments',
+            type: 'file_upload',
+            label: '附件',
+            props: {
+              uploadEndpoint: '/api/mobile/files',
+            },
+          },
+          [
+            {
+              id: 'submitted-file',
+              name: 'history.png',
+              contentUrl: '/api/mobile/files/submitted-file/content',
+              contentType: 'image/png',
+              size: 12,
+            },
+          ],
+          onValueChange,
+        )}
+      />,
+    );
+
+    expect(await screen.findByText('history.png')).toBeInTheDocument();
+    fetchMock.mockClear();
+
+    await user.click(screen.getByRole('button', { name: '删除 history.png' }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', []);
   });
 

@@ -12,6 +12,7 @@ import { SubmitConfirmPage } from './SubmitConfirmPage';
 import { SubmitSuccessPage } from './SubmitSuccessPage';
 import { useSubmitFlowStore } from './submitFlow.store';
 import { ProcessDetailPage } from '../processes/ProcessDetailPage';
+import { collectMobileFileRefs } from './start.api';
 
 const AUTH_USER: MobileUser = {
   id: 7,
@@ -267,9 +268,10 @@ describe('mobile form submit flow', () => {
         attachments: [
           {
             id: '5e152409-83c4-4dbb-9fef-5782416d7bb8',
-            url: '/api/mobile/files/5e152409-83c4-4dbb-9fef-5782416d7bb8/content',
+            name: 'proof.pdf',
+            contentUrl: '/api/mobile/files/5e152409-83c4-4dbb-9fef-5782416d7bb8/content',
             contentType: 'application/pdf',
-            sizeBytes: 12,
+            size: 12,
           },
         ],
       },
@@ -294,6 +296,37 @@ describe('mobile form submit flow', () => {
         ],
       });
     });
+  });
+
+  it('collects file refs from current and legacy mobile file values', () => {
+    expect(collectMobileFileRefs({
+      attachments: [
+        {
+          id: '5e152409-83c4-4dbb-9fef-5782416d7bb8',
+          name: 'proof.pdf',
+          contentUrl: '/api/mobile/files/5e152409-83c4-4dbb-9fef-5782416d7bb8/content',
+          contentType: 'application/pdf',
+          size: 12,
+        },
+        {
+          id: '85c25190-545e-4f46-a441-26e7fd0a0239',
+          url: '/api/mobile/files/85c25190-545e-4f46-a441-26e7fd0a0239/content',
+          contentType: 'image/png',
+          sizeBytes: 9,
+        },
+      ],
+    })).toEqual([
+      {
+        fileId: '5e152409-83c4-4dbb-9fef-5782416d7bb8',
+        fieldId: 'attachments',
+        sortOrder: 0,
+      },
+      {
+        fileId: '85c25190-545e-4f46-a441-26e7fd0a0239',
+        fieldId: 'attachments',
+        sortOrder: 1,
+      },
+    ]);
   });
 
   it('submits directly when workflow is disabled', async () => {

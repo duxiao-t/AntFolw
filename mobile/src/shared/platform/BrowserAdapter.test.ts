@@ -4,9 +4,10 @@ import type { MobileFile } from '../api/types';
 
 const FILE: MobileFile = {
   id: 'file-1',
-  url: '/api/files/file-1?signed=1',
+  name: 'file.pdf',
+  contentUrl: '/api/files/file-1?signed=1',
   contentType: 'application/pdf',
-  sizeBytes: 1024,
+  size: 1024,
 };
 
 describe('browserAdapter', () => {
@@ -34,9 +35,26 @@ describe('browserAdapter', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
 
     await expect(
-      browserAdapter.openFile({ ...FILE, url: 'https://files.example.com/file-1?signed=1' }),
+      browserAdapter.openFile({ ...FILE, contentUrl: 'https://files.example.com/file-1?signed=1' }),
     ).rejects.toThrow('Only same-origin files can be opened');
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens legacy file URLs restored from local drafts', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    await browserAdapter.openFile({
+      ...FILE,
+      contentUrl: '',
+      url: '/api/files/legacy-file?signed=1',
+      sizeBytes: 1024,
+    });
+
+    expect(open).toHaveBeenCalledWith(
+      'http://localhost:3000/api/files/legacy-file?signed=1',
+      '_blank',
+      'noopener,noreferrer',
+    );
   });
 
   it('goes back when browser history has previous entries', () => {

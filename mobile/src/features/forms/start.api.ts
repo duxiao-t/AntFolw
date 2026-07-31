@@ -89,10 +89,19 @@ function collectValueFiles(value: unknown, fieldId: string, refs: MobileFileRef[
 }
 
 function isMobileFileValue(value: unknown): value is { id: string } {
+  const file = value as {
+    id?: unknown;
+    contentType?: unknown;
+    size?: unknown;
+    sizeBytes?: unknown;
+    contentUrl?: unknown;
+    url?: unknown;
+  };
   return typeof value === 'object'
     && value != null
     && !Array.isArray(value)
-    && typeof (value as { id?: unknown }).id === 'string'
-    && typeof (value as { contentType?: unknown }).contentType === 'string'
-    && typeof (value as { sizeBytes?: unknown }).sizeBytes === 'number';
+    && typeof file.id === 'string'
+    && typeof file.contentType === 'string'
+    && (typeof file.size === 'number' || typeof file.sizeBytes === 'number')
+    && (typeof file.contentUrl === 'string' || typeof file.url === 'string');
 }

@@ -169,9 +169,10 @@ describe('apiRequest', () => {
   it('sends FormData through shared auth without JSON content type', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
       id: 'file-1',
-      url: '/api/mobile/files/file-1/content',
+      name: 'hello.txt',
+      contentUrl: '/api/mobile/files/file-1/content',
       contentType: 'text/plain',
-      sizeBytes: 5,
+      size: 5,
     }));
     vi.stubGlobal('fetch', fetchMock);
     setAuthController({

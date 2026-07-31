@@ -16,7 +16,7 @@ export const browserAdapter: PlatformAdapter = {
   },
   async openFile(file: MobileFile) {
     if (typeof window === 'undefined') return;
-    const url = resolveSameOriginUrl(file.url);
+    const url = resolveSameOriginUrl(file.contentUrl || file.url || '');
     window.open(url, '_blank', 'noopener,noreferrer');
   },
   closePage() {

@@ -60,7 +60,10 @@ export interface AppFilters {
 
 export interface MobileFile {
   id: string;
-  url: string;
+  name: string;
+  contentUrl: string;
   contentType: string;
-  sizeBytes: number;
+  size: number;
+  url?: string;
+  sizeBytes?: number;
 }
