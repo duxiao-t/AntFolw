@@ -97,9 +97,10 @@ export function FileUploadField(props: MobileFieldProps) {
                     <div className={`af-upload-list__status af-upload-list__status--${item.status}`}>
                       {statusLabel(item)}
                     </div>
-                    <div className="af-upload-list__progress" aria-hidden="true">
+                    <div className={`af-upload-list__progress af-upload-list__progress--${progressTone(item)}`} aria-hidden="true">
                       <span style={{ width: `${item.progress}%` }} />
                     </div>
+                    {item.error ? <div className="af-upload-list__error">{item.error}</div> : null}
                   </div>
                   {item.status === 'failed' ? (
                     <button type="button" className="af-link-button" onClick={() => void queueFileUpload(item.file, item.localId)}>
@@ -154,7 +155,7 @@ export function FileUploadField(props: MobileFieldProps) {
   }
 
   function updateUploadProgress(localId: string, progress: number) {
-    const bounded = Math.min(99, Math.max(8, Math.round(progress)));
+    const bounded = Math.min(100, Math.max(8, Math.round(progress)));
     let changed = false;
     const next = itemsRef.current.map((item): UploadItem => {
       if (item.localId !== localId || item.status !== 'uploading' || item.progress >= bounded) {
@@ -268,7 +269,7 @@ function localBlocker(items: UploadItem[]) {
 
 function statusLabel(item: UploadItem) {
   if (item.status === 'failed') {
-    return item.error || '上传失败';
+    return '上传失败';
   }
   if (item.status === 'ready') {
     return '100%';
@@ -277,9 +278,13 @@ function statusLabel(item: UploadItem) {
     return '删除中';
   }
   if (item.status === 'delete_failed') {
-    return item.error || '删除失败';
+    return '删除失败';
   }
   return `上传中 ${item.progress}%`;
+}
+
+function progressTone(item: UploadItem) {
+  return item.status === 'failed' || item.status === 'delete_failed' ? 'error' : 'success';
 }
 
 function fileContentUrl(file: MobileFileDto) {

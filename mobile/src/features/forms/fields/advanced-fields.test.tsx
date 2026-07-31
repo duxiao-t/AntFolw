@@ -272,10 +272,13 @@ describe('advanced mobile fields', () => {
       );
     }
 
-    render(<StatefulUpload />);
+    const { container } = render(<StatefulUpload />);
 
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
     await waitFor(() => expect(screen.getByText('100%')).toBeInTheDocument());
+    expect(container.querySelector('.af-upload-list__progress')).toHaveClass(
+      'af-upload-list__progress--success',
+    );
 
     expect(consoleError.mock.calls.flat().join('\n')).not.toContain('Cannot update a component');
     consoleError.mockRestore();
@@ -361,7 +364,7 @@ describe('advanced mobile fields', () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
 
-    render(
+    const { container } = render(
       <FileUploadField
         {...baseProps(
           {
@@ -380,7 +383,12 @@ describe('advanced mobile fields', () => {
 
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-oops'], 'oops.pdf', { type: 'application/pdf' }));
 
-    await waitFor(() => expect(screen.getByText('上传失败')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(container.querySelector('.af-upload-list__status')).toHaveTextContent('上传失败'));
+    expect(container.querySelector('.af-upload-list__progress')).toHaveClass(
+      'af-upload-list__progress--error',
+    );
+    expect(container.querySelector('.af-upload-list__error')).toHaveTextContent('上传失败');
     expect(onValueChange).not.toHaveBeenCalledWith('attachments', expect.arrayContaining([expect.anything()]));
     expect(screen.getByRole('button', { name: '重试 oops.pdf' })).toBeInTheDocument();
   });
@@ -401,7 +409,7 @@ describe('advanced mobile fields', () => {
 
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-oops'], 'oops.pdf', { type: 'application/pdf' }));
 
-    await waitFor(() => expect(screen.getByText('上传失败')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('上传失败').length).toBeGreaterThan(0));
     const emittedValue = onValueChange.mock.calls.at(-1)?.[1];
 
     expect(Array.isArray(emittedValue)).toBe(true);

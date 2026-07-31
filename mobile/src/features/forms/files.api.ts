@@ -65,6 +65,7 @@ function uploadMobileFileWithProgress(
   const controller = getAuthController();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let settled = false;
     xhr.open('POST', endpoint);
     xhr.withCredentials = true;
     xhr.setRequestHeader('Accept', 'application/json');
@@ -82,9 +83,19 @@ function uploadMobileFileWithProgress(
       }
       onProgress(Math.min(99, Math.max(8, Math.round((event.loaded / event.total) * 100))));
     };
-    xhr.onerror = () => reject(new Error('网络异常，文件上传失败'));
-    xhr.onabort = () => reject(new Error('文件上传已取消'));
-    xhr.onload = () => {
+    xhr.onerror = () => rejectOnce(new Error('网络异常，文件上传失败'));
+    xhr.onabort = () => rejectOnce(new Error('文件上传已取消'));
+    xhr.onload = handleResponse;
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 4) {
+        handleResponse();
+      }
+    };
+    function handleResponse() {
+      if (settled) {
+        return;
+      }
+      settled = true;
       if (xhr.status === 401 && !retry && !controller.isAuthEndpoint(endpoint)) {
         void controller.refresh()
           .then(() => uploadMobileFileWithProgress(endpoint, formData, onProgress, true))
@@ -93,14 +104,23 @@ function uploadMobileFileWithProgress(
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          resolve(JSON.parse(xhr.responseText || '{}') as MobileFileDto);
+          const metadata = JSON.parse(xhr.responseText || '{}') as MobileFileDto;
+          onProgress(100);
+          resolve(metadata);
         } catch {
           reject(new Error('文件上传响应解析失败'));
         }
         return;
       }
       reject(apiErrorFromXhr(xhr));
-    };
+    }
+    function rejectOnce(error: Error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    }
     onProgress(8);
     xhr.send(formData);
   });
