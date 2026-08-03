@@ -6,7 +6,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
@@ -97,15 +96,18 @@ class MobileFileServiceTest {
     }
 
     @Test
-    void uploadDeduplicatesSameOwnerAndContent() throws Exception {
+    void uploadDeduplicatesAndRepairsExistingStorageObject() throws Exception {
         MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
 
-        MobileFileDto dto = service.upload(pngFile("logo.png", pngBytes()), 7L);
+        byte[] originalBytes = pngBytes();
+        MobileFileDto dto = service.upload(pngFile("logo.png", originalBytes), 7L);
 
         assertThat(dto.id()).isEqualTo(existing.getId());
         assertThat(dto.contentUrl()).isEqualTo("/api/mobile/files/" + existing.getId() + "/content");
-        assertThat(storage.putCount).isZero();
+        assertThat(storage.putCount).isEqualTo(1);
+        assertThat(storage.storageKey).isEqualTo(existing.getStorageKey());
+        assertThat(storage.contentBytes).isEqualTo(originalBytes);
         Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
     }
 
@@ -113,12 +115,14 @@ class MobileFileServiceTest {
     void uploadStoresValidatedFileMetadata() throws Exception {
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
-        MobileFileDto dto = service.upload(pngFile("logo.png", pngBytes()), 7L);
+        byte[] originalBytes = pngBytes();
+        MobileFileDto dto = service.upload(pngFile("logo.png", originalBytes), 7L);
 
         assertThat(dto.name()).isEqualTo("logo.png");
         assertThat(dto.contentType()).isEqualTo("image/png");
         assertThat(dto.contentUrl()).startsWith("/api/mobile/files/");
         assertThat(storage.putCount).isEqualTo(1);
+        assertThat(storage.contentBytes).isEqualTo(originalBytes);
         ArgumentCaptor<MobileFile> captor = ArgumentCaptor.forClass(MobileFile.class);
         Mockito.verify(fileMapper).insert(captor.capture());
         MobileFile row = captor.getValue();
@@ -219,14 +223,19 @@ class MobileFileServiceTest {
 
     private static final class CapturingStorage implements FileStorage {
         private int putCount;
+        private String storageKey;
         private String contentType;
+        private byte[] contentBytes = new byte[0];
 
         @Override
         public StoredObject put(String storageKey, InputStream content, long size,
                                 String contentType) throws IOException {
             putCount++;
+            this.storageKey = storageKey;
             this.contentType = contentType;
-            content.transferTo(OutputStream.nullOutputStream());
+            ByteArrayOutputStream captured = new ByteArrayOutputStream();
+            content.transferTo(captured);
+            contentBytes = captured.toByteArray();
             return new StoredObject(storageKey, size);
         }
 

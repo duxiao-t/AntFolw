@@ -1,9 +1,11 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -41,8 +43,12 @@ public class MobileFileController {
         MobileFileContent content = fileService.readContent(id, principal.userId(), principal.roles());
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType(content.metadata().contentType()))
-            .header(HttpHeaders.CONTENT_DISPOSITION,
-                "inline; filename=\"" + content.metadata().name() + "\"")
+            .contentLength(content.metadata().size())
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                .filename(content.metadata().name(), StandardCharsets.UTF_8)
+                .build()
+                .toString())
+            .header(HttpHeaders.CACHE_CONTROL, "no-store, no-transform")
             .body(content.resource());
     }
 

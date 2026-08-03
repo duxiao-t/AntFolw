@@ -44,18 +44,14 @@ public class MobileFileService {
             .eq("status", READY_STATUS)
             .isNull("deleted_at"));
         if (existing != null) {
+            writeStorageObject(existing.getStorageKey(), content, submittedContentType);
             return toDto(existing);
         }
 
         UUID id = UUID.randomUUID();
         String originalName = sanitizeName(file.getOriginalFilename());
         String storageKey = ownerId + "/" + id + "-" + originalName;
-        try {
-            storage.put(storageKey, new ByteArrayInputStream(content), content.length,
-                submittedContentType);
-        } catch (IOException exception) {
-            throw new BizException("FILE_STORAGE_FAILED", exception.getMessage());
-        }
+        writeStorageObject(storageKey, content, submittedContentType);
 
         MobileFile row = new MobileFile();
         row.setId(id);
@@ -68,6 +64,14 @@ public class MobileFileService {
         row.setStatus(READY_STATUS);
         fileMapper.insert(row);
         return toDto(row);
+    }
+
+    private void writeStorageObject(String storageKey, byte[] content, String contentType) {
+        try {
+            storage.put(storageKey, new ByteArrayInputStream(content), content.length, contentType);
+        } catch (IOException exception) {
+            throw new BizException("FILE_STORAGE_FAILED", exception.getMessage());
+        }
     }
 
     public MobileFileDto getMetadata(UUID id, long userId, List<String> roles) {
