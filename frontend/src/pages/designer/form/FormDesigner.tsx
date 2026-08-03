@@ -124,8 +124,17 @@ function createPreviewNode(entry: PaletteEntry): SchemaNode {
 
 
 function DragPreview({ drag }: { drag: ActiveDrag }) {
-  const node =
-    drag.source === 'canvas' ? drag.node : createPreviewNode(drag.entry);
+  if (drag.source === 'palette') {
+    return (
+      <div className="form-designer__palette-card form-designer__palette-card--ghost">
+        <FieldTypeIcon entry={drag.entry} />
+        <span className="form-designer__palette-card-label" title={drag.entry.label}>
+          {drag.entry.label}
+        </span>
+      </div>
+    );
+  }
+  const node = drag.node;
   const ft = formRegistry[node.type];
   if (!ft) return null;
   const renderNode = {
@@ -137,9 +146,7 @@ function DragPreview({ drag }: { drag: ActiveDrag }) {
     },
   };
   return (
-    <DesignerFieldPreview
-      node={node}
-    >
+    <DesignerFieldPreview node={node}>
       <ft.Component node={renderNode} mode="designer-preview" value={undefined} />
     </DesignerFieldPreview>
   );
