@@ -13,8 +13,6 @@ type Props = {
   onChange?(v: any): void;
   recentlyDroppedId?: string | null;
   onDropAnimationEnd?(id: string): void;
-  activeCanvasNodeId?: string | null;
-  dropIndex?: number | null;
   onDesignerNodeChange?(node: SchemaNode): void;
 };
 
@@ -60,36 +58,6 @@ function useDesignerListFlip(isEnabled: boolean, deps: unknown[]) {
   return listRef;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getPreviewSchema({
-  activeCanvasNodeId,
-  dropIndex,
-  schema,
-}: {
-  activeCanvasNodeId?: string | null;
-  dropIndex?: number | null;
-  schema: SchemaNode[];
-}) {
-  if (!activeCanvasNodeId) return schema;
-
-  const activeNode = schema.find((node) => node.id === activeCanvasNodeId);
-  if (!activeNode) return schema;
-
-  const withoutActiveNode = schema.filter(
-    (node) => node.id !== activeCanvasNodeId,
-  );
-  if (dropIndex == null) return withoutActiveNode;
-
-  const targetIndex = clamp(dropIndex, 0, withoutActiveNode.length);
-  return [
-    ...withoutActiveNode.slice(0, targetIndex),
-    activeNode,
-    ...withoutActiveNode.slice(targetIndex),
-  ];
-}
 
 function isEmptyValue(value: any) {
   return (
@@ -134,15 +102,11 @@ function shouldRenderNode(
 }
 
 function canRequireNode(type: string) {
-  return !['section', 'span_layout', 'table_list', 'description'].includes(type);
+  return !['span_layout', 'table_list', 'description'].includes(type);
 }
 
 function isFlatContainerNode(type: string) {
-  return type === 'section' || type === 'span_layout';
-}
-
-function usesOwnDesignerChrome(type: string) {
-  return type === 'section';
+  return type === 'span_layout';
 }
 
 export function DesignerFieldPreview({
@@ -152,21 +116,12 @@ export function DesignerFieldPreview({
   children: React.ReactNode;
   node: SchemaNode;
 }) {
-  const ownsDesignerChrome = usesOwnDesignerChrome(node.type);
   const fieldType = formRegistry[node.type];
   const fieldName = node.label || fieldType?.label || node.type;
   const questionDescription =
     node.props?.questionDescription || node.props?.description || '题干说明';
   const showTitle = node.props?.showTitle !== false;
   const showDescription = node.props?.showDescription !== false;
-
-  if (ownsDesignerChrome) {
-    return (
-      <div className="form-renderer__drag-card form-renderer__drag-card--bare">
-        {children}
-      </div>
-    );
-  }
 
   return (
     <div className="form-renderer__drag-card">
@@ -266,14 +221,15 @@ function DesignerFieldFrame({
       data-designer-field-id={node.id}
       className={rootClassName}
       onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
+      {...attributes}
+      {...listeners}
     >
       <div className="form-renderer__designer-card">
         <button
           type="button"
           className="form-renderer__designer-drag-handle"
           aria-label="拖动字段"
-          {...attributes}
-          {...listeners}
+          tabIndex={-1}
         >
           <span aria-hidden="true">•••</span>
         </button>
@@ -347,8 +303,6 @@ function DesignerFieldFrame({
 }
 
 export function FormRenderer({
-  activeCanvasNodeId,
-  dropIndex,
   schema,
   mode,
   value,
@@ -358,19 +312,10 @@ export function FormRenderer({
   onDropAnimationEnd,
 }: Props) {
   const isDesigner = mode === 'designer-preview';
-  const renderSchema = isDesigner
-    ? getPreviewSchema({ activeCanvasNodeId, dropIndex, schema })
-    : schema;
-  const listRef = useDesignerListFlip(isDesigner, [
-    isDesigner,
-    schema,
-    renderSchema,
-    activeCanvasNodeId,
-    dropIndex,
-  ]);
+  const listRef = useDesignerListFlip(isDesigner, [isDesigner, schema]);
   return (
     <div ref={listRef} data-canvas={isDesigner ? 'true' : undefined}>
-      {renderSchema.map((node) => {
+      {schema.map((node) => {
         const ft = formRegistry[node.type];
         if (!ft) return null;
         if (!shouldRenderNode(node, mode, value ?? {})) return null;
@@ -378,11 +323,10 @@ export function FormRenderer({
         const nodeValue = flatContainer
           ? value ?? {}
           : value?.[node.id] ?? node.props?.defaultValue;
-        const ownsDesignerChrome = usesOwnDesignerChrome(node.type);
         const renderNode = isDesigner
           ? {
               ...node,
-              label: ownsDesignerChrome ? node.label : '',
+              label: '',
               props: {
                 ...node.props,
                 required: false,
@@ -411,7 +355,7 @@ export function FormRenderer({
               recentlyDroppedId={recentlyDroppedId}
               onDropAnimationEnd={onDropAnimationEnd}
               onNodeChange={onDesignerNodeChange}
-              bare={ownsDesignerChrome}
+              bare={false}
             >
               {field}
             </DesignerFieldFrame>

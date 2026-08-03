@@ -5,24 +5,17 @@ import { FormRenderer } from './FormRenderer';
 import type { SchemaNode } from '../../registry/types';
 
 describe('FormRenderer', () => {
-  it('keeps section children in the flat form value contract', () => {
+  it('keeps layout container children in the flat form value contract', () => {
     const schema: SchemaNode[] = [
       {
-        id: 'basic',
-        type: 'section',
-        label: '基础信息',
+        id: 'row',
+        type: 'span_layout',
+        label: '基本信息',
         children: [
           { id: 'name', type: 'text', label: '姓名', props: { placeholder: '请输入姓名' } },
         ],
       },
-      {
-        id: 'business',
-        type: 'section',
-        label: '业务信息',
-        children: [
-          { id: 'reason', type: 'text', label: '事由', props: { placeholder: '请输入事由' } },
-        ],
-      },
+      { id: 'reason', type: 'text', label: '事由', props: { placeholder: '请输入事由' } },
     ];
     const onChange = vi.fn();
 
@@ -50,17 +43,16 @@ describe('FormRenderer', () => {
 
     expect(onChange).toHaveBeenLastCalledWith({ name: '张三', reason: '报销' });
     expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({
-      basic: expect.anything(),
-      business: expect.anything(),
+      row: expect.anything(),
     }));
   });
 
-  it('renders a business section as one designer surface without nested section chrome', () => {
+  it('renders a span-layout container inside a designer field frame', () => {
     const schema: SchemaNode[] = [
       {
-        id: 'basic',
-        type: 'section',
-        label: '基础信息',
+        id: 'row',
+        type: 'span_layout',
+        label: '基本信息',
         props: { description: '填写申请基础资料' },
         children: [
           { id: 'name', type: 'text', label: '姓名', props: { placeholder: '请输入姓名' } },
@@ -73,20 +65,8 @@ describe('FormRenderer', () => {
         <FormRenderer schema={schema} mode="designer-preview" value={{}} />
       </DndContext>,
     );
-    const sectionFrame = container.querySelector('[data-designer-field-id="basic"]');
-    const directSection = Array.from(sectionFrame?.children ?? []).find((child) =>
-      child.classList.contains('form-renderer__business-section'),
-    );
-    const directDesignerCard = Array.from(sectionFrame?.children ?? []).find((child) =>
-      child.classList.contains('form-renderer__designer-card'),
-    );
-
-    expect(screen.getAllByText('基础信息')).toHaveLength(1);
-    expect(screen.getByText('填写申请基础资料')).toBeInTheDocument();
-    expect(sectionFrame?.classList.contains('form-renderer__field--designer-bare')).toBe(true);
-    expect(directSection).toBeTruthy();
-    expect(directDesignerCard).toBeUndefined();
-    expect(sectionFrame?.querySelectorAll('.form-renderer__business-section')).toHaveLength(1);
-    expect(sectionFrame?.querySelectorAll('.form-renderer__designer-card')).toHaveLength(1);
+    const fieldFrame = container.querySelector('[data-designer-field-id="row"]');
+    expect(fieldFrame).toBeTruthy();
+    expect(fieldFrame?.querySelector('.form-renderer__designer-card')).toBeTruthy();
   });
 });

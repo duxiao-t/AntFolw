@@ -17,7 +17,6 @@ import {
   FieldNumberOutlined,
   FileTextOutlined,
   FontSizeOutlined,
-  ProfileOutlined,
   TableOutlined,
   UploadOutlined,
   UserOutlined,
@@ -32,12 +31,10 @@ import {
   FormRenderer,
 } from '../../../components/FormRenderer/FormRenderer';
 import {
-  findById,
   paletteEntries,
   formRegistry,
 } from '../../../registry/formRegistry';
 import type { SchemaNode } from '../../../registry/types';
-import { SECTION_DROP_PREFIX } from '../../../components/form-fields/SectionField';
 import { useFormDesignerStore } from './useFormDesignerStore';
 import { Inspector } from './Inspector';
 import './form-designer.less';
@@ -53,29 +50,18 @@ type ActiveDrag =
       node: SchemaNode;
     };
 
+
 type DropIndicatorState = {
   index: number;
   top: number;
-  height: number;
 };
 
-type CanvasDragSnapshot = {
-  activeNodeId: string;
-  activeHeight: number;
-  items: Array<{
-    id: string;
-    top: number;
-    bottom: number;
-    height: number;
-  }>;
-};
 
 const FALLBACK_FIELD_GAP = 16;
 const AUTO_SCROLL_EDGE = 72;
 const AUTO_SCROLL_MAX_SPEED = 18;
 
 const paletteIcons: Record<string, React.ReactNode> = {
-  section: <ProfileOutlined />,
   text: <FontSizeOutlined />,
   textarea: <AlignLeftOutlined />,
   number: <FieldNumberOutlined />,
@@ -144,11 +130,6 @@ function createPreviewNode(entry: PaletteEntry): SchemaNode {
   };
 }
 
-function sectionIdFromDropTarget(id: unknown) {
-  return typeof id === 'string' && id.startsWith(SECTION_DROP_PREFIX)
-    ? id.slice(SECTION_DROP_PREFIX.length)
-    : null;
-}
 
 function DragPreview({ drag }: { drag: ActiveDrag }) {
   const node =
@@ -157,7 +138,7 @@ function DragPreview({ drag }: { drag: ActiveDrag }) {
   if (!ft) return null;
   const renderNode = {
     ...node,
-    label: node.type === 'section' ? node.label : '',
+    label: '',
     props: {
       ...node.props,
       required: false,
@@ -172,41 +153,9 @@ function DragPreview({ drag }: { drag: ActiveDrag }) {
   );
 }
 
-function captureCanvasDragSnapshot(nodeId: string): CanvasDragSnapshot | null {
-  const allFieldEls = Array.from(
-    document.querySelectorAll<HTMLElement>('[data-designer-field-id]'),
-  );
-  const activeEl = allFieldEls.find(
-    (el) => el.dataset.designerFieldId === nodeId,
-  );
-  const canvas = activeEl?.closest<HTMLElement>('.form-designer__canvas');
-  if (!canvas) return null;
-
-  const canvasRect = canvas.getBoundingClientRect();
-  const items = Array.from(
-    canvas.querySelectorAll<HTMLElement>('[data-designer-field-id]'),
-  ).map((el) => {
-    const rect = el.getBoundingClientRect();
-    const top = rect.top - canvasRect.top + canvas.scrollTop;
-    return {
-      id: el.dataset.designerFieldId ?? '',
-      top,
-      bottom: top + rect.height,
-      height: rect.height,
-    };
-  });
-  const activeItem = items.find((item) => item.id === nodeId);
-
-  return {
-    activeNodeId: nodeId,
-    activeHeight: activeItem?.height ?? activeEl?.offsetHeight ?? 172,
-    items,
-  };
-}
 
 function CanvasDrop({
   activeCanvasNodeId,
-  canvasDragSnapshot,
   dropIndicator,
   isDragActive,
   onDropIndicatorChange,
@@ -214,7 +163,6 @@ function CanvasDrop({
   onDropAnimationEnd,
 }: {
   activeCanvasNodeId: string | null;
-  canvasDragSnapshot: CanvasDragSnapshot | null;
   dropIndicator: DropIndicatorState | null;
   isDragActive: boolean;
   onDropIndicatorChange(next: DropIndicatorState | null): void;
@@ -223,9 +171,7 @@ function CanvasDrop({
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: 'canvas' });
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const lastPointerRef = useRef<{ clientX: number; clientY: number } | null>(
-    null,
-  );
+  const lastPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const dropIndicatorRef = useRef<DropIndicatorState | null>(null);
   const schema = useFormDesignerStore((s) => s.schema);
   const selectedId = useFormDesignerStore((s) => s.selectedId);
@@ -245,180 +191,84 @@ function CanvasDrop({
       const current = dropIndicatorRef.current;
       const isSame =
         current?.index === next?.index &&
-        Math.abs((current?.top ?? -1) - (next?.top ?? -1)) < 0.5 &&
-        Math.abs((current?.height ?? -1) - (next?.height ?? -1)) < 0.5;
+        Math.abs((current?.top ?? -1) - (next?.top ?? -1)) < 0.5;
       if (isSame) return;
-
       dropIndicatorRef.current = next;
       onDropIndicatorChange(next);
     },
     [onDropIndicatorChange],
   );
 
-  const updateIndicator = useCallback((clientX: number, clientY: number) => {
+  const recomputeIndicator = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isDragActive) return;
+    const pointer = lastPointerRef.current;
+    if (!canvas || !isDragActive || !pointer) {
+      return;
+    }
     const canvasRect = canvas.getBoundingClientRect();
     const isInsideCanvas =
-      clientX >= canvasRect.left &&
-      clientX <= canvasRect.right &&
-      clientY >= canvasRect.top &&
-      clientY <= canvasRect.bottom;
+      pointer.clientX >= canvasRect.left &&
+      pointer.clientX <= canvasRect.right &&
+      pointer.clientY >= canvasRect.top &&
+      pointer.clientY <= canvasRect.bottom;
     if (!isInsideCanvas) {
       setNextDropIndicator(null);
       return;
     }
-    const pointerTarget = document.elementFromPoint(clientX, clientY);
-    if (pointerTarget?.closest('[data-designer-section-dropzone]')) {
-      setNextDropIndicator(null);
-      return;
-    }
 
-    if (
-      activeCanvasNodeId &&
-      canvasDragSnapshot?.activeNodeId === activeCanvasNodeId
-    ) {
-      const pointerY = clientY - canvasRect.top + canvas.scrollTop;
-      const fieldItems = canvasDragSnapshot.items.filter(
-        (item) => item.id !== activeCanvasNodeId,
-      );
-      const placeholderHeight =
-        canvasDragSnapshot.activeHeight || FALLBACK_FIELD_GAP * 10;
-
-      if (fieldItems.length === 0) {
-        setNextDropIndicator({
-          index: 0,
-          top:
-            canvas.scrollTop +
-            Math.max(24, canvas.clientHeight / 2 - placeholderHeight / 2),
-          height: placeholderHeight,
-        });
-        return;
-      }
-
-      let index = fieldItems.length;
-      for (let i = 0; i < fieldItems.length; i += 1) {
-        const midpoint = fieldItems[i].top + fieldItems[i].height / 2;
-        if (pointerY < midpoint) {
-          index = i;
-          break;
-        }
-      }
-
-      let centerTop: number;
-      if (index === 0) {
-        centerTop = fieldItems[0].top - FALLBACK_FIELD_GAP / 2;
-      } else if (index >= fieldItems.length) {
-        centerTop =
-          fieldItems[fieldItems.length - 1].bottom + FALLBACK_FIELD_GAP / 2;
-      } else {
-        centerTop = (fieldItems[index - 1].bottom + fieldItems[index].top) / 2;
-      }
-
-      setNextDropIndicator({
-        index,
-        top: centerTop - placeholderHeight / 2,
-        height: placeholderHeight,
-      });
-      return;
-    }
-
-    const allFieldEls = Array.from(
+    const pointerY = pointer.clientY - canvasRect.top + canvas.scrollTop;
+    const fieldEls = Array.from(
       canvas.querySelectorAll<HTMLElement>('[data-designer-field-id]'),
-    );
-    const fieldEls = allFieldEls.filter(
-      (el) => el.dataset.designerFieldId !== activeCanvasNodeId,
-    );
-    const activeEl = activeCanvasNodeId
-      ? allFieldEls.find(
-          (el) => el.dataset.designerFieldId === activeCanvasNodeId,
-        )
-      : null;
-    const activeLayoutHeight = activeEl?.offsetHeight;
-    const placeholderHeight = activeLayoutHeight ?? 172;
+    ).filter((el) => el.dataset.designerFieldId !== activeCanvasNodeId);
 
     if (fieldEls.length === 0) {
-      setNextDropIndicator({
-        index: 0,
-        top:
-          canvas.scrollTop +
-          Math.max(24, canvas.clientHeight / 2 - placeholderHeight / 2),
-        height: placeholderHeight,
-      });
+      setNextDropIndicator({ index: 0, top: canvas.scrollTop + 8 });
       return;
     }
 
-    const rects = fieldEls.map((el) => el.getBoundingClientRect());
-    let index = rects.length;
-    for (let i = 0; i < rects.length; i += 1) {
-      const midpoint = rects[i].top + rects[i].height / 2;
-      if (clientY < midpoint) {
+    const layoutTops = fieldEls.map((el) => el.offsetTop);
+    const layoutBottoms = fieldEls.map((el) => el.offsetTop + el.offsetHeight);
+    let index = fieldEls.length;
+    for (let i = 0; i < fieldEls.length; i += 1) {
+      if (pointerY < layoutTops[i] + (layoutBottoms[i] - layoutTops[i]) / 2) {
         index = i;
         break;
       }
     }
 
-    const layoutTops = fieldEls.map((el) => el.offsetTop);
-    const layoutBottoms = fieldEls.map((el) => el.offsetTop + el.offsetHeight);
-    const layoutGaps = layoutTops
-      .slice(1)
-      .map((top, gapIndex) =>
-        Math.max(0, top - layoutBottoms[gapIndex]),
-      );
-    const averageGap =
-      layoutGaps.length > 0
-        ? layoutGaps.reduce((sum, gap) => sum + gap, 0) / layoutGaps.length
-        : FALLBACK_FIELD_GAP;
-    const edgeGap = Math.max(FALLBACK_FIELD_GAP, averageGap);
-    let centerTop: number;
+    let top: number;
     if (index === 0) {
-      centerTop = layoutTops[0] - edgeGap / 2;
-    } else if (index >= rects.length) {
-      centerTop = layoutBottoms[layoutBottoms.length - 1] + edgeGap / 2;
+      top = layoutTops[0] - FALLBACK_FIELD_GAP / 2;
+    } else if (index >= fieldEls.length) {
+      top = layoutBottoms[layoutBottoms.length - 1] + FALLBACK_FIELD_GAP / 2;
     } else {
-      centerTop = (layoutBottoms[index - 1] + layoutTops[index]) / 2;
+      top = (layoutBottoms[index - 1] + layoutTops[index]) / 2;
     }
-    setNextDropIndicator({
-      index,
-      top: centerTop - placeholderHeight / 2,
-      height: placeholderHeight,
-    });
-  }, [
-    activeCanvasNodeId,
-    canvasDragSnapshot,
-    isDragActive,
-    setNextDropIndicator,
-  ]);
+    setNextDropIndicator({ index, top: top - 2 });
+  }, [activeCanvasNodeId, isDragActive, setNextDropIndicator]);
 
   useEffect(() => {
     if (!isDragActive) return undefined;
     const handlePointerMove = (event: PointerEvent) => {
-      lastPointerRef.current = {
-        clientX: event.clientX,
-        clientY: event.clientY,
-      };
-      updateIndicator(event.clientX, event.clientY);
+      lastPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
     };
     const handlePointerCancel = () => {
       lastPointerRef.current = null;
       setNextDropIndicator(null);
     };
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
-    window.addEventListener('pointercancel', handlePointerCancel, {
-      passive: true,
-    });
+    window.addEventListener('pointercancel', handlePointerCancel, { passive: true });
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointercancel', handlePointerCancel);
       lastPointerRef.current = null;
       setNextDropIndicator(null);
     };
-  }, [isDragActive, setNextDropIndicator, updateIndicator]);
+  }, [isDragActive, setNextDropIndicator]);
 
   useEffect(() => {
     if (!isDragActive) return undefined;
     let frameId = 0;
-
     const tick = () => {
       const canvas = canvasRef.current;
       const pointer = lastPointerRef.current;
@@ -427,58 +277,49 @@ function CanvasDrop({
         const isHorizontallyInside =
           pointer.clientX >= rect.left && pointer.clientX <= rect.right;
         let scrollDelta = 0;
-
         if (isHorizontallyInside) {
           const topDistance = pointer.clientY - rect.top;
           const bottomDistance = rect.bottom - pointer.clientY;
-
           if (topDistance >= 0 && topDistance < AUTO_SCROLL_EDGE) {
             scrollDelta =
               -AUTO_SCROLL_MAX_SPEED *
               ((AUTO_SCROLL_EDGE - topDistance) / AUTO_SCROLL_EDGE);
-          } else if (
-            bottomDistance >= 0 &&
-            bottomDistance < AUTO_SCROLL_EDGE
-          ) {
+          } else if (bottomDistance >= 0 && bottomDistance < AUTO_SCROLL_EDGE) {
             scrollDelta =
               AUTO_SCROLL_MAX_SPEED *
               ((AUTO_SCROLL_EDGE - bottomDistance) / AUTO_SCROLL_EDGE);
           }
         }
-
         if (Math.abs(scrollDelta) > 0.2) {
           const previousScrollTop = canvas.scrollTop;
           canvas.scrollTop += scrollDelta;
           if (canvas.scrollTop !== previousScrollTop) {
-            updateIndicator(pointer.clientX, pointer.clientY);
+            recomputeIndicator();
           }
+        } else {
+          recomputeIndicator();
         }
       }
-
       frameId = requestAnimationFrame(tick);
     };
-
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [isDragActive, updateIndicator]);
+  }, [isDragActive, recomputeIndicator]);
 
   useEffect(() => {
     if (!isDragActive) return undefined;
-
     const recalculate = () => {
-      const pointer = lastPointerRef.current;
-      if (pointer) updateIndicator(pointer.clientX, pointer.clientY);
+      if (lastPointerRef.current) recomputeIndicator();
     };
     const observer = new ResizeObserver(recalculate);
     const canvas = canvasRef.current;
-
     if (canvas) observer.observe(canvas);
     window.addEventListener('resize', recalculate);
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', recalculate);
     };
-  }, [isDragActive, updateIndicator]);
+  }, [isDragActive, recomputeIndicator]);
 
   useEffect(() => {
     document.querySelectorAll('[data-designer-field-id]').forEach((el) => {
@@ -488,6 +329,7 @@ function CanvasDrop({
           : '';
     });
   }, [selectedId]);
+
   return (
     <div
       ref={setCanvasRef}
@@ -506,11 +348,7 @@ function CanvasDrop({
         }
       }}
       onPointerMove={(e) => {
-        lastPointerRef.current = {
-          clientX: e.clientX,
-          clientY: e.clientY,
-        };
-        updateIndicator(e.clientX, e.clientY);
+        lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
       }}
       onClick={(e) => {
         const id = (e.target as HTMLElement)
@@ -525,17 +363,15 @@ function CanvasDrop({
         value={{}}
         recentlyDroppedId={recentlyDroppedId}
         onDropAnimationEnd={onDropAnimationEnd}
-        activeCanvasNodeId={activeCanvasNodeId}
-        dropIndex={dropIndicator?.index ?? null}
         onDesignerNodeChange={(node) => updateNode(node.id, node)}
       />
       {(schema.length === 0 || (activeCanvasNodeId && schema.length === 1)) && (
         <div className="form-designer__empty">拖入第一个字段</div>
       )}
-      {dropIndicator && !activeCanvasNodeId && (
+      {dropIndicator && (
         <div
-          className="form-designer__drop-placeholder"
-          style={{ height: dropIndicator.height, top: dropIndicator.top }}
+          className="form-designer__insert-line"
+          style={{ top: dropIndicator.top }}
         />
       )}
     </div>
@@ -574,25 +410,20 @@ export function FormDesignerSurface({
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { token } = theme.useToken();
-  const { schema, selectedId, loadSchema, resetSchema, addNode, insertNode, moveNode, undo } =
+  const { schema, loadSchema, resetSchema, addNode, insertNode, moveNode, undo } =
     useFormDesignerStore();
   const [definition, setDefinition] = useState<FormDefinition | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
-  const [canvasDragSnapshot, setCanvasDragSnapshot] =
-    useState<CanvasDragSnapshot | null>(null);
   const [dropIndicator, setDropIndicator] =
     useState<DropIndicatorState | null>(null);
   const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
   const activeCanvasNodeId =
     activeDrag?.source === 'canvas' ? activeDrag.nodeId : null;
-  const selectedNode = selectedId ? findById(schema, selectedId) : null;
-  const selectedSectionId = selectedNode?.type === 'section' ? selectedNode.id : null;
   const addPaletteEntry = useCallback(
     (entry: PaletteEntry) => {
-      const parentId = selectedSectionId && entry.type !== 'section' ? selectedSectionId : null;
-      addNode(parentId, entry.type, entry.defaultProps);
+      addNode(null, entry.type, entry.defaultProps);
     },
-    [addNode, selectedSectionId],
+    [addNode],
   );
 
   // Load existing definition when id is provided (not 'new').
@@ -658,14 +489,12 @@ export function FormDesignerSurface({
           | { source?: string; entry?: PaletteEntry; node?: any }
           | undefined;
         if (data?.source === 'palette' && data.entry) {
-          setCanvasDragSnapshot(null);
           setActiveDrag({ source: 'palette', entry: data.entry });
           return;
         }
         if (data?.source === 'canvas' && data.node) {
           const ft = formRegistry[data.node.type];
           if (!ft) return;
-          setCanvasDragSnapshot(captureCanvasDragSnapshot(data.node.id));
           setActiveDrag({
             source: 'canvas',
             nodeId: data.node.id,
@@ -681,30 +510,14 @@ export function FormDesignerSurface({
       }}
       onDragCancel={() => {
         setActiveDrag(null);
-        setCanvasDragSnapshot(null);
         setDropIndicator(null);
       }}
       onDragEnd={(e: DragEndEvent) => {
         const currentDrag = activeDrag;
         const currentDrop = dropIndicator;
-        const sectionDropId = sectionIdFromDropTarget(e.over?.id);
         const isCanvasDrop = !!currentDrop || e.over?.id === 'canvas';
         setActiveDrag(null);
-        setCanvasDragSnapshot(null);
         setDropIndicator(null);
-        if (
-          sectionDropId &&
-          currentDrag?.source === 'palette' &&
-          currentDrag.entry.type !== 'section'
-        ) {
-          const newId = addNode(
-            sectionDropId,
-            currentDrag.entry.type,
-            currentDrag.entry.defaultProps,
-          );
-          setRecentlyDroppedId(newId);
-          return;
-        }
         if (isCanvasDrop && currentDrag) {
           if (currentDrag.source === 'canvas') {
             if (currentDrop) {
@@ -760,7 +573,6 @@ export function FormDesignerSurface({
             </Space>
             <CanvasDrop
               activeCanvasNodeId={activeCanvasNodeId}
-              canvasDragSnapshot={canvasDragSnapshot}
               dropIndicator={dropIndicator}
               isDragActive={!!activeDrag}
               onDropIndicatorChange={setDropIndicator}

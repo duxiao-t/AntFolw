@@ -160,19 +160,18 @@
   pointer-events: none;
 }
 
-.form-designer__drop-placeholder {
+.form-designer__insert-line {
   position: absolute;
   right: 32px;
   left: 32px;
   z-index: 3;
-  border: 1px dashed var(--form-designer-primary);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 58%);
-  box-shadow: 0 12px 34px rgb(0 0 0 / 6%);
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: var(--form-designer-primary);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 80%);
   pointer-events: none;
-  transition:
-    top 160ms ease,
-    height 160ms ease;
+  transition: top 120ms ease;
 }
 
 .form-designer__inspector {
