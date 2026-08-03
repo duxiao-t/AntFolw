@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -40,6 +41,22 @@ class FormDefinitionServiceSchemaTest {
         var pub = service.publish(1L);
         assertThat(pub.getStatus()).isEqualTo("PUBLISHED");
         assertThat(pub.getVersion()).isEqualTo(2);
+    }
+
+    @Test void publishAcceptsSectionSchema() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setVersion(1);
+        fd.setSchema("""
+            [{"id":"basic","type":"section","label":"基础信息","props":{"description":"填写基础信息"},
+              "children":[{"id":"a","type":"text","label":"姓名"}]}]
+            """);
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        var pub = service.publish(1L);
+
+        assertThat(pub.getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test void publishRejectsEmptySchema() {
@@ -119,5 +136,24 @@ class FormDefinitionServiceSchemaTest {
             Map.of("a", "")
         )).isInstanceOf(BizException.class)
             .hasMessageContaining("required");
+    }
+
+    @Test void validateSubmissionRecursesSectionChildrenWithoutRequiringContainerValue() {
+        assertThatThrownBy(() -> service.validateSubmission(
+            """
+                [{"id":"basic","type":"section","label":"基础信息","props":{"required":true},
+                  "children":[{"id":"a","type":"text","label":"姓名","props":{"required":true}}]}]
+                """,
+            Map.of("a", "")
+        )).isInstanceOf(BizException.class)
+            .hasMessageContaining("姓名");
+
+        assertThatCode(() -> service.validateSubmission(
+            """
+                [{"id":"basic","type":"section","label":"基础信息","props":{"required":true},
+                  "children":[{"id":"a","type":"text","label":"姓名","props":{"required":true}}]}]
+                """,
+            Map.of("a", "张三")
+        )).doesNotThrowAnyException();
     }
 }

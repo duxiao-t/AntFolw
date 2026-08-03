@@ -21,6 +21,7 @@ public class FormDefinitionService {
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
+        "section",
         "text", "textarea", "number", "money",
         "radio", "checkbox", "select", "multi_select", "search",
         "date", "date_range", "time", "switch",
@@ -28,6 +29,7 @@ public class FormDefinitionService {
         "user_picker", "dept_picker",
         "description", "span_layout", "table_list"
     );
+    private static final Set<String> CONTAINER_TYPES = Set.of("section", "span_layout");
 
     public Page<FormDefinition> list(long page, long size, String keyword, String status) {
         long safePage = Math.max(page, 1);
@@ -219,6 +221,13 @@ public class FormDefinitionService {
     }
 
     private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node, Map<?, ?> values) {
+        if (CONTAINER_TYPES.contains(node.path("type").asText(""))) {
+            var containerChildren = node.path("children");
+            if (containerChildren.isArray()) {
+                containerChildren.forEach(child -> validateNodeValue(child, values));
+            }
+            return;
+        }
         Object value = values.get(node.path("id").asText());
         var props = node.path("props");
         var rules = node.path("rules");
