@@ -16,13 +16,6 @@ import './MobileFormPreview.less';
 type PreviewValues = Record<string, any>;
 type PreviewErrors = Record<string, string>;
 
-type PreviewSection = {
-  id: string;
-  title: string;
-  description?: string;
-  nodes: SchemaNode[];
-  fieldIds: string[];
-};
 
 export type MobileFormPreviewProps = {
   title: string;
@@ -49,9 +42,6 @@ export function MobileFormPreview({
   onSaveDraft,
   onSubmit,
 }: MobileFormPreviewProps) {
-  const sections = buildPreviewSections(schema, values);
-  const errorCounts = errorCountsBySection(sections, errors);
-
   return (
     <div className="approval-mobile-preview" data-testid="mobile-form-preview">
       <header className="app-bar">
@@ -66,70 +56,22 @@ export function MobileFormPreview({
         <div className="form-fill-page__body">
           <section className="form-fill-intro" aria-label="表单说明">
             <div className="form-fill-intro__kicker">
-              <span>{sections.length} 个业务分区</span>
               <span>预览模式</span>
             </div>
             <h2>{title || '未命名表单'}</h2>
             {description ? (
               <p>{description}</p>
             ) : (
-              <p>请按分区填写内容，带 * 为必填项。</p>
+              <p>请填写以下内容，带 * 为必填项。</p>
             )}
           </section>
 
-          <nav className="section-anchor-nav" aria-label="业务分区导航">
-            {sections.map((section, index) => {
-              const errorCount = errorCounts[section.id] ?? 0;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  className={`section-anchor${errorCount > 0 ? ' section-anchor--error' : ''}`}
-                  aria-label={`${section.title}${errorCount > 0 ? `，${errorCount} 项需补充` : ''}`}
-                  onClick={() => scrollPreviewSection(section.id)}
-                >
-                  <span>{index + 1}</span>
-                  <strong>{section.title}</strong>
-                  {errorCount > 0 ? <em>{errorCount}</em> : null}
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="form-section-stack">
-            {sections.map((section, index) => {
-              const errorCount = errorCounts[section.id] ?? 0;
-              return (
-                <section
-                  key={section.id}
-                  className={`af-card--form business-section-card${errorCount > 0 ? ' business-section-card--error' : ''}`}
-                  data-preview-section-id={section.id}
-                  aria-labelledby={`preview-section-${section.id}`}
-                >
-                  <header className="business-section-card__head">
-                    <div>
-                      <span>分区 {index + 1}</span>
-                      <h3 id={`preview-section-${section.id}`}>{section.title}</h3>
-                      {section.description ? <small>{section.description}</small> : null}
-                    </div>
-                    {errorCount > 0 ? <strong>{errorCount} 项需补充</strong> : null}
-                  </header>
-                  <div className="business-section-card__body">
-                    {section.nodes.length > 0 ? (
-                      <PreviewNodeList
-                        nodes={section.nodes}
-                        values={values}
-                        errors={errors}
-                        onValueChange={onValueChange}
-                      />
-                    ) : (
-                      <p className="af-empty-text">暂无可填写内容</p>
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
+          <PreviewNodeList
+            nodes={schema}
+            values={values}
+            errors={errors}
+            onValueChange={onValueChange}
+          />
         </div>
       </main>
 
@@ -211,24 +153,6 @@ function PreviewField({
   const description = fieldDescription(node);
   const help = fieldHelp(node);
 
-  if (node.type === 'section') {
-    return (
-      <section className="af-nested-section" aria-label={label}>
-        <header className="af-nested-section__head">
-          <strong>{label}</strong>
-          {description ? <small>{description}</small> : null}
-        </header>
-        <div className="af-nested-section__body">
-          <PreviewNodeList
-            nodes={node.children ?? []}
-            values={values}
-            errors={errors}
-            onValueChange={onValueChange}
-          />
-        </div>
-      </section>
-    );
-  }
 
   if (node.type === 'span_layout') {
     return (
@@ -576,68 +500,10 @@ function TableListPreview({ node, value }: { node: SchemaNode; value: any }) {
   );
 }
 
-function buildPreviewSections(
-  schema: SchemaNode[],
-  values: PreviewValues,
-): PreviewSection[] {
-  const visibleNodes = visibleDescendantNodes(schema, values);
-  const sections: PreviewSection[] = [];
-  let looseNodes: SchemaNode[] = [];
 
-  function flushLoose() {
-    if (looseNodes.length === 0) return;
-    sections.push(toSection({
-      id: sections.length === 0 ? 'default-section' : `default-section-${sections.length + 1}`,
-      title: sections.length === 0 ? '表单内容' : '补充信息',
-      nodes: looseNodes,
-    }));
-    looseNodes = [];
-  }
 
-  for (const node of visibleNodes) {
-    if (node.type === 'section') {
-      flushLoose();
-      const section = toSection({
-        id: node.id,
-        title: fieldLabel(node) || '业务分区',
-        description: sectionDescription(node),
-        nodes: node.children ?? [],
-      });
-      if (section.nodes.length > 0 || section.fieldIds.length > 0) {
-        sections.push(section);
-      }
-      continue;
-    }
-    looseNodes.push(node);
-  }
-  flushLoose();
 
-  return sections.length > 0
-    ? sections
-    : [toSection({ id: 'default-section', title: '表单内容', nodes: [] })];
-}
 
-function toSection(input: {
-  id: string;
-  title: string;
-  description?: string;
-  nodes: SchemaNode[];
-}): PreviewSection {
-  return {
-    ...input,
-    fieldIds: input.nodes.flatMap(collectFieldIds),
-  };
-}
-
-function collectFieldIds(node: SchemaNode): string[] {
-  if (node.type === 'description') {
-    return [];
-  }
-  if (node.children && node.type !== 'table_list') {
-    return node.children.flatMap(collectFieldIds);
-  }
-  return [node.id];
-}
 
 function collectNodeErrors(
   nodes: SchemaNode[],
@@ -646,7 +512,7 @@ function collectNodeErrors(
 ) {
   for (const node of nodes) {
     if (!isVisibleNode(node, values)) continue;
-    if (node.type === 'section' || node.type === 'span_layout') {
+    if (node.type === 'span_layout') {
       collectNodeErrors(node.children ?? [], values, errors);
       continue;
     }
@@ -749,29 +615,11 @@ function matchesDisplayCondition(condition: any, values: PreviewValues) {
   }
 }
 
-function errorCountsBySection(
-  sections: PreviewSection[],
-  errors: PreviewErrors,
-): Record<string, number> {
-  return sections.reduce<Record<string, number>>((next, section) => {
-    const count = section.fieldIds.filter((fieldId) => Boolean(errors[fieldId])).length;
-    if (count > 0) next[section.id] = count;
-    return next;
-  }, {});
-}
 
-function scrollPreviewSection(sectionId: string) {
-  if (typeof document === 'undefined') return;
-  const target = document.querySelector(`[data-preview-section-id="${escapeCssIdent(sectionId)}"]`);
-  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
 
-function escapeCssIdent(value: string) {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(value);
-  }
-  return value.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-}
+
+
+
 
 function fieldLabel(node: SchemaNode) {
   return node.label || String(node.props?.title ?? node.props?.label ?? formRegistry[node.type]?.label ?? node.id);
@@ -787,10 +635,7 @@ function fieldHelp(node: SchemaNode) {
   return typeof text === 'string' && text.trim() ? text : null;
 }
 
-function sectionDescription(node: SchemaNode) {
-  const text = node.props?.description;
-  return typeof text === 'string' && text.trim() ? text : undefined;
-}
+
 
 function fieldOptions(node: SchemaNode) {
   const options = node.props?.options;

@@ -7,10 +7,9 @@ import MobileFormPreview, {
 
 const schema: SchemaNode[] = [
   {
-    id: 'basic',
-    type: 'section',
-    label: '基础信息',
-    props: { description: '填写申请人与时间' },
+    id: 'row',
+    type: 'span_layout',
+    label: '基本信息',
     children: [
       {
         id: 'name',
@@ -27,22 +26,15 @@ const schema: SchemaNode[] = [
     ],
   },
   {
-    id: 'materials',
-    type: 'section',
-    label: '附件材料',
-    children: [
-      {
-        id: 'reason',
-        type: 'textarea',
-        label: '事由',
-        props: { placeholder: '请输入事由' },
-      },
-    ],
+    id: 'reason',
+    type: 'textarea',
+    label: '事由',
+    props: { placeholder: '请输入事由' },
   },
 ];
 
 describe('MobileFormPreview', () => {
-  it('renders the publish preview with the real mobile form structure', () => {
+  it('renders the publish preview with flat mobile form fields', () => {
     const onValueChange = vi.fn();
     const onSaveDraft = vi.fn();
     const onSubmit = vi.fn();
@@ -61,12 +53,11 @@ describe('MobileFormPreview', () => {
 
     expect(screen.getByTestId('mobile-form-preview')).toBeInTheDocument();
     expect(container.firstElementChild).toHaveClass('approval-mobile-preview');
-    expect(container.querySelector('.approval-mobile-preview__phone')).toBeNull();
     expect(screen.getByText('填写表单')).toBeInTheDocument();
-    expect(screen.getByText('2 个业务分区')).toBeInTheDocument();
-    expect(screen.getAllByText('基础信息')).toHaveLength(2);
-    expect(screen.getAllByText('附件材料')).toHaveLength(2);
-    expect(screen.getByText('1 项需补充')).toBeInTheDocument();
+    expect(screen.getByText('预览模式')).toBeInTheDocument();
+    expect(screen.getByText('姓名')).toBeInTheDocument();
+    expect(screen.getByText('事由')).toBeInTheDocument();
+    expect(screen.getByText('请填写事由')).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('请输入姓名'), {
       target: { value: '张三' },
@@ -79,7 +70,7 @@ describe('MobileFormPreview', () => {
     expect(onSubmit).toHaveBeenCalled();
   });
 
-  it('collects field-level errors for mobile preview section counters', () => {
+  it('collects field-level errors for mobile preview validation', () => {
     expect(collectPreviewFieldErrors(schema, {})).toMatchObject({
       name: '请填写姓名',
       startDate: '请填写开始日期',

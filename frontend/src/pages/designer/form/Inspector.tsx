@@ -318,7 +318,6 @@ export function Inspector() {
   const props = node.props ?? {};
   const condition = props.displayCondition ?? {};
   const fieldOptions = collectFieldOptions(schema, node.id);
-  const isSection = node.type === 'section';
   const update = (patch: Partial<SchemaNode>) =>
     updateNode(node.id, { ...node, ...patch });
   const updateProps = (patch: Record<string, any>) =>
@@ -343,24 +342,20 @@ export function Inspector() {
             label: '基础设置',
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size={12}>
-                <PanelField label={isSection ? '分区名称' : '字段标题'}>
+                <PanelField label="字段标题">
                   <Input
                     value={node.label ?? ''}
                     placeholder={fieldType.label}
                     onChange={(event) => update({ label: event.target.value })}
                   />
                 </PanelField>
-                <PanelField label={isSection ? '分区说明' : '题干说明'}>
+                <PanelField label="题干说明">
                   <Input.TextArea
                     rows={3}
-                    value={isSection ? props.description ?? '' : props.questionDescription ?? ''}
-                    placeholder={isSection ? '请输入分区说明' : '请输入题干说明'}
+                    value={props.questionDescription ?? ''}
+                    placeholder='请输入题干说明'
                     onChange={(event) =>
-                      updateProps(
-                        isSection
-                          ? { description: event.target.value }
-                          : { questionDescription: event.target.value },
-                      )
+                      updateProps({ questionDescription: event.target.value })
                     }
                   />
                 </PanelField>
@@ -549,12 +544,7 @@ function renderComponentSettings(
 ) {
   const props = node.props ?? {};
   switch (node.type) {
-    case 'section':
-      return (
-        <Typography.Text type="secondary">
-          业务分区用于移动端单页填报的分区导航，字段拖入分区后会按设计顺序展示。
-        </Typography.Text>
-      );
+
     case 'text':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
