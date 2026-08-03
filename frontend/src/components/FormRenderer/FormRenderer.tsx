@@ -1,4 +1,5 @@
-import { useDraggable } from '@dnd-kit/core';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { EyeInvisibleOutlined } from '@ant-design/icons';
 import { Checkbox, type CheckboxProps } from 'antd';
 import { useLayoutEffect, useRef } from 'react';
@@ -13,6 +14,8 @@ type Props = {
   onChange?(v: any): void;
   recentlyDroppedId?: string | null;
   onDropAnimationEnd?(id: string): void;
+  sortableIds?: string[];
+  placeholderId?: string | null;
   onDesignerNodeChange?(node: SchemaNode): void;
 };
 
@@ -138,6 +141,21 @@ export function DesignerFieldPreview({
   );
 }
 
+function SortablePlaceholder({ id }: { id: string }) {
+  const { setNodeRef, transform, transition } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      data-designer-placeholder-id={id}
+      className="form-renderer__field form-renderer__field--designer form-renderer__placeholder"
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+    >
+      <div className="form-renderer__designer-card form-renderer__placeholder-card">
+        松开放入此处
+      </div>
+    </div>
+  );
+}
 function DesignerFieldFrame({
   children,
   node,
@@ -153,8 +171,15 @@ function DesignerFieldFrame({
   onNodeChange?(node: SchemaNode): void;
   bare?: boolean;
 }) {
-  const { attributes, isDragging, listeners, setNodeRef } = useDraggable({
-    id: `field:${node.id}`,
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
+    id: node.id,
     data: { source: 'canvas', node },
   });
 
@@ -196,14 +221,14 @@ function DesignerFieldFrame({
         ref={setNodeRef}
         data-designer-field-id={node.id}
         className={rootClassName}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
         onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
       >
         <button
           type="button"
           className="form-renderer__designer-drag-handle form-renderer__designer-drag-handle--bare"
           aria-label="拖动字段"
-          {...attributes}
-          {...listeners}
+          tabIndex={-1}
         >
           <span aria-hidden="true">•••</span>
         </button>
@@ -220,6 +245,7 @@ function DesignerFieldFrame({
       ref={setNodeRef}
       data-designer-field-id={node.id}
       className={rootClassName}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
       {...attributes}
       {...listeners}
@@ -310,12 +336,21 @@ export function FormRenderer({
   onDesignerNodeChange,
   recentlyDroppedId,
   onDropAnimationEnd,
+  sortableIds,
+  placeholderId,
 }: Props) {
   const isDesigner = mode === 'designer-preview';
-  const listRef = useDesignerListFlip(isDesigner, [isDesigner, schema]);
+  const listRef = useDesignerListFlip(isDesigner, [isDesigner, schema, sortableIds]);
+  const renderIds =
+    isDesigner && sortableIds ? sortableIds : schema.map((node) => node.id);
   return (
     <div ref={listRef} data-canvas={isDesigner ? 'true' : undefined}>
-      {schema.map((node) => {
+      {renderIds.map((id) => {
+        if (isDesigner && placeholderId && id === placeholderId) {
+          return <SortablePlaceholder key={id} id={id} />;
+        }
+        const node = schema.find((item) => item.id === id);
+        if (!node) return null;
         const ft = formRegistry[node.type];
         if (!ft) return null;
         if (!shouldRenderNode(node, mode, value ?? {})) return null;

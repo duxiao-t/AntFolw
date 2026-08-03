@@ -71,9 +71,22 @@
   opacity: 1;
 }
 
+.form-renderer__field--designer {
+  transition: transform 200ms ease;
+}
+
 .form-renderer__field--designer:hover .form-renderer__designer-card {
   border-color: var(--form-designer-primary);
   box-shadow: var(--form-designer-shadow);
+}
+
+.form-renderer__placeholder-card {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border-style: dashed;
+  background: var(--form-designer-primary-bg);
+  color: var(--form-designer-text-secondary);
 }
 
 .form-renderer__field--designer-bare {
