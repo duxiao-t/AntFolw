@@ -220,7 +220,8 @@ function DesignerFieldFrame({
           type="button"
           className="form-renderer__designer-drag-handle form-renderer__designer-drag-handle--bare"
           aria-label="拖动字段"
-          tabIndex={-1}
+          {...attributes}
+          {...listeners}
         >
           <span aria-hidden="true">•••</span>
         </button>
@@ -238,15 +239,14 @@ function DesignerFieldFrame({
       data-designer-field-id={node.id}
       className={rootClassName}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      {...attributes}
-      {...listeners}
     >
       <div className="form-renderer__designer-card">
         <button
           type="button"
           className="form-renderer__designer-drag-handle"
           aria-label="拖动字段"
-          tabIndex={-1}
+          {...attributes}
+          {...listeners}
         >
           <span aria-hidden="true">•••</span>
         </button>
