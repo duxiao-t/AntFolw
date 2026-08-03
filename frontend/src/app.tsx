@@ -117,14 +117,7 @@ export const layout: RunTimeLayoutConfig = ({
     // waterMarkProps: {
     //   content: initialState?.currentUser?.name,
     // },
-    footerRender: (props) => {
-      const pathname = props?.location?.pathname ?? window.location.pathname;
-      // 设计器与创建向导是整页工具型页面，隐藏全局页脚避免多出滚动条
-      if (pathname.startsWith('/designer/') || pathname.includes('/wizard')) {
-        return false;
-      }
-      return <Footer />;
-    },
+    footerRender: () => <Footer />,
     onPageChange: () => {
       const { location } = window;
       // 如果没有登录，重定向到 login
