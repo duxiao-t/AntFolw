@@ -1,7 +1,6 @@
 import {
   DndContext,
   DragOverlay,
-  type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
   useDraggable,
@@ -261,8 +260,9 @@ export function FormDesignerSurface({
   );
   const visualIdsRef = useRef(visualIds);
   const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
+  const [palettePreviewId, setPalettePreviewId] = useState<string | null>(null);
   const placeholderId =
-    activeDrag?.source === 'palette' ? String(activeDrag.entry.type) : null;
+    activeDrag?.source === 'palette' ? palettePreviewId : null;
 
   useEffect(() => {
     visualIdsRef.current = visualIds;
@@ -285,7 +285,7 @@ export function FormDesignerSurface({
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
-      const { active, over } = event;
+      const { over } = event;
       if (!over || !activeDrag) return;
       if (activeDrag.source === 'canvas') {
         const activeId = activeDrag.nodeId;
@@ -299,7 +299,8 @@ export function FormDesignerSurface({
         });
         return;
       }
-      const previewId = String(active.id);
+      if (!palettePreviewId) return;
+      const previewId = palettePreviewId;
       const overId = String(over.id);
       setVisualIds((ids) => {
         const overIndex = ids.indexOf(overId);
@@ -313,13 +314,14 @@ export function FormDesignerSurface({
         return next;
       });
     },
-    [activeDrag],
+    [activeDrag, palettePreviewId],
   );
 
   const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
+    () => {
       const currentDrag = activeDrag;
       setActiveDrag(null);
+      setPalettePreviewId(null);
       const finalIds = visualIdsRef.current;
       if (currentDrag?.source === 'canvas') {
         const ordered = finalIds
@@ -334,8 +336,7 @@ export function FormDesignerSurface({
         return;
       }
       if (currentDrag?.source === 'palette') {
-        const previewId = String(event.active.id);
-        const index = finalIds.indexOf(previewId);
+        const index = palettePreviewId == null ? -1 : finalIds.indexOf(palettePreviewId);
         const type = currentDrag.entry.type;
         const newId = insertNode(
           null,
@@ -346,7 +347,7 @@ export function FormDesignerSurface({
         setRecentlyDroppedId(newId);
       }
     },
-    [activeDrag, insertNode, resetSchema, schema],
+    [activeDrag, insertNode, palettePreviewId, resetSchema, schema],
   );
 
   // Load existing definition when id is provided (not 'new').
@@ -412,6 +413,7 @@ export function FormDesignerSurface({
           | { source?: string; entry?: PaletteEntry; node?: any }
           | undefined;
         if (data?.source === 'palette' && data.entry) {
+          setPalettePreviewId(`preview:${data.entry.type}:${Date.now()}`);
           setActiveDrag({ source: 'palette', entry: data.entry });
           return;
         }
@@ -434,6 +436,7 @@ export function FormDesignerSurface({
       onDragOver={handleDragOver}
       onDragCancel={() => {
         setActiveDrag(null);
+        setPalettePreviewId(null);
         resetVisualIds();
       }}
       onDragEnd={handleDragEnd}
