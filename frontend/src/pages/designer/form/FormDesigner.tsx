@@ -1,6 +1,9 @@
 import {
   DndContext,
   DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
   type DragOverEvent,
   type DragStartEvent,
   useDraggable,
@@ -109,19 +112,6 @@ function PaletteCard({
   );
 }
 
-function createPreviewNode(entry: PaletteEntry): SchemaNode {
-  return {
-    id: `preview_${entry.type}`,
-    type: entry.type,
-    label: entry.label,
-    props: {
-      ...entry.defaultProps,
-      showTitle: true,
-      showDescription: true,
-    },
-  };
-}
-
 
 function DragPreview({ drag }: { drag: ActiveDrag }) {
   if (drag.source === 'palette') {
@@ -154,6 +144,11 @@ function DragPreview({ drag }: { drag: ActiveDrag }) {
 
 
 
+/**
+ * Keeps the drag overlay inside the designer canvas, anchored at the canvas
+ * center when the drag starts, and scales with pointer movement but clamped
+ * to the canvas bounds.
+ */
 function CanvasDrop({
   schema,
   sortableIds,
@@ -405,8 +400,13 @@ export function FormDesignerSurface({
     minHeight: embedded ? 560 : undefined,
   } as React.CSSProperties;
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
   return (
     <DndContext
+      sensors={sensors}
       onDragStart={(e: DragStartEvent) => {
         const data = e.active.data.current as
           | { source?: string; entry?: PaletteEntry; node?: any }
