@@ -21,7 +21,6 @@ public class FormDefinitionService {
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
-        "section",
         "text", "textarea", "number", "money",
         "radio", "checkbox", "select", "multi_select", "search",
         "date", "date_range", "time", "switch",
@@ -29,7 +28,7 @@ public class FormDefinitionService {
         "user_picker", "dept_picker",
         "description", "span_layout", "table_list"
     );
-    private static final Set<String> CONTAINER_TYPES = Set.of("section", "span_layout");
+    private static final Set<String> CONTAINER_TYPES = Set.of("span_layout");
 
     public Page<FormDefinition> list(long page, long size, String keyword, String status) {
         long safePage = Math.max(page, 1);

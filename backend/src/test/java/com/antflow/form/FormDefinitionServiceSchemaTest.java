@@ -43,20 +43,20 @@ class FormDefinitionServiceSchemaTest {
         assertThat(pub.getVersion()).isEqualTo(2);
     }
 
-    @Test void publishAcceptsSectionSchema() {
+    @Test void publishRejectsSectionType() {
         var fd = new FormDefinition();
         fd.setId(1L);
         fd.setStatus("DRAFT");
         fd.setVersion(1);
         fd.setSchema("""
-            [{"id":"basic","type":"section","label":"基础信息","props":{"description":"填写基础信息"},
-              "children":[{"id":"a","type":"text","label":"姓名"}]}]
+            [{"id":"basic","type":"section","label":"基础信息","children":[
+              {"id":"a","type":"text","label":"姓名"}]}]
             """);
         when(mapper.selectById(1L)).thenReturn(fd);
 
-        var pub = service.publish(1L);
-
-        assertThat(pub.getStatus()).isEqualTo("PUBLISHED");
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("unsupported field type");
     }
 
     @Test void publishRejectsEmptySchema() {
@@ -138,10 +138,10 @@ class FormDefinitionServiceSchemaTest {
             .hasMessageContaining("required");
     }
 
-    @Test void validateSubmissionRecursesSectionChildrenWithoutRequiringContainerValue() {
+    @Test void validateSubmissionRecursesLayoutChildrenWithoutRequiringContainerValue() {
         assertThatThrownBy(() -> service.validateSubmission(
             """
-                [{"id":"basic","type":"section","label":"基础信息","props":{"required":true},
+                [{"id":"row","type":"span_layout","label":"布局","props":{"required":true},
                   "children":[{"id":"a","type":"text","label":"姓名","props":{"required":true}}]}]
                 """,
             Map.of("a", "")
@@ -150,7 +150,7 @@ class FormDefinitionServiceSchemaTest {
 
         assertThatCode(() -> service.validateSubmission(
             """
-                [{"id":"basic","type":"section","label":"基础信息","props":{"required":true},
+                [{"id":"row","type":"span_layout","label":"布局","props":{"required":true},
                   "children":[{"id":"a","type":"text","label":"姓名","props":{"required":true}}]}]
                 """,
             Map.of("a", "张三")

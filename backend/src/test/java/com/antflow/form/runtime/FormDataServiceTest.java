@@ -40,7 +40,7 @@ class FormDataServiceTest {
     }
 
     @Test
-    void directSubmitAcceptsFlatValuesFromTwoBusinessSections() throws Exception {
+    void directSubmitAcceptsFlatValuesFromLayoutContainers() throws Exception {
         Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
 
         Long id = service.submit(
@@ -58,8 +58,7 @@ class FormDataServiceTest {
         assertThat(saved.getStatus()).isEqualTo("SUBMITTED");
         assertThat(json.readTree(saved.getData()).path("applicant").asText()).isEqualTo("张三");
         assertThat(json.readTree(saved.getData()).path("reason").asText()).isEqualTo("报销");
-        assertThat(json.readTree(saved.getData()).has("basic")).isFalse();
-        assertThat(json.readTree(saved.getData()).has("business")).isFalse();
+        assertThat(json.readTree(saved.getData()).has("row")).isFalse();
     }
 
     private static FormDefinition publishedNoWorkflowForm() {
@@ -72,12 +71,10 @@ class FormDataServiceTest {
         form.setSettings("{\"workflowEnabled\":false}");
         form.setSchema("""
             [
-              {"id":"basic","type":"section","label":"基础信息","children":[
+              {"id":"row","type":"span_layout","label":"基本信息","children":[
                 {"id":"applicant","type":"text","label":"申请人","props":{"required":true}}
               ]},
-              {"id":"business","type":"section","label":"业务信息","children":[
-                {"id":"reason","type":"text","label":"事由","props":{"required":true}}
-              ]}
+              {"id":"reason","type":"text","label":"事由","props":{"required":true}}
             ]
             """);
         return form;
