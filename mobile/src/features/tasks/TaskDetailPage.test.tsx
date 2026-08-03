@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setAuthController } from '../../shared/api/auth';
 import { TaskDetailPage } from './TaskDetailPage';
 import { TaskCenterPage } from './TaskCenterPage';
 import type { MobileTaskDetail } from './tasks.api';
@@ -84,6 +85,7 @@ function setupFetch(options: {
   detail?: typeof TASK_DETAIL;
   conflictOnApprove?: boolean;
   failRejectValidation?: boolean;
+  fileDownloadFailure?: boolean;
 } = {}) {
   const detail = options.detail ?? TASK_DETAIL;
   let approveCount = 0;
@@ -93,6 +95,18 @@ function setupFetch(options: {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.includes('/api/mobile/tasks/401') && !url.includes('/approve') && !url.includes('/reject')) {
         return jsonResponse(detail);
+      }
+      if (url.includes('/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content')) {
+        if (options.fileDownloadFailure) {
+          return jsonResponse({
+            code: 'FILE_STORAGE_FAILED',
+            message: 'could not read object from MinIO',
+          }, 422);
+        }
+        return new Response(new Blob(['%PDF-proof'], { type: 'application/pdf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/pdf' },
+        });
       }
       if (url.includes('/api/mobile/tasks/401/approve') && init?.method === 'POST') {
         approveCount += 1;
@@ -149,6 +163,11 @@ function renderDetail(initialPath = '/tasks/401?returnView=pending') {
 
 beforeEach(() => {
   vi.unstubAllGlobals();
+  setAuthController({
+    authorizationHeader: () => ({}),
+    refresh: async () => undefined,
+    isAuthEndpoint: (path) => path.includes('/auth/'),
+  });
   setupFetch();
 });
 
@@ -159,13 +178,60 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('审批详情')).toBeInTheDocument();
     expect(screen.getAllByText((text) => text.includes('张三')).length).toBeGreaterThan(0);
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '下载证明.pdf' })).toHaveAttribute(
-      'href',
-      '/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content',
-    );
+    expect(screen.getByRole('button', { name: '下载证明.pdf' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '下载证明.pdf' })).not.toBeInTheDocument();
     expect(screen.getByText('审批中')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '同意' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '驳回' })).toBeInTheDocument();
+  });
+
+  it('downloads protected attachments through authenticated blob fetch', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const createObjectURL = vi.fn(() => 'blob:http://localhost/proof');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const linkClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    setAuthController({
+      authorizationHeader: () => ({ Authorization: 'Bearer mobile-token' }),
+      refresh: async () => undefined,
+      isAuthEndpoint: (path) => path.includes('/auth/'),
+    });
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+
+    renderDetail();
+    await screen.findByRole('button', { name: '下载证明.pdf' });
+    fetchMock.mockClear();
+
+    await user.click(screen.getByRole('button', { name: '下载证明.pdf' }));
+
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob)));
+    const contentCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content'));
+    expect(contentCall).toBeTruthy();
+    expect(contentCall?.[1]).toEqual(expect.objectContaining({ credentials: 'include' }));
+    expect(new Headers(contentCall?.[1]?.headers).get('Authorization')).toBe('Bearer mobile-token');
+    expect(linkClick).toHaveBeenCalled();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:http://localhost/proof');
+    linkClick.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('shows a precise error when the MinIO object is missing', async () => {
+    setupFetch({ fileDownloadFailure: true });
+    renderDetail();
+    await screen.findByRole('button', { name: '下载证明.pdf' });
+
+    await userEvent.click(screen.getByRole('button', { name: '下载证明.pdf' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '附件原文件未写入 MinIO，请重新上传后再下载',
+    );
   });
 
   it('hides action buttons when server returns empty allowedActions', async () => {

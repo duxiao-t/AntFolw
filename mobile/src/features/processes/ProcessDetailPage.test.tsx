@@ -145,6 +145,28 @@ describe('ProcessDetailPage', () => {
     expect(screen.getByRole('button', { name: '撤回流程' })).toBeInTheDocument();
   });
 
+  it('renders started process attachments as protected download buttons', async () => {
+    setupFetch({
+      detail: {
+        ...INSTANCE_DETAIL,
+        files: [
+          {
+            id: 'af5f8d74-9c79-4d2c-9c41-f2b0cf1e82f0',
+            name: '报价单.pdf',
+            contentType: 'application/pdf',
+            size: 2048,
+            contentUrl: '/api/mobile/files/af5f8d74-9c79-4d2c-9c41-f2b0cf1e82f0/content',
+          },
+        ],
+      },
+    });
+
+    renderProcess();
+
+    expect(await screen.findByRole('button', { name: '下载报价单.pdf' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '下载报价单.pdf' })).not.toBeInTheDocument();
+  });
+
   it('hides withdraw when canWithdraw is false', async () => {
     setupFetch({ detail: WITHDRAWN_DETAIL });
     renderProcess();

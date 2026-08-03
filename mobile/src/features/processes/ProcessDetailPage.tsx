@@ -5,6 +5,7 @@ import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
+import { AttachmentDownloadButton } from "../forms/components/AttachmentDownloadButton";
 import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ApprovalRecords, approvalSummaryLabel } from "../tasks/ApprovalRecords";
@@ -61,7 +62,7 @@ export function ProcessDetailPage() {
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
-      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {files.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(files.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{files.length === 0 ? <p className="muted small">暂无附件</p> : files.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {instance.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><a href={file.contentUrl} aria-label={`下载${file.name}`}><DownloadIcon /></a></div></article>)}</div></section>
+      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {files.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(files.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{files.length === 0 ? <p className="muted small">暂无附件</p> : files.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {instance.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
     </AppPage>
   );
 }
@@ -78,6 +79,5 @@ function createIdempotencyKey() { return typeof crypto.randomUUID === "function"
 function avatarText(name?: string | null) { return name?.trim().slice(0, 1) || "—"; }
 function shareProcess(title: string) { if (typeof navigator.share === "function") void navigator.share({ title, url: window.location.href }).catch(() => undefined); }
 function ShareIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" /></svg>; }
-function DownloadIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>; }
 
 export default ProcessDetailPage;
