@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>16 · 账号安全</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">16 · Security</div>
+  <div class="preview-shell__hint">列表 · 状态徽章(on/off) · 双因子</div>
+
+  <div class="phone">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">账号安全</div>
+        <span></span>
+      </header>
+
+      <main class="page page--no-tabbar" style="padding-bottom: 90px;">
+
+        <div class="hero" style="margin-top:12px;">
+          <div class="hero__head">
+            <small>账号安全等级</small>
+          </div>
+          <div class="hero__greeting">
+            <h2 style="font-size:22px;">较高</h2>
+            <p>已开启 双因子 + 设备锁 · 建议补充 生物特征</p>
+          </div>
+        </div>
+
+        <section class="section">
+          <div class="list-card">
+            <button class="list-item">
+              <span class="list-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <div class="list-item__main"><b>登录密码</b><small>上次更新 90 天前</small></div>
+              <span class="badge-soft badge-soft--on">已设置</span>
+              <span class="list-item__chev">›</span>
+            </button>
+            <button class="list-item">
+              <span class="list-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+              </span>
+              <div class="list-item__main"><b>双因子认证</b><small>短信验证码</small></div>
+              <span class="badge-soft badge-soft--on">已开启</span>
+              <span class="list-item__chev">›</span>
+            </button>
+            <button class="list-item">
+              <span class="list-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4z"/></svg>
+              </span>
+              <div class="list-item__main"><b>生物特征</b><small>Face ID / 指纹</small></div>
+              <span class="badge-soft badge-soft--off">未开启</span>
+              <span class="list-item__chev">›</span>
+            </button>
+            <button class="list-item">
+              <span class="list-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              </span>
+              <div class="list-item__main"><b>登录设备</b><small>2 台 · 含本机</small></div>
+              <span class="list-item__chev">›</span>
+            </button>
+            <button class="list-item">
+              <span class="list-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+              </span>
+              <div class="list-item__main"><b>消息推送</b><small>审批结果 · 通知</small></div>
+              <span class="badge-soft badge-soft--on">已开启</span>
+              <span class="list-item__chev">›</span>
+            </button>
+            <button class="list-item">
+              <span class="list-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12c0 4.97-4.03 9-9 9-1.86 0-3.59-.57-5.04-1.54L3 21l1.54-3.96A8.95 8.95 0 0 1 3 12c0-4.97 4.03-9 9-9s9 4.03 9 9z"/></svg>
+              </span>
+              <div class="list-item__main"><b>应急联系人</b><small>1 人 · 张经理</small></div>
+              <span class="list-item__chev">›</span>
+            </button>
+          </div>
+        </section>
+
+        <p style="text-align:center;color:var(--af-color-muted);font-size:11px;margin:24px 0 0;">所有操作均会被记录到操作日志。</p>
+
+      </main>
+
+      <div class="action-bar">
+        <button class="btn btn--ghost btn--lg">查看操作日志</button>
+        <button class="btn btn--danger btn--lg">退出全部设备</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

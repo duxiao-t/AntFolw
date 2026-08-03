@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>07 · 应用目录</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">07 · App Catalog</div>
+  <div class="preview-shell__hint">业务分类色 · 双列应用卡片 · 搜索筛选</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">全部应用</div>
+        <button class="app-bar__action" aria-label="查看收藏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17.3 6.18 21l1.64-7.03L2 9.74l7.19-.61L12 2.5l2.81 6.63L22 9.74l-5.82 4.23L17.82 21z"/></svg>
+        </button>
+      </header>
+
+      <main class="page page--no-tabbar catalog-page">
+        <div class="searchbar catalog-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input placeholder="搜索表单或应用" aria-label="搜索表单或应用" />
+        </div>
+
+        <div class="chip-row catalog-filter" data-chip-select="single" aria-label="应用分类">
+          <button class="chip is-active" type="button">全部</button>
+          <button class="chip" type="button">行政</button>
+          <button class="chip" type="button">财务</button>
+          <button class="chip" type="button">人事</button>
+          <button class="chip" type="button">IT</button>
+          <button class="chip" type="button">业务</button>
+        </div>
+
+        <section class="catalog-section" aria-labelledby="catalog-admin-title">
+          <header class="catalog-section__head">
+            <h2 id="catalog-admin-title">行政</h2>
+            <span>4 个应用</span>
+          </header>
+          <div class="catalog-card-grid">
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--admin">差</span>
+              <span class="catalog-app-card__name">出差申请</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--finance">报</span>
+              <span class="catalog-app-card__name">报销</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--people">加</span>
+              <span class="catalog-app-card__name">加班</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--admin">假</span>
+              <span class="catalog-app-card__name">请假</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="catalog-section" aria-labelledby="catalog-finance-title">
+          <header class="catalog-section__head">
+            <h2 id="catalog-finance-title">财务</h2>
+            <span>4 个应用</span>
+          </header>
+          <div class="catalog-card-grid">
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--operations">采</span>
+              <span class="catalog-app-card__name">采购</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--admin">用</span>
+              <span class="catalog-app-card__name">用印</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--finance">付</span>
+              <span class="catalog-app-card__name">付款</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--finance">开</span>
+              <span class="catalog-app-card__name">开票</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="catalog-section" aria-labelledby="catalog-people-it-title">
+          <header class="catalog-section__head">
+            <h2 id="catalog-people-it-title">人事 / IT</h2>
+            <span>4 个应用</span>
+          </header>
+          <div class="catalog-card-grid">
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--people">招</span>
+              <span class="catalog-app-card__name">招聘</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--people">转</span>
+              <span class="catalog-app-card__name">转正</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--it">权</span>
+              <span class="catalog-app-card__name">权限申请</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+            <button class="catalog-app-card" type="button">
+              <span class="catalog-app-card__icon app-glyph--it">设</span>
+              <span class="catalog-app-card__name">设备申领</span>
+              <span class="catalog-app-card__chev" aria-hidden="true">›</span>
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

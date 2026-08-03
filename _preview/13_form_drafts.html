@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>13 · 我的草稿</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">13 · Drafts</div>
+  <div class="preview-shell__hint">草稿列表 · 滑出删除 · 72h 后归档</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">我的草稿</div>
+        <button class="app-bar__action" aria-label="编辑">编辑</button>
+      </header>
+
+      <main class="page page--no-tabbar">
+
+        <p class="muted small" style="margin:4px 4px 14px;">未提交的草稿,将在 72 小时后自动归档。</p>
+
+        <section style="display:grid;gap:10px;">
+          <div class="draft-card draft-card--info">
+            <span class="draft-card__icon">差</span>
+            <div class="draft-card__main">
+              <b>出差申请 · 客户拜访</b>
+              <small>保存于 7月28日 14:35 · 步骤 1/3</small>
+            </div>
+            <span class="draft-card__chev">›</span>
+            <button class="draft-card__del">删除</button>
+          </div>
+
+          <div class="draft-card draft-card--success">
+            <span class="draft-card__icon">报</span>
+            <div class="draft-card__main">
+              <b>报销 · 6 月差旅</b>
+              <small>保存于 7月27日 21:12 · 步骤 2/3</small>
+            </div>
+            <span class="draft-card__chev">›</span>
+            <button class="draft-card__del">删除</button>
+          </div>
+
+          <div class="draft-card draft-card--warning">
+            <span class="draft-card__icon">采</span>
+            <div class="draft-card__main">
+              <b>采购 · 测试设备</b>
+              <small>保存于 7月22日 09:08 · 步骤 1/3</small>
+            </div>
+            <span class="draft-card__chev">›</span>
+            <button class="draft-card__del">删除</button>
+          </div>
+        </section>
+
+        <div class="empty-hero">
+          <div class="empty-hero__art">
+            <svg viewBox="0 0 120 120" fill="none">
+              <circle cx="60" cy="60" r="44" fill="#f1f5f9"/>
+              <path d="M40 50h40M40 60h28M40 70h36" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>已加载全部草稿</h3>
+          <p>新表单中途退出时会自动保存到这里。</p>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

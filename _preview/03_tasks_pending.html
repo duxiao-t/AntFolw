@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>03 · 待我处理</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">03 · Tasks / Pending</div>
+  <div class="preview-shell__hint">view 切换 · 状态 chip · 任务卡(状态色竖条 + due chip)</div>
+
+  <div class="phone">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <span></span>
+        <div class="app-bar__title">待办</div>
+        <button class="app-bar__action" aria-label="排序">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h11M3 12h7M3 18h3"/><path d="M17 4v16M14 7l3-3 3 3"/></svg>
+        </button>
+      </header>
+
+      <main class="page">
+
+        <section style="margin: 4px 0 14px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+            <div>
+              <h3 style="font-size:22px;font-weight:800;margin:0;">需要你处理的审批</h3>
+              <small style="color:var(--af-color-muted);font-size:12px;">共 5 单 · 按时间排序</small>
+            </div>
+            <span class="chip chip--soft">5</span>
+          </div>
+
+          <div class="tabs">
+            <button class="tab is-active">待我处理</button>
+            <button class="tab">我发起的</button>
+            <button class="tab">已处理</button>
+          </div>
+
+          <div class="searchbar" style="margin-bottom:10px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input placeholder="搜索申请人 / 表单名" />
+          </div>
+
+          <div class="chip-row">
+            <button class="chip is-active">全部</button>
+            <button class="chip">进行中</button>
+            <button class="chip">已通过</button>
+            <button class="chip is-active">我审批</button>
+            <button class="chip">紧急</button>
+          </div>
+        </section>
+
+                <section style="display:grid;gap:10px;">
+
+          <button class="task-card">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">出差申请 · 北京 → 上海 3 天</div>
+                <span class="chip chip--danger-soft">紧急</span>
+              </div>
+              <div class="task-card__sub">当前节点:<b style="color:var(--af-color-primary);">财务复核</b> · 2/3</div>
+              <div class="task-progress"><i style="width:66%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">李宁</b></span>
+                <span>7月29日 09:12</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card task-card--info">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">报销 · 6 月差旅发票 8 张</div>
+                <span class="chip chip--soft">待复核</span>
+              </div>
+              <div class="task-card__sub">当前节点:<b style="color:var(--af-color-primary);">直属上级</b> · 1/3</div>
+              <div class="task-progress"><i style="width:33%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">王晓</b></span>
+                <span>7月28日 14:35</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">加班申请 · 周末系统升级</div>
+                <span class="chip chip--soft">待审批</span>
+              </div>
+              <div class="task-card__sub">当前节点:<b style="color:var(--af-color-primary);">直属上级</b> · 1/3</div>
+              <div class="task-progress"><i style="width:33%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">陈昊</b></span>
+                <span>7月27日 18:20</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card task-card--success">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">用印申请 · 销售合同</div>
+                <span class="chip chip--success-soft">即将完成</span>
+              </div>
+              <div class="task-card__sub">当前节点:<b style="color:var(--af-color-primary);">HR 备案</b> · 3/3</div>
+              <div class="task-progress"><i style="width:95%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">张敏</b></span>
+                <span>7月25日 11:08</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card task-card--danger">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">采购申请 · 办公笔记本 10 台</div>
+                <span class="chip chip--warn-soft">需签批</span>
+              </div>
+              <div class="task-card__sub">当前节点:<b style="color:var(--af-color-primary);">财务</b> · 2/4</div>
+              <div class="task-progress"><i style="width:50%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">刘洋</b></span>
+                <span>7月22日 10:45</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="btn btn--ghost btn--block" style="margin-top:6px;">还有更多,请继续下拉加载</button>
+        </section>
+
+        <div class="spacer-24"></div>
+      </main>
+
+      <nav class="tabbar" aria-label="主导航">
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h14v-9"/></svg>
+          工作台
+        </button>
+        <button class="tabbar__item is-active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h12M4 12h16M4 17h10"/></svg>待办
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+          我的
+        </button>
+      </nav>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>
+
+

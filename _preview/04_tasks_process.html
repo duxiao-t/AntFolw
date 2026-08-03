@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>04 · 我发起的</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">04 · Tasks / Mine (Process)</div>
+  <div class="preview-shell__hint">流程视角 · 状态胶囊 · 节点进度</div>
+
+  <div class="phone">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <span></span>
+        <div class="app-bar__title">待办</div>
+        <button class="app-bar__action" aria-label="排序">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h11M3 12h7M3 18h3"/><path d="M17 4v16M14 7l3-3 3 3"/></svg>
+        </button>
+      </header>
+
+      <main class="page">
+
+        <section style="margin: 4px 0 14px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+            <div>
+              <h3 style="font-size:22px;font-weight:800;margin:0;">我发起的流程</h3>
+              <small style="color:var(--af-color-muted);font-size:12px;">共 12 条 · 进行中 5</small>
+            </div>
+          </div>
+
+          <div class="tabs">
+            <button class="tab">待我处理</button>
+            <button class="tab is-active">我发起的</button>
+            <button class="tab">已处理</button>
+          </div>
+
+        <div class="searchbar" style="margin-bottom:10px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input placeholder="搜索申请人 / 表单名" />
+        </div>
+
+        <div class="chip-row">
+            <button class="chip is-active">全部</button>
+            <button class="chip is-active">审批中</button>
+            <button class="chip">通过</button>
+            <button class="chip">驳回</button>
+            <button class="chip">已撤回</button>
+          </div>
+        </section>
+
+                <section style="display:grid;gap:10px;">
+
+          <button class="task-card task-card--info">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">报销 · 7 月差旅</div>
+                <span class="chip chip--soft">审批中</span>
+              </div>
+              <div class="task-card__sub">当前节点:<b style="color:var(--af-color-primary);">财务复核</b> · 1/3</div>
+              <div class="task-progress"><i style="width:33%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">王晓</b></span>
+                <span>7月29日 09:12</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card task-card--success">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">出差 · 客户拜访</div>
+                <span class="chip chip--success-soft">通过</span>
+              </div>
+              <div class="task-card__sub">已结束 · 历时 1 天</div>
+              <div class="task-progress task-progress--success"><i style="width:100%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">张三</b></span>
+                <span>7月25日 09:30</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card task-card--danger">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">采购 · 测试设备</div>
+                <span class="chip chip--danger-soft">驳回</span>
+              </div>
+              <div class="task-card__sub">驳回原因:<b style="color:var(--af-color-danger);">缺少询价单</b></div>
+              <div class="task-progress task-progress--danger"><i style="width:25%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">李四</b></span>
+                <span>7月22日 14:00</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+          <button class="task-card task-card--muted">
+            <div class="task-card__main">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div class="task-card__title">用印 · 合作协议</div>
+                <span class="chip chip--ghost">已撤回</span>
+              </div>
+              <div class="task-card__sub">你于 7月25日 撤回</div>
+              <div class="task-progress task-progress--ghost"><i style="width:33%"></i></div>
+              <div class="task-card__footer">
+                <span>发起人 <b style="color:var(--af-color-text);">王五</b></span>
+                <span>7月24日 10:20</span>
+              </div>
+            </div>
+            <span class="task-card__chev">›</span>
+          </button>
+
+        </section>
+
+        <div class="spacer-24"></div>
+      </main>
+
+      <nav class="tabbar" aria-label="主导航">
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h14v-9"/></svg>
+          工作台
+        </button>
+        <button class="tabbar__item is-active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h12M4 12h16M4 17h10"/></svg>待办
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+          我的
+        </button>
+      </nav>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>
+
+

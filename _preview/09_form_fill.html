@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>09 · 热处理产量统计表</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">09 · Form Fill</div>
+  <div class="preview-shell__hint">单步单卡填报 · 12 类动态组件 · 附件独立卡片</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">填写表单</div>
+        <button class="app-bar__action" aria-label="保存草稿">草稿</button>
+      </header>
+
+      <main class="page page--no-tabbar form-fill-page">
+        <section class="step-head" aria-labelledby="heat-treatment-form-title">
+          <div class="step-head__kicker">
+            <span>步骤 2 / 3 · 生产数据</span>
+            <span class="step-head__count">第 2 步</span>
+          </div>
+          <h2 id="heat-treatment-form-title">热处理产量统计表</h2>
+          <p>请填写本批次生产与质量数据，带 <span class="required-mark">*</span> 为必填项。</p>
+          <div class="step-progress" aria-label="填写进度 66%"><i style="width:66%"></i></div>
+          <div class="step-nav" aria-label="表单步骤">
+            <span class="step-dot step-dot--done">✓</span>
+            <span class="step-dot step-dot--current">2</span>
+            <span class="step-dot">3</span>
+          </div>
+        </section>
+
+        <div class="form-next-hint">
+          <strong>下一步：审批人确认</strong>
+          <span>生产数据填写完成后，选择审批人与抄送人。</span>
+        </div>
+
+        <!-- 当前步骤的全部填报项统一放在一张主卡片中 -->
+        <section class="field-card form-main-card" aria-label="热处理产量填报内容">
+          <label class="field">
+            <span class="field__label">产品编码 <span class="required-mark">*</span></span>
+            <input type="text" value="HT-AL-6082-017" aria-label="产品编码" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">产品名称 <span class="required-mark">*</span></span>
+            <input type="text" value="铝合金传动轴套" aria-label="产品名称" />
+          </label>
+
+          <div class="field">
+            <span class="field__label">工序 <span class="required-mark">*</span></span>
+            <button class="control form-picker" type="button" aria-label="选择工序，当前为渗碳淬火">
+              <span>渗碳淬火</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+            </button>
+          </div>
+
+          <div class="field">
+            <span class="field__label">生产日期 <span class="required-mark">*</span></span>
+            <button class="control form-picker date-picker-control" type="button" aria-label="选择生产日期，当前为2026年7月30日">
+              <span>2026-07-30</span>
+              <span class="picker-icon-slot" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>
+              </span>
+            </button>
+          </div>
+
+          <div class="field">
+            <span class="field__label">统计周期</span>
+            <button class="control date-range-control" type="button" aria-label="选择统计周期，当前为2026年7月28日至7月30日">
+              <span class="date-range-control__value"><small>开始日期</small><strong>2026-07-28</strong></span>
+              <span class="date-range-control__to" aria-hidden="true">至</span>
+              <span class="date-range-control__value"><small>结束日期</small><strong>2026-07-30</strong></span>
+              <span class="picker-icon-slot" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>
+              </span>
+            </button>
+          </div>
+
+          <div class="field">
+            <span class="field__label">生产标签</span>
+            <button class="control form-picker control--multi" type="button" aria-label="选择生产标签，已选白班、2号炉、重点批次">
+              <span class="selected-tags">
+                <span>白班</span>
+                <span>2号炉</span>
+                <span>重点批次</span>
+              </span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+            </button>
+            <span class="field__help">支持选择多个班次、设备或批次标签。</span>
+          </div>
+
+          <div class="field">
+            <span class="field__label">作业人员 <span class="required-mark">*</span></span>
+            <button class="control form-picker user-picker-control" type="button" aria-label="选择作业人员，已选王志强、赵磊">
+              <span class="user-stack" aria-hidden="true">
+                <span class="user-avatar">王</span>
+                <span class="user-avatar user-avatar--accent">赵</span>
+              </span>
+              <span class="picker-value">王志强、赵磊</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+
+          <div class="field">
+            <span class="field__label">生产部门 <span class="required-mark">*</span></span>
+            <button class="control form-picker department-picker-control" type="button" aria-label="选择生产部门，当前为生产制造部热处理一组">
+              <span class="department-mark" aria-hidden="true">制</span>
+              <span class="picker-value">
+                <strong>生产制造部</strong>
+                <small>热处理一组</small>
+              </span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+
+          <label class="field">
+            <span class="field__label">产量 <span class="required-mark">*</span></span>
+            <span class="input-unit">
+              <input type="text" inputmode="numeric" value="1,260" aria-label="产量" />
+              <b>件</b>
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="field__label">废品 <span class="required-mark">*</span></span>
+            <span class="input-unit input-unit--danger">
+              <input type="text" inputmode="numeric" value="18" aria-label="废品数量" />
+              <b>件</b>
+            </span>
+          </label>
+
+          <div class="field">
+            <span class="field__label">总数</span>
+            <span class="input-unit input-unit--readonly">
+              <input type="text" value="1,278" aria-label="总数" readonly />
+              <b>件</b>
+            </span>
+            <span class="field__help">由产量与废品数量自动计算。</span>
+          </div>
+
+          <label class="field">
+            <span class="field__label">本批加工金额</span>
+            <span class="input-unit amount-control">
+              <b class="amount-control__prefix">¥</b>
+              <input type="text" inputmode="decimal" value="23,480.00" aria-label="本批加工金额" />
+              <span>CNY</span>
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="field__label">备注</span>
+            <textarea aria-label="备注" placeholder="填写异常情况、返工说明或其他补充信息">2 号炉第二批次，炉温与保温时长均符合工艺卡要求；18 件表面硬度不达标，已单独隔离并提交复检。</textarea>
+            <span class="field__help field__help--right">已输入 49 / 500</span>
+          </label>
+
+          <div class="field detail-table-field">
+            <span class="field__label">产品产量明细 <span class="required-mark">*</span></span>
+            <div class="mobile-detail-table">
+              <div class="mobile-detail-table__head">
+                <div>
+                  <strong>明细表</strong>
+                  <small>2 行 · 自动汇总</small>
+                </div>
+                <button type="button" aria-label="添加一行明细">＋ 添加</button>
+              </div>
+
+              <article class="detail-entry">
+                <header class="detail-entry__head">
+                  <span class="detail-entry__index">01</span>
+                  <div>
+                    <strong>HT-AL-6082-017-A</strong>
+                    <small>铝合金传动轴套 · 渗碳淬火</small>
+                  </div>
+                  <button type="button" aria-label="编辑第1行">编辑</button>
+                </header>
+                <div class="detail-entry__metrics">
+                  <label><span>产量</span><input type="text" inputmode="numeric" value="640" aria-label="第1行产量" /></label>
+                  <label><span>废品</span><input type="text" inputmode="numeric" value="8" aria-label="第1行废品" /></label>
+                  <label><span>总数</span><input type="text" value="648" aria-label="第1行总数" readonly /></label>
+                </div>
+                <p><span>备注</span>首炉抽检合格，8 件待复检。</p>
+              </article>
+
+              <article class="detail-entry">
+                <header class="detail-entry__head">
+                  <span class="detail-entry__index">02</span>
+                  <div>
+                    <strong>HT-AL-6082-017-B</strong>
+                    <small>铝合金传动轴套 · 渗碳淬火</small>
+                  </div>
+                  <button type="button" aria-label="编辑第2行">编辑</button>
+                </header>
+                <div class="detail-entry__metrics">
+                  <label><span>产量</span><input type="text" inputmode="numeric" value="620" aria-label="第2行产量" /></label>
+                  <label><span>废品</span><input type="text" inputmode="numeric" value="10" aria-label="第2行废品" /></label>
+                  <label><span>总数</span><input type="text" value="630" aria-label="第2行总数" readonly /></label>
+                </div>
+                <p><span>备注</span>第二炉已完成隔离标识。</p>
+              </article>
+
+              <div class="mobile-detail-table__summary">
+                <span>合计</span>
+                <span>产量 <b>1,260</b></span>
+                <span>废品 <b>18</b></span>
+                <span>总数 <b>1,278</b></span>
+              </div>
+            </div>
+            <span class="field__help">移动端按行展开，避免传统宽表横向滚动。</span>
+          </div>
+        </section>
+
+        <!-- 附件是当前步骤唯一独立的内容卡片 -->
+        <section class="field-card form-attachment-card" aria-labelledby="attachment-card-title">
+          <header class="form-attachment-card__head">
+            <div>
+              <h3 id="attachment-card-title">附件</h3>
+              <small>已上传 2 个文件</small>
+            </div>
+            <span>3.2 MB</span>
+          </header>
+          <div class="field form-attachment-card__field">
+            <div class="upload-control">
+              <div class="upload-file-row">
+                <span class="upload-file-row__type">XLS</span>
+                <span class="upload-file-row__main">
+                  <strong>热处理工艺记录.xlsx</strong>
+                  <small>王志强 · 2.4 MB</small>
+                </span>
+                <button type="button" aria-label="删除热处理工艺记录">×</button>
+              </div>
+              <div class="upload-file-row">
+                <span class="upload-file-row__type upload-file-row__type--pdf">PDF</span>
+                <span class="upload-file-row__main">
+                  <strong>2号炉温度曲线.pdf</strong>
+                  <small>赵磊 · 860 KB</small>
+                </span>
+                <button type="button" aria-label="删除2号炉温度曲线">×</button>
+              </div>
+              <label class="upload-trigger">
+                <input type="file" multiple aria-label="上传附件" />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg>
+                <span>
+                  <strong>添加附件</strong>
+                  <small>支持 XLSX、PDF、PNG，单个不超过 20 MB</small>
+                </span>
+              </label>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div class="action-bar form-fill-action-bar">
+        <button class="btn btn--ghost btn--lg">上一步</button>
+        <button class="btn btn--success btn--lg">下一步</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

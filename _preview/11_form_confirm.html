@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>11 · 提交确认</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">11 · Confirm</div>
+  <div class="preview-shell__hint">提交前摘要 · 审批流可见 · 二次确认</div>
+
+  <div class="phone phone--fixed">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">确认提交</div>
+        <span></span>
+      </header>
+
+      <main class="page page--no-tabbar" style="padding-bottom: 90px;">
+
+        <div style="margin:8px 0 14px;">
+          <h3 style="margin:0;font-size:20px;font-weight:800;">请确认本次申请</h3>
+          <small style="color:var(--af-color-muted);">提交后将按以下流程流转,可在"我发起的"中跟进。</small>
+        </div>
+
+        <div class="confirm-card">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--af-color-line);">
+            <div style="font-size:13px;font-weight:700;">出差申请</div>
+            <small class="muted">表单编号 BX-2025-0730-018</small>
+          </div>
+          <div class="confirm-row"><span class="confirm-row__k">出发日期</span><span class="confirm-row__v">2025-07-30</span></div>
+          <div class="confirm-row"><span class="confirm-row__k">返回日期</span><span class="confirm-row__v">2025-08-01</span></div>
+          <div class="confirm-row"><span class="confirm-row__k">目的地</span><span class="confirm-row__v">上海</span></div>
+          <div class="confirm-row"><span class="confirm-row__k">预算</span><span class="confirm-row__v">¥4,820.00</span></div>
+          <div class="confirm-row"><span class="confirm-row__k">同行</span><span class="confirm-row__v">3 人</span></div>
+        </div>
+
+        <h4 style="font-size:13px;color:var(--af-color-muted);margin:18px 4px 8px;font-weight:600;">审批流(2/2 会签)</h4>
+        <div class="list-card">
+          <button class="list-item">
+            <span class="list-item__avatar flow-person-avatar avatar-tone avatar-tone--blue">张</span>
+            <div class="list-item__main"><b>张经理 · 直属上级</b><small>审批节点 1 · 主审</small></div>
+            <span class="chip chip--soft">通过</span>
+          </button>
+          <button class="list-item">
+            <span class="list-item__avatar flow-person-avatar avatar-tone avatar-tone--mint">王</span>
+            <div class="list-item__main"><b>王晓 · 财务总监</b><small>审批节点 2 · 会签</small></div>
+            <span class="chip chip--ghost">待审</span>
+          </button>
+        </div>
+
+        <div style="margin:18px 0;padding:12px 14px;border:1px dashed var(--af-color-border);border-radius:10px;background:#fff;">
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--af-color-text-secondary);">
+            <input type="checkbox" checked />
+            <span>我已确认信息无误,提交后将按上述审批流转入下一节点。</span>
+          </label>
+        </div>
+
+      </main>
+
+      <div class="action-bar">
+        <button class="btn btn--ghost btn--lg">返回编辑</button>
+        <button class="btn btn--success btn--lg">确认提交</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>17 · 加载骨架</title>
+<link rel="stylesheet" href="preview.css" />
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="preview-shell">
+  <div class="preview-shell__title">17 · Loading Skeleton</div>
+  <div class="preview-shell__hint">shimmer 动画 · 1.4s 循环 · 与卡片结构 1:1 镜像</div>
+
+  <div class="phone">
+    <div class="phone__body">
+
+      <header class="app-bar">
+        <button class="app-bar__back" aria-label="返回">‹</button>
+        <div class="app-bar__title">工作台</div>
+        <button class="app-bar__action" aria-label="搜索">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        </button>
+      </header>
+
+      <main class="page page--flush" style="display:grid;gap:14px;">
+
+        <div style="background:#fff;border:1px solid var(--af-color-line);border-radius:var(--af-radius-card-lg);padding:18px;display:grid;gap:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="skeleton" style="width:120px;height:12px;"></span>
+            <span class="skeleton" style="width:36px;height:36px;border-radius:50%;"></span>
+          </div>
+          <span class="skeleton" style="width:60%;height:24px;border-radius:6px;"></span>
+          <span class="skeleton" style="width:80%;height:12px;"></span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+          <span class="skeleton" style="height:62px;border-radius:12px;"></span>
+          <span class="skeleton" style="height:62px;border-radius:12px;"></span>
+          <span class="skeleton" style="height:62px;border-radius:12px;"></span>
+        </div>
+
+        <div style="background:#fff;border:1px solid var(--af-color-line);border-radius:var(--af-radius-card);padding:18px;display:grid;gap:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="skeleton" style="width:80px;height:14px;"></span>
+            <span class="skeleton" style="width:40px;height:14px;"></span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;">
+            <span class="skeleton" style="width:44px;height:44px;border-radius:12px;justify-self:center;"></span>
+            <span class="skeleton" style="width:44px;height:44px;border-radius:12px;justify-self:center;"></span>
+            <span class="skeleton" style="width:44px;height:44px;border-radius:12px;justify-self:center;"></span>
+            <span class="skeleton" style="width:44px;height:44px;border-radius:12px;justify-self:center;"></span>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid var(--af-color-line);border-radius:var(--af-radius-card);padding:14px;display:grid;gap:12px;">
+          <span class="skeleton" style="width:40%;height:14px;"></span>
+          <span class="skeleton" style="width:100%;height:44px;border-radius:10px;"></span>
+          <span class="skeleton" style="width:100%;height:44px;border-radius:10px;"></span>
+          <span class="skeleton" style="width:80%;height:44px;border-radius:10px;"></span>
+        </div>
+
+      </main>
+
+      <nav class="tabbar" aria-label="主导航">
+        <button class="tabbar__item is-active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h14v-9"/></svg>
+          工作台
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h12M4 12h16M4 17h10"/></svg>
+          待办
+        </button>
+        <button class="tabbar__item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+          我的
+        </button>
+      </nav>
+
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

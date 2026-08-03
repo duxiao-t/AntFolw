@@ -1,0 +1,60 @@
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.umi/
+frontend/.cache/
+frontend/.env.local
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+
+# Java / backend
+backend/target/
+backend/.idea/
+backend/*.class
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.iml
+.DS_Store
+
+# Reference repos — copied out, not part of the antflow project
+ant-design-pro-master/
+wflow-master/
+
+# Build outputs / infra
+infra/.env
+infra/data/
+
+# Local verification artifacts
+*-run.log
+*-run.err.log
+screenshots/
+
+# OS
+Thumbs.db
+
+mobile/node_modules/
+mobile/dist/
+mobile/coverage/
+mobile/playwright-report/
+mobile/test-results/
+.superpowers/
+.worktrees/
+
+backend/smoke-backend*.log
+backend/probe*.java
+backend/probe*.class
+backend/probe*.out
+backend/probe*.err
+backend/mvn*.log
+backend/smoke-run*.out
+backend/smoke-final.out
+backend/backend/
+backend/data/
+
+
+# Frontend local preview artifacts
+frontend/frontend/

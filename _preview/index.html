@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AntFlow Mobile · 设计预览总目录</title>
+<link rel="stylesheet" href="preview.css" />
+<style>
+  .hub {
+    max-width: 980px; margin: 40px auto 80px; padding: 0 24px;
+  }
+  .hub__head {
+    background: var(--af-gradient-hero); color: #fff;
+    padding: 28px 28px 32px; border-radius: var(--af-radius-card-lg);
+    box-shadow: var(--af-shadow-card-strong); position: relative; overflow: hidden;
+  }
+  .hub__head::after { content:""; position:absolute; left:0; right:0; bottom:0; height:3px; background: var(--af-gradient-brand); }
+  .hub__head h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+  .hub__head p  { margin: 8px 0 0; font-size: 13px; opacity: .9; }
+  .hub__grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px; margin-top: 22px;
+  }
+  .hub__card {
+    display: block; padding: 14px 14px 16px;
+    background: #fff; border: 1px solid var(--af-color-line);
+    border-radius: var(--af-radius-card); box-shadow: var(--af-shadow-card);
+    color: var(--af-color-text);
+  }
+  .hub__card:hover { box-shadow: var(--af-shadow-card-strong); transform: translateY(-2px); transition: all .18s ease; }
+  .hub__card b { display: block; font-size: 14px; }
+  .hub__card small { display: block; font-size: 11px; color: var(--af-color-muted); margin-top: 4px; }
+  .hub__card .tag { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: var(--af-radius-pill); background: #eaf2ff; color: var(--af-color-primary); margin-bottom: 8px; }
+  .hub__group { margin-top: 28px; }
+  .hub__group h2 { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #345; margin: 0 4px 10px; }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" aria-label="切换主题">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l3 2"/></svg>
+</button>
+
+<div class="hub">
+  <div class="hub__head">
+    <h1>AntFlow Mobile · 设计预览</h1>
+    <p>所有目标页面与状态的视觉样品 · 20 份 · 暗色模式可由右上按钮切换</p>
+  </div>
+
+  <div class="hub__group">
+    <h2>主流程</h2>
+    <div class="hub__grid">
+      <a class="hub__card" href="01_login.html"><span class="tag">A</span><b>登录</b><small>品牌 Hero · 表单卡片 · 第三方登录</small></a>
+      <a class="hub__card" href="02_workbench.html"><span class="tag">A</span><b>工作台</b><small>KPI · 常用应用 · 最近流程</small></a>
+      <a class="hub__card" href="03_tasks_pending.html"><span class="tag">A</span><b>待我处理</b><small>任务卡 + 过滤 chip</small></a>
+      <a class="hub__card" href="04_tasks_process.html"><span class="tag">A</span><b>我发起的</b><small>流程卡 · 状态胶囊</small></a>
+      <a class="hub__card" href="05_tasks_done.html"><span class="tag">A</span><b>已处理</b><small>密集列表</small></a>
+      <a class="hub__card" href="06_task_detail.html"><span class="tag">A</span><b>审批详情</b><small>通用表单 + 卡片审批记录 + 附件</small></a>
+    </div>
+  </div>
+
+  <div class="hub__group">
+    <h2>应用 / 表单流程</h2>
+    <div class="hub__grid">
+      <a class="hub__card" href="07_app_catalog.html"><span class="tag">B</span><b>应用目录</b><small>分类筛选 + 双列应用卡片</small></a>
+      <a class="hub__card" href="08_app_favorites.html"><span class="tag">B</span><b>我的收藏</b><small>可排序列表</small></a>
+      <a class="hub__card" href="09_form_fill.html"><span class="tag">B</span><b>表单填写</b><small>12 类组件 · 移动端明细表</small></a>
+      <a class="hub__card" href="10_form_self_select.html"><span class="tag">B</span><b>选人 / 选部门</b><small>网格选择</small></a>
+      <a class="hub__card" href="11_form_confirm.html"><span class="tag">B</span><b>提交确认</b><small>摘要卡</small></a>
+      <a class="hub__card" href="12_form_success.html"><span class="tag">B</span><b>提交成功</b><small>EmptyHero 对勾</small></a>
+      <a class="hub__card" href="13_form_drafts.html"><span class="tag">B</span><b>我的草稿</b><small>滑出删除</small></a>
+    </div>
+  </div>
+
+  <div class="hub__group">
+    <h2>个人中心</h2>
+    <div class="hub__grid">
+      <a class="hub__card" href="15_profile.html"><span class="tag">C</span><b>我的</b><small>资料 hero · 统计 · 列表</small></a>
+      <a class="hub__card" href="16_security.html"><span class="tag">C</span><b>账号安全</b><small>列表 + 徽章</small></a>
+    </div>
+  </div>
+
+  <div class="hub__group">
+    <h2>状态 & 交互</h2>
+    <div class="hub__grid">
+      <a class="hub__card" href="17_state_loading.html"><span class="tag">S</span><b>加载骨架</b><small>shimmer 动画</small></a>
+      <a class="hub__card" href="18_state_empty.html"><span class="tag">S</span><b>空态</b><small>EmptyHero 几何插画</small></a>
+      <a class="hub__card" href="19_state_error.html"><span class="tag">S</span><b>错误态</b><small>网络 / 业务错误</small></a>
+      <a class="hub__card" href="20_sheet_approve.html"><span class="tag">S</span><b>同意 Sheet</b><small>底部弹出动作面板</small></a>
+      <a class="hub__card" href="21_sheet_reject.html"><span class="tag">S</span><b>驳回 Sheet</b><small>原因输入</small></a>
+    </div>
+  </div>
+</div>
+
+<script src="preview.js"></script>
+</body>
+</html>

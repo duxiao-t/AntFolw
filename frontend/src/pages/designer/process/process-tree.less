@@ -1,0 +1,220 @@
+// DingTalk-style process tree styles
+
+.pt-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0 32px;
+  background: #f5f6f8;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.pt-chain {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+// -------- Node card --------
+
+.pt-node {
+  position: relative;
+  width: 280px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  overflow: hidden;
+  z-index: 1;
+
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    transform: translateY(-1px);
+
+    .pt-node__del {
+      opacity: 1;
+    }
+  }
+
+  &--root {
+    border-top: 3px solid #1677ff;
+  }
+
+  &--approval {
+    border-top: 3px solid #52c41a;
+  }
+
+  &--cc {
+    border-top: 3px solid #faad14;
+  }
+
+  &__title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    font-weight: 500;
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.88);
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  &__del {
+    color: #bfbfbf;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      color: #ff4d4f;
+    }
+  }
+
+  &__body {
+    padding: 10px 12px;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.65);
+  }
+}
+
+// -------- Add (+) button between nodes --------
+
+.pt-add {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 36px;
+
+  // vertical connector lines
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    background: #d9d9d9;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  &::before {
+    top: 0;
+    height: 8px;
+  }
+
+  &::after {
+    bottom: 0;
+    height: 8px;
+  }
+
+  &__btn {
+    position: relative;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid #d9d9d9;
+    color: #1677ff;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    margin-top: 6px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    transition: background 0.15s ease, border-color 0.15s ease;
+
+    &:hover {
+      background: #1677ff;
+      border-color: #1677ff;
+      color: #fff;
+    }
+  }
+
+  &--branch {
+    margin: 8px 0;
+    height: auto;
+
+    &::before,
+    &::after {
+      display: none;
+    }
+  }
+}
+
+// -------- Conditions / branches --------
+
+.pt-conditions {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 8px 12px;
+  width: 320px;
+  position: relative;
+  z-index: 1;
+
+  &__head {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+  }
+}
+
+.pt-branches {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+}
+
+.pt-branch {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #fafafa;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  padding: 8px 6px;
+  min-width: 0;
+
+  &__title {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.88);
+    font-weight: 500;
+    padding: 4px 8px;
+    background: #fff;
+    border-radius: 3px;
+    border: 1px solid #e8e8e8;
+    cursor: pointer;
+    margin-bottom: 8px;
+    text-align: center;
+  }
+}
+
+// -------- End marker --------
+
+.pt-end {
+  margin-top: 8px;
+  padding: 8px 20px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 16px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  position: relative;
+  z-index: 1;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 16px;
+    background: #d9d9d9;
+  }
+}
