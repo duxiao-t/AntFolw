@@ -66,7 +66,7 @@ public class MobileFileService {
         if (watermarked && submittedContentType.startsWith("video/")) {
             originalName = toMp4Name(originalName);
         }
-        String storageKey = kindPrefix(submittedContentType) + ownerId + "/" + id + "-" + originalName;
+        String storageKey = kindPrefix(submittedContentType) + id + "-" + originalName;
         writeStorageObject(storageKey, content, submittedContentType);
 
         MobileFile row = new MobileFile();
@@ -145,7 +145,9 @@ public class MobileFileService {
             validateImageContent(submittedContentType, content);
         } else if (submittedContentType.startsWith("video/")) {
             String detectedContentType = detectContentType(content);
-            if (detectedContentType == null || !detectedContentType.equals(submittedContentType)) {
+            // mp4 / quicktime / 3gpp / webm are all accepted regardless of the
+            // exact submitted subtype, so iPhone .mov/.mp4 variances pass.
+            if (detectedContentType == null || !detectedContentType.startsWith("video/")) {
                 throw new BizException("BAD_FILE", "unsupported file content");
             }
         }

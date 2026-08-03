@@ -84,7 +84,7 @@ class MobileFileServiceTest {
 
         assertThat(dto.contentType()).isEqualTo("application/pdf");
         assertThat(storage.contentBytes).isEqualTo(content);
-        assertThat(storage.storageKey).startsWith("file/7/");
+        assertThat(storage.storageKey).startsWith("file/");
     }
 
     @Test
@@ -98,7 +98,7 @@ class MobileFileServiceTest {
         assertThat(dto.contentType()).isEqualTo("text/plain");
         assertThat(dto.name()).isEqualTo("note.txt");
         assertThat(storage.contentBytes).isEqualTo(content);
-        assertThat(storage.storageKey).startsWith("file/7/");
+        assertThat(storage.storageKey).startsWith("file/");
     }
 
     @Test
@@ -142,7 +142,7 @@ class MobileFileServiceTest {
         assertThat(dto.name()).isEqualTo("clip.mp4");
         assertThat(storage.contentBytes).isEqualTo(content);
         assertThat(storage.contentType).isEqualTo("video/mp4");
-        assertThat(storage.storageKey).startsWith("video/7/");
+        assertThat(storage.storageKey).startsWith("video/");
     }
 
     @Test
@@ -210,7 +210,7 @@ class MobileFileServiceTest {
         assertThat(row.getOwnerId()).isEqualTo(7L);
         assertThat(row.getOriginalName()).isEqualTo("logo.png");
         assertThat(row.getStorageKey()).contains(row.getId().toString());
-        assertThat(row.getStorageKey()).startsWith("image/7/");
+        assertThat(row.getStorageKey()).startsWith("image/");
         assertThat(row.getSha256()).hasSize(64);
         assertThat(row.getStatus()).isEqualTo("READY");
         assertThat(storage.contentType).isEqualTo("image/png");
