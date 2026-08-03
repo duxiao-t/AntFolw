@@ -55,3 +55,6 @@ backend/smoke-final.out
 backend/backend/
 backend/data/
 
+
+# Frontend local preview artifacts
+frontend/frontend/
