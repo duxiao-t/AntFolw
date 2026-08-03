@@ -483,13 +483,7 @@ export function FormDesignerSurface({
             <Inspector />
           </aside>
         </div>
-        <DragOverlay
-          dropAnimation={
-            activeDrag?.source === 'palette'
-              ? null
-              : { duration: 220, easing: 'ease' }
-          }
-        >
+        <DragOverlay dropAnimation={null}>
           {activeDrag ? (
             <div className="form-designer__drag-preview">
               <DragPreview drag={activeDrag} />
