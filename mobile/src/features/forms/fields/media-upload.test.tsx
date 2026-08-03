@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MobileSchemaNode } from '../schema/types';
-import { maxCountError, uploadExtraFields, videoDurationError } from './FileUploadField';
+import { isHeicFile, maxCountError, uploadExtraFields, videoDurationError } from './FileUploadField';
 import { ImageUploadField } from './ImageUploadField';
 import { VideoUploadField } from './VideoUploadField';
 
@@ -45,6 +45,12 @@ describe('media upload fields', () => {
   it('image field does not force the camera for album or both sources', () => {
     render(<ImageUploadField {...baseProps({ id: 'photo', type: 'image_upload', label: '照片', props: { source: 'album' } }, [])} />);
     expect(screen.getByLabelText('照片').getAttribute('capture')).toBeNull();
+  });
+
+  it('detects iPhone HEIC photos for client-side conversion', () => {
+    expect(isHeicFile({ name: 'IMG_1234.heic', type: 'image/heic' } as File)).toBe(true);
+    expect(isHeicFile({ name: 'IMG_1234.HEIF', type: '' } as File)).toBe(true);
+    expect(isHeicFile({ name: 'photo.png', type: 'image/png' } as File)).toBe(false);
   });
 
   it('video field opens the camera when source is camera', () => {

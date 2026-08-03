@@ -18,6 +18,7 @@ export function ImageUploadField(props: MobileFieldProps) {
           source: props.node.props?.source ?? 'both',
           addLabel: '添加图片',
           unitLabel: '张图片',
+          convertHeic: true,
         },
       }}
     />

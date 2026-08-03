@@ -266,13 +266,26 @@ export function FileUploadField(props: MobileFieldProps) {
   );
 
   async function addFile(file: File) {
-    const error = await beforeAddError(file);
+    let nextFile = file;
+    if (props.node.props?.convertHeic === true && isHeicFile(file)) {
+      try {
+        const converted = await heicToJpeg(file);
+        if (!converted) {
+          throw new Error('无法处理 HEIC 图片，请在手机设置中把相机格式改为"兼容性最好"后重试');
+        }
+        nextFile = converted;
+      } catch (error) {
+        setLocalError(errorMessage(error));
+        return;
+      }
+    }
+    const error = await beforeAddError(nextFile);
     if (error) {
       setLocalError(error);
       return;
     }
     setLocalError(null);
-    await queueFileUpload(file);
+    await queueFileUpload(nextFile);
   }
 
   async function beforeAddError(file: File) {
@@ -646,6 +659,51 @@ export function maxCountError(node: MobileSchemaNode, currentCount: number): str
     ? node.props.unitLabel
     : defaultUnitLabel(node);
   return `最多上传 ${maxCount} ${unit}`;
+}
+
+export function isHeicFile(file: File) {
+  const type = typeof file.type === 'string' ? file.type.toLowerCase() : '';
+  return type === 'image/heic' || type === 'image/heif' || /\.(heic|heif)$/i.test(file.name);
+}
+
+async function heicToJpeg(file: File): Promise<File | null> {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return null;
+  }
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(objectUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    if (canvas.width <= 0 || canvas.height <= 0) {
+      return null;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return null;
+    }
+    ctx.drawImage(image, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) {
+      return null;
+    }
+    const name = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+    return new File([blob], name || 'image.jpg', { type: 'image/jpeg' });
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('image decode failed'));
+    image.src = src;
+  });
 }
 
 export function videoDurationError(node: MobileSchemaNode, durationSeconds: number): string | null {
