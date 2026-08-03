@@ -133,6 +133,18 @@ function shouldRenderNode(
   return matchesDisplayCondition(node.props?.displayCondition, formValue);
 }
 
+function canRequireNode(type: string) {
+  return !['section', 'span_layout', 'table_list', 'description'].includes(type);
+}
+
+function isFlatContainerNode(type: string) {
+  return type === 'section' || type === 'span_layout';
+}
+
+function usesOwnDesignerChrome(type: string) {
+  return type === 'section';
+}
+
 export function DesignerFieldPreview({
   children,
   node,
@@ -140,12 +152,21 @@ export function DesignerFieldPreview({
   children: React.ReactNode;
   node: SchemaNode;
 }) {
+  const ownsDesignerChrome = usesOwnDesignerChrome(node.type);
   const fieldType = formRegistry[node.type];
   const fieldName = node.label || fieldType?.label || node.type;
   const questionDescription =
     node.props?.questionDescription || node.props?.description || '题干说明';
   const showTitle = node.props?.showTitle !== false;
   const showDescription = node.props?.showDescription !== false;
+
+  if (ownsDesignerChrome) {
+    return (
+      <div className="form-renderer__drag-card form-renderer__drag-card--bare">
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div className="form-renderer__drag-card">
@@ -168,12 +189,14 @@ function DesignerFieldFrame({
   recentlyDroppedId,
   onDropAnimationEnd,
   onNodeChange,
+  bare = false,
 }: {
   children: React.ReactNode;
   node: SchemaNode;
   recentlyDroppedId?: string | null;
   onDropAnimationEnd?(id: string): void;
   onNodeChange?(node: SchemaNode): void;
+  bare?: boolean;
 }) {
   const { attributes, isDragging, listeners, setNodeRef } = useDraggable({
     id: `field:${node.id}`,
@@ -187,6 +210,7 @@ function DesignerFieldFrame({
   const showTitle = node.props?.showTitle !== false;
   const showDescription = node.props?.showDescription !== false;
   const hidden = !!node.props?.hidden;
+  const canRequire = canRequireNode(node.type);
   const updateProp = (key: string, checked: boolean) => {
     onNodeChange?.({
       ...node,
@@ -201,19 +225,46 @@ function DesignerFieldFrame({
     (event) => {
       updateProp(key, event.target.checked);
     };
+  const rootClassName = [
+    'form-renderer__field',
+    'form-renderer__field--designer',
+    bare ? 'form-renderer__field--designer-bare' : '',
+    isDragging ? 'form-renderer__field--dragging' : '',
+    recentlyDroppedId === node.id ? 'form-renderer__field--drop-in' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  if (bare) {
+    return (
+      <div
+        ref={setNodeRef}
+        data-designer-field-id={node.id}
+        className={rootClassName}
+        onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
+      >
+        <button
+          type="button"
+          className="form-renderer__designer-drag-handle form-renderer__designer-drag-handle--bare"
+          aria-label="拖动字段"
+          {...attributes}
+          {...listeners}
+        >
+          <span aria-hidden="true">•••</span>
+        </button>
+        {hidden && (
+          <EyeInvisibleOutlined className="form-renderer__designer-hidden-icon form-renderer__designer-hidden-icon--bare" />
+        )}
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div
       ref={setNodeRef}
       data-designer-field-id={node.id}
-      className={[
-        'form-renderer__field',
-        'form-renderer__field--designer',
-        isDragging ? 'form-renderer__field--dragging' : '',
-        recentlyDroppedId === node.id ? 'form-renderer__field--drop-in' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      className={rootClassName}
       onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
     >
       <div className="form-renderer__designer-card">
@@ -246,17 +297,19 @@ function DesignerFieldFrame({
           {children}
         </div>
         <div className="form-renderer__designer-options">
-          <div
-            className="form-renderer__designer-option"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <Checkbox
-              checked={!!node.props?.required}
-              onChange={onCheckboxChange('required')}
+          {canRequire && (
+            <div
+              className="form-renderer__designer-option"
+              onPointerDown={(event) => event.stopPropagation()}
             >
-              是否必填
-            </Checkbox>
-          </div>
+              <Checkbox
+                checked={!!node.props?.required}
+                onChange={onCheckboxChange('required')}
+              >
+                是否必填
+              </Checkbox>
+            </div>
+          )}
           <div
             className="form-renderer__designer-option"
             onPointerDown={(event) => event.stopPropagation()}
@@ -321,11 +374,15 @@ export function FormRenderer({
         const ft = formRegistry[node.type];
         if (!ft) return null;
         if (!shouldRenderNode(node, mode, value ?? {})) return null;
-        const nodeValue = value?.[node.id] ?? node.props?.defaultValue;
+        const flatContainer = isFlatContainerNode(node.type);
+        const nodeValue = flatContainer
+          ? value ?? {}
+          : value?.[node.id] ?? node.props?.defaultValue;
+        const ownsDesignerChrome = usesOwnDesignerChrome(node.type);
         const renderNode = isDesigner
           ? {
               ...node,
-              label: '',
+              label: ownsDesignerChrome ? node.label : '',
               props: {
                 ...node.props,
                 required: false,
@@ -337,9 +394,13 @@ export function FormRenderer({
             node={renderNode}
             mode={mode}
             value={nodeValue}
-            onChange={(v: any) =>
-              onChange?.({ ...(value ?? {}), [node.id]: v })
-            }
+            onChange={(v: any) => {
+              if (flatContainer) {
+                onChange?.(v);
+                return;
+              }
+              onChange?.({ ...(value ?? {}), [node.id]: v });
+            }}
           />
         );
         if (isDesigner) {
@@ -350,6 +411,7 @@ export function FormRenderer({
               recentlyDroppedId={recentlyDroppedId}
               onDropAnimationEnd={onDropAnimationEnd}
               onNodeChange={onDesignerNodeChange}
+              bare={ownsDesignerChrome}
             >
               {field}
             </DesignerFieldFrame>

@@ -12,7 +12,6 @@ import {
   Steps,
   Switch,
   Tag,
-  Typography,
   message,
   theme,
 } from 'antd';
@@ -24,11 +23,13 @@ import {
 import { history, request, useLocation, useParams } from '@umijs/max';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
 import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
+import MobileFormPreview, {
+  collectPreviewFieldErrors,
+} from './MobileFormPreview';
 
 type FormDefinition = {
   id: number;
@@ -90,75 +91,6 @@ function enrichSchemaLabels(nodes: SchemaNode[]): SchemaNode[] {
   }));
 }
 
-function isEmptyValue(value: any) {
-  return (
-    value == null ||
-    value === '' ||
-    (Array.isArray(value) && value.length === 0)
-  );
-}
-
-function matchesDisplayCondition(
-  condition: Record<string, any> | undefined,
-  value: Record<string, any>,
-) {
-  if (!condition?.fieldId) return true;
-  const sourceValue = value[condition.fieldId];
-  const targetValue = condition.value;
-
-  switch (condition.operator ?? 'eq') {
-    case 'ne':
-      return String(sourceValue ?? '') !== String(targetValue ?? '');
-    case 'contains':
-      return Array.isArray(sourceValue)
-        ? sourceValue.map(String).includes(String(targetValue ?? ''))
-        : String(sourceValue ?? '').includes(String(targetValue ?? ''));
-    case 'empty':
-      return isEmptyValue(sourceValue);
-    case 'notEmpty':
-      return !isEmptyValue(sourceValue);
-    default:
-      return String(sourceValue ?? '') === String(targetValue ?? '');
-  }
-}
-
-function isVisibleNode(node: SchemaNode, value: Record<string, any>) {
-  return !node.props?.hidden && matchesDisplayCondition(node.props?.displayCondition, value);
-}
-
-function collectValidationErrors(nodes: SchemaNode[], value: Record<string, any>) {
-  const errors: string[] = [];
-  nodes.forEach((node) => {
-    if (!isVisibleNode(node, value)) return;
-    const currentValue = value[node.id] ?? node.props?.defaultValue;
-    const label = getNodeLabel(node);
-    if (node.props?.required && isEmptyValue(currentValue)) {
-      errors.push(node.props?.validationMessage || `请填写：${label}`);
-    }
-    if (
-      !isEmptyValue(currentValue) &&
-      node.props?.minLength &&
-      String(currentValue).length < node.props.minLength
-    ) {
-      errors.push(`${label} 不能少于 ${node.props.minLength} 个字符`);
-    }
-    if (!isEmptyValue(currentValue) && node.props?.pattern) {
-      try {
-        const regex = new RegExp(node.props.pattern);
-        if (!regex.test(String(currentValue))) {
-          errors.push(node.props?.validationMessage || `${label} 格式不正确`);
-        }
-      } catch {
-        errors.push(`${label} 的正则表达式无效`);
-      }
-    }
-    if (node.children) {
-      errors.push(...collectValidationErrors(node.children, value));
-    }
-  });
-  return errors;
-}
-
 function collectOptionErrors(nodes: SchemaNode[]) {
   const optionTypes = new Set(['select', 'multi_select']);
   const errors: string[] = [];
@@ -215,6 +147,7 @@ export default function FormManagementWizard() {
   const [form] = Form.useForm();
   const { token } = theme.useToken();
   const [previewValue, setPreviewValue] = useState<Record<string, any>>({});
+  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
   const id = params.id;
   const isNew = !id || id === 'new';
   const formId = isNew ? null : Number(id);
@@ -347,12 +280,24 @@ export default function FormManagementWizard() {
   };
 
   const handlePreviewSubmit = () => {
-    const validationErrors = collectValidationErrors(schema, previewValue);
-    if (validationErrors.length > 0) {
-      message.error(validationErrors[0]);
+    const validationErrors = collectPreviewFieldErrors(previewSchema, previewValue);
+    setPreviewErrors(validationErrors);
+    const firstError = Object.values(validationErrors)[0];
+    if (firstError) {
+      message.error(firstError);
       return;
     }
     message.success('模拟提交校验通过');
+  };
+
+  const handlePreviewValueChange = (fieldId: string, value: any) => {
+    setPreviewValue((current) => ({ ...current, [fieldId]: value }));
+    setPreviewErrors((current) => {
+      if (!current[fieldId]) return current;
+      const next = { ...current };
+      delete next[fieldId];
+      return next;
+    });
   };
 
   const saveBasic = useMutation({
@@ -470,7 +415,13 @@ export default function FormManagementWizard() {
         : '发布后用户提交将直接完成，确认发布？',
       okText: '确认发布',
       cancelText: '取消',
-      onOk: () => publishAll.mutateAsync(),
+      onOk: async () => {
+        try {
+          await publishAll.mutateAsync();
+        } catch {
+          // React Query onError already shows the backend business message.
+        }
+      },
     });
   };
 
@@ -529,70 +480,18 @@ export default function FormManagementWizard() {
         }}
       >
         <Card title="手机端预览">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              padding: '8px 0 16px',
-            }}
-          >
-            <div
-              style={{
-                width: 390,
-                maxWidth: '100%',
-                minHeight: 640,
-                maxHeight: 'calc(100vh - 260px)',
-                overflowY: 'auto',
-                border: `1px solid ${token.colorBorder}`,
-                borderRadius: 28,
-                background: token.colorBgLayout,
-                padding: 12,
-                boxShadow: token.boxShadowSecondary,
-              }}
-            >
-              <div
-                style={{
-                  minHeight: 616,
-                  borderRadius: 20,
-                  background: token.colorBgContainer,
-                  padding: 16,
-                }}
-              >
-                <Typography.Title level={4} style={{ marginTop: 0 }}>
-                  {definition?.name ?? '未命名表单'}
-                </Typography.Title>
-                {definition?.description && (
-                  <Typography.Paragraph type="secondary">
-                    {definition.description}
-                  </Typography.Paragraph>
-                )}
-                {previewSchema.length > 0 ? (
-                  <FormRenderer
-                    schema={previewSchema}
-                    mode="runtime-fill"
-                    value={previewValue}
-                    onChange={setPreviewValue}
-                  />
-                ) : (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    message="暂无组件"
-                    description="请返回表单制作添加至少一个组件。"
-                  />
-                )}
-                <Button
-                  block
-                  type="primary"
-                  style={{ marginTop: 16 }}
-                  disabled={previewSchema.length === 0}
-                  onClick={handlePreviewSubmit}
-                >
-                  模拟提交
-                </Button>
-              </div>
-            </div>
-          </div>
+          <MobileFormPreview
+            title={definition?.name ?? '未命名表单'}
+            description={definition?.description}
+            schema={previewSchema}
+            values={previewValue}
+            errors={previewErrors}
+            savePending={saveDraft.isPending}
+            submitDisabled={previewSchema.length === 0}
+            onValueChange={handlePreviewValueChange}
+            onSaveDraft={() => saveDraft.mutate()}
+            onSubmit={handlePreviewSubmit}
+          />
         </Card>
 
         <Space direction="vertical" size={16} style={{ width: '100%' }}>

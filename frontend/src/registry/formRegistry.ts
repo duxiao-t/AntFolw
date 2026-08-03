@@ -1,4 +1,5 @@
 import type { FieldType, SchemaNode } from './types';
+import { SectionField } from '../components/form-fields/SectionField';
 import { TextField } from '../components/form-fields/TextField';
 import { TextareaField } from '../components/form-fields/TextareaField';
 import { DescriptionField } from '../components/form-fields/DescriptionField';
@@ -15,6 +16,7 @@ import { SpanLayoutField } from '../components/form-fields/SpanLayoutField';
 import { TableListField } from '../components/form-fields/TableListField';
 
 export const formRegistry: Record<string, FieldType> = {
+  section: SectionField,
   text: TextField,
   textarea: TextareaField,
   description: DescriptionField,

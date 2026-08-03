@@ -17,6 +17,7 @@ import {
   FieldNumberOutlined,
   FileTextOutlined,
   FontSizeOutlined,
+  ProfileOutlined,
   TableOutlined,
   UploadOutlined,
   UserOutlined,
@@ -31,10 +32,12 @@ import {
   FormRenderer,
 } from '../../../components/FormRenderer/FormRenderer';
 import {
+  findById,
   paletteEntries,
   formRegistry,
 } from '../../../registry/formRegistry';
 import type { SchemaNode } from '../../../registry/types';
+import { SECTION_DROP_PREFIX } from '../../../components/form-fields/SectionField';
 import { useFormDesignerStore } from './useFormDesignerStore';
 import { Inspector } from './Inspector';
 import './form-designer.less';
@@ -72,6 +75,7 @@ const AUTO_SCROLL_EDGE = 72;
 const AUTO_SCROLL_MAX_SPEED = 18;
 
 const paletteIcons: Record<string, React.ReactNode> = {
+  section: <ProfileOutlined />,
   text: <FontSizeOutlined />,
   textarea: <AlignLeftOutlined />,
   number: <FieldNumberOutlined />,
@@ -140,6 +144,12 @@ function createPreviewNode(entry: PaletteEntry): SchemaNode {
   };
 }
 
+function sectionIdFromDropTarget(id: unknown) {
+  return typeof id === 'string' && id.startsWith(SECTION_DROP_PREFIX)
+    ? id.slice(SECTION_DROP_PREFIX.length)
+    : null;
+}
+
 function DragPreview({ drag }: { drag: ActiveDrag }) {
   const node =
     drag.source === 'canvas' ? drag.node : createPreviewNode(drag.entry);
@@ -147,7 +157,7 @@ function DragPreview({ drag }: { drag: ActiveDrag }) {
   if (!ft) return null;
   const renderNode = {
     ...node,
-    label: '',
+    label: node.type === 'section' ? node.label : '',
     props: {
       ...node.props,
       required: false,
@@ -255,6 +265,11 @@ function CanvasDrop({
       clientY >= canvasRect.top &&
       clientY <= canvasRect.bottom;
     if (!isInsideCanvas) {
+      setNextDropIndicator(null);
+      return;
+    }
+    const pointerTarget = document.elementFromPoint(clientX, clientY);
+    if (pointerTarget?.closest('[data-designer-section-dropzone]')) {
       setNextDropIndicator(null);
       return;
     }
@@ -559,7 +574,7 @@ export function FormDesignerSurface({
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { token } = theme.useToken();
-  const { schema, loadSchema, resetSchema, addNode, insertNode, moveNode, undo } =
+  const { schema, selectedId, loadSchema, resetSchema, addNode, insertNode, moveNode, undo } =
     useFormDesignerStore();
   const [definition, setDefinition] = useState<FormDefinition | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
@@ -570,6 +585,15 @@ export function FormDesignerSurface({
   const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
   const activeCanvasNodeId =
     activeDrag?.source === 'canvas' ? activeDrag.nodeId : null;
+  const selectedNode = selectedId ? findById(schema, selectedId) : null;
+  const selectedSectionId = selectedNode?.type === 'section' ? selectedNode.id : null;
+  const addPaletteEntry = useCallback(
+    (entry: PaletteEntry) => {
+      const parentId = selectedSectionId && entry.type !== 'section' ? selectedSectionId : null;
+      addNode(parentId, entry.type, entry.defaultProps);
+    },
+    [addNode, selectedSectionId],
+  );
 
   // Load existing definition when id is provided (not 'new').
   useEffect(() => {
@@ -663,10 +687,24 @@ export function FormDesignerSurface({
       onDragEnd={(e: DragEndEvent) => {
         const currentDrag = activeDrag;
         const currentDrop = dropIndicator;
+        const sectionDropId = sectionIdFromDropTarget(e.over?.id);
         const isCanvasDrop = !!currentDrop || e.over?.id === 'canvas';
         setActiveDrag(null);
         setCanvasDragSnapshot(null);
         setDropIndicator(null);
+        if (
+          sectionDropId &&
+          currentDrag?.source === 'palette' &&
+          currentDrag.entry.type !== 'section'
+        ) {
+          const newId = addNode(
+            sectionDropId,
+            currentDrag.entry.type,
+            currentDrag.entry.defaultProps,
+          );
+          setRecentlyDroppedId(newId);
+          return;
+        }
         if (isCanvasDrop && currentDrag) {
           if (currentDrag.source === 'canvas') {
             if (currentDrop) {
@@ -693,7 +731,7 @@ export function FormDesignerSurface({
                   <PaletteCard
                     key={e.type}
                     entry={e}
-                    onAdd={() => addNode(null, e.type, e.defaultProps)}
+                    onAdd={() => addPaletteEntry(e)}
                   />
                 ))}
             </div>

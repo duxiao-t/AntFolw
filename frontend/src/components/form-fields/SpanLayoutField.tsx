@@ -34,8 +34,8 @@ export const SpanLayoutField: FieldType = {
             >
               <FormRenderer
                 schema={[child]}
-                value={value?.[child.id]}
-                onChange={(v: any) => onChange?.({ ...(value ?? {}), [child.id]: v })}
+                value={value ?? {}}
+                onChange={(nextValue: any) => onChange?.(nextValue)}
                 mode={mode}
               />
             </Col>

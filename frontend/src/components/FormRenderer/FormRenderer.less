@@ -56,11 +56,25 @@
   cursor: grabbing;
 }
 
+.form-renderer__designer-drag-handle--bare {
+  top: 2px;
+  z-index: 2;
+}
+
 .form-renderer__field--designer:hover .form-renderer__designer-drag-handle {
   opacity: 1;
 }
 
 .form-renderer__field--designer:hover .form-renderer__designer-card {
+  border-color: var(--form-designer-primary);
+  box-shadow: var(--form-designer-shadow);
+}
+
+.form-renderer__field--designer-bare {
+  position: relative;
+}
+
+.form-renderer__field--designer-bare:hover .form-renderer__business-section {
   border-color: var(--form-designer-primary);
   box-shadow: var(--form-designer-shadow);
 }
@@ -91,6 +105,12 @@
   right: 36px;
   color: var(--form-designer-text);
   font-size: 15px;
+}
+
+.form-renderer__designer-hidden-icon--bare {
+  top: 14px;
+  right: 18px;
+  z-index: 2;
 }
 
 .form-renderer__designer-control {
@@ -127,12 +147,77 @@
   box-shadow: 0 18px 46px rgb(0 0 0 / 12%);
 }
 
+.form-renderer__drag-card--bare {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .form-renderer__drag-card .form-renderer__designer-control [data-field-id] > div:first-child {
   display: none;
 }
 
 .form-renderer__field--drop-in {
   animation: form-renderer-drop-in 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.form-renderer__business-section {
+  display: grid;
+  gap: 12px;
+  min-height: 128px;
+  padding: 14px;
+  border: 1px solid var(--form-designer-border, #d9d9d9);
+  border-radius: 8px;
+  background: rgb(250 252 255 / 72%);
+}
+
+.form-renderer__business-section--designer {
+  border-style: dashed;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.form-renderer__business-section--over {
+  border-color: var(--form-designer-primary, #1677ff);
+  background: var(--form-designer-primary-bg, #e6f4ff);
+  box-shadow: inset 0 0 0 1px var(--form-designer-primary, #1677ff);
+}
+
+.form-renderer__business-section-head {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.form-renderer__business-section-head strong {
+  overflow: hidden;
+  color: var(--form-designer-text, #1f1f1f);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-renderer__business-section-head small {
+  color: var(--form-designer-text-secondary, #666);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.form-renderer__business-section-body {
+  display: grid;
+  gap: 8px;
+  min-height: 72px;
+}
+
+.form-renderer__business-section-body > [data-canvas='true'] {
+  display: grid;
+  gap: 8px;
 }
 
 @keyframes form-renderer-drop-in {
