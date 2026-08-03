@@ -314,11 +314,8 @@ describe('advanced mobile fields', () => {
       </>,
     );
 
-    expect(screen.getByLabelText('附件')).toHaveAttribute(
-      'accept',
-      'image/jpeg,image/png,application/pdf',
-    );
-    expect(screen.getByLabelText('图片')).toHaveAttribute('accept', 'image/jpeg,image/png');
+    expect(screen.getByLabelText('附件')).not.toHaveAttribute('accept');
+    expect(screen.getByLabelText('图片')).toHaveAttribute('accept', 'image/*');
   });
 
   it('does not notify the parent form from a React state updater while uploading', async () => {

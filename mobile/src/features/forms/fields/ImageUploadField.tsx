@@ -1,7 +1,7 @@
 import type { MobileFieldProps } from '../schema/types';
 import { FileUploadField } from './FileUploadField';
 
-const DEFAULT_IMAGE_ACCEPT = 'image/jpeg,image/png';
+const DEFAULT_IMAGE_ACCEPT = 'image/*';
 
 export function ImageUploadField(props: MobileFieldProps) {
   return (

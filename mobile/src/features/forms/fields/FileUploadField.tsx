@@ -16,7 +16,7 @@ export type UploadItem = {
 };
 
 const uploadQueueBlockedSymbol = Symbol('antflowUploadQueueBlocked');
-const DEFAULT_FILE_ACCEPT = 'image/jpeg,image/png,application/pdf';
+const DEFAULT_FILE_ACCEPT = '';
 
 export type FileUploadValue = MobileFileDto[] & {
   [uploadQueueBlockedSymbol]?: boolean;
@@ -243,7 +243,7 @@ export function FileUploadField(props: MobileFieldProps) {
               ref={inputRef}
               aria-label={label}
               type="file"
-              accept={accept}
+              accept={accept || undefined}
               multiple={multiple}
               capture={capture}
               onChange={(event) => {
@@ -571,6 +571,17 @@ function formatBytes(bytes: number) {
 }
 
 function uploadHint(accept: string, multiple: boolean) {
+  const prefix = multiple ? '支持多文件' : '支持单文件';
+  if (!accept || accept.trim() === '') {
+    return prefix + ' · 任意格式';
+  }
+  const trimmed = accept.trim();
+  if (trimmed === 'image/*') {
+    return prefix + ' · 图片格式';
+  }
+  if (trimmed === 'video/*') {
+    return prefix + ' · 视频格式';
+  }
   const formats = accept
     .split(',')
     .map((item) => item.trim())
@@ -586,7 +597,7 @@ function uploadHint(accept: string, multiple: boolean) {
     });
   const uniqueFormats = Array.from(new Set(formats)).slice(0, 4);
   const formatText = uniqueFormats.length > 0 ? uniqueFormats.join('、') : '常用文件';
-  return `${multiple ? '支持多文件' : '支持单文件'} · ${formatText}`;
+  return prefix + ' · ' + formatText;
 }
 
 function errorMessage(error: unknown) {
