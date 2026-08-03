@@ -10,7 +10,7 @@ test.describe('rework original form flow', () => {
 
     await signIn(page, USERS.bob.username, 'ant.design', `/forms/${world.formCode}`);
     await page.getByLabel('请假事由').fill('原始请假事由');
-    await page.getByRole('button', { name: '下一步' }).click();
+    await page.getByRole('button', { name: '提交' }).click();
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
     await page.getByRole('button', { name: '完成' }).click();
     await page.getByRole('button', { name: '确认提交' }).click();
@@ -41,7 +41,7 @@ test.describe('rework original form flow', () => {
     const reason = page.getByLabel('请假事由');
     await expect(reason).toHaveValue('原始请假事由');
     await reason.fill('修改后的请假事由');
-    await page.getByRole('button', { name: '下一步' }).click();
+    await page.getByRole('button', { name: '提交' }).click();
     await expect(page.getByText('本次提交将保留原单号')).toBeVisible();
     await page.getByRole('button', { name: '确认重提' }).click();
     await expect(page.getByRole('heading', { name: '提交成功' })).toBeVisible();

@@ -58,7 +58,7 @@ test.describe('key pages visual regression', () => {
     await capture(page, '05-form');
 
     // 6 self-select
-    await page.getByRole('button', { name: '下一步' }).click();
+    await page.getByRole('button', { name: '提交' }).click();
     await expect(page.locator('.app-bar__title')).toHaveText('选择审批人');
     await capture(page, '06-self-select');
 

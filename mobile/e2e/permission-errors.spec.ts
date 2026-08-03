@@ -33,7 +33,7 @@ test.describe('permission and idempotency', () => {
 
     await signIn(page, USERS.bob.username, 'ant.design', `/forms/${world.formCode}`);
     await page.getByLabel('请假事由').fill('幂等提交');
-    await page.getByRole('button', { name: '下一步' }).click();
+    await page.getByRole('button', { name: '提交' }).click();
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
     await page.getByRole('button', { name: '完成' }).click();
     await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();

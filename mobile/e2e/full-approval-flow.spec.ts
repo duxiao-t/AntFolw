@@ -20,7 +20,7 @@ test.describe('full approval flow', () => {
     await signIn(page, USERS.bob.username, 'ant.design', `/forms/${world.formCode}`);
     await expect(page.getByRole('heading', { name: '请假申请' })).toBeVisible();
     await page.getByLabel('请假事由').fill('E2E回家探亲');
-    await page.getByRole('button', { name: '下一步' }).click();
+    await page.getByRole('button', { name: '提交' }).click();
 
     await expect(page.locator('.app-bar__title')).toHaveText('选择审批人');
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
