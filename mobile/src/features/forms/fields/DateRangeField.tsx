@@ -27,31 +27,40 @@ export function DateRangeField(props: MobileFieldProps) {
       error={fieldError({ ...props, value: localStart && localEnd ? [localStart, localEnd] : [] })}
       summary={summary}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div className="af-date-range-control date-range-control">
         <label htmlFor={startId} style={visuallyHiddenStyle}>
           {`${label.replace(/时间|日期$/, '')}开始`}
         </label>
-        <Input
-          id={startId}
-          type="date"
-          value={localStart}
-          onChange={(value) => {
-            setLocalStart(value);
-            props.onValueChange(props.node.id, [value, localEnd]);
-          }}
-        />
+        <span className="date-range-control__value">
+          <small>开始日期</small>
+          <Input
+            id={startId}
+            className="af-date-range-control__input"
+            type="date"
+            value={localStart}
+            onChange={(value) => {
+              setLocalStart(value);
+              props.onValueChange(props.node.id, [value, localEnd]);
+            }}
+          />
+        </span>
+        <span className="date-range-control__to" aria-hidden="true">至</span>
         <label htmlFor={endId} style={visuallyHiddenStyle}>
           {`${label.replace(/时间|日期$/, '')}结束`}
         </label>
-        <Input
-          id={endId}
-          type="date"
-          value={localEnd}
-          onChange={(value) => {
-            setLocalEnd(value);
-            props.onValueChange(props.node.id, [localStart, value]);
-          }}
-        />
+        <span className="date-range-control__value">
+          <small>结束日期</small>
+          <Input
+            id={endId}
+            className="af-date-range-control__input"
+            type="date"
+            value={localEnd}
+            onChange={(value) => {
+              setLocalEnd(value);
+              props.onValueChange(props.node.id, [localStart, value]);
+            }}
+          />
+        </span>
       </div>
     </FieldShell>
   );

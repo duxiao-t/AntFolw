@@ -17,6 +17,7 @@ type FieldShellProps = PropsWithChildren<{
   summary?: ReactNode;
   help?: ReactNode;
   description?: ReactNode;
+  className?: string;
 }>;
 
 export function FieldShell({
@@ -28,13 +29,20 @@ export function FieldShell({
   summary,
   help,
   description,
+  className,
   children,
 }: FieldShellProps) {
   const resolvedDescription = description ?? (node ? fieldDescription(node) : null);
   const resolvedHelp = help ?? (node ? fieldHelp(node) : null);
+  const shellClassName = [
+    'af-field',
+    error ? 'af-field--error' : '',
+    summary ? 'af-field--readonly' : '',
+    className ?? '',
+  ].filter(Boolean).join(' ');
   return (
     <section
-      className={`af-field${error ? ' af-field--error' : ''}${summary ? ' af-field--readonly' : ''}`}
+      className={shellClassName}
       data-field-id={node?.id}
     >
       <div className="af-field__head">

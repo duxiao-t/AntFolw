@@ -15,6 +15,7 @@ export function DateField(props: MobileFieldProps) {
     >
       <Input
         id={props.node.id}
+        className="af-control"
         type="date"
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}

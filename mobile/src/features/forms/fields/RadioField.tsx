@@ -32,7 +32,7 @@ export function RadioField(props: MobileFieldProps) {
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                className="af-choice-tile"
+                className={`af-choice-tile${isSelected ? ' af-choice-tile--selected' : ''}`}
                 disabled={option.disabled}
                 onClick={() => {
                   setSelected([option.value]);

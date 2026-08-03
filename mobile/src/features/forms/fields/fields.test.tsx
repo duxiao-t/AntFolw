@@ -99,7 +99,8 @@ describe('leaf mobile fields', () => {
     expect(onValueChange).toHaveBeenCalledWith('travel', ['2026-07-20', '2026-07-22']);
   });
 
-  it('renders and validates select field', () => {
+  it('renders and validates select field', async () => {
+    const user = userEvent.setup();
     const onValueChange = vi.fn();
     const { unmount } = render(
       <SelectField
@@ -123,7 +124,8 @@ describe('leaf mobile fields', () => {
     );
 
     expect(screen.getByText('请填写部门')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('研发部'));
+    await user.click(screen.getByRole('button', { name: '选择部门' }));
+    await user.click(await screen.findByRole('option', { name: '研发部' }));
     expect(onValueChange).toHaveBeenCalledWith('dept', 'dev');
     unmount();
     render(
@@ -148,7 +150,8 @@ describe('leaf mobile fields', () => {
     expect(screen.getByText('研发部')).toBeInTheDocument();
   });
 
-  it('renders and validates multi select field', () => {
+  it('renders and validates multi select field', async () => {
+    const user = userEvent.setup();
     const onValueChange = vi.fn();
     render(
       <MultiSelectField
@@ -172,8 +175,11 @@ describe('leaf mobile fields', () => {
     );
 
     expect(screen.getByText('请填写抄送人')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('张三'));
-    fireEvent.click(screen.getByText('李四'));
+    await user.click(screen.getByRole('button', { name: '选择抄送人' }));
+    expect(screen.getByRole('dialog', { name: '选择抄送人' })).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: '张三' }));
+    await user.click(screen.getByRole('checkbox', { name: '李四' }));
+    await user.click(screen.getByRole('button', { name: '完成' }));
     expect(onValueChange).toHaveBeenLastCalledWith('cc', ['zhangsan', 'lisi']);
   });
 
@@ -201,7 +207,7 @@ describe('leaf mobile fields', () => {
     expect(onValueChange).toHaveBeenCalledWith('leaveType', 'adjust');
   });
 
-  it('renders multi-select options as large touch choices', async () => {
+  it('opens multi-select options in a full-screen picker', async () => {
     const onValueChange = vi.fn();
     render(
       <MultiSelectField
@@ -214,11 +220,10 @@ describe('leaf mobile fields', () => {
       />,
     );
 
-    const pen = screen.getByRole('checkbox', { name: '笔' });
-
-    expect(pen).toHaveClass('af-choice-tile');
-
-    await userEvent.click(pen);
+    await userEvent.click(screen.getByRole('button', { name: '纸张' }));
+    expect(screen.getByRole('dialog', { name: '选择用品' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('checkbox', { name: '笔' }));
+    await userEvent.click(screen.getByRole('button', { name: '完成' }));
 
     expect(onValueChange).toHaveBeenCalledWith('supplies', ['paper', 'pen']);
   });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DeleteOutline, FileOutline, PictureOutline, UploadOutline } from 'antd-mobile-icons';
 import type { MobileFileDto, UploadProgressEvent } from '../files.api';
 import { deleteMobileFile, fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFieldProps } from '../schema/types';
@@ -162,26 +163,12 @@ export function FileUploadField(props: MobileFieldProps) {
       summary={props.mode === 'readonly' ? readonlySummary(readyValues) : undefined}
     >
       {props.mode === 'readonly' ? null : (
-        <>
-          <input
-            ref={inputRef}
-            aria-label={label}
-            type="file"
-            accept={accept}
-            multiple={multiple}
-            onChange={(event) => {
-              const files = Array.from(event.target.files ?? []);
-              event.target.value = '';
-              for (const file of files) {
-                void queueFileUpload(file);
-              }
-            }}
-          />
+        <div className="upload-control af-upload-control">
           <div className="af-upload-list">
             {items.map((item) => {
               const previewUrl = previewImages && item.remote ? previewUrls[item.localId] ?? '' : '';
               return (
-                <div key={item.localId} className="af-upload-list__item">
+                <div key={item.localId} className={`upload-file-row af-upload-list__item af-upload-list__item--${item.status}`}>
                   {previewUrl ? (
                     <button
                       type="button"
@@ -191,12 +178,18 @@ export function FileUploadField(props: MobileFieldProps) {
                     >
                       <img src={previewUrl} alt="" />
                     </button>
-                  ) : null}
-                  <div className="af-upload-list__main">
-                    <div className="af-upload-list__name">{item.file.name}</div>
-                    <div className={`af-upload-list__status af-upload-list__status--${item.status}`}>
-                      {statusLabel(item)}
-                    </div>
+                  ) : (
+                    <span className={`upload-file-row__type ${fileTypeClass(item)}`} aria-hidden="true">
+                      {isImageUploadItem(item) ? <PictureOutline /> : <FileOutline />}
+                      <span>{fileTypeLabel(item)}</span>
+                    </span>
+                  )}
+                  <div className="upload-file-row__main af-upload-list__main">
+                    <strong className="af-upload-list__name">{item.file.name}</strong>
+                    <small className={`af-upload-list__status af-upload-list__status--${item.status}`}>
+                      <span>{statusLabel(item)}</span>
+                      <span className="af-upload-list__meta"> · {fileSizeLabel(item)}</span>
+                    </small>
                     <div className="af-upload-list__progress-row">
                       <div
                         className={`af-upload-list__progress af-upload-list__progress--${progressTone(item)}`}
@@ -210,25 +203,53 @@ export function FileUploadField(props: MobileFieldProps) {
                     </div>
                     {item.error ? <div className="af-upload-list__error">{item.error}</div> : null}
                   </div>
-                  {item.status === 'failed' ? (
-                    <button type="button" className="af-link-button" onClick={() => void queueFileUpload(item.file, item.localId)}>
-                      重试 {item.file.name}
+                  <div className="upload-file-row__actions">
+                    {item.status === 'failed' ? (
+                      <button
+                        type="button"
+                        className="af-link-button af-upload-list__retry"
+                        aria-label={`重试 ${item.file.name}`}
+                        onClick={() => void queueFileUpload(item.file, item.localId)}
+                      >
+                        重试
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="af-link-button af-upload-list__delete"
+                      aria-label={`删除 ${item.file.name}`}
+                      disabled={item.status === 'deleting'}
+                      onClick={() => void removeItem(item.localId)}
+                    >
+                      <DeleteOutline aria-hidden="true" />
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="af-link-button"
-                    aria-label={`删除 ${item.file.name}`}
-                    disabled={item.status === 'deleting'}
-                    onClick={() => void removeItem(item.localId)}
-                  >
-                    删除
-                  </button>
+                  </div>
                 </div>
               );
             })}
           </div>
-        </>
+          <label className="upload-trigger">
+            <input
+              ref={inputRef}
+              aria-label={label}
+              type="file"
+              accept={accept}
+              multiple={multiple}
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = '';
+                for (const file of files) {
+                  void queueFileUpload(file);
+                }
+              }}
+            />
+            <UploadOutline aria-hidden="true" />
+            <span>
+              <strong>{previewImages ? '添加图片' : '添加附件'}</strong>
+              <small>{uploadHint(accept, multiple)}</small>
+            </span>
+          </label>
+        </div>
       )}
     </FieldShell>
   );
@@ -461,6 +482,67 @@ function sameUploadItems(left: UploadItem[], right: UploadItem[]) {
 
 function fileContentUrl(file: MobileFileDto) {
   return file.contentUrl || file.url || '';
+}
+
+function isImageUploadItem(item: UploadItem) {
+  return isImageContentType(item.remote?.contentType || item.file.type);
+}
+
+function fileTypeLabel(item: UploadItem) {
+  if (isImageUploadItem(item)) {
+    return 'IMG';
+  }
+  const extension = item.file.name.split('.').pop();
+  if (extension && extension !== item.file.name && extension.length <= 5) {
+    return extension.toUpperCase();
+  }
+  return 'FILE';
+}
+
+function fileTypeClass(item: UploadItem) {
+  if (isImageUploadItem(item)) {
+    return 'upload-file-row__type--image';
+  }
+  return fileTypeLabel(item) === 'PDF' ? 'upload-file-row__type--pdf' : '';
+}
+
+function fileSizeLabel(item: UploadItem) {
+  const size = item.remote?.sizeBytes ?? item.remote?.size ?? item.file.size;
+  return formatBytes(size);
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const digits = value >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function uploadHint(accept: string, multiple: boolean) {
+  const formats = accept
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      if (item.startsWith('image/')) {
+        return item.slice('image/'.length).toUpperCase();
+      }
+      if (item.startsWith('application/')) {
+        return item.slice('application/'.length).toUpperCase();
+      }
+      return item.replace(/^\./, '').toUpperCase();
+    });
+  const uniqueFormats = Array.from(new Set(formats)).slice(0, 4);
+  const formatText = uniqueFormats.length > 0 ? uniqueFormats.join('、') : '常用文件';
+  return `${multiple ? '支持多文件' : '支持单文件'} · ${formatText}`;
 }
 
 function errorMessage(error: unknown) {

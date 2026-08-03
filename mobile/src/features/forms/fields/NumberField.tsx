@@ -15,6 +15,7 @@ export function NumberField(props: MobileFieldProps) {
     >
       <Input
         id={props.node.id}
+        className="af-control"
         inputMode="decimal"
         type="number"
         value={stringValue(props.value)}

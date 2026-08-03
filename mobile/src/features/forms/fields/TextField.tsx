@@ -15,6 +15,7 @@ export function TextField(props: MobileFieldProps) {
     >
       <Input
         id={props.node.id}
+        className="af-control"
         clearable
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}

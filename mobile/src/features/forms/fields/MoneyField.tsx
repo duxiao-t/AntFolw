@@ -15,6 +15,7 @@ export function MoneyField(props: MobileFieldProps) {
     >
       <Input
         id={props.node.id}
+        className="af-control"
         inputMode="decimal"
         placeholder="0.00"
         value={stringValue(props.value)}

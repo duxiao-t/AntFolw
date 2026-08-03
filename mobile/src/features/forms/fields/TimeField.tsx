@@ -1,4 +1,5 @@
 import { Picker } from 'antd-mobile';
+import { ClockCircleOutline } from 'antd-mobile-icons';
 import { useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary, stringValue } from './fieldShared';
@@ -31,10 +32,13 @@ export function TimeField(props: MobileFieldProps) {
     >
       <button
         type="button"
-        className={`af-field-picker${value ? '' : ' af-field-picker--placeholder'}`}
+        className={`control form-picker af-field-picker${value ? '' : ' af-field-picker--placeholder'}`}
         onClick={() => setVisible(true)}
       >
-        {value || String(props.node.props?.placeholder ?? '请选择时间')}
+        <span>{value || String(props.node.props?.placeholder ?? '请选择时间')}</span>
+        <span className="picker-icon-slot" aria-hidden="true">
+          <ClockCircleOutline />
+        </span>
       </button>
       <Picker
         title={label}

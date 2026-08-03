@@ -23,16 +23,29 @@ export function TableListField(props: MobileFieldProps) {
   const canAdd = rows.length < maxRows;
 
   return (
-    <FieldShell node={props.node} label={label} error={props.error}>
-      <div style={{ display: 'grid', gap: 8 }}>
+    <FieldShell node={props.node} label={label} error={props.error} className="af-field--table">
+      <div className="mobile-detail-table">
+        <div className="mobile-detail-table__head">
+          <div>
+            <strong>明细表</strong>
+            <small>{rows.length} 行{Number.isFinite(maxRows) ? ` · 最多 ${maxRows} 行` : ''}</small>
+          </div>
+          <button type="button" aria-label={`新增${label}`} disabled={!canAdd} onClick={addRow}>
+            + 添加
+          </button>
+        </div>
         {rows.map((row, index) => {
           const children = props.node.children ?? [];
           const rowMode = props.mode;
           return (
-            <section key={row.key} style={{ border: '1px solid var(--af-color-border)', padding: 12, borderRadius: 6 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <strong>{`第${index + 1}行`}</strong>
-                <div style={{ display: 'flex', gap: 8 }}>
+            <article key={row.key} className={`detail-entry${expanded.includes(row.key) ? ' detail-entry--expanded' : ''}`}>
+              <header className="detail-entry__head">
+                <span className="detail-entry__index">{String(index + 1).padStart(2, '0')}</span>
+                <div>
+                  <strong>{rowTitle(row.value, children, index)}</strong>
+                  <small>{rowSubtitle(row.value, children)}</small>
+                </div>
+                <div className="detail-entry__actions">
                   <button type="button" onClick={() => toggle(row.key)}>
                     {expanded.includes(row.key) ? `收起 第${index + 1}行` : `展开 第${index + 1}行`}
                   </button>
@@ -48,18 +61,15 @@ export function TableListField(props: MobileFieldProps) {
                     删除
                   </button>
                 </div>
-              </div>
+              </header>
               {expanded.includes(row.key) ? (
-                <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                <div className="detail-entry__body">
                   {children.map((child) => renderChild(child, row.value, index, rowMode))}
                 </div>
               ) : null}
-            </section>
+            </article>
           );
         })}
-        <button type="button" disabled={!canAdd} onClick={addRow}>
-          新增{label}
-        </button>
       </div>
     </FieldShell>
   );
@@ -156,6 +166,37 @@ function emptyRow(children: MobileSchemaNode[]) {
     row[child.id] = defaultValue(child);
   }
   return row;
+}
+
+function rowTitle(row: RowValue, children: MobileSchemaNode[], index: number) {
+  const firstValue = children
+    .map((child) => row[child.id])
+    .find((value) => summarizeCell(value).length > 0);
+  return summarizeCell(firstValue) || `第${index + 1}行`;
+}
+
+function rowSubtitle(row: RowValue, children: MobileSchemaNode[]) {
+  const values = children
+    .slice(0, 3)
+    .map((child) => {
+      const value = summarizeCell(row[child.id]);
+      return value ? `${child.label ?? child.id}: ${value}` : '';
+    })
+    .filter(Boolean);
+  return values.length > 0 ? values.join(' · ') : '展开后填写明细';
+}
+
+function summarizeCell(value: unknown) {
+  if (value == null) {
+    return '';
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? `${value.length}项` : '';
+  }
+  if (typeof value === 'object') {
+    return '';
+  }
+  return String(value);
 }
 
 function defaultValue(node: MobileSchemaNode) {
