@@ -1,6 +1,7 @@
 import { getIntl } from '@umijs/max';
 import { Button, Card, Result } from 'antd';
 import React from 'react';
+import { ErrorBoundary as ReactErrorBoundary, type FallbackProps } from 'react-error-boundary';
 
 function isChunkLoadError(error: Error): boolean {
   return (
@@ -77,85 +78,66 @@ function renderErrorFallback(
   );
 }
 
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-  isOnline: boolean;
-  retryCount: number;
+function ErrorFallback({
+  error,
+  onRetry,
+}: FallbackProps & { onRetry(): void }) {
+  const [isOnline, setIsOnline] = React.useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+
+  React.useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (isChunkLoadError(error as Error)) {
+        window.location.reload();
+      }
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [error]);
+
+  return renderErrorFallback(error as Error, isOnline, onRetry, () => {
+    window.location.reload();
+  });
 }
 
-export default class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  ErrorBoundaryState
-> {
-  state: ErrorBoundaryState = {
-    hasError: false,
-    error: null,
-    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
-    retryCount: 0,
-  };
+function ErrorBoundaryImpl({ children }: { children: React.ReactNode }) {
+  const [retryCount, setRetryCount] = React.useState(0);
 
-  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
-    return { hasError: true, error };
-  }
+  return (
+    <ReactErrorBoundary
+      key={retryCount}
+      fallbackRender={(fallbackProps) => (
+        <ErrorFallback
+          {...fallbackProps}
+          onRetry={() => setRetryCount((count) => count + 1)}
+        />
+      )}
+      onError={(error, info) => {
+        console.error('[ErrorBoundary]', error, info.componentStack);
+      }}
+    >
+      {children}
+    </ReactErrorBoundary>
+  );
+}
 
-  componentDidMount() {
-    window.addEventListener('online', this.handleOnline);
-    window.addEventListener('offline', this.handleOffline);
-  }
-
-  componentWillUnmount() {
-    window.removeEventListener('online', this.handleOnline);
-    window.removeEventListener('offline', this.handleOffline);
-  }
-
-  handleOnline = () => {
-    this.setState({ isOnline: true });
-    if (
-      this.state.hasError &&
-      this.state.error &&
-      isChunkLoadError(this.state.error)
-    ) {
-      window.location.reload();
-    }
-  };
-
-  handleOffline = () => {
-    this.setState({ isOnline: false });
-  };
-
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[ErrorBoundary]', error, info.componentStack);
-  }
-
-  handleRetry = () => {
-    // Incrementing retryCount changes the key on the children fragment,
-    // forcing React to unmount and remount all lazy components.
-    // This causes React.lazy to re-execute import() for the failed chunk.
-    this.setState((prev) => ({
-      hasError: false,
-      error: null,
-      retryCount: prev.retryCount + 1,
-    }));
-  };
-
-  handleReload = () => {
-    window.location.reload();
-  };
-
-  render() {
-    if (!this.state.hasError || !this.state.error) {
-      return (
-        <React.Fragment key={this.state.retryCount}>
-          {this.props.children}
-        </React.Fragment>
-      );
-    }
-    return renderErrorFallback(
-      this.state.error,
-      this.state.isOnline,
-      this.handleRetry,
-      this.handleReload,
-    );
+/**
+ * Offline-aware error boundary built on `react-error-boundary`.
+ * The class shell satisfies ProLayout's `ComponentClass` ErrorBoundary prop.
+ */
+export default class ErrorBoundary extends React.Component<{
+  children: React.ReactNode;
+}> {
+  override render() {
+    return <ErrorBoundaryImpl>{this.props.children}</ErrorBoundaryImpl>;
   }
 }
