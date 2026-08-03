@@ -152,16 +152,12 @@ function CanvasDrop({
   sortableIds,
   placeholderId,
   isDragActive,
-  recentlyDroppedId,
-  onDropAnimationEnd,
   onDesignerNodeChange,
 }: {
   schema: SchemaNode[];
   sortableIds: string[];
   placeholderId: string | null;
   isDragActive: boolean;
-  recentlyDroppedId: string | null;
-  onDropAnimationEnd(id: string): void;
   onDesignerNodeChange(node: SchemaNode): void;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: 'canvas' });
@@ -205,8 +201,6 @@ function CanvasDrop({
           schema={schema}
           mode="designer-preview"
           value={{}}
-          recentlyDroppedId={recentlyDroppedId}
-          onDropAnimationEnd={onDropAnimationEnd}
           sortableIds={sortableIds}
           placeholderId={placeholderId}
           onDesignerNodeChange={onDesignerNodeChange}
@@ -259,7 +253,6 @@ export function FormDesignerSurface({
     schema.map((node) => node.id),
   );
   const visualIdsRef = useRef(visualIds);
-  const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
   const [palettePreviewId, setPalettePreviewId] = useState<string | null>(null);
   const placeholderId =
     activeDrag?.source === 'palette' ? palettePreviewId : null;
@@ -338,13 +331,12 @@ export function FormDesignerSurface({
       if (currentDrag?.source === 'palette') {
         const index = palettePreviewId == null ? -1 : finalIds.indexOf(palettePreviewId);
         const type = currentDrag.entry.type;
-        const newId = insertNode(
+        insertNode(
           null,
           type,
           formRegistry[type].defaultProps,
           index < 0 ? schema.length : index,
         );
-        setRecentlyDroppedId(newId);
       }
     },
     [activeDrag, insertNode, palettePreviewId, resetSchema, schema],
@@ -484,12 +476,6 @@ export function FormDesignerSurface({
               sortableIds={visualIds}
               placeholderId={placeholderId}
               isDragActive={!!activeDrag}
-              recentlyDroppedId={recentlyDroppedId}
-              onDropAnimationEnd={(nodeId) => {
-                if (nodeId === recentlyDroppedId) {
-                  setRecentlyDroppedId(null);
-                }
-              }}
               onDesignerNodeChange={(node) => updateNode(node.id, node)}
             />
           </main>
@@ -497,7 +483,13 @@ export function FormDesignerSurface({
             <Inspector />
           </aside>
         </div>
-        <DragOverlay dropAnimation={{ duration: 220, easing: 'ease' }}>
+        <DragOverlay
+          dropAnimation={
+            activeDrag?.source === 'palette'
+              ? null
+              : { duration: 220, easing: 'ease' }
+          }
+        >
           {activeDrag ? (
             <div className="form-designer__drag-preview">
               <DragPreview drag={activeDrag} />

@@ -12,8 +12,6 @@ type Props = {
   mode: FieldMode;
   value?: any;
   onChange?(v: any): void;
-  recentlyDroppedId?: string | null;
-  onDropAnimationEnd?(id: string): void;
   sortableIds?: string[];
   placeholderId?: string | null;
   onDesignerNodeChange?(node: SchemaNode): void;
@@ -159,15 +157,11 @@ function SortablePlaceholder({ id }: { id: string }) {
 function DesignerFieldFrame({
   children,
   node,
-  recentlyDroppedId,
-  onDropAnimationEnd,
   onNodeChange,
   bare = false,
 }: {
   children: React.ReactNode;
   node: SchemaNode;
-  recentlyDroppedId?: string | null;
-  onDropAnimationEnd?(id: string): void;
   onNodeChange?(node: SchemaNode): void;
   bare?: boolean;
 }) {
@@ -210,7 +204,6 @@ function DesignerFieldFrame({
     'form-renderer__field--designer',
     bare ? 'form-renderer__field--designer-bare' : '',
     isDragging ? 'form-renderer__field--dragging' : '',
-    recentlyDroppedId === node.id ? 'form-renderer__field--drop-in' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -222,7 +215,6 @@ function DesignerFieldFrame({
         data-designer-field-id={node.id}
         className={rootClassName}
         style={{ transform: CSS.Transform.toString(transform), transition }}
-        onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
       >
         <button
           type="button"
@@ -246,7 +238,6 @@ function DesignerFieldFrame({
       data-designer-field-id={node.id}
       className={rootClassName}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      onAnimationEnd={() => onDropAnimationEnd?.(node.id)}
       {...attributes}
       {...listeners}
     >
@@ -334,8 +325,6 @@ export function FormRenderer({
   value,
   onChange,
   onDesignerNodeChange,
-  recentlyDroppedId,
-  onDropAnimationEnd,
   sortableIds,
   placeholderId,
 }: Props) {
@@ -387,8 +376,6 @@ export function FormRenderer({
             <DesignerFieldFrame
               key={node.id}
               node={node}
-              recentlyDroppedId={recentlyDroppedId}
-              onDropAnimationEnd={onDropAnimationEnd}
               onNodeChange={onDesignerNodeChange}
               bare={false}
             >
