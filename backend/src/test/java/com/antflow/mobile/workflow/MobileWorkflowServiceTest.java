@@ -1,5 +1,6 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormDefinition;
@@ -77,6 +78,7 @@ class MobileWorkflowServiceTest {
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
         Mockito.when(draftService.get(101L, 7L)).thenReturn(new MobileDraftDto(101L, 10L,
             "leave", "请假申请", 3, data, objectMapper.createArrayNode(), false, null, null));
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.when(fileMapper.selectById(fileId)).thenReturn(file(fileId, 7L, "READY"));
         Mockito.when(engine.start(any(StartCmd.class), Mockito.eq(7L)))
             .thenReturn(Map.of("instanceId", 501L, "formDataId", 301L,
@@ -96,8 +98,26 @@ class MobileWorkflowServiceTest {
         Mockito.verify(draftService).deleteAfterSubmit(101L, 7L);
     }
 
+
+    @Test
+    void startRejectsDraftFromOlderFormVersion() {
+        JsonNode data = objectMapper.createObjectNode().put("days", 2);
+        Mockito.when(draftService.get(101L, 7L)).thenReturn(new MobileDraftDto(101L, 10L,
+            "leave", "请假申请", 2, data, objectMapper.createArrayNode(), false, null, null));
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
+
+        assertThatThrownBy(() -> service.start(new StartMobileInstanceRequest("leave", data,
+            Map.of(), 101L, List.of()), 7L))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode()).isEqualTo("DRAFT_VERSION_MISMATCH"))
+            .hasMessageContaining("表单已改版");
+    }
+
     @Test
     void instanceDetailReadsProcessSnapshotAndConvertsJsonStrings() {
+
+
+
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
@@ -366,6 +386,15 @@ class MobileWorkflowServiceTest {
         return user;
     }
 
+    private static FormDefinition publishedForm(int version) {
+        FormDefinition form = new FormDefinition();
+        form.setId(10L);
+        form.setCode("leave");
+        form.setName("请假申请");
+        form.setVersion(version);
+        form.setStatus("PUBLISHED");
+        return form;
+    }
     private static Department department(String name) {
         Department department = new Department();
         department.setId(20L);

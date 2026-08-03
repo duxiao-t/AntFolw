@@ -83,6 +83,11 @@ public class MobileWorkflowService {
             if (draft.readOnly()) {
                 throw new BizException("BAD_DRAFT", "draft is read only");
             }
+            FormDefinition currentForm = formDefinitionService.getByCode(request.formCode());
+            if (currentForm != null && draft.formVersion() != currentForm.getVersion()) {
+                throw new BizException("DRAFT_VERSION_MISMATCH",
+                    "表单已改版，请基于新版本重新填写");
+            }
         }
 
         Map<String, List<Long>> selfSelected = request.selfSelected() == null
