@@ -18,6 +18,7 @@ export type FieldTypeCode =
   | 'dept_picker'
   | 'file_upload'
   | 'image_upload'
+  | 'video_upload'
   | 'description'
   | 'span_layout'
   | 'table_list';

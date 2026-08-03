@@ -6,6 +6,7 @@ import { DescriptionField } from '../fields/DescriptionField';
 import { DeptPickerField } from '../fields/DeptPickerField';
 import { FileUploadField, hasBlockingUploadQueue } from '../fields/FileUploadField';
 import { ImageUploadField } from '../fields/ImageUploadField';
+import { VideoUploadField } from '../fields/VideoUploadField';
 import { MoneyField } from '../fields/MoneyField';
 import { MultiSelectField } from '../fields/MultiSelectField';
 import { NumberField } from '../fields/NumberField';
@@ -146,8 +147,12 @@ export const registeredFields: MobileFieldDefinition[] = [
     summarize: (_node, value) => summarizeUploadedFiles(value),
   }),
   field('image_upload', ImageUploadField, {
-    validate: validateFileUpload,
+    validate: validateImageUpload,
     summarize: (_node, value) => summarizeUploadedFiles(value, '张图片'),
+  }),
+  field('video_upload', VideoUploadField, {
+    validate: validateVideoUpload,
+    summarize: (_node, value) => summarizeUploadedFiles(value, '个视频'),
   }),
   field('description', DescriptionField, {
     validate: () => null,
@@ -279,6 +284,22 @@ function validateFileUpload(node: MobileSchemaNode, value: unknown) {
     return '仍有文件未完成上传';
   }
   return validateCommonRules(node, value);
+}
+
+function validateMaxCount(node: MobileSchemaNode, value: unknown, unit: string) {
+  const maxCount = typeof node.props?.maxCount === 'number' ? node.props.maxCount : undefined;
+  if (typeof maxCount !== 'number' || !Array.isArray(value) || value.length <= maxCount) {
+    return null;
+  }
+  return `最多上传 ${maxCount} ${unit}`;
+}
+
+function validateImageUpload(node: MobileSchemaNode, value: unknown) {
+  return validateMaxCount(node, value, '张图片') ?? validateFileUpload(node, value);
+}
+
+function validateVideoUpload(node: MobileSchemaNode, value: unknown) {
+  return validateMaxCount(node, value, '个视频') ?? validateFileUpload(node, value);
 }
 
 function summarizeUploadedFiles(value: unknown, unit = '个附件') {

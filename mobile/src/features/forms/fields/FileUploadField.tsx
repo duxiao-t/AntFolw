@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeleteOutline, FileOutline, PictureOutline, UploadOutline } from 'antd-mobile-icons';
 import type { MobileFileDto, UploadProgressEvent } from '../files.api';
 import { deleteMobileFile, fetchMobileFileBlob, uploadMobileFile } from '../files.api';
-import type { MobileFieldProps } from '../schema/types';
+import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
 
 export type UploadItem = {
@@ -43,9 +43,19 @@ export function FileUploadField(props: MobileFieldProps) {
   const accept = typeof props.node.props?.accept === 'string' ? props.node.props.accept : DEFAULT_FILE_ACCEPT;
   const multiple = props.node.props?.multiple !== false;
   const previewImages = props.node.props?.preview === true;
+  const maxCount = typeof props.node.props?.maxCount === 'number' ? props.node.props.maxCount : undefined;
+  const maxDuration = typeof props.node.props?.maxDuration === 'number' ? props.node.props.maxDuration : undefined;
+  const capture = props.node.props?.source === 'camera' ? 'environment' : undefined;
+  const addLabel = typeof props.node.props?.addLabel === 'string' && props.node.props.addLabel
+    ? props.node.props.addLabel
+    : previewImages ? '添加图片' : '添加附件';
+  const unitLabel = typeof props.node.props?.unitLabel === 'string' && props.node.props.unitLabel
+    ? props.node.props.unitLabel
+    : '个文件';
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [localError, setLocalError] = useState<string | null>(null);
   const itemsRef = useRef<UploadItem[]>([]);
   const previewImagesRef = useRef(previewImages);
   const mountedRef = useRef(true);
@@ -159,7 +169,7 @@ export function FileUploadField(props: MobileFieldProps) {
       node={props.node}
       label={label}
       required={isRequired(props.node)}
-      error={fieldError(props) || localBlocker(items)}
+      error={fieldError(props) || localBlocker(items) || localError}
       summary={props.mode === 'readonly' ? readonlySummary(readyValues) : undefined}
     >
       {props.mode === 'readonly' ? null : (
@@ -235,17 +245,18 @@ export function FileUploadField(props: MobileFieldProps) {
               type="file"
               accept={accept}
               multiple={multiple}
+              capture={capture}
               onChange={(event) => {
                 const files = Array.from(event.target.files ?? []);
                 event.target.value = '';
                 for (const file of files) {
-                  void queueFileUpload(file);
+                  void addFile(file);
                 }
               }}
             />
             <UploadOutline aria-hidden="true" />
             <span>
-              <strong>{previewImages ? '添加图片' : '添加附件'}</strong>
+              <strong>{addLabel}</strong>
               <small>{uploadHint(accept, multiple)}</small>
             </span>
           </label>
@@ -253,6 +264,34 @@ export function FileUploadField(props: MobileFieldProps) {
       )}
     </FieldShell>
   );
+
+  async function addFile(file: File) {
+    const error = await beforeAddError(file);
+    if (error) {
+      setLocalError(error);
+      return;
+    }
+    setLocalError(null);
+    await queueFileUpload(file);
+  }
+
+  async function beforeAddError(file: File) {
+    if (typeof maxCount === 'number') {
+      const currentCount = itemsRef.current.filter(
+        (item) => item.status !== 'deleting' && item.status !== 'delete_failed',
+      ).length;
+      if (currentCount >= maxCount) {
+        return maxCountError(props.node, currentCount) ?? `最多上传 ${maxCount} ${unitLabel}`;
+      }
+    }
+    if (typeof maxDuration === 'number' && isVideoFile(file)) {
+      const duration = await readVideoDuration(file);
+      if (duration > maxDuration) {
+        return videoDurationError(props.node, duration) ?? `视频不能超过 ${maxDuration} 秒`;
+      }
+    }
+    return null;
+  }
 
   async function queueFileUpload(file: File, localId = createLocalId()) {
     const uploadingItem: UploadItem = { localId, file, status: 'uploading', progress: 0 };
@@ -262,9 +301,14 @@ export function FileUploadField(props: MobileFieldProps) {
     ]);
     await wait(20);
     try {
-      const remote = await uploadMobileFile(endpoint, file, (event) => {
-        updateUploadProgress(localId, event);
-      });
+      const remote = await uploadMobileFile(
+        endpoint,
+        file,
+        (event) => {
+          updateUploadProgress(localId, event);
+        },
+        uploadExtraFields(props.node),
+      );
       commitItems(
         itemsRef.current.map((item): UploadItem =>
           item.localId === localId
@@ -560,4 +604,91 @@ function createLocalId() {
   return typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function defaultMaxCount(node: MobileSchemaNode): number | undefined {
+  if (node.type === 'image_upload') {
+    return 20;
+  }
+  if (node.type === 'video_upload') {
+    return 1;
+  }
+  return undefined;
+}
+
+function defaultUnitLabel(node: MobileSchemaNode): string {
+  if (node.type === 'image_upload') {
+    return '张图片';
+  }
+  if (node.type === 'video_upload') {
+    return '个视频';
+  }
+  return '个文件';
+}
+
+export function maxCountError(node: MobileSchemaNode, currentCount: number): string | null {
+  const maxCount = typeof node.props?.maxCount === 'number' ? node.props.maxCount : defaultMaxCount(node);
+  if (typeof maxCount !== 'number' || currentCount < maxCount) {
+    return null;
+  }
+  const unit = typeof node.props?.unitLabel === 'string' && node.props.unitLabel
+    ? node.props.unitLabel
+    : defaultUnitLabel(node);
+  return `最多上传 ${maxCount} ${unit}`;
+}
+
+export function videoDurationError(node: MobileSchemaNode, durationSeconds: number): string | null {
+  const maxDuration = typeof node.props?.maxDuration === 'number' ? node.props.maxDuration : 60;
+  if (durationSeconds <= maxDuration) {
+    return null;
+  }
+  return `视频不能超过 ${maxDuration} 秒`;
+}
+
+export function uploadExtraFields(node: MobileSchemaNode): Record<string, string> | undefined {
+  if (node.props?.watermark !== true) {
+    return undefined;
+  }
+  const text = typeof node.props?.watermarkText === 'string' ? node.props.watermarkText.trim() : '';
+  return { watermark: 'true', watermarkText: text || 'AntFlow' };
+}
+
+function isVideoFile(file: File) {
+  return typeof file.type === 'string' && file.type.toLowerCase().startsWith('video/');
+}
+
+function readVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+      reject(new Error('video duration is not supported'));
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute('src');
+    };
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('video metadata timeout'));
+    }, 15000);
+    video.onloadedmetadata = () => {
+      window.clearTimeout(timer);
+      const duration = Number.isFinite(video.duration) ? video.duration : NaN;
+      cleanup();
+      if (Number.isFinite(duration)) {
+        resolve(duration);
+      } else {
+        reject(new Error('video duration is unavailable'));
+      }
+    };
+    video.onerror = () => {
+      window.clearTimeout(timer);
+      cleanup();
+      reject(new Error('video metadata load failed'));
+    };
+    video.src = objectUrl;
+  });
 }

@@ -33,9 +33,15 @@ export async function uploadMobileFile(
   endpoint: string,
   file: File,
   onProgress?: UploadProgressHandler,
+  extraFields?: Record<string, string>,
 ): Promise<MobileFileDto> {
   const formData = new FormData();
   formData.set('file', file);
+  for (const [key, value] of Object.entries(extraFields ?? {})) {
+    if (value != null && value !== '') {
+      formData.set(key, value);
+    }
+  }
   if (onProgress && typeof XMLHttpRequest !== 'undefined') {
     return uploadMobileFileWithProgress(endpoint, formData, onProgress);
   }

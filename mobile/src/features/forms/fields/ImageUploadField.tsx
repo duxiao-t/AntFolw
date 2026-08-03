@@ -13,6 +13,11 @@ export function ImageUploadField(props: MobileFieldProps) {
           ...props.node.props,
           accept: props.node.props?.accept ?? DEFAULT_IMAGE_ACCEPT,
           preview: props.node.props?.preview ?? true,
+          multiple: true,
+          maxCount: props.node.props?.maxCount ?? 20,
+          source: props.node.props?.source ?? 'both',
+          addLabel: '添加图片',
+          unitLabel: '张图片',
         },
       }}
     />
