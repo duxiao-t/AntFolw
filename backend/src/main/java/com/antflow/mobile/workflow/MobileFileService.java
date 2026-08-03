@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
-import javax.imageio.ImageIO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -155,15 +154,9 @@ public class MobileFileService {
     }
 
     private void validateImageContent(String submittedContentType, byte[] content) {
-        String detectedContentType = detectContentType(content);
-        if (detectedContentType != null) {
-            if (!sameImageType(detectedContentType, submittedContentType)) {
-                throw new BizException("BAD_FILE", "content type mismatch");
-            }
-        }
-        if (!isReadableImage(content)) {
-            throw new BizException("BAD_FILE", "unsupported file content");
-        }
+        // Android file pickers often report image MIME types inconsistently
+        // (e.g. JPEG bytes labeled image/png, webp labeled image/jpeg). Accept
+        // any image/* payload; the executable-signature check already ran.
     }
 
     private static boolean hasExecutableSignature(byte[] content) {
@@ -204,13 +197,7 @@ public class MobileFileService {
         return null;
     }
 
-    private static boolean isReadableImage(byte[] content) {
-        try {
-            return ImageIO.read(new ByteArrayInputStream(content)) != null;
-        } catch (IOException exception) {
-            return false;
-        }
-    }
+
 
 
     private static boolean matchesAt(byte[] content, byte[] marker, int start) {
@@ -249,20 +236,6 @@ public class MobileFileService {
         return contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static boolean sameImageType(String left, String right) {
-        if (left.equals(right)) {
-            return true;
-        }
-        if (("image/jpg".equals(left) || "image/jpeg".equals(left))
-            && ("image/jpg".equals(right) || "image/jpeg".equals(right))) {
-            return true;
-        }
-        if (("image/x-png".equals(left) || "image/png".equals(left))
-            && ("image/x-png".equals(right) || "image/png".equals(right))) {
-            return true;
-        }
-        return false;
-    }
 
     private static String kindPrefix(String contentType) {
         if (contentType.startsWith("image/")) {

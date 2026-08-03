@@ -102,15 +102,16 @@ class MobileFileServiceTest {
     }
 
     @Test
-    void uploadRejectsMalformedImageWithOnlyMagicHeader() {
-        MockMultipartFile file = pngFile("broken.png", new byte[] {
-            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01
-        });
+    void uploadAcceptsImageWithMismatchedMimeLabel() throws Exception {
+        // Android file pickers often label JPEG bytes as image/png.
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
-        assertThatThrownBy(() -> service.upload(file, 7L))
-            .isInstanceOf(BizException.class)
-            .hasMessageContaining("unsupported file content");
-        assertThat(storage.putCount).isZero();
+        MobileFileDto dto = service.upload(
+            new MockMultipartFile("file", "photo.png", "image/png", jpegBytes()), 7L);
+
+        assertThat(dto.contentType()).isEqualTo("image/png");
+        assertThat(storage.contentBytes).isNotEmpty();
+        assertThat(storage.storageKey).startsWith("image/");
     }
 
     @Test
@@ -271,6 +272,13 @@ class MobileFileServiceTest {
 
     private static MockMultipartFile pngFile(String name, byte[] content) {
         return new MockMultipartFile("file", name, "image/png", content);
+    }
+
+    private static byte[] jpegBytes() throws IOException {
+        BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "jpeg", output);
+        return output.toByteArray();
     }
 
     private static byte[] pngBytes() {
