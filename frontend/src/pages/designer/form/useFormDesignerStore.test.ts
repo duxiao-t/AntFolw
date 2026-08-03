@@ -22,7 +22,7 @@ describe('useFormDesignerStore', () => {
 
     const schema = useFormDesignerStore.getState().schema;
     expect(schema).toHaveLength(1);
-    expect(schema[0]).toMatchObject({ id, type: 'text', props: { placeholder: 'x' } });
+    expect(schema[0]).toMatchObject({ id, type: 'text', label: '单行文本', props: { placeholder: 'x' } });
     expect(useFormDesignerStore.getState().selectedId).toBe(id);
   });
 

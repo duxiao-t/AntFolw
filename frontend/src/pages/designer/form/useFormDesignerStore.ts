@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { nanoid } from '@reduxjs/toolkit';
-import { updateAt, removeAt } from '../../../registry/formRegistry';
+import { formRegistry, updateAt, removeAt } from '../../../registry/formRegistry';
 import type { SchemaNode } from '../../../registry/types';
 
 type State = {
@@ -82,6 +82,7 @@ export const useFormDesignerStore = create<State>((set) => ({
     const newNode: SchemaNode = {
       id: nanoid(8),
       type,
+      label: formRegistry[type]?.label ?? type,
       props: { ...defaultProps },
     };
     set((s) => {
@@ -108,6 +109,7 @@ export const useFormDesignerStore = create<State>((set) => ({
     const newNode: SchemaNode = {
       id: nanoid(8),
       type,
+      label: formRegistry[type]?.label ?? type,
       props: { ...defaultProps },
     };
     set((s) => {
