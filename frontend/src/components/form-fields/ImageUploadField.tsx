@@ -2,7 +2,7 @@ import { Upload, Button, message } from 'antd';
 import { PictureOutlined } from '@ant-design/icons';
 import type { FieldType } from '../../registry/types';
 
-const DEFAULT_ACCEPT = 'image/jpeg,image/png';
+const DEFAULT_ACCEPT = 'image/*';
 
 export const ImageUploadField: FieldType = {
   type: 'image_upload',
