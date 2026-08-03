@@ -366,6 +366,7 @@ function renderControl({
       );
     case 'file_upload':
     case 'image_upload':
+    case 'video_upload':
       return (
         <button type="button" className="upload-control">
           <UploadOutlined />

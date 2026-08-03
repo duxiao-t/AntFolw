@@ -11,6 +11,8 @@ import { MultiSelectField } from '../components/form-fields/MultiSelectField';
 import { UserPickerField } from '../components/form-fields/UserPickerField';
 import { DeptPickerField } from '../components/form-fields/DeptPickerField';
 import { FileUploadField } from '../components/form-fields/FileUploadField';
+import { ImageUploadField } from '../components/form-fields/ImageUploadField';
+import { VideoUploadField } from '../components/form-fields/VideoUploadField';
 import { SpanLayoutField } from '../components/form-fields/SpanLayoutField';
 import { TableListField } from '../components/form-fields/TableListField';
 
@@ -27,8 +29,17 @@ export const formRegistry: Record<string, FieldType> = {
   user_picker: UserPickerField,
   dept_picker: DeptPickerField,
   file_upload: FileUploadField,
+  image_upload: ImageUploadField,
+  video_upload: VideoUploadField,
   span_layout: SpanLayoutField,
   table_list: TableListField,
+};
+
+export type PaletteEntry = {
+  type: string;
+  label: string;
+  icon: string;
+  defaultProps: Record<string, any>;
 };
 
 export const paletteEntries = Object.entries(formRegistry).map(([type, ft]) => ({
@@ -37,6 +48,42 @@ export const paletteEntries = Object.entries(formRegistry).map(([type, ft]) => (
   icon: ft.icon,
   defaultProps: ft.defaultProps,
 }));
+
+export type PaletteGroup = {
+  key: string;
+  title: string;
+  entries: PaletteEntry[];
+};
+
+export const paletteGroups: PaletteGroup[] = [
+  {
+    key: 'basic',
+    title: '基础组件',
+    entries: [
+      'text',
+      'textarea',
+      'number',
+      'money',
+      'date',
+      'date_range',
+      'select',
+      'multi_select',
+      'user_picker',
+      'dept_picker',
+      'span_layout',
+      'table_list',
+    ]
+      .map((type) => paletteEntries.find((entry) => entry.type === type))
+      .filter((entry): entry is PaletteEntry => Boolean(entry)),
+  },
+  {
+    key: 'media',
+    title: '多媒体组件',
+    entries: ['image_upload', 'video_upload', 'file_upload']
+      .map((type) => paletteEntries.find((entry) => entry.type === type))
+      .filter((entry): entry is PaletteEntry => Boolean(entry)),
+  },
+];
 
 export function findById(nodes: SchemaNode[], id: string): SchemaNode | null {
   for (const n of nodes) {

@@ -173,6 +173,25 @@
   will-change: transform;
 }
 
+.form-designer__palette-group + .form-designer__palette-group {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--form-designer-border);
+}
+
+.form-fields-media-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 72px;
+  border: 1px dashed var(--form-designer-border-strong);
+  border-radius: 8px;
+  background: var(--form-designer-primary-bg);
+  color: var(--form-designer-text-secondary);
+  font-size: 13px;
+}
+
 @media (max-width: 1279px) {
   .form-designer__palette {
     width: 220px;

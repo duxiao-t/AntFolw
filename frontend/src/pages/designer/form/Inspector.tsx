@@ -40,6 +40,8 @@ const requiredTypes = new Set([
   'user_picker',
   'dept_picker',
   'file_upload',
+  'image_upload',
+  'video_upload',
 ]);
 
 const defaultValueTypes = new Set([
@@ -872,6 +874,103 @@ function renderComponentSettings(
               onChange={(event) => updateProps({ buttonText: event.target.value })}
             />
           </PanelField>
+        </Space>
+      );
+    case 'image_upload':
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <PanelField label="图片来源">
+            <Select
+              value={props.source ?? 'both'}
+              options={[
+                { label: '仅拍照', value: 'camera' },
+                { label: '仅从相册选择', value: 'album' },
+                { label: '拍照或相册', value: 'both' },
+              ]}
+              onChange={(source) => updateProps({ source })}
+            />
+          </PanelField>
+          <PanelField label="最多上传数量">
+            <InputNumber
+              min={1}
+              max={20}
+              style={{ width: '100%' }}
+              value={props.maxCount ?? 20}
+              onChange={(value) => updateProps({ maxCount: value ?? 20 })}
+            />
+          </PanelField>
+          <PanelField label="单张大小限制(MB)">
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              value={props.maxSizeMB}
+              onChange={(value) => updateProps({ maxSizeMB: value })}
+            />
+          </PanelField>
+          <Checkbox
+            checked={!!props.watermark}
+            onChange={(event) => updateProps({ watermark: event.target.checked })}
+          >
+            上传时添加水印
+          </Checkbox>
+          <PanelField label="水印文字">
+            <Input
+              value={props.watermarkText ?? 'AntFlow'}
+              disabled={!props.watermark}
+              onChange={(event) => updateProps({ watermarkText: event.target.value })}
+            />
+          </PanelField>
+          <Typography.Text type="secondary">
+            水印将叠加拍摄/上传时间，由服务端处理后存储。
+          </Typography.Text>
+        </Space>
+      );
+    case 'video_upload':
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <PanelField label="视频来源">
+            <Select
+              value={props.source ?? 'both'}
+              options={[
+                { label: '仅拍摄', value: 'camera' },
+                { label: '仅从相册选择', value: 'album' },
+                { label: '拍摄或相册', value: 'both' },
+              ]}
+              onChange={(source) => updateProps({ source })}
+            />
+          </PanelField>
+          <PanelField label="最长时长(秒)">
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              value={props.maxDuration ?? 60}
+              onChange={(value) => updateProps({ maxDuration: value ?? 60 })}
+            />
+          </PanelField>
+          <PanelField label="单文件大小限制(MB)">
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              value={props.maxSizeMB ?? 100}
+              onChange={(value) => updateProps({ maxSizeMB: value })}
+            />
+          </PanelField>
+          <Checkbox
+            checked={!!props.watermark}
+            onChange={(event) => updateProps({ watermark: event.target.checked })}
+          >
+            上传时添加水印
+          </Checkbox>
+          <PanelField label="水印文字">
+            <Input
+              value={props.watermarkText ?? 'AntFlow'}
+              disabled={!props.watermark}
+              onChange={(event) => updateProps({ watermarkText: event.target.value })}
+            />
+          </PanelField>
+          <Typography.Text type="secondary">
+            超过最长时长的视频将无法选择；水印由服务端处理后存储。
+          </Typography.Text>
         </Space>
       );
     case 'span_layout':

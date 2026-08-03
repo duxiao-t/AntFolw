@@ -21,9 +21,11 @@ import {
   FieldNumberOutlined,
   FileTextOutlined,
   FontSizeOutlined,
+  PictureOutlined,
   TableOutlined,
   UploadOutlined,
   UserOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons';
 import { App, Button, Space, theme } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -34,16 +36,11 @@ import {
   DesignerFieldPreview,
   FormRenderer,
 } from '../../../components/FormRenderer/FormRenderer';
-import {
-  paletteEntries,
-  formRegistry,
-} from '../../../registry/formRegistry';
+import { paletteGroups, formRegistry, type PaletteEntry } from '../../../registry/formRegistry';
 import type { SchemaNode } from '../../../registry/types';
 import { useFormDesignerStore } from './useFormDesignerStore';
 import { Inspector } from './Inspector';
 import './form-designer.less';
-
-type PaletteEntry = (typeof paletteEntries)[number];
 
 type ActiveDrag =
   | { source: 'palette'; entry: PaletteEntry }
@@ -68,6 +65,8 @@ const paletteIcons: Record<string, React.ReactNode> = {
   user_picker: <UserOutlined />,
   dept_picker: <ApartmentOutlined />,
   file_upload: <UploadOutlined />,
+  image_upload: <PictureOutlined />,
+  video_upload: <VideoCameraOutlined />,
   span_layout: <ColumnWidthOutlined />,
   table_list: <TableOutlined />,
 };
@@ -447,18 +446,22 @@ export function FormDesignerSurface({
       <div className="form-designer-shell" style={designerVars}>
         <div className="form-designer">
           <aside className="form-designer__palette">
-            <h4>基础组件</h4>
-            <div className="form-designer__palette-grid">
-              {paletteEntries
-                .filter((e) => e.type !== 'description')
-                .map((e) => (
-                  <PaletteCard
-                    key={e.type}
-                    entry={e}
-                    onAdd={() => addPaletteEntry(e)}
-                  />
-                ))}
-            </div>
+            {paletteGroups.map((group) => (
+              <section key={group.key} className="form-designer__palette-group">
+                <h4>{group.title}</h4>
+                <div className="form-designer__palette-grid">
+                  {group.entries
+                    .filter((e) => e.type !== 'description')
+                    .map((e) => (
+                      <PaletteCard
+                        key={e.type}
+                        entry={e}
+                        onAdd={() => addPaletteEntry(e)}
+                      />
+                    ))}
+                </div>
+              </section>
+            ))}
           </aside>
           <main className="form-designer__workspace">
             <Space className="form-designer__toolbar">
