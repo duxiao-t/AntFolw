@@ -11,7 +11,6 @@ import { MultiSelectField } from '../fields/MultiSelectField';
 import { NumberField } from '../fields/NumberField';
 import { RadioField } from '../fields/RadioField';
 import { SearchField } from '../fields/SearchField';
-import { SectionField } from '../fields/SectionField';
 import { SelectField } from '../fields/SelectField';
 import { SpanLayoutField } from '../fields/SpanLayoutField';
 import { SwitchField } from '../fields/SwitchField';
@@ -108,10 +107,6 @@ function field(
 }
 
 export const registeredFields: MobileFieldDefinition[] = [
-  field('section', SectionField, {
-    validate: () => null,
-    summarize: () => '业务分区',
-  }),
   field('text', TextField),
   field('textarea', TextareaField),
   field('number', NumberField),

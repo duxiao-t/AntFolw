@@ -1,7 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 
 export type FieldTypeCode =
-  | 'section'
   | 'text'
   | 'textarea'
   | 'number'

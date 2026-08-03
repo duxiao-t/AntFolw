@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,24 +20,9 @@ const FORM_RESPONSE = {
   name: '请假申请',
   version: 3,
   schema: [
-    {
-      id: 'time',
-      type: 'section',
-      label: '请假时间',
-      props: { description: '选择请假起止日期' },
-      children: [
-        { id: 'start', type: 'date', label: '开始时间', props: { required: true } },
-        { id: 'end', type: 'date', label: '结束时间', props: { required: true } },
-      ],
-    },
-    {
-      id: 'reason-group',
-      type: 'section',
-      label: '请假事由',
-      children: [
-        { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
-      ],
-    },
+    { id: 'start', type: 'date', label: '开始时间', props: { required: true } },
+    { id: 'end', type: 'date', label: '结束时间', props: { required: true } },
+    { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
   ],
 };
 
@@ -131,7 +116,6 @@ describe('FormFillPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
     expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '请假时间，2 项需补充' })).toBeInTheDocument();
 
     await userEvent.type(startInput, '2026-07-30');
     await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
@@ -155,6 +139,42 @@ describe('FormFillPage', () => {
     expect(await screen.findByLabelText('开始时间')).toHaveValue('2026-07-30');
   });
 
+  it('does not load an older-version draft and offers to discard it', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/mobile/forms/leave')) {
+        return jsonResponse(FORM_RESPONSE);
+      }
+      if (url.includes('/api/mobile/drafts/101') && init?.method !== 'DELETE') {
+        return jsonResponse({
+          id: 101,
+          formCode: 'leave',
+          formName: '请假申请',
+          formVersion: 2,
+          data: { start: '2026-07-30' },
+          updatedAt: '2026-07-21T03:00:00+08:00',
+          readOnly: false,
+        });
+      }
+      if (url.includes('/api/mobile/drafts/101') && init?.method === 'DELETE') {
+        return jsonResponse({});
+      }
+      if (url.includes('/api/mobile/drafts') && init?.method === 'POST') {
+        return jsonResponse(102);
+      }
+      return jsonResponse({});
+    });
+
+    renderForm('/forms/leave?draftId=101');
+
+    expect(await screen.findByText('表单已更新，当前草稿基于旧版本，已为你重置为空白表单。')).toBeInTheDocument();
+    expect(screen.getByLabelText('开始时间')).toHaveValue('');
+
+    await userEvent.click(screen.getByRole('button', { name: '丢弃草稿' }));
+
+    expect(await screen.findByText('草稿已丢弃')).toBeInTheDocument();
+  });
+
   it('keeps next action fixed at the bottom of the viewport', async () => {
     renderForm();
 
@@ -163,7 +183,7 @@ describe('FormFillPage', () => {
     expect(nextButton.parentElement).toHaveClass('action-bar', 'form-fill-action-bar');
   });
 
-  it('keeps upload fields in their owning business section', async () => {
+  it('renders upload fields in the flat form page', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.includes('/api/mobile/forms/leave')) {
@@ -172,16 +192,9 @@ describe('FormFillPage', () => {
           name: '附件表单',
           version: 1,
           schema: [
-            {
-              id: 'materials',
-              type: 'section',
-              label: '申请材料',
-              children: [
-                { id: 'reason', type: 'text', label: '事由' },
-                { id: 'attachments', type: 'file_upload', label: '附件' },
-                { id: 'photos', type: 'image_upload', label: '图片' },
-              ],
-            },
+            { id: 'reason', type: 'text', label: '事由' },
+            { id: 'attachments', type: 'file_upload', label: '附件' },
+            { id: 'photos', type: 'image_upload', label: '图片' },
           ],
           settings: { workflowEnabled: false },
         });
@@ -192,18 +205,11 @@ describe('FormFillPage', () => {
       return jsonResponse({});
     });
 
-    const { container } = renderForm();
+    renderForm();
 
     expect(await screen.findByLabelText('事由')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '申请材料' })).toBeInTheDocument();
-
-    const sectionCard = container.querySelector('[data-section-id="materials"]');
-    expect(sectionCard).not.toBeNull();
-    expect(container.querySelector('.form-attachment-card')).toBeNull();
-
-    expect(within(sectionCard as HTMLElement).getByLabelText('事由')).toBeInTheDocument();
-    expect(within(sectionCard as HTMLElement).getByLabelText('附件')).toBeInTheDocument();
-    expect(within(sectionCard as HTMLElement).getByLabelText('图片')).toBeInTheDocument();
+    expect(screen.getByLabelText('附件')).toBeInTheDocument();
+    expect(screen.getByLabelText('图片')).toBeInTheDocument();
   });
 
   it('recovers local values for the current user when schema version matches', async () => {
@@ -232,25 +238,16 @@ describe('FormFillPage', () => {
     expect(await screen.findByText('工作台目标页')).toBeInTheDocument();
   });
 
-  it('renders all business sections in one scrollable page with anchor navigation', async () => {
+  it('renders all fields in one scrollable page', async () => {
     renderForm();
 
     expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
-    expect(screen.getByText('2 个业务分区')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '请假时间' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '请假事由' })).toBeInTheDocument();
     expect(screen.getByLabelText('开始时间')).toBeInTheDocument();
     expect(screen.getByLabelText('结束时间')).toBeInTheDocument();
     expect(inputByLabel('请假事由')).toBeInTheDocument();
-
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    await userEvent.click(screen.getByRole('button', { name: '请假事由' }));
-
-    expect(scrollIntoView).toHaveBeenCalled();
   });
 
-  it('renders legacy schemas without section as one default section', async () => {
+  it('renders span-layout and fields in one flat page', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.includes('/api/mobile/forms/leave')) {
@@ -281,20 +278,16 @@ describe('FormFillPage', () => {
     renderForm();
 
     expect(await screen.findByRole('heading', { name: '旧表单' })).toBeInTheDocument();
-    expect(screen.getByText('1 个业务分区')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '表单内容' })).toBeInTheDocument();
     expect(screen.getByLabelText('开始时间')).toBeInTheDocument();
     expect(screen.getByLabelText('请假事由')).toBeInTheDocument();
   });
 
-  it('marks section error counts and scrolls to the first invalid field on submit', async () => {
+  it('shows field errors and scrolls to the first invalid field on submit', async () => {
     renderForm();
 
     await userEvent.click(await screen.findByRole('button', { name: '提交' }));
 
     expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '请假时间，2 项需补充' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '请假事由，1 项需补充' })).toBeInTheDocument();
   });
 
   it('continues to the existing self-select or confirm flow after full-form validation succeeds', async () => {

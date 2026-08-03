@@ -10,6 +10,7 @@ import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
 import {
   createMobileDraft,
   fetchMobileDraft,
+  deleteMobileDraft,
   fetchMobileForm,
   updateMobileDraft,
 } from "./drafts.api";
@@ -26,7 +27,6 @@ import {
   type RecoveryDraftWriter,
 } from "./recoveryDraft.store";
 import { validateSchemaValues } from "./schema/fieldRegistry";
-import { buildFormSections } from "./schema/sections";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
 import { fetchReworkTask, saveReworkTask } from "./rework.api";
@@ -48,6 +48,7 @@ export function FormFillPage() {
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
   const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
   const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
+  const [draftVersionMismatch, setDraftVersionMismatch] = useState(false);
 
   const formQuery = useQuery({
     queryKey: queryKeys.form(code),
@@ -105,7 +106,11 @@ export function FormFillPage() {
       || (reworkTaskId != null && reworkQuery.isPending)) {
       return;
     }
-    const baseValues = reworkQuery.data?.formData ?? draftQuery.data?.data ?? {};
+    const draftMismatch = draftQuery.data != null && draftQuery.data.formVersion !== formQuery.data.version;
+    setDraftVersionMismatch(draftMismatch);
+    const baseValues = draftMismatch
+      ? {}
+      : (reworkQuery.data?.formData ?? draftQuery.data?.data ?? {});
     const nextValues = chooseInitialValues({
       baseValues,
       code,
@@ -168,8 +173,6 @@ export function FormFillPage() {
   const schema = formQuery.data?.schema ?? [];
   const process = formQuery.data?.process;
   const formSchema = formSchemaWithoutSelfSelectRules(schema);
-  const sections = buildFormSections(formSchema, values);
-  const sectionErrorCounts = errorCountsBySection(sections, errors);
   const title = formQuery.data?.name ?? "表单填写";
   const description = typeof formQuery.data?.description === "string" ? formQuery.data.description : "";
   const fieldMode = draftQuery.data?.readOnly ? "readonly" : "fill";
@@ -190,70 +193,31 @@ export function FormFillPage() {
       contentClassName="form-fill-page"
     >
       <div className="form-fill-page__body">
-        <section className="form-fill-intro" aria-label="表单说明">
-          <div className="form-fill-intro__kicker">
-            <span>{sections.length} 个业务分区</span>
-            {status ? <span>{status}</span> : null}
+        {draftVersionMismatch ? (
+          <div className="draft-version-banner" role="alert">
+            <span>表单已更新，当前草稿基于旧版本，已为你重置为空白表单。</span>
+            <button type="button" className="btn btn--ghost" onClick={() => void discardDraft()}>
+              丢弃草稿
+            </button>
           </div>
+        ) : null}
+        <section className="form-fill-intro" aria-label="表单说明">
+          {status ? (
+            <div className="form-fill-intro__kicker">
+              <span>{status}</span>
+            </div>
+          ) : null}
           <h2>{title}</h2>
-          {description ? <p>{description}</p> : <p>请按分区填写内容，带 * 为必填项。</p>}
+          {description ? <p>{description}</p> : <p>请填写以下内容，带 * 为必填项。</p>}
         </section>
 
-        <nav className="section-anchor-nav" aria-label="业务分区导航">
-          {sections.map((section, index) => {
-            const errorCount = sectionErrorCounts[section.id] ?? 0;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                className={`section-anchor${errorCount > 0 ? " section-anchor--error" : ""}`}
-                aria-label={`${section.title}${errorCount > 0 ? `，${errorCount} 项需补充` : ""}`}
-                onClick={() => scrollToSection(section.id)}
-              >
-                <span>{index + 1}</span>
-                <strong>{section.title}</strong>
-                {errorCount > 0 ? <em>{errorCount}</em> : null}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="form-section-stack">
-          {sections.map((section, index) => {
-            const sectionErrors = pickErrors(errors, section.fieldIds);
-            const errorCount = sectionErrorCounts[section.id] ?? 0;
-            return (
-              <section
-                key={section.id}
-                className={`af-card--form business-section-card${errorCount > 0 ? " business-section-card--error" : ""}`}
-                data-section-id={section.id}
-                aria-labelledby={`form-section-${section.id}`}
-              >
-                <header className="business-section-card__head">
-                  <div>
-                    <span>分区 {index + 1}</span>
-                    <h3 id={`form-section-${section.id}`}>{section.title}</h3>
-                    {section.description ? <small>{section.description}</small> : null}
-                  </div>
-                  {errorCount > 0 ? <strong>{errorCount} 项需补充</strong> : null}
-                </header>
-                <div className="business-section-card__body">
-                  {section.nodes.length > 0 ? (
-                    <DynamicFormRenderer
-                      schema={section.nodes}
-                      values={values}
-                      mode={fieldMode}
-                      errors={sectionErrors}
-                      onValueChange={handleValueChange}
-                    />
-                  ) : (
-                    <p className="af-empty-text">暂无可填写内容</p>
-                  )}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+        <DynamicFormRenderer
+          schema={formSchema}
+          values={values}
+          mode={fieldMode}
+          errors={errors}
+          onValueChange={handleValueChange}
+        />
       </div>
 
       <div className="action-bar form-fill-action-bar">
@@ -298,6 +262,26 @@ export function FormFillPage() {
     </AppPage>
   );
 
+  async function discardDraft() {
+    if (draftIdFromUrl == null) {
+      return;
+    }
+    try {
+      await deleteMobileDraft(draftIdFromUrl);
+      if (user) {
+        removeRecoveryDraft(user.id, code, recoveryId(reworkTaskId, draftIdFromUrl));
+      }
+      setSavedDraftId(null);
+      setDraftVersionMismatch(false);
+      setValues({});
+      setInitialValues({});
+      setStatus("草稿已丢弃");
+      void navigate(`/forms/${encodeURIComponent(code)}`, { replace: true });
+    } catch {
+      showToast({ icon: "fail", content: "丢弃草稿失败" });
+    }
+  }
+
   function saveDraft() {
     void saveMutation.mutateAsync();
   }
@@ -330,32 +314,6 @@ export function FormFillPage() {
     setSubmitNavigationAllowed(true);
     setPendingSubmitPath(nextPath);
   }
-}
-
-function pickErrors(errors: FieldValidationErrors, fieldIds: string[]): FieldValidationErrors {
-  return fieldIds.reduce<FieldValidationErrors>((next, fieldId) => {
-    if (errors[fieldId]) next[fieldId] = errors[fieldId];
-    return next;
-  }, {});
-}
-
-function errorCountsBySection(
-  groups: Array<{ id: string; fieldIds: string[] }>,
-  errors: FieldValidationErrors,
-): Record<string, number> {
-  return groups.reduce<Record<string, number>>((next, group) => {
-    const count = group.fieldIds.filter((fieldId) => Boolean(errors[fieldId])).length;
-    if (count > 0) next[group.id] = count;
-    return next;
-  }, {});
-}
-
-function scrollToSection(sectionId: string) {
-  if (typeof document === "undefined") {
-    return;
-  }
-  const target = document.querySelector(`[data-section-id="${escapeCssIdent(sectionId)}"]`);
-  target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function scrollToFirstError(errors: FieldValidationErrors) {
