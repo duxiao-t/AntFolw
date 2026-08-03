@@ -113,18 +113,22 @@ function PaletteCard({
 }
 
 
+function createPreviewNode(entry: PaletteEntry): SchemaNode {
+  return {
+    id: `preview:${entry.type}`,
+    type: entry.type,
+    label: entry.label,
+    props: {
+      ...entry.defaultProps,
+      showTitle: true,
+      showDescription: true,
+    },
+  };
+}
+
 function DragPreview({ drag }: { drag: ActiveDrag }) {
-  if (drag.source === 'palette') {
-    return (
-      <div className="form-designer__palette-card form-designer__palette-card--ghost">
-        <FieldTypeIcon entry={drag.entry} />
-        <span className="form-designer__palette-card-label" title={drag.entry.label}>
-          {drag.entry.label}
-        </span>
-      </div>
-    );
-  }
-  const node = drag.node;
+  const node =
+    drag.source === 'canvas' ? drag.node : createPreviewNode(drag.entry);
   const ft = formRegistry[node.type];
   if (!ft) return null;
   const renderNode = {
