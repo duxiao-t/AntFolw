@@ -66,7 +66,7 @@ public class MobileFileService {
         if (watermarked && submittedContentType.startsWith("video/")) {
             originalName = toMp4Name(originalName);
         }
-        String storageKey = ownerId + "/" + id + "-" + originalName;
+        String storageKey = kindPrefix(submittedContentType) + ownerId + "/" + id + "-" + originalName;
         writeStorageObject(storageKey, content, submittedContentType);
 
         MobileFile row = new MobileFile();
@@ -122,13 +122,7 @@ public class MobileFileService {
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
             throw new BizException("BAD_FILE", "file is empty");
         }
-        if (file.getSize() > properties.getMaxBytes()) {
-            throw new BizException("BAD_FILE", "file is too large");
-        }
         String contentType = normalize(file.getContentType());
-        if (!properties.getAllowedTypes().contains(contentType)) {
-            throw new BizException("BAD_FILE", "unsupported content type");
-        }
         long limit = contentType.startsWith("video/") ? properties.getMaxVideoBytes() : properties.getMaxBytes();
         if (file.getSize() > limit) {
             throw new BizException("BAD_FILE", "file is too large");
@@ -147,17 +141,25 @@ public class MobileFileService {
         if (hasExecutableSignature(content)) {
             throw new BizException("BAD_FILE", "unsupported file content");
         }
+        if (submittedContentType.startsWith("image/")) {
+            validateImageContent(submittedContentType, content);
+        } else if (submittedContentType.startsWith("video/")) {
+            String detectedContentType = detectContentType(content);
+            if (detectedContentType == null || !detectedContentType.equals(submittedContentType)) {
+                throw new BizException("BAD_FILE", "unsupported file content");
+            }
+        }
+        // Other content types (attachments) are accepted as-is.
+    }
+
+    private void validateImageContent(String submittedContentType, byte[] content) {
         String detectedContentType = detectContentType(content);
-        if (detectedContentType == null) {
-            throw new BizException("BAD_FILE", "unsupported file content");
+        if (detectedContentType != null) {
+            if (!sameImageType(detectedContentType, submittedContentType)) {
+                throw new BizException("BAD_FILE", "content type mismatch");
+            }
         }
-        if (!submittedContentType.equals(detectedContentType)) {
-            throw new BizException("BAD_FILE", "content type mismatch");
-        }
-        if (detectedContentType.startsWith("image/") && !isReadableImage(content)) {
-            throw new BizException("BAD_FILE", "unsupported file content");
-        }
-        if ("application/pdf".equals(detectedContentType) && !hasPdfTrailer(content)) {
+        if (!isReadableImage(content)) {
             throw new BizException("BAD_FILE", "unsupported file content");
         }
     }
@@ -208,16 +210,6 @@ public class MobileFileService {
         }
     }
 
-    private static boolean hasPdfTrailer(byte[] content) {
-        byte[] marker = "%%EOF".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-        int start = Math.max(0, content.length - 2048);
-        for (int index = content.length - marker.length; index >= start; index--) {
-            if (matchesAt(content, marker, index)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private static boolean matchesAt(byte[] content, byte[] marker, int start) {
         if (start < 0 || start + marker.length > content.length) {
@@ -253,6 +245,31 @@ public class MobileFileService {
 
     private static String normalize(String contentType) {
         return contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean sameImageType(String left, String right) {
+        if (left.equals(right)) {
+            return true;
+        }
+        if (("image/jpg".equals(left) || "image/jpeg".equals(left))
+            && ("image/jpg".equals(right) || "image/jpeg".equals(right))) {
+            return true;
+        }
+        if (("image/x-png".equals(left) || "image/png".equals(left))
+            && ("image/x-png".equals(right) || "image/png".equals(right))) {
+            return true;
+        }
+        return false;
+    }
+
+    private static String kindPrefix(String contentType) {
+        if (contentType.startsWith("image/")) {
+            return "image/";
+        }
+        if (contentType.startsWith("video/")) {
+            return "video/";
+        }
+        return "file/";
     }
 
     private static String toMp4Name(String name) {

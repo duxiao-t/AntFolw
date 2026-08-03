@@ -12,14 +12,6 @@ public class MobileFileProperties {
     private String storage = "minio";
     private long maxBytes = 10L * 1024 * 1024;
     private long maxVideoBytes = 100L * 1024 * 1024;
-    private List<String> allowedTypes = List.of(
-        "image/jpeg",
-        "image/png",
-        "application/pdf",
-        "video/mp4",
-        "video/quicktime",
-        "video/webm",
-        "video/3gpp");
     private Minio minio = new Minio();
 
     @Data

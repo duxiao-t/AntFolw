@@ -36,7 +36,6 @@ class MobileFileServiceTest {
         processor = Mockito.mock(MediaWatermarkProcessor.class);
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
-        properties.setAllowedTypes(List.of("image/jpeg", "image/png", "application/pdf"));
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
     }
 
@@ -53,7 +52,6 @@ class MobileFileServiceTest {
     void uploadRejectsOversizedFileBeforeStorageWrite() {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4L);
-        properties.setAllowedTypes(List.of("image/png"));
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
         MockMultipartFile file = pngFile("large.png", new byte[] {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D
@@ -77,12 +75,30 @@ class MobileFileServiceTest {
     }
 
     @Test
-    void uploadRejectsMismatchedContentType() {
-        MockMultipartFile file = new MockMultipartFile("file", "fake.png", "image/png", pdfBytes());
+    void uploadAcceptsArbitraryFileFormat() throws Exception {
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
-        assertThatThrownBy(() -> service.upload(file, 7L))
-            .isInstanceOf(BizException.class)
-            .hasMessageContaining("content type mismatch");
+        byte[] content = pdfBytes();
+        MobileFileDto dto = service.upload(
+            new MockMultipartFile("file", "contract.pdf", "application/pdf", content), 7L);
+
+        assertThat(dto.contentType()).isEqualTo("application/pdf");
+        assertThat(storage.contentBytes).isEqualTo(content);
+        assertThat(storage.storageKey).startsWith("file/7/");
+    }
+
+    @Test
+    void uploadAcceptsArbitraryAttachmentFormat() throws Exception {
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+
+        byte[] content = "plain text attachment".getBytes(StandardCharsets.UTF_8);
+        MobileFileDto dto = service.upload(
+            new MockMultipartFile("file", "note.txt", "text/plain", content), 7L);
+
+        assertThat(dto.contentType()).isEqualTo("text/plain");
+        assertThat(dto.name()).isEqualTo("note.txt");
+        assertThat(storage.contentBytes).isEqualTo(content);
+        assertThat(storage.storageKey).startsWith("file/7/");
     }
 
     @Test
@@ -102,7 +118,6 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
         properties.setMaxVideoBytes(8L);
-        properties.setAllowedTypes(List.of("video/mp4"));
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
 
         MockMultipartFile file = new MockMultipartFile("file", "clip.mp4", "video/mp4", new byte[9]);
@@ -116,7 +131,6 @@ class MobileFileServiceTest {
     @Test
     void uploadAcceptsMp4Video() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
-        properties.setAllowedTypes(List.of("video/mp4"));
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
@@ -128,12 +142,12 @@ class MobileFileServiceTest {
         assertThat(dto.name()).isEqualTo("clip.mp4");
         assertThat(storage.contentBytes).isEqualTo(content);
         assertThat(storage.contentType).isEqualTo("video/mp4");
+        assertThat(storage.storageKey).startsWith("video/7/");
     }
 
     @Test
     void uploadAppliesWatermarkForVideoAndRenamesToMp4() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
-        properties.setAllowedTypes(List.of("video/quicktime"));
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
@@ -196,6 +210,7 @@ class MobileFileServiceTest {
         assertThat(row.getOwnerId()).isEqualTo(7L);
         assertThat(row.getOriginalName()).isEqualTo("logo.png");
         assertThat(row.getStorageKey()).contains(row.getId().toString());
+        assertThat(row.getStorageKey()).startsWith("image/7/");
         assertThat(row.getSha256()).hasSize(64);
         assertThat(row.getStatus()).isEqualTo("READY");
         assertThat(storage.contentType).isEqualTo("image/png");
