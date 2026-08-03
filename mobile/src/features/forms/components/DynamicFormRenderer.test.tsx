@@ -64,6 +64,31 @@ describe('DynamicFormRenderer', () => {
     expect(screen.getByText('请填写请假事由')).toBeInTheDocument();
   });
 
+  it('renders nested section children against the full value object', () => {
+    const schema: MobileSchemaNode[] = [
+      {
+        id: 'business',
+        type: 'section',
+        label: '业务信息',
+        props: { description: '填写业务字段' },
+        children: [{ id: 'reason', type: 'text', label: '请假事由' }],
+      },
+    ];
+
+    render(
+      <DynamicFormRenderer
+        mode="fill"
+        schema={schema}
+        values={{ reason: '回家探亲' }}
+        onValueChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('业务信息')).toBeInTheDocument();
+    expect(screen.getByText('填写业务字段')).toBeInTheDocument();
+    expect(screen.getByLabelText('请假事由')).toHaveValue('回家探亲');
+  });
+
   it('renders readonly leaf summaries without editable controls', () => {
     const schema: MobileSchemaNode[] = [
       { id: 'reason', type: 'text', label: '请假事由' },

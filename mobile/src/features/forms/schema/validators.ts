@@ -138,7 +138,7 @@ function collectVisibleValueNodes(
       collectVisibleValueNodes(node.children, values, output);
       continue;
     }
-    if (Object.prototype.hasOwnProperty.call(values, node.id)) {
+    if (Object.hasOwn(values, node.id)) {
       output[node.id] = values[node.id];
     }
   }
@@ -195,6 +195,7 @@ function matchesDisplayCondition(condition: unknown, values: MobileFormValues) {
     case 'eq':
     case '==':
     case '===':
+      return String(sourceValue ?? '') === String(targetValue ?? '');
     default:
       return String(sourceValue ?? '') === String(targetValue ?? '');
   }

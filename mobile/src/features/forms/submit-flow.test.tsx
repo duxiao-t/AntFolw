@@ -176,7 +176,7 @@ describe('mobile form submit flow', () => {
     renderSubmitFlow();
 
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
     expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
     expect(screen.getByText('表单编号将在提交后生成')).toBeInTheDocument();
@@ -205,9 +205,8 @@ describe('mobile form submit flow', () => {
     renderSubmitFlow();
 
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
     await userEvent.type(await screen.findByLabelText('补充说明'), '请尽快审批');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
     expect(await screen.findByText('选择审批人')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '搜索审批人' })).toBeInTheDocument();
@@ -235,7 +234,7 @@ describe('mobile form submit flow', () => {
     renderSubmitFlow();
 
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
     await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
     await userEvent.click(await screen.findByRole('button', { name: '重试提交' }));
 

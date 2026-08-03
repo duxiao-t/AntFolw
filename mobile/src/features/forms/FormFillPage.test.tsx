@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,8 +22,9 @@ const FORM_RESPONSE = {
   schema: [
     {
       id: 'time',
-      type: 'span_layout',
+      type: 'section',
       label: '请假时间',
+      props: { description: '选择请假起止日期' },
       children: [
         { id: 'start', type: 'date', label: '开始时间', props: { required: true } },
         { id: 'end', type: 'date', label: '结束时间', props: { required: true } },
@@ -31,7 +32,7 @@ const FORM_RESPONSE = {
     },
     {
       id: 'reason-group',
-      type: 'span_layout',
+      type: 'section',
       label: '请假事由',
       children: [
         { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
@@ -90,6 +91,8 @@ function renderForm(initialPath = '/forms/leave') {
   const router = createMemoryRouter(
     [
       { path: '/forms/:code', element: <FormFillPage /> },
+      { path: '/forms/:code/self-select', element: <div>自选审批人目标页</div> },
+      { path: '/forms/:code/confirm', element: <div>确认提交目标页</div> },
       { path: '/workbench', element: <div>工作台目标页</div> },
     ],
     { initialEntries: [initialPath] },
@@ -99,6 +102,19 @@ function renderForm(initialPath = '/forms/leave') {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+}
+
+function inputByLabel(label: string) {
+  const input = screen
+    .getAllByLabelText(label)
+    .find((element): element is HTMLInputElement | HTMLTextAreaElement =>
+      element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement,
+    );
+  expect(input).toBeDefined();
+  if (!input) {
+    throw new Error(`Expected input labeled ${label}`);
+  }
+  return input;
 }
 
 beforeEach(() => {
@@ -112,15 +128,15 @@ describe('FormFillPage', () => {
     renderForm();
 
     const startInput = await screen.findByLabelText('开始时间');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
     expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '请假时间，2 项需补充' })).toBeInTheDocument();
 
     await userEvent.type(startInput, '2026-07-30');
     await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
-    await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '草稿' }));
+    await userEvent.type(inputByLabel('请假事由'), '回家探亲');
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
 
     await waitFor(() => {
       const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
@@ -142,9 +158,52 @@ describe('FormFillPage', () => {
   it('keeps next action fixed at the bottom of the viewport', async () => {
     renderForm();
 
-    const nextButton = await screen.findByRole('button', { name: '下一步' });
+    const nextButton = await screen.findByRole('button', { name: '提交' });
 
     expect(nextButton.parentElement).toHaveClass('action-bar', 'form-fill-action-bar');
+  });
+
+  it('keeps upload fields in their owning business section', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/mobile/forms/leave')) {
+        return jsonResponse({
+          code: 'leave',
+          name: '附件表单',
+          version: 1,
+          schema: [
+            {
+              id: 'materials',
+              type: 'section',
+              label: '申请材料',
+              children: [
+                { id: 'reason', type: 'text', label: '事由' },
+                { id: 'attachments', type: 'file_upload', label: '附件' },
+                { id: 'photos', type: 'image_upload', label: '图片' },
+              ],
+            },
+          ],
+          settings: { workflowEnabled: false },
+        });
+      }
+      if (url.includes('/api/mobile/drafts') && init?.method === 'POST') {
+        return jsonResponse(102);
+      }
+      return jsonResponse({});
+    });
+
+    const { container } = renderForm();
+
+    expect(await screen.findByLabelText('事由')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '申请材料' })).toBeInTheDocument();
+
+    const sectionCard = container.querySelector('[data-section-id="materials"]');
+    expect(sectionCard).not.toBeNull();
+    expect(container.querySelector('.form-attachment-card')).toBeNull();
+
+    expect(within(sectionCard as HTMLElement).getByLabelText('事由')).toBeInTheDocument();
+    expect(within(sectionCard as HTMLElement).getByLabelText('附件')).toBeInTheDocument();
+    expect(within(sectionCard as HTMLElement).getByLabelText('图片')).toBeInTheDocument();
   });
 
   it('recovers local values for the current user when schema version matches', async () => {
@@ -173,36 +232,79 @@ describe('FormFillPage', () => {
     expect(await screen.findByText('工作台目标页')).toBeInTheDocument();
   });
 
-  it('renders one form group at a time and advances after current step is valid', async () => {
+  it('renders all business sections in one scrollable page with anchor navigation', async () => {
     renderForm();
 
     expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '1. 请假时间' })).toHaveAttribute('aria-current', 'step');
-    expect(screen.getAllByText(/1\s*\/\s*2/).length).toBeGreaterThan(0);
-    expect(screen.getByText('步骤 1 / 2 · 请假时间')).toBeInTheDocument();
-    expect(screen.queryByLabelText('请假事由')).not.toBeInTheDocument();
+    expect(screen.getByText('2 个业务分区')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '请假时间' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '请假事由' })).toBeInTheDocument();
+    expect(screen.getByLabelText('开始时间')).toBeInTheDocument();
+    expect(screen.getByLabelText('结束时间')).toBeInTheDocument();
+    expect(inputByLabel('请假事由')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    await userEvent.click(screen.getByRole('button', { name: '请假事由' }));
 
-    expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
-
-    await userEvent.type(screen.getByLabelText('开始时间'), '2026-07-30');
-    await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
-
-    expect(screen.getByRole('button', { name: '2. 请假事由' })).toHaveAttribute('aria-current', 'step');
-    expect(screen.getAllByText(/2\s*\/\s*2/).length).toBeGreaterThan(0);
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 
-  it('jumps back to the first step with errors during final validation', async () => {
+  it('renders legacy schemas without section as one default section', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/mobile/forms/leave')) {
+        return jsonResponse({
+          code: 'leave',
+          name: '旧表单',
+          version: 1,
+          schema: [
+            {
+              id: 'time',
+              type: 'span_layout',
+              label: '请假时间',
+              children: [
+                { id: 'start', type: 'date', label: '开始时间', props: { required: true } },
+                { id: 'end', type: 'date', label: '结束时间', props: { required: true } },
+              ],
+            },
+            { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+          ],
+        });
+      }
+      if (url.includes('/api/mobile/drafts') && init?.method === 'POST') {
+        return jsonResponse(102);
+      }
+      return jsonResponse({});
+    });
+
+    renderForm();
+
+    expect(await screen.findByRole('heading', { name: '旧表单' })).toBeInTheDocument();
+    expect(screen.getByText('1 个业务分区')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '表单内容' })).toBeInTheDocument();
+    expect(screen.getByLabelText('开始时间')).toBeInTheDocument();
+    expect(screen.getByLabelText('请假事由')).toBeInTheDocument();
+  });
+
+  it('marks section error counts and scrolls to the first invalid field on submit', async () => {
+    renderForm();
+
+    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
+
+    expect(await screen.findByText('请填写开始时间')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '请假时间，2 项需补充' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '请假事由，1 项需补充' })).toBeInTheDocument();
+  });
+
+  it('continues to the existing self-select or confirm flow after full-form validation succeeds', async () => {
     renderForm();
 
     await userEvent.type(await screen.findByLabelText('开始时间'), '2026-07-30');
     await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
-    await userEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await userEvent.type(inputByLabel('请假事由'), '回家探亲');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
-    expect(await screen.findByText('请填写请假事由')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /2\. 请假事由/ })).toHaveAttribute('aria-current', 'step');
+    expect(await screen.findByText('确认提交目标页')).toBeInTheDocument();
   });
 });

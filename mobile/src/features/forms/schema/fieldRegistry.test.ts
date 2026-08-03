@@ -6,9 +6,10 @@ describe('mobile field registry', () => {
   it('registers exactly the supported mobile field types once', () => {
     const typeCodes = registeredFields.map((field) => field.type);
 
-    expect(typeCodes).toHaveLength(20);
+    expect(typeCodes).toHaveLength(21);
     expect(new Set(typeCodes).size).toBe(typeCodes.length);
     expect(typeCodes).toEqual([
+      'section',
       'text',
       'textarea',
       'number',
@@ -93,6 +94,24 @@ describe('mobile field registry', () => {
 
     expect(errors).toEqual({ reason: '请填写请假事由' });
     expect(errors.layout).toBeUndefined();
+  });
+
+  it('keys section child validation errors by child field id', () => {
+    const schema: MobileSchemaNode[] = [
+      {
+        id: 'business',
+        type: 'section',
+        label: '业务信息',
+        children: [
+          { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+        ],
+      },
+    ];
+
+    const errors = validateSchemaValues(schema, { reason: '' });
+
+    expect(errors).toEqual({ reason: '请填写请假事由' });
+    expect(errors.business).toBeUndefined();
   });
 
   it('rejects malformed optional picker values while allowing empty optional values', () => {

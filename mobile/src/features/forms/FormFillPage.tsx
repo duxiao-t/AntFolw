@@ -7,8 +7,6 @@ import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { useAuthStore } from "../auth/auth.store";
 import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
-import { FormStepHeader } from "./components/FormStepHeader";
-import { FormNextStepHint, FormStepNavigator } from "./components/FormStepNavigator";
 import {
   createMobileDraft,
   fetchMobileDraft,
@@ -28,7 +26,7 @@ import {
   type RecoveryDraftWriter,
 } from "./recoveryDraft.store";
 import { validateSchemaValues } from "./schema/fieldRegistry";
-import { buildFormStepGroups } from "./schema/stepGroups";
+import { buildFormSections } from "./schema/sections";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
 import { fetchReworkTask, saveReworkTask } from "./rework.api";
@@ -45,8 +43,6 @@ export function FormFillPage() {
   const [values, setValues] = useState<MobileFormValues>({});
   const [initialValues, setInitialValues] = useState<MobileFormValues>({});
   const [errors, setErrors] = useState<FieldValidationErrors>({});
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [completedStepIds, setCompletedStepIds] = useState<Set<string>>(() => new Set());
   const [initialized, setInitialized] = useState(false);
   const [status, setStatus] = useState("");
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
@@ -172,14 +168,11 @@ export function FormFillPage() {
   const schema = formQuery.data?.schema ?? [];
   const process = formQuery.data?.process;
   const formSchema = formSchemaWithoutSelfSelectRules(schema);
-  const stepGroups = buildFormStepGroups(formSchema, values);
-  const currentStep = stepGroups[Math.min(currentStepIndex, Math.max(stepGroups.length - 1, 0))];
-  const currentStepErrors = currentStep ? pickErrors(errors, currentStep.fieldIds) : {};
-  const stepErrorCounts = errorCountsByStep(stepGroups, errors);
+  const sections = buildFormSections(formSchema, values);
+  const sectionErrorCounts = errorCountsBySection(sections, errors);
   const title = formQuery.data?.name ?? "表单填写";
-  const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
-  const hasSelfSelect = findSelfSelectRules(process).length > 0;
   const description = typeof formQuery.data?.description === "string" ? formQuery.data.description : "";
+  const fieldMode = draftQuery.data?.readOnly ? "readonly" : "fill";
 
   if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)
     || (reworkTaskId != null && reworkQuery.isPending)) {
@@ -195,65 +188,85 @@ export function FormFillPage() {
       title="填写表单"
       onBack={() => navigateBack(navigate)}
       contentClassName="form-fill-page"
-      action={
-        <button type="button" className="app-bar__action" disabled={saveMutation.isPending} onClick={() => saveDraft()}>{saveMutation.isPending ? "保存中" : reworkTaskId ? "保存" : "草稿"}</button>
-      }
     >
-      <div>
-        <FormStepHeader
-          title={title}
-          description={currentStep?.description ?? currentStep?.title ?? description}
-          currentIndex={currentStepIndex}
-          total={stepGroups.length}
-          completedCount={completedStepIds.size}
-          fieldCount={currentStep?.fieldIds.length ?? 0}
-          sectionLabel={currentStep?.title}
-          autosaveLabel={status || undefined}
-        >
-          <FormStepNavigator
-            groups={stepGroups}
-            currentIndex={currentStepIndex}
-            completedStepIds={completedStepIds}
-            errorCounts={stepErrorCounts}
-            onSelect={setCurrentStepIndex}
-          />
-        </FormStepHeader>
-        <FormNextStepHint
-          groups={stepGroups}
-          currentIndex={currentStepIndex}
-          errorCounts={stepErrorCounts}
-          finalTitle={hasSelfSelect ? "下一步：审批人确认" : undefined}
-          finalHint={hasSelfSelect ? "表单填写完成后，选择审批人与抄送人。" : undefined}
-        />
-        <section className="af-card--form form-main-card">
-          <DynamicFormRenderer
-            schema={currentStep?.nodes ?? []}
-            values={values}
-            mode={draftQuery.data?.readOnly ? "readonly" : "fill"}
-            errors={currentStepErrors}
-            onValueChange={(fieldId, value) => {
-              setValues((current) => ({ ...current, [fieldId]: value }));
-              setErrors((current) => {
-                const next = { ...current };
-                delete next[fieldId];
-                return next;
-              });
-              setStatus("");
-            }}
-          />
+      <div className="form-fill-page__body">
+        <section className="form-fill-intro" aria-label="表单说明">
+          <div className="form-fill-intro__kicker">
+            <span>{sections.length} 个业务分区</span>
+            {status ? <span>{status}</span> : null}
+          </div>
+          <h2>{title}</h2>
+          {description ? <p>{description}</p> : <p>请按分区填写内容，带 * 为必填项。</p>}
         </section>
+
+        <nav className="section-anchor-nav" aria-label="业务分区导航">
+          {sections.map((section, index) => {
+            const errorCount = sectionErrorCounts[section.id] ?? 0;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                className={`section-anchor${errorCount > 0 ? " section-anchor--error" : ""}`}
+                aria-label={`${section.title}${errorCount > 0 ? `，${errorCount} 项需补充` : ""}`}
+                onClick={() => scrollToSection(section.id)}
+              >
+                <span>{index + 1}</span>
+                <strong>{section.title}</strong>
+                {errorCount > 0 ? <em>{errorCount}</em> : null}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="form-section-stack">
+          {sections.map((section, index) => {
+            const sectionErrors = pickErrors(errors, section.fieldIds);
+            const errorCount = sectionErrorCounts[section.id] ?? 0;
+            return (
+              <section
+                key={section.id}
+                className={`af-card--form business-section-card${errorCount > 0 ? " business-section-card--error" : ""}`}
+                data-section-id={section.id}
+                aria-labelledby={`form-section-${section.id}`}
+              >
+                <header className="business-section-card__head">
+                  <div>
+                    <span>分区 {index + 1}</span>
+                    <h3 id={`form-section-${section.id}`}>{section.title}</h3>
+                    {section.description ? <small>{section.description}</small> : null}
+                  </div>
+                  {errorCount > 0 ? <strong>{errorCount} 项需补充</strong> : null}
+                </header>
+                <div className="business-section-card__body">
+                  {section.nodes.length > 0 ? (
+                    <DynamicFormRenderer
+                      schema={section.nodes}
+                      values={values}
+                      mode={fieldMode}
+                      errors={sectionErrors}
+                      onValueChange={handleValueChange}
+                    />
+                  ) : (
+                    <p className="af-empty-text">暂无可填写内容</p>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </div>
 
       <div className="action-bar form-fill-action-bar">
         <button
           type="button"
           className="btn btn--ghost btn--lg"
-          onClick={() => currentStepIndex > 0 ? setCurrentStepIndex((index) => index - 1) : navigateBack(navigate)}
+          disabled={saveMutation.isPending}
+          onClick={() => saveDraft()}
         >
-          上一步
+          {saveMutation.isPending ? "保存中" : reworkTaskId ? "保存原单" : "保存草稿"}
         </button>
-        <button type="button" className="btn btn--success btn--lg" onClick={goNext}>
-          {workflowEnabled ? "下一步" : "提交"}
+        <button type="button" className="btn btn--success btn--lg" onClick={submitForm}>
+          提交
         </button>
       </div>
 
@@ -289,33 +302,20 @@ export function FormFillPage() {
     void saveMutation.mutateAsync();
   }
 
-  function goNext() {
-    const currentErrors = validateSchemaValues(currentStep?.nodes ?? [], values);
-    if (Object.keys(currentErrors).length > 0) {
-      setErrors((existing) => ({ ...existing, ...currentErrors }));
-      showToast({ icon: "fail", content: "请先完善当前步骤" });
-      scrollToFirstError(currentErrors);
-      return;
-    }
+  function handleValueChange(fieldId: string, value: unknown) {
+    setValues((current) => ({ ...current, [fieldId]: value }));
+    setErrors((current) => {
+      const next = { ...current };
+      delete next[fieldId];
+      return next;
+    });
+    setStatus("");
+  }
 
-    if (currentStep) {
-      setCompletedStepIds((existing) => new Set(existing).add(currentStep.id));
-    }
-
-    if (currentStepIndex < stepGroups.length - 1) {
-      setCurrentStepIndex((index) => index + 1);
-      return;
-    }
-
+  function submitForm() {
     const nextErrors = validateSchemaValues(formSchema, values);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
-      const firstErrorStepIndex = stepGroups.findIndex((group) =>
-        group.fieldIds.some((fieldId) => Boolean(nextErrors[fieldId])),
-      );
-      if (firstErrorStepIndex >= 0) {
-        setCurrentStepIndex(firstErrorStepIndex);
-      }
       showToast({ icon: "fail", content: "请完善必填或格式错误字段" });
       scrollToFirstError(nextErrors);
       return;
@@ -339,7 +339,7 @@ function pickErrors(errors: FieldValidationErrors, fieldIds: string[]): FieldVal
   }, {});
 }
 
-function errorCountsByStep(
+function errorCountsBySection(
   groups: Array<{ id: string; fieldIds: string[] }>,
   errors: FieldValidationErrors,
 ): Record<string, number> {
@@ -348,6 +348,14 @@ function errorCountsByStep(
     if (count > 0) next[group.id] = count;
     return next;
   }, {});
+}
+
+function scrollToSection(sectionId: string) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const target = document.querySelector(`[data-section-id="${escapeCssIdent(sectionId)}"]`);
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function scrollToFirstError(errors: FieldValidationErrors) {

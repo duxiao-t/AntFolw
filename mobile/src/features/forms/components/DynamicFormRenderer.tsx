@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import { getFieldDefinition } from '../schema/fieldRegistry';
 import { isVisibleNode } from '../schema/validators';
 import type {
@@ -16,11 +15,6 @@ export type DynamicFormRendererProps = {
   onValueChange: (fieldId: string, value: unknown) => void;
 };
 
-const rendererStyle: CSSProperties = {
-  display: 'grid',
-  gap: 2,
-};
-
 export function DynamicFormRenderer({
   schema,
   values,
@@ -36,7 +30,7 @@ export function DynamicFormRenderer({
       const definition = getFieldDefinition(node.type);
       const FieldComponent = definition.Component;
       return [
-        <div key={node.id} data-field-id={node.id}>
+        <div key={node.id} className="af-form-renderer__item" data-field-id={node.id}>
           <FieldComponent
             node={node}
             value={values[node.id]}
@@ -51,7 +45,7 @@ export function DynamicFormRenderer({
     });
   }
 
-  return <div style={rendererStyle}>{renderNodes(schema)}</div>;
+  return <div className="af-form-renderer">{renderNodes(schema)}</div>;
 }
 
 export default DynamicFormRenderer;
