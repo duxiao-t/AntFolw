@@ -6,7 +6,6 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import {
   AlignLeftOutlined,
@@ -484,7 +483,7 @@ export function FormDesignerSurface({
             <Inspector />
           </aside>
         </div>
-        <DragOverlay modifiers={[restrictToVerticalAxis]} dropAnimation={null}>
+        <DragOverlay dropAnimation={null}>
           {activeDrag ? (
             <div className="form-designer__drag-preview">
               <DragPreview drag={activeDrag} />
