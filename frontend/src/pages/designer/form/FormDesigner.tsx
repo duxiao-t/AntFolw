@@ -399,8 +399,8 @@ export function FormDesignerSurface({
     '--form-designer-primary-bg': token.colorPrimaryBg,
     '--form-designer-danger': token.colorError,
     '--form-designer-shadow': token.boxShadowSecondary,
-    height: embedded ? 'calc(100vh - 260px)' : '100vh',
-    minHeight: embedded ? 560 : undefined,
+    height: embedded ? '100%' : 'calc(100vh - 120px)',
+    minHeight: embedded ? 480 : undefined,
   } as React.CSSProperties;
 
   const sensors = useSensors(

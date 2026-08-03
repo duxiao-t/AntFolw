@@ -1,4 +1,3 @@
-import { PageContainer } from '@ant-design/pro-components';
 import {
   Alert,
   Button,
@@ -9,7 +8,6 @@ import {
   List,
   Modal,
   Space,
-  Steps,
   Switch,
   Tag,
   message,
@@ -566,21 +564,76 @@ export default function FormManagementWizard() {
     );
   };
 
+  const prevStep = current > 0 ? steps[current - 1] : null;
+  const nextStep = current < steps.length - 1 ? steps[current + 1] : null;
+
+  const renderStepNav = () => (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'flex-end',
+        gap: 12,
+        padding: '14px 0 4px',
+        flex: '0 0 auto',
+      }}
+    >
+      {prevStep ? (
+        <Button onClick={() => goStep(prevStep.key)}>上一步</Button>
+      ) : null}
+      {nextStep ? (
+        <Button type="primary" onClick={() => goStep(nextStep.key)}>
+          下一步
+        </Button>
+      ) : null}
+    </div>
+  );
+
   return (
-    <PageContainer title={false}>
-      <Card style={{ marginBottom: 16 }}>
-        <Steps
-          current={current}
-          items={steps}
-          onChange={(index) => {
-            if (formId) goStep(steps[index].key);
-          }}
-        />
-      </Card>
+    <div
+      className="form-management-wizard"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: 'calc(100vh - 120px)',
+        padding: '16px 20px 8px',
+        gap: 12,
+        boxSizing: 'border-box',
+      }}
+    >
       {currentKey === 'basic' && renderBasic()}
-      {currentKey === 'designer' && formId && <FormDesignerSurface formId={formId} embedded onSaved={() => qc.invalidateQueries({ queryKey: ['form-management-definition'] })} />}
-      {currentKey === 'process' && workflowEnabled && formId && <ProcessDesignerSurface formDefId={formId} embedded onSaved={() => qc.invalidateQueries({ queryKey: ['form-management-process'] })} />}
+      {currentKey === 'designer' && formId && (
+        <>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <FormDesignerSurface
+              formId={formId}
+              embedded
+              onSaved={() =>
+                qc.invalidateQueries({
+                  queryKey: ['form-management-definition'],
+                })
+              }
+            />
+          </div>
+          {renderStepNav()}
+        </>
+      )}
+      {currentKey === 'process' && workflowEnabled && formId && (
+        <>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ProcessDesignerSurface
+              formDefId={formId}
+              embedded
+              onSaved={() =>
+                qc.invalidateQueries({
+                  queryKey: ['form-management-process'],
+                })
+              }
+            />
+          </div>
+          {renderStepNav()}
+        </>
+      )}
       {currentKey === 'publish' && renderPublish()}
-    </PageContainer>
+    </div>
   );
 }
