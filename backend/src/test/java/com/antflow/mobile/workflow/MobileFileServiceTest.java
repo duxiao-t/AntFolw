@@ -25,6 +25,7 @@ class MobileFileServiceTest {
     private MobileFileMapper fileMapper;
     private MobileFileAccessMapper accessMapper;
     private CapturingStorage storage;
+    private MediaWatermarkProcessor processor;
     private MobileFileService service;
 
     @BeforeEach
@@ -32,10 +33,11 @@ class MobileFileServiceTest {
         fileMapper = Mockito.mock(MobileFileMapper.class);
         accessMapper = Mockito.mock(MobileFileAccessMapper.class);
         storage = new CapturingStorage();
+        processor = Mockito.mock(MediaWatermarkProcessor.class);
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
         properties.setAllowedTypes(List.of("image/jpeg", "image/png", "application/pdf"));
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
     }
 
     @Test
@@ -52,7 +54,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4L);
         properties.setAllowedTypes(List.of("image/png"));
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
         MockMultipartFile file = pngFile("large.png", new byte[] {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D
         });
@@ -93,6 +95,71 @@ class MobileFileServiceTest {
             .isInstanceOf(BizException.class)
             .hasMessageContaining("unsupported file content");
         assertThat(storage.putCount).isZero();
+    }
+
+    @Test
+    void uploadRejectsOversizedVideo() {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxBytes(10L * 1024 * 1024);
+        properties.setMaxVideoBytes(8L);
+        properties.setAllowedTypes(List.of("video/mp4"));
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+
+        MockMultipartFile file = new MockMultipartFile("file", "clip.mp4", "video/mp4", new byte[9]);
+
+        assertThatThrownBy(() -> service.upload(file, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("file is too large");
+        assertThat(storage.putCount).isZero();
+    }
+
+    @Test
+    void uploadAcceptsMp4Video() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setAllowedTypes(List.of("video/mp4"));
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+
+        byte[] content = mp4Bytes();
+        MobileFileDto dto = service.upload(
+            new MockMultipartFile("file", "clip.mp4", "video/mp4", content), 7L);
+
+        assertThat(dto.contentType()).isEqualTo("video/mp4");
+        assertThat(dto.name()).isEqualTo("clip.mp4");
+        assertThat(storage.contentBytes).isEqualTo(content);
+        assertThat(storage.contentType).isEqualTo("video/mp4");
+    }
+
+    @Test
+    void uploadAppliesWatermarkForVideoAndRenamesToMp4() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setAllowedTypes(List.of("video/quicktime"));
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(processor.apply(Mockito.any(), Mockito.eq("video/quicktime"), Mockito.eq("AntFlow")))
+            .thenReturn(new byte[] {1, 2, 3});
+        Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+
+        MobileFileDto dto = service.upload(
+            new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()), 7L, true, "AntFlow");
+
+        assertThat(dto.contentType()).isEqualTo("video/mp4");
+        assertThat(dto.name()).isEqualTo("clip.mp4");
+        assertThat(storage.contentBytes).isEqualTo(new byte[] {1, 2, 3});
+        assertThat(storage.contentType).isEqualTo("video/mp4");
+    }
+
+    @Test
+    void uploadSkipsWatermarkWhenTextIsBlank() throws Exception {
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+
+        byte[] content = pngBytes();
+        MobileFileDto dto = service.upload(pngFile("logo.png", content), 7L, true, "  ");
+
+        assertThat(storage.contentBytes).isEqualTo(content);
+        Mockito.verify(processor, Mockito.never()).apply(Mockito.any(), Mockito.any(), Mockito.any());
     }
 
     @Test
@@ -201,6 +268,20 @@ class MobileFileServiceTest {
         } catch (IOException exception) {
             throw new IllegalStateException("could not create test png", exception);
         }
+    }
+
+    private static byte[] mp4Bytes() {
+        return new byte[] {
+            0, 0, 0, 20, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0,
+            'i', 's', 'o', 'm'
+        };
+    }
+
+    private static byte[] movBytes() {
+        return new byte[] {
+            0, 0, 0, 20, 'f', 't', 'y', 'p', 'q', 't', ' ', ' ', 0, 0, 0, 0,
+            'q', 't', ' ', ' '
+        };
     }
 
     private static byte[] pdfBytes() {

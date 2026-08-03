@@ -30,13 +30,26 @@ public class MobileFileService {
     private final MobileFileAccessMapper accessMapper;
     private final FileStorage storage;
     private final MobileFileProperties properties;
+    private final MediaWatermarkProcessor watermarkProcessor;
 
     @Transactional(rollbackFor = Exception.class)
     public MobileFileDto upload(MultipartFile file, long ownerId) {
+        return upload(file, ownerId, false, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public MobileFileDto upload(MultipartFile file, long ownerId, boolean watermark, String watermarkText) {
         validateBasic(file);
         byte[] content = readAllBytes(file);
         String submittedContentType = normalize(file.getContentType());
         validateContent(submittedContentType, content);
+        boolean watermarked = false;
+        String watermarkLabel = watermarkText == null ? "" : watermarkText.trim();
+        if (watermark && watermarkProcessor.supports(submittedContentType) && !watermarkLabel.isEmpty()) {
+            content = watermarkProcessor.apply(content, submittedContentType, watermarkLabel);
+            submittedContentType = watermarkProcessor.resultContentType(submittedContentType);
+            watermarked = true;
+        }
         String sha256 = sha256(content);
         MobileFile existing = fileMapper.selectOne(new QueryWrapper<MobileFile>()
             .eq("owner_id", ownerId)
@@ -50,6 +63,9 @@ public class MobileFileService {
 
         UUID id = UUID.randomUUID();
         String originalName = sanitizeName(file.getOriginalFilename());
+        if (watermarked && submittedContentType.startsWith("video/")) {
+            originalName = toMp4Name(originalName);
+        }
         String storageKey = ownerId + "/" + id + "-" + originalName;
         writeStorageObject(storageKey, content, submittedContentType);
 
@@ -113,6 +129,10 @@ public class MobileFileService {
         if (!properties.getAllowedTypes().contains(contentType)) {
             throw new BizException("BAD_FILE", "unsupported content type");
         }
+        long limit = contentType.startsWith("video/") ? properties.getMaxVideoBytes() : properties.getMaxBytes();
+        if (file.getSize() > limit) {
+            throw new BizException("BAD_FILE", "file is too large");
+        }
     }
 
     private byte[] readAllBytes(MultipartFile file) {
@@ -161,6 +181,21 @@ public class MobileFileService {
         }
         if (startsWith(content, "%PDF-".getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
             return "application/pdf";
+        }
+        if (content.length >= 12
+            && matchesAt(content, "ftyp".getBytes(java.nio.charset.StandardCharsets.US_ASCII), 4)) {
+            String brand = new String(content, 8, 4, java.nio.charset.StandardCharsets.US_ASCII)
+                .toLowerCase(Locale.ROOT);
+            if (brand.startsWith("qt")) {
+                return "video/quicktime";
+            }
+            if (brand.startsWith("3gp")) {
+                return "video/3gpp";
+            }
+            return "video/mp4";
+        }
+        if (startsWith(content, new byte[] {0x1A, 0x45, (byte) 0xDF, (byte) 0xA3})) {
+            return "video/webm";
         }
         return null;
     }
@@ -218,6 +253,14 @@ public class MobileFileService {
 
     private static String normalize(String contentType) {
         return contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String toMp4Name(String name) {
+        int dot = name.lastIndexOf('.');
+        if (dot > 0 && dot < name.length() - 1) {
+            return name.substring(0, dot) + ".mp4";
+        }
+        return name + ".mp4";
     }
 
     private static String sanitizeName(String originalName) {

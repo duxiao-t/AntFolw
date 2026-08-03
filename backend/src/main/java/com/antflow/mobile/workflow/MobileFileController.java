@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -26,9 +27,12 @@ public class MobileFileController {
     private final MobileFileService fileService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public MobileFileDto upload(@RequestPart("file") MultipartFile file) {
+    public MobileFileDto upload(
+        @RequestPart("file") MultipartFile file,
+        @RequestParam(name = "watermark", defaultValue = "false") boolean watermark,
+        @RequestParam(name = "watermarkText", required = false) String watermarkText) {
         PrincipalHolder.Principal principal = principal();
-        return fileService.upload(file, principal.userId());
+        return fileService.upload(file, principal.userId(), watermark, watermarkText);
     }
 
     @GetMapping("/{id}")
