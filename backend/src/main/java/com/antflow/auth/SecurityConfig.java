@@ -33,7 +33,7 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> {
                 CorsConfiguration corsConfiguration = new CorsConfiguration();
-                corsConfiguration.setAllowedOrigins(corsProperties.getAllowedOrigins());
+                corsConfiguration.setAllowedOriginPatterns(corsProperties.getAllowedOriginPatterns());
                 corsConfiguration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
                 corsConfiguration.setAllowedHeaders(List.of("*"));
                 corsConfiguration.setAllowCredentials(true);
