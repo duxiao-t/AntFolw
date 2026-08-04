@@ -137,9 +137,8 @@ public class MobileFileService {
     }
 
     private void validateContent(String submittedContentType, byte[] content) {
-        if (hasExecutableSignature(content)) {
-            throw new BizException("BAD_FILE", "unsupported file content");
-        }
+        // Attachments accept arbitrary formats (including executables such as
+        // .dll/.exe), so no signature-based rejection is applied here.
         if (submittedContentType.startsWith("image/")) {
             validateImageContent(submittedContentType, content);
         } else if (submittedContentType.startsWith("video/")) {
@@ -159,10 +158,6 @@ public class MobileFileService {
         // any image/* payload; the executable-signature check already ran.
     }
 
-    private static boolean hasExecutableSignature(byte[] content) {
-        return startsWith(content, new byte[] {0x4D, 0x5A})
-            || startsWith(content, new byte[] {0x7F, 0x45, 0x4C, 0x46});
-    }
 
     private static String detectContentType(byte[] content) {
         if (startsWith(content, new byte[] {

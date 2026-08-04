@@ -64,14 +64,18 @@ class MobileFileServiceTest {
     }
 
     @Test
-    void uploadRejectsExecutableSignature() {
-        MockMultipartFile file = new MockMultipartFile("file", "run.png", "image/png", new byte[] {
-            0x4D, 0x5A, 0x00, 0x00
-        });
+    void uploadAcceptsExecutableAsAttachment() throws Exception {
+        // .dll/.exe attachments are allowed; only the MZ header is required.
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
-        assertThatThrownBy(() -> service.upload(file, 7L))
-            .isInstanceOf(BizException.class)
-            .hasMessageContaining("unsupported file content");
+        byte[] content = new byte[] {0x4D, 0x5A, 0x00, 0x00};
+        MobileFileDto dto = service.upload(
+            new MockMultipartFile("file", "aida_bench64.dll", "application/x-msdownload", content), 7L);
+
+        assertThat(dto.contentType()).isEqualTo("application/x-msdownload");
+        assertThat(dto.name()).isEqualTo("aida_bench64.dll");
+        assertThat(storage.contentBytes).isEqualTo(content);
+        assertThat(storage.storageKey).startsWith("file/");
     }
 
     @Test
