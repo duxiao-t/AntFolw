@@ -11,7 +11,7 @@ export function ImageUploadField(props: MobileFieldProps) {
         ...props.node,
         props: {
           ...props.node.props,
-          accept: props.node.props?.accept ?? DEFAULT_IMAGE_ACCEPT,
+          accept: 'image/*',
           preview: props.node.props?.preview ?? true,
           multiple: true,
           maxCount: props.node.props?.maxCount ?? 20,
