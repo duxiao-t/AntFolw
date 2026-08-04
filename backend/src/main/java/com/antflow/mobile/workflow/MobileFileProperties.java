@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "antflow.mobile.files")
 public class MobileFileProperties {
     private String storage = "minio";
-    private long maxBytes = 10L * 1024 * 1024;
+    private long maxBytes = 100L * 1024 * 1024;
     private long maxVideoBytes = 100L * 1024 * 1024;
     private Minio minio = new Minio();
 
