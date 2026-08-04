@@ -1,7 +1,8 @@
-import { PageContainer, ProTable } from '@ant-design/pro-components';
-import { Button, Space, Tag } from 'antd';
+import { PageContainer, ProTable, type ActionType } from '@ant-design/pro-components';
+import { App, Button, Popconfirm, Space, Tag } from 'antd';
 import { ApartmentOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { history, request } from '@umijs/max';
+import { useRef } from 'react';
 
 type FormDefinition = {
   id: number;
@@ -39,9 +40,33 @@ function isWorkflowEnabled(settings: FormDefinition['settings']) {
 }
 
 export default function FormManagementList() {
+  const actionRef = useRef<ActionType | undefined>(undefined);
+  const { message } = App.useApp();
+
+  const handleDelete = async (record: FormDefinition) => {
+    try {
+      await request(`/api/forms/definitions/${record.id}`, { method: 'DELETE' });
+      message.success('已删除');
+      actionRef.current?.reload();
+    } catch (error: any) {
+      message.error(error?.message ?? '删除失败');
+    }
+  };
+
+  const handleDisable = async (record: FormDefinition) => {
+    try {
+      await request(`/api/forms/definitions/${record.id}/disable`, { method: 'POST' });
+      message.success('已停用');
+      actionRef.current?.reload();
+    } catch (error: any) {
+      message.error(error?.message ?? '停用失败');
+    }
+  };
+
   return (
     <PageContainer title={false}>
       <ProTable<FormDefinition>
+        actionRef={actionRef}
         rowKey="id"
         columns={[
           { title: '表单名称', dataIndex: 'name' },
@@ -70,14 +95,42 @@ export default function FormManagementList() {
           {
             title: '操作',
             key: 'op',
-            width: 220,
-            render: (_, record) => (
-              <Space>
-                <a onClick={() => history.push(`/approval/forms/${record.id}/wizard?step=basic`)}>编辑</a>
-                <a onClick={() => history.push(`/approval/forms/${record.id}/wizard?step=publish`)}>发布</a>
-                <a onClick={() => history.push(`/approval/form-data?formDefId=${record.id}`)}>数据</a>
-              </Space>
-            ),
+            width: 260,
+            render: (_, record) => {
+              const deprecated = record.status === 'DEPRECATED';
+              return (
+                <Space>
+                  <a onClick={() => history.push(`/approval/forms/${record.id}/wizard?step=basic`)}>编辑</a>
+                  <Popconfirm
+                    title="确认停用该表单？"
+                    description="停用后表单将不再可发起填报。"
+                    okText="停用"
+                    okButtonProps={{ danger: true }}
+                    disabled={deprecated}
+                    onConfirm={() => handleDisable(record)}
+                  >
+                    <a
+                      style={{
+                        color: deprecated ? 'rgba(0, 0, 0, 0.25)' : undefined,
+                        cursor: deprecated ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {deprecated ? '已停用' : '停用'}
+                    </a>
+                  </Popconfirm>
+                  <Popconfirm
+                    title="确认删除该表单？"
+                    description="删除后列表不再展示，历史提交数据仍会保留。"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => handleDelete(record)}
+                  >
+                    <a style={{ color: '#ff4d4f' }}>删除</a>
+                  </Popconfirm>
+                  <a onClick={() => history.push(`/approval/form-data?formDefId=${record.id}`)}>数据</a>
+                </Space>
+              );
+            },
           },
         ]}
         request={async (params) => {
