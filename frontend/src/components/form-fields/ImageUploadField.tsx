@@ -61,7 +61,7 @@ export const ImageUploadField: FieldType = {
         <Upload
           disabled={mode !== 'runtime-fill'}
           multiple
-          accept={node.props?.accept ?? DEFAULT_ACCEPT}
+          accept="image/*"
           maxCount={maxCount}
           listType="picture"
           fileList={
