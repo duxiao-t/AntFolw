@@ -1106,8 +1106,8 @@ function renderComponentSettings(
       const checklistResults = Array.isArray(props.results) && props.results.length >= 2
         ? props.results
         : [
-            { id: 'normal', label: '正常' },
-            { id: 'abnormal', label: '异常' },
+            { id: 'pass', label: '通过' },
+            { id: 'fail', label: '不通过' },
             { id: 'na', label: '不适用' },
           ];
       const descMap = props.descriptionRequiredByResult ?? {};

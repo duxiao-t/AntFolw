@@ -16,8 +16,8 @@ function resultsOf(node: any) {
   const results = node.props?.results;
   if (!Array.isArray(results) || results.length === 0) {
     return [
-      { id: 'normal', label: '正常' },
-      { id: 'abnormal', label: '异常' },
+      { id: 'pass', label: '通过' },
+      { id: 'fail', label: '不通过' },
       { id: 'na', label: '不适用' },
     ];
   }
@@ -38,12 +38,12 @@ export const ChecklistField: FieldType = {
       { id: 'item-2', label: '检查项2', required: true },
     ],
     results: [
-      { id: 'normal', label: '正常' },
-      { id: 'abnormal', label: '异常' },
+      { id: 'pass', label: '通过' },
+      { id: 'fail', label: '不通过' },
       { id: 'na', label: '不适用' },
     ],
     allowDescription: true,
-    descriptionRequiredByResult: { abnormal: true },
+    descriptionRequiredByResult: { fail: true },
     oneClick: true,
     photoMaxCount: 9,
   },
@@ -87,12 +87,12 @@ export const ChecklistField: FieldType = {
 
     const updateEntry = (itemId: string, patch: Record<string, any>) => {
       const next = entries.map((entry: any) =>
-        entry?.itemId === itemId ? { ...entry, ...patch } : entry,
+        entry?.id === itemId ? { ...entry, ...patch } : entry,
       );
-      const hasEntry = entries.some((entry: any) => entry?.itemId === itemId);
+      const hasEntry = entries.some((entry: any) => entry?.id === itemId);
       const final = hasEntry
         ? next
-        : [...next, { itemId, result: '', remark: '', photos: [], ...patch }];
+        : [...next, { id: itemId, name: '', status: '', description: '', images: [], ...patch }];
       onChange?.(final);
     };
 
@@ -112,10 +112,11 @@ export const ChecklistField: FieldType = {
                   size="small"
                   onClick={() => {
                     const next = items.map((item) => ({
-                      itemId: item.id,
-                      result: result.id,
-                      remark: '',
-                      photos: [],
+                      id: item.id,
+                      name: item.label,
+                      status: result.id,
+                      description: '',
+                      images: [],
                     }));
                     onChange?.(next);
                   }}
@@ -126,7 +127,7 @@ export const ChecklistField: FieldType = {
             </div>
           ) : null}
           {items.map((item) => {
-            const entry = entries.find((e: any) => e?.itemId === item.id);
+            const entry = entries.find((e: any) => e?.id === item.id);
             return (
               <div key={item.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, display: 'grid', gap: 8 }}>
                 <strong>
@@ -134,8 +135,8 @@ export const ChecklistField: FieldType = {
                   {item.required ? <span style={{ color: '#ff4d4f', marginLeft: 6 }}>*</span> : null}
                 </strong>
                 <Radio.Group
-                  value={entry?.result}
-                  onChange={(event) => updateEntry(item.id, { result: event.target.value })}
+                  value={entry?.status}
+                  onChange={(event) => updateEntry(item.id, { status: event.target.value })}
                 >
                   {results.map((result) => (
                     <Radio key={result.id} value={result.id}>
@@ -147,15 +148,15 @@ export const ChecklistField: FieldType = {
                   <>
                     <Input.TextArea
                       rows={2}
-                      placeholder="填写描述（异常原因、现场情况等）"
-                      value={entry?.remark}
-                      onChange={(event) => updateEntry(item.id, { remark: event.target.value })}
+                      placeholder="请输入描述"
+                      value={entry?.description}
+                      onChange={(event) => updateEntry(item.id, { description: event.target.value })}
                     />
                     <Upload
                       multiple
                       accept="image/*"
                       listType="picture"
-                      fileList={(entry?.photos ?? []).map((photo: any, index: number) => ({
+                      fileList={(entry?.images ?? []).map((photo: any, index: number) => ({
                         uid: photo.id ?? String(index),
                         name: photo.name ?? '照片',
                         status: 'done',
