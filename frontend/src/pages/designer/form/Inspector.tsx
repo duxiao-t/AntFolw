@@ -2,6 +2,7 @@ import {
   Button,
   Checkbox,
   Collapse,
+  Divider,
   Empty,
   Input,
   InputNumber,
@@ -179,7 +180,7 @@ function ChecklistItemsEditor({
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={8}>
       {normalized.map((item, index) => (
-        <Space.Compact key={item.id} style={{ width: '100%' }}>
+        <div key={item.id} className="checklist-config__row">
           <Input
             placeholder="检查内容"
             value={item.label}
@@ -193,10 +194,11 @@ function ChecklistItemsEditor({
           </Checkbox>
           <Button
             icon={<DeleteOutlined />}
+            size="small"
             aria-label="删除检查项"
             onClick={() => remove(index)}
           />
-        </Space.Compact>
+        </div>
       ))}
       <Space>
         <Button size="small" icon={<PlusOutlined />} onClick={add}>
@@ -1112,19 +1114,31 @@ function renderComponentSettings(
           ];
       const descMap = props.descriptionRequiredByResult ?? {};
       return (
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <PanelField label="检查项列表">
+        <Space
+          direction="vertical"
+          style={{ width: '100%' }}
+          size={16}
+          split={<Divider style={{ margin: 0 }} />}
+        >
+          <div className="checklist-config__section">
+            <div className="checklist-config__section-title">检查项</div>
             <ChecklistItemsEditor
               value={props.items}
               onChange={(items) => updateProps({ items })}
             />
-          </PanelField>
-          <PanelField label="结果选项（2~4 个，文字可自定义）">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+          </div>
+
+          <div className="checklist-config__section">
+            <div className="checklist-config__section-title">结果选项</div>
+            <Typography.Text type="secondary" className="checklist-config__hint">
+              2~4 个，文字可自定义；勾选「描述必填」的结果，填报时该项描述必须填写。
+            </Typography.Text>
+            <div className="checklist-config__rows">
               {checklistResults.map((result, index) => (
-                <Space.Compact key={result.id ?? index} style={{ width: '100%' }}>
+                <div key={result.id ?? index} className="checklist-config__row">
                   <Input
                     value={result.label ?? ''}
+                    placeholder={`结果${index + 1}`}
                     onChange={(event) => {
                       const next = [...checklistResults];
                       next[index] = { ...result, label: event.target.value };
@@ -1142,63 +1156,72 @@ function renderComponentSettings(
                       })
                     }
                   >
-                    选此项描述必填
+                    描述必填
                   </Checkbox>
                   <Button
                     icon={<MinusOutlined />}
+                    size="small"
                     disabled={checklistResults.length <= 2}
-                    aria-label="删除结果"
+                    aria-label={`删除结果${index + 1}`}
                     onClick={() =>
                       updateProps({
                         results: checklistResults.filter((_, itemIndex) => itemIndex !== index),
                       })
                     }
                   />
-                </Space.Compact>
+                </div>
               ))}
-              <Button
-                size="small"
-                icon={<PlusOutlined />}
-                disabled={checklistResults.length >= 4}
-                onClick={() =>
-                  updateProps({
-                    results: [
-                      ...checklistResults,
-                      {
-                        id: `result-${Date.now()}`,
-                        label: `结果${checklistResults.length + 1}`,
-                      },
-                    ],
-                  })
+            </div>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              disabled={checklistResults.length >= 4}
+              onClick={() =>
+                updateProps({
+                  results: [
+                    ...checklistResults,
+                    {
+                      id: `result-${Date.now()}`,
+                      label: `结果${checklistResults.length + 1}`,
+                    },
+                  ],
+                })
+              }
+            >
+              新增结果
+            </Button>
+          </div>
+
+          <div className="checklist-config__section">
+            <div className="checklist-config__section-title">通用设置</div>
+            <div className="checklist-config__rows">
+              <Checkbox
+                checked={props.allowDescription !== false}
+                onChange={(event) =>
+                  updateProps({ allowDescription: event.target.checked })
                 }
               >
-                新增结果
-              </Button>
-            </Space>
-          </PanelField>
-          <Checkbox
-            checked={props.allowDescription !== false}
-            onChange={(event) =>
-              updateProps({ allowDescription: event.target.checked })
-            }
-          >
-            允许填写图文描述（文字 + 现场照片）
-          </Checkbox>
-          <Checkbox
-            checked={props.oneClick !== false}
-            onChange={(event) => updateProps({ oneClick: event.target.checked })}
-          >
-            支持一键全部设为某结果
-          </Checkbox>
-          <PanelField label="每条现场照片最多">
-            <InputNumber
-              min={1}
-              max={20}
-              style={{ width: '100%' }}
-              value={props.photoMaxCount ?? 9}
-              onChange={(value) => updateProps({ photoMaxCount: value ?? 9 })}
-            />
-          </PanelField>
+                允许填写图文描述（文字 + 现场照片）
+              </Checkbox>
+              <Checkbox
+                checked={props.oneClick !== false}
+                onChange={(event) => updateProps({ oneClick: event.target.checked })}
+              >
+                支持一键全部设为某结果
+              </Checkbox>
+            </div>
+            <div className="checklist-config__inline-field">
+              <span>每条现场照片最多</span>
+              <InputNumber
+                min={1}
+                max={20}
+                size="small"
+                style={{ width: 96 }}
+                value={props.photoMaxCount ?? 9}
+                onChange={(value) => updateProps({ photoMaxCount: value ?? 9 })}
+              />
+            </div>
+          </div>
         </Space>
       );
     }
