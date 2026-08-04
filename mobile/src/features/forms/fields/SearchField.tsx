@@ -15,6 +15,7 @@ export function SearchField(props: MobileFieldProps) {
     >
       <Input
         id={props.node.id}
+        className="af-control"
         clearable
         type="search"
         placeholder={String(props.node.props?.placeholder ?? '搜索')}

@@ -18,6 +18,7 @@ export function NumberField(props: MobileFieldProps) {
         className="af-control"
         inputMode="decimal"
         type="number"
+        placeholder={String(props.node.props?.placeholder ?? '请输入')}
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}
       />

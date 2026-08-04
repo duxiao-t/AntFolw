@@ -17,6 +17,7 @@ export function TextareaField(props: MobileFieldProps) {
         id={props.node.id}
         className="af-control af-control--textarea"
         autoSize={{ minRows: 3, maxRows: 6 }}
+        placeholder={String(props.node.props?.placeholder ?? '请输入')}
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}
       />

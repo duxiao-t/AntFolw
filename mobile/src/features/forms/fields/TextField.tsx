@@ -17,6 +17,7 @@ export function TextField(props: MobileFieldProps) {
         id={props.node.id}
         className="af-control"
         clearable
+        placeholder={String(props.node.props?.placeholder ?? '请输入')}
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}
       />
