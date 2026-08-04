@@ -44,6 +44,14 @@ export default defineConfig({
    */
   hash: true,
 
+  /**
+   * 排除测试/类型声明文件，避免它们被当成页面路由编译
+   * （例如 login.test.tsx 引用 @@/requestRecordMock 会导致 dev 编译失败）
+   */
+  conventionRoutes: {
+    exclude: [/.test./, /.spec./, /.e2e./, /.d.ts$/],
+  },
+
   publicPath: PUBLIC_PATH,
 
   /**
