@@ -3629,31 +3629,81 @@ body {
   #root { max-width: none; box-shadow: none; }
 }
 
-/* 检查项组件 */
-.af-checklist { display: grid; gap: 12px; }
-.af-checklist__quick {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 10px; border-radius: var(--af-radius-control, 8px);
-  background: var(--af-color-fill, rgba(0,0,0,0.04)); font-size: 13px;
+
+/* 检查项组件（卡片式） */
+.af-checklist { display: flex; flex-direction: column; }
+.af-checklist__header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
 }
-.af-checklist__quick-btn {
-  border: 1px solid var(--af-color-border); border-radius: 999px;
-  background: var(--af-color-surface); color: var(--af-color-text);
-  padding: 2px 10px; font-size: 12px;
+.af-checklist__title { font-size: 20px; font-weight: 700; color: #1F1F1F; }
+.af-checklist__required { color: var(--af-color-danger, #D93025); margin-left: 4px; }
+.af-checklist__check-all {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: #5A6FA8; font-size: 15px; font-weight: 400;
 }
-.af-checklist__quick-btn:active { opacity: 0.7; }
-.af-checklist__item {
-  display: grid; gap: 8px; padding: 12px;
-  border: 1px solid var(--af-color-border); border-radius: var(--af-radius-control, 8px);
-  background: var(--af-color-surface);
+.af-checklist__error { color: var(--af-color-danger, #D93025); font-size: 13px; margin-bottom: 10px; }
+.af-checklist__list { display: flex; flex-direction: column; gap: 14px; }
+.af-checklist__empty { color: #9AA0A6; font-size: 14px; padding: 8px 0; }
+
+.af-check__card {
+  border-radius: 8px; overflow: hidden;
+  border: 2px solid #E5E6E8; background: #FFFFFF;
+  box-shadow: 0 1px 4px rgba(0,0,0,.03);
 }
-.af-checklist__item-head { display: flex; align-items: center; gap: 4px; }
-.af-checklist__required { color: var(--af-color-danger); }
-.af-checklist__results { display: flex; gap: 12px; flex-wrap: wrap; }
-.af-checklist__result {
+.af-check__card--pass { background: #E9F6EE; border-color: #22A052; box-shadow: 0 1px 6px rgba(34,160,82,.10); }
+.af-check__card--fail { background: #FBECEA; border-color: #D93025; box-shadow: 0 1px 6px rgba(217,48,37,.10); }
+.af-check__card--na   { background: #DBDBDB; border-color: #8F8F8F; box-shadow: 0 1px 6px rgba(143,143,143,.10); }
+
+.af-check__head {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 60px; padding: 0 16px; cursor: pointer;
+}
+.af-check__name { font-size: 16px; color: #1F1F1F; }
+
+/* 状态 A：未选中 — 三个图标按钮 + 竖线 */
+.af-check__actions { display: flex; align-items: center; }
+.af-check__actions-inner { display: flex; align-items: center; }
+.af-check__icon-btn {
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; padding: 0; cursor: pointer; color: #C4C7CC;
+}
+.af-check__icon-btn svg { width: 20px; height: 20px; }
+.af-check__icon-btn--pass:hover { color: #22A052; }
+.af-check__icon-btn--fail:hover { color: #D93025; }
+.af-check__icon-btn--na:hover { color: #666666; }
+.af-check__divider { width: 1px; height: 24px; background: #E2E3E5; }
+
+/* 已选中：状态图标 + 添加描述 */
+.af-check__status-area { display: flex; align-items: center; gap: 12px; }
+.af-check__status-icon {
+  background: none; border: none; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.af-check__status-icon svg { width: 22px; height: 22px; }
+.af-check__status-icon--pass { color: #22A052; }
+.af-check__status-icon--fail { color: #D93025; }
+.af-check__status-icon--na   { color: #666666; }
+.af-check__add-desc {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: #5A6FA8; font-size: 15px; font-weight: 400;
+}
+.af-check__text-btn { font-size: 14px; color: #5A6FA8; white-space: nowrap; }
+
+/* 展开描述区 */
+.af-check__detail { padding: 16px 16px 20px; background: #F7F8FA; }
+.af-check__card--pass .af-check__detail { border-top: 1px solid #22A052; }
+.af-check__card--fail .af-check__detail { border-top: 1px solid #D93025; }
+.af-check__card--na   .af-check__detail { border-top: 1px solid #8F8F8F; }
+.af-check__desc-input {
+  width: 100%; min-height: 80px; border: none; outline: none; resize: none;
+  background: transparent; font: inherit; font-size: 15px; color: #1F1F1F;
+}
+.af-check__desc-input::placeholder { color: #C0C4CC; }
+.af-check__upload-row { display: flex; gap: 24px; margin-top: 24px; }
+.af-check__upload-btn {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 14px; color: var(--af-color-text);
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: #5A6FA8; font-size: 15px;
 }
-.af-checklist__result input { accent-color: var(--af-color-primary, #1677ff); }
-.af-checklist__remark { min-height: 56px; }
-.af-checklist__empty { color: var(--af-color-muted); font-size: 13px; }
+.af-check__upload-btn svg { width: 18px; height: 18px; }

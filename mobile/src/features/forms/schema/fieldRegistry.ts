@@ -309,24 +309,24 @@ function validateChecklist(node: MobileSchemaNode, value: unknown) {
   const entries = entriesFromValue(value, items);
   const allowDescription = node.props?.allowDescription !== false;
   for (const item of items) {
-    const entry = entries.find((e) => e.itemId === item.id);
-    if (item.required && (!entry || !entry.result)) {
+    const entry = entries.find((e) => e.id === item.id);
+    if (item.required && (!entry || !entry.status)) {
       return `请完成检查项「${item.label}」`;
     }
-    if (allowDescription && entry?.result) {
+    if (allowDescription && entry?.status) {
       const map = node.props?.descriptionRequiredByResult;
       const required =
-        typeof map === 'object' && map != null && map[entry.result] === true;
+        typeof map === 'object' && map != null && map[entry.status] === true;
       if (
         required &&
-        !String(entry.remark ?? '').trim() &&
-        !(Array.isArray(entry.photos) && entry.photos.length > 0)
+        !String(entry.description ?? '').trim() &&
+        !(Array.isArray(entry.images) && entry.images.length > 0)
       ) {
         return `「${item.label}」的描述必填`;
       }
     }
   }
-  if (node.props?.required === true && !entries.some((e) => e.result)) {
+  if (node.props?.required === true && !entries.some((e) => e.status)) {
     return '请完成检查项';
   }
   return null;

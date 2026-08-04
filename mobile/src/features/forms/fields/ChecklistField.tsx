@@ -1,26 +1,85 @@
-import { ImageUploader, type ImageUploadItem } from 'antd-mobile';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Toast } from 'antd-mobile';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { MobileFileDto } from '../files.api';
-import { fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
-import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
+import { fieldError, fieldLabel, isRequired } from './fieldShared';
 
 export type ChecklistResultOption = { id: string; label: string };
 export type ChecklistItemDef = { id: string; label: string; required: boolean };
+
 export type ChecklistEntry = {
-  itemId: string;
-  result: string;
-  remark: string;
-  photos: MobileFileDto[];
+  id: string;
+  name: string;
+  status: string | null;
+  description: string;
+  images: MobileFileDto[];
 };
 
 export type ChecklistValue = ChecklistEntry[];
 
 const DEFAULT_RESULTS: ChecklistResultOption[] = [
-  { id: 'normal', label: '正常' },
-  { id: 'abnormal', label: '异常' },
+  { id: 'pass', label: '通过' },
+  { id: 'fail', label: '不通过' },
   { id: 'na', label: '不适用' },
 ];
+
+type Tone = 'pass' | 'fail' | 'na' | 'extra' | null;
+
+const iconProps = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+} as const;
+
+function IconPass() {
+  return (
+    <svg {...iconProps} role="img" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round">
+      <title>通过</title>
+      <path d="M4.5 12.5l5 5.5L19.5 6" />
+    </svg>
+  );
+}
+function IconFail() {
+  return (
+    <svg {...iconProps} role="img" strokeWidth={2.6} strokeLinecap="round">
+      <title>不通过</title>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+function IconNa() {
+  return (
+    <svg {...iconProps} role="img" strokeWidth={2.4} strokeLinecap="round">
+      <title>不适用</title>
+      <path d="M15.5 4.5l-7 15" />
+    </svg>
+  );
+}
+function IconCamera() {
+  return (
+    <svg {...iconProps} role="img" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <title>拍照</title>
+      <path d="M3.5 8.2a1.7 1.7 0 0 1 1.7-1.7h2.2l1.6-2.2a1 1 0 0 1 .8-.4h4.4a1 1 0 0 1 .8.4l1.6 2.2h2.2a1.7 1.7 0 0 1 1.7 1.7v9.1a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z" />
+      <circle cx="12" cy="12.6" r="3.4" />
+    </svg>
+  );
+}
+function IconImage() {
+  return (
+    <svg {...iconProps} role="img" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <title>相册上传</title>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M20.5 15.5l-4.8-4.8-8.2 8.2" />
+    </svg>
+  );
+}
+
+const TONE_ICONS: Record<string, () => ReactElement> = {
+  pass: IconPass,
+  fail: IconFail,
+  na: IconNa,
+};
 
 export function checklistItems(node: MobileSchemaNode): ChecklistItemDef[] {
   const items = node.props?.items;
@@ -53,251 +112,290 @@ export function checklistResults(node: MobileSchemaNode): ChecklistResultOption[
   return parsed.length >= 2 ? parsed : DEFAULT_RESULTS;
 }
 
+function toneOf(results: ChecklistResultOption[], status: string | null): Tone {
+  if (!status) return null;
+  const index = results.findIndex((result) => result.id === status);
+  if (index === 0) return 'pass';
+  if (index === 1) return 'fail';
+  if (index === 2) return 'na';
+  return index >= 3 ? 'extra' : null;
+}
+
+function descriptionRequired(node: MobileSchemaNode, resultId: string | null) {
+  if (!resultId) return false;
+  const map = node.props?.descriptionRequiredByResult;
+  return typeof map === 'object' && map != null && map[resultId] === true;
+}
 
 export function ChecklistField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const items = useMemo(() => checklistItems(props.node), [props.node]);
   const results = useMemo(() => checklistResults(props.node), [props.node]);
-  const allowDescription = props.node.props?.allowDescription !== false;
   const oneClick = props.node.props?.oneClick !== false;
-  const photoMaxCount =
-    typeof props.node.props?.photoMaxCount === 'number'
-      ? props.node.props.photoMaxCount
-      : 9;
-
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<ChecklistValue>(() => entriesFromValue(props.value, items));
 
   useEffect(() => {
     setEntries(entriesFromValue(props.value, items));
   }, [props.value, items]);
 
-  const updateItem = useCallback(
-    (itemId: string, patch: Partial<Omit<ChecklistEntry, 'itemId'>>) => {
-      setEntries((current) => {
-        const next = current.map((entry) =>
-          entry.itemId === itemId ? { ...entry, ...patch } : entry,
-        );
-        props.onValueChange(props.node.id, next);
-        return next;
-      });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.node.id, props.onValueChange],
-  );
+  const updateEntry = (id: string, patch: Partial<Omit<ChecklistEntry, 'id' | 'name'>>) => {
+    const next = entries.map((entry) =>
+      entry.id === id ? { ...entry, ...patch } : entry,
+    );
+    setEntries(next);
+    props.onValueChange(props.node.id, next);
+  };
 
-  const setAllResults = useCallback(
-    (resultId: string) => {
-      const next = entries.map((entry) => ({ ...entry, result: resultId }));
-      setEntries(next);
-      props.onValueChange(props.node.id, next);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries, props.node.id, props.onValueChange],
-  );
+  const setStatus = (id: string, status: string | null) => {
+    const next = entries.map((entry) =>
+      entry.id === id
+        ? { ...entry, status, description: status ? entry.description : '' }
+        : entry,
+    );
+    setEntries(next);
+    props.onValueChange(props.node.id, next);
+  };
+
+  const setAll = (resultId: string) => {
+    const next = entries.map((entry) => ({ ...entry, status: resultId }));
+    setEntries(next);
+    props.onValueChange(props.node.id, next);
+  };
 
   const error = fieldError(props);
+  const required = isRequired(props.node);
+
+  if (props.mode === 'readonly') {
+    return (
+      <div className="af-checklist">
+        <div className="af-checklist__header">
+          <strong className="af-checklist__title">{label}</strong>
+        </div>
+        <div className="af-checklist__list">{checklistSummary(props.node, props.value)}</div>
+      </div>
+    );
+  }
 
   return (
-    <FieldShell
-      node={props.node}
-      label={label}
-      required={isRequired(props.node)}
-      error={error}
-      summary={
-        props.mode === 'readonly' ? checklistSummary(props.node, props.value) : undefined
-      }
-    >
-      {props.mode === 'readonly'
-        ? null
-        : (
-          <div className="af-checklist">
-            {oneClick && results.length > 0 ? (
-              <div className="af-checklist__quick">
-                <span>全部设为：</span>
-                {results.map((result) => (
-                  <button
-                    key={result.id}
-                    type="button"
-                    className="af-checklist__quick-btn"
-                    onClick={() => setAllResults(result.id)}
-                  >
-                    {result.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {items.length === 0 ? (
-              <div className="af-checklist__empty">尚未配置检查项</div>
-            ) : null}
-            {items.map((item) => {
-              const entry = entries.find((e) => e.itemId === item.id) ?? {
-                itemId: item.id,
-                result: '',
-                remark: '',
-                photos: [],
-              };
-              return (
-                <div key={item.id} className="af-checklist__item">
-                  <div className="af-checklist__item-head">
-                    <strong>{item.label}</strong>
-                    {item.required ? <span className="af-checklist__required">*</span> : null}
-                  </div>
-                  <div className="af-checklist__results" role="radiogroup" aria-label={`${item.label}结果`}>
-                    {results.map((result) => (
-                      <label key={result.id} className="af-checklist__result">
-                        <input
-                          type="radio"
-                          name={`check-${item.id}`}
-                          value={result.id}
-                          checked={entry.result === result.id}
-                          onChange={() => updateItem(item.id, { result: result.id })}
-                        />
-                        <span>{result.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {allowDescription ? (
-                    <div className="af-checklist__desc">
-                      <textarea
-                        className="af-control af-checklist__remark"
-                        rows={2}
-                        placeholder="填写描述（异常原因、现场情况等）"
-                        value={entry.remark}
-                        onChange={(event) => updateItem(item.id, { remark: event.target.value })}
-                      />
-                      <ChecklistPhotos
-                        photos={entry.photos}
-                        maxCount={photoMaxCount}
-                        onChange={(photos) => updateItem(item.id, { photos })}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        )}
-    </FieldShell>
+    <div className="af-checklist">
+      <div className="af-checklist__header">
+        <strong className="af-checklist__title">
+          {label}
+          {required ? <span className="af-checklist__required">*</span> : null}
+        </strong>
+        {oneClick && results.length > 0 ? (
+          <button
+            type="button"
+            className="af-checklist__check-all"
+            onClick={() => setAll(results[0].id)}
+          >
+            一键勾选
+          </button>
+        ) : null}
+      </div>
+      {error ? <div className="af-checklist__error">{error}</div> : null}
+      <div className="af-checklist__list">
+        {items.length === 0 ? (
+          <div className="af-checklist__empty">尚未配置检查项</div>
+        ) : null}
+        {items.map((item) => {
+          const entry = entries.find((e) => e.id === item.id) ?? {
+            id: item.id,
+            name: item.label,
+            status: null,
+            description: '',
+            images: [],
+          };
+          const tone = toneOf(results, entry.status);
+          const expanded = expandedId === item.id && tone !== null;
+          return (
+            <CheckCard
+              key={item.id}
+              item={item}
+              entry={entry}
+              results={results}
+              tone={tone}
+              expanded={expanded}
+              allowDescription={props.node.props?.allowDescription !== false}
+              onStatus={(status) => setStatus(item.id, status)}
+              onExpand={(next) => setExpandedId(next ? item.id : null)}
+              onEntry={(patch) => updateEntry(item.id, patch)}
+            />
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function ChecklistPhotos({
-  photos,
-  maxCount,
-  onChange,
+function CheckCard({
+  item,
+  entry,
+  results,
+  tone,
+  expanded,
+  allowDescription,
+  onStatus,
+  onExpand,
+  onEntry,
 }: {
-  photos: MobileFileDto[];
-  maxCount: number;
-  onChange(photos: MobileFileDto[]): void;
+  item: ChecklistItemDef;
+  entry: ChecklistEntry;
+  results: ChecklistResultOption[];
+  tone: Tone;
+  expanded: boolean;
+  allowDescription: boolean;
+  onStatus(status: string | null): void;
+  onExpand(expanded: boolean): void;
+  onEntry(patch: Partial<Omit<ChecklistEntry, 'id' | 'name'>>): void;
 }) {
-  const [items, setItems] = useState<ImageUploadItem[]>([]);
-  const dtoByKey = useRef<Map<string, MobileFileDto>>(new Map());
-  const objectUrls = useRef<Map<string, string>>(new Map());
-  const photosRef = useRef<MobileFileDto[]>(photos);
-  photosRef.current = photos;
+  const stateClass = tone && tone !== 'extra' ? `af-check__card--${tone}` : 'af-check__card--none';
 
-  useEffect(() => {
-    let cancelled = false;
-    const next: ImageUploadItem[] = [];
-    const nextDto = new Map<string, MobileFileDto>();
-    for (const photo of photos) {
-      const key = photo.id;
-      nextDto.set(key, photo);
-      next.push({ url: '', key });
-    }
-    dtoByKey.current = nextDto;
-    setItems(next);
-    // load previews for any photo without one
-    photos.forEach((photo) => {
-      if (objectUrls.current.has(photo.id)) return;
-      void fetchMobileFileBlob(photo.contentUrl || photo.url || '')
-        .then((blob) => {
-          if (cancelled) return;
-          const objectUrl = URL.createObjectURL(blob);
-          objectUrls.current.set(photo.id, objectUrl);
-          setItems((current) =>
-            current.map((item) => (item.key === photo.id ? { ...item, url: objectUrl } : item)),
-          );
-        })
-        .catch(() => {
-          /* preview unavailable */
-        });
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photos]);
+  if (!tone) {
+    return (
+      <div className={`af-check__card ${stateClass}`}>
+        <div className="af-check__head">
+          <span className="af-check__name">{item.label}</span>
+          <span className="af-check__actions">
+            {results.map((result, index) => {
+              const t = toneOf(results, result.id);
+              const Icon = t && t !== 'extra' ? TONE_ICONS[t] : null;
+              return (
+                <span key={result.id} className="af-check__actions-inner">
+                  {index > 0 ? <span className="af-check__divider" aria-hidden="true" /> : null}
+                  <button
+                    type="button"
+                    className={`af-check__icon-btn af-check__icon-btn--${t ?? 'extra'}`}
+                    aria-label={result.label}
+                    onClick={() => onStatus(result.id)}
+                  >
+                    {Icon ? <Icon /> : <span className="af-check__text-btn">{result.label}</span>}
+                  </button>
+                </span>
+              );
+            })}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
-  const handleUpload = async (file: File) => {
-    const dto = await uploadMobileFile('/api/mobile/files', file);
-    let url = dto.contentUrl || dto.url || '';
-    try {
-      const blob = await fetchMobileFileBlob(url);
-      const objectUrl = URL.createObjectURL(blob);
-      objectUrls.current.set(dto.id, objectUrl);
-      url = objectUrl;
-    } catch {
-      /* keep content url */
-    }
-    dtoByKey.current.set(dto.id, dto);
-    photosRef.current = [...photosRef.current, dto];
-    onChange(photosRef.current);
-    return { url, key: dto.id };
-  };
-
-  const handleRemove = (item: ImageUploadItem) => {
-    const key = item.key ?? '';
-    const url = objectUrls.current.get(key);
-    if (url) {
-      URL.revokeObjectURL(url);
-      objectUrls.current.delete(key);
-    }
-    dtoByKey.current.delete(key);
-    photosRef.current = photosRef.current.filter((photo) => photo.id !== key);
-    onChange(photosRef.current);
-  };
-
+  const Icon = tone !== 'extra' ? TONE_ICONS[tone] : null;
+  const statusLabel = results.find((r) => r.id === entry.status)?.label ?? '状态';
   return (
-    <ImageUploader
-      value={items}
-      onChange={setItems}
-      upload={handleUpload}
-      onDelete={handleRemove}
-      maxCount={maxCount}
-      accept="image/*"
-      multiple
-    />
+    <div className={`af-check__card ${stateClass}`}>
+      <div className="af-check__head">
+        <button
+          type="button"
+          className="af-check__name"
+          onClick={() => {
+            if (expanded) onExpand(false);
+          }}
+        >
+          {item.label}
+        </button>
+        <span className="af-check__status-area">
+          <button
+            type="button"
+            className={`af-check__status-icon af-check__status-icon--${tone}`}
+            aria-label={`${statusLabel}，点击取消选择`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onStatus(null);
+              onExpand(false);
+            }}
+          >
+            {Icon ? <Icon /> : <span className="af-check__text-btn">{statusLabel}</span>}
+          </button>
+          {allowDescription && !expanded ? (
+            <button
+              type="button"
+              className="af-check__add-desc"
+              onClick={(event) => {
+                event.stopPropagation();
+                onExpand(true);
+              }}
+            >
+              添加描述
+            </button>
+          ) : null}
+        </span>
+      </div>
+      {expanded ? (
+        <div className="af-check__detail">
+          <textarea
+            className="af-check__desc-input"
+            rows={4}
+            placeholder="请输入描述"
+            value={entry.description}
+            onChange={(event) => onEntry({ description: event.target.value })}
+          />
+          <div className="af-check__upload-row">
+            <button
+              type="button"
+              className="af-check__upload-btn"
+              onClick={() => Toast.show({ icon: 'info', content: '拍照功能开发中' })}
+            >
+              <IconCamera />
+              <span>拍照</span>
+            </button>
+            <button
+              type="button"
+              className="af-check__upload-btn"
+              onClick={() => Toast.show({ icon: 'info', content: '相册上传开发中' })}
+            >
+              <IconImage />
+              <span>相册上传</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 export function entriesFromValue(value: unknown, items: ChecklistItemDef[]): ChecklistValue {
   if (!Array.isArray(value)) {
-    return items.map((item) => ({ itemId: item.id, result: '', remark: '', photos: [] }));
+    return items.map((item) => ({
+      id: item.id,
+      name: item.label,
+      status: null,
+      description: '',
+      images: [],
+    }));
   }
-  const byItem = new Map<string, ChecklistEntry>();
+  const byId = new Map<string, ChecklistEntry>();
   for (const entry of value) {
     if (typeof entry !== 'object' || entry == null) continue;
     const raw = entry as Record<string, unknown>;
-    if (typeof raw.itemId !== 'string') continue;
-    byItem.set(raw.itemId, {
-      itemId: raw.itemId,
-      result: typeof raw.result === 'string' ? raw.result : '',
-      remark: typeof raw.remark === 'string' ? raw.remark : '',
-      photos: Array.isArray(raw.photos) ? raw.photos : [],
+    const id = typeof raw.id === 'string' ? raw.id : typeof raw.itemId === 'string' ? raw.itemId : '';
+    if (!id) continue;
+    byId.set(id, {
+      id,
+      name: typeof raw.name === 'string' ? raw.name : '',
+      status: typeof raw.status === 'string' ? raw.status : typeof raw.result === 'string' ? raw.result : null,
+      description: typeof raw.description === 'string' ? raw.description : typeof raw.remark === 'string' ? raw.remark : '',
+      images: Array.isArray(raw.images) ? raw.images : Array.isArray(raw.photos) ? raw.photos : [],
     });
   }
-  return items.map((item) => byItem.get(item.id) ?? { itemId: item.id, result: '', remark: '', photos: [] });
+  return items.map((item) => byId.get(item.id) ?? {
+    id: item.id,
+    name: item.label,
+    status: null,
+    description: '',
+    images: [],
+  });
 }
 
 export function checklistSummary(node: MobileSchemaNode, value: unknown): string {
   const items = checklistItems(node);
   const entries = entriesFromValue(value, items);
-  const counts = new Map<string, number>();
   const results = checklistResults(node);
+  const counts = new Map<string, number>();
   for (const entry of entries) {
-    if (!entry.result) continue;
-    counts.set(entry.result, (counts.get(entry.result) ?? 0) + 1);
+    if (!entry.status) continue;
+    counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
   }
   if (counts.size === 0) {
     return '未完成';
