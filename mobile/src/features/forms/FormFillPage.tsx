@@ -26,6 +26,7 @@ import {
   shouldDiscardMismatchedRecovery,
   type RecoveryDraftWriter,
 } from "./recoveryDraft.store";
+import { applySchemaDefaults } from "./schema/defaults";
 import { validateSchemaValues } from "./schema/fieldRegistry";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
@@ -111,13 +112,16 @@ export function FormFillPage() {
     const baseValues = draftMismatch
       ? {}
       : (reworkQuery.data?.formData ?? draftQuery.data?.data ?? {});
-    const nextValues = chooseInitialValues({
-      baseValues,
-      code,
-      draftId: recoveryId(reworkTaskId, draftIdFromUrl),
-      schemaVersion: formQuery.data.version,
-      userId: user?.id ?? null,
-    });
+    const nextValues = applySchemaDefaults(
+      formQuery.data.schema ?? [],
+      chooseInitialValues({
+        baseValues,
+        code,
+        draftId: recoveryId(reworkTaskId, draftIdFromUrl),
+        schemaVersion: formQuery.data.version,
+        userId: user?.id ?? null,
+      }),
+    );
     setValues(nextValues);
     setInitialValues(nextValues);
     setInitialized(true);

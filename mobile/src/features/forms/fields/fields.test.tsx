@@ -240,3 +240,33 @@ describe('leaf mobile fields', () => {
     expect(screen.queryByLabelText('说明')).not.toBeInTheDocument();
   });
 });
+
+describe('date field time support', () => {
+  it('uses datetime-local input when format includes time', () => {
+    render(
+      <DateField
+        {...baseProps(
+          { id: 'at', type: 'date', label: '时间', props: { format: 'YYYY-MM-DD HH:mm' } },
+          '2026-08-04 10:30',
+        )}
+      />,
+    );
+    const input = screen.getByLabelText('时间') as HTMLInputElement;
+    expect(input.type).toBe('datetime-local');
+    expect(input.value).toBe('2026-08-04T10:30');
+  });
+
+  it('uses date input and truncates stored time for plain date format', () => {
+    render(
+      <DateField
+        {...baseProps(
+          { id: 'd', type: 'date', label: '日期' },
+          '2026-08-04',
+        )}
+      />,
+    );
+    const input = screen.getByLabelText('日期') as HTMLInputElement;
+    expect(input.type).toBe('date');
+    expect(input.value).toBe('2026-08-04');
+  });
+});
