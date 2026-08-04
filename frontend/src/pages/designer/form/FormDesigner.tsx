@@ -379,7 +379,7 @@ export function FormDesignerSurface({
     onSuccess: (res: any) => {
       setDefinition(res);
       onSaved?.(res);
-      if (id === 'new' && !embedded) navigate(`/designer/form/${res.id}`);
+      if (id === 'new' && !embedded) navigate(`/approval/forms/${res.id}/wizard?step=designer`);
       message.success('已保存草稿');
     },
   });
@@ -512,5 +512,18 @@ export function FormDesignerSurface({
 }
 
 export default function FormDesigner() {
-  return <FormDesignerSurface />;
+  // 旧入口 /designer/form/:id 统一重定向到带面包屑与分步导航的向导页，
+  // 保证「表单属性-表单设计-流程设计-预览」导航永久存在（用户指定不可移除）。
+  const routeParams = useParams();
+  const navigate = useNavigate();
+  const id = String(routeParams.id ?? 'new');
+  useEffect(() => {
+    navigate(
+      id === 'new'
+        ? '/approval/forms/new/wizard?step=designer'
+        : `/approval/forms/${id}/wizard?step=designer`,
+      { replace: true },
+    );
+  }, [id, navigate]);
+  return null;
 }

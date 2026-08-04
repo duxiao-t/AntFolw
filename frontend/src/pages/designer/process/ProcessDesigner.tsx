@@ -1,6 +1,6 @@
 import { App, Button, Drawer, Space } from 'antd';
 import { useEffect, useState } from 'react';
-import { useParams, request } from '@umijs/max';
+import { useParams, request, useNavigate } from '@umijs/max';
 import { useQuery } from '@tanstack/react-query';
 import { ProcessTree } from './ProcessTree';
 import { useProcessDesignerStore } from './useProcessDesignerStore';
@@ -151,5 +151,18 @@ export function ProcessDesignerSurface({
 }
 
 export default function ProcessDesigner() {
-  return <ProcessDesignerSurface />;
+  // 旧入口 /designer/process/:formDefId 统一重定向到带面包屑与分步导航的向导页，
+  // 保证「表单属性-表单设计-流程设计-预览」导航永久存在（用户指定不可移除）。
+  const routeParams = useParams();
+  const navigate = useNavigate();
+  const formDefId = String(routeParams.formDefId ?? '');
+  useEffect(() => {
+    navigate(
+      formDefId
+        ? `/approval/forms/${formDefId}/wizard?step=process`
+        : '/approval/forms',
+      { replace: true },
+    );
+  }, [formDefId, navigate]);
+  return null;
 }

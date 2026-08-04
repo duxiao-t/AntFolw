@@ -153,13 +153,13 @@ export default function FormListPage() {
           </ModalForm>
           <Button
             size="small"
-            onClick={() => navigate(`/designer/form/${fd.id}`)}
+            onClick={() => navigate(`/approval/forms/${fd.id}/wizard?step=designer`)}
           >
             组件配置
           </Button>
           <Button
             size="small"
-            onClick={() => navigate(`/designer/process/${fd.id}`)}
+            onClick={() => navigate(`/approval/forms/${fd.id}/wizard?step=process`)}
           >
             流程
           </Button>

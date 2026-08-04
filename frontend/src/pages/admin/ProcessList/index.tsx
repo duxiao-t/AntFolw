@@ -24,7 +24,7 @@ export default function ProcessListPage() {
         { title: '创建', dataIndex: 'createdAt' },
         { title: '操作', render: (_, pd: any) => (
           <Space>
-            <Button size="small" onClick={() => navigate(`/designer/process/${pd.formDefId}`)}>编辑流程</Button>
+            <Button size="small" onClick={() => navigate(`/approval/forms/${pd.formDefId}/wizard?step=process`)}>编辑流程</Button>
           </Space>
         ) },
       ]}

@@ -568,6 +568,11 @@ export default function FormManagementWizard() {
 
   return (
     <PageContainer title={false}>
+      {/* ===================================================================
+          ⚠️ 用户指定永久保留区域：面包屑（PageContainer 默认生成）+ 分步导航
+          「表单属性 → 表单设计 → 流程设计 → 预览发布」。
+          禁止删除/隐藏此处导航，除非用户明确给出指令。
+          =================================================================== */}
       <Card style={{ marginBottom: 16 }}>
         <Steps
           current={current}
