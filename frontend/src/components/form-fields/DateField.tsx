@@ -6,21 +6,29 @@ export const DateField: FieldType = {
   label: '日期',
   icon: 'calendar',
   defaultProps: { required: false, format: 'YYYY-MM-DD' },
-  Component: ({ node, mode, value, onChange }) => (
-    <div data-field-id={node.id}>
-      <div style={{ display: 'block', marginBottom: 4 }}>
-        {node.label}{node.props?.required ? ' *' : ''}
+  Component: ({ node, mode, value, onChange }) => {
+    const format = node.props?.format ?? 'YYYY-MM-DD';
+    const resolvedValue =
+      value ??
+      (mode === 'runtime-fill' && node.props?.defaultNow
+        ? (window as any).dayjs?.().format(format)
+        : undefined);
+    return (
+      <div data-field-id={node.id}>
+        <div style={{ display: 'block', marginBottom: 4 }}>
+          {node.label}{node.props?.required ? ' *' : ''}
+        </div>
+        <DatePicker
+          disabled={mode !== 'runtime-fill'}
+          value={resolvedValue ? (window as any).dayjs?.(resolvedValue) : undefined}
+          onChange={(d: any) => onChange?.(d ? d.format(format) : undefined)}
+          placeholder={node.props?.placeholder}
+          format={format}
+          style={{ width: '100%' }}
+        />
       </div>
-      <DatePicker
-        disabled={mode !== 'runtime-fill'}
-        value={value ? (window as any).dayjs?.(value) : undefined}
-        onChange={(d: any) => onChange?.(d ? d.format(node.props?.format ?? 'YYYY-MM-DD') : undefined)}
-        placeholder={node.props?.placeholder}
-        format={node.props?.format ?? 'YYYY-MM-DD'}
-        style={{ width: '100%' }}
-      />
-    </div>
-  ),
+    );
+  },
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
       <div>标签</div>

@@ -377,13 +377,38 @@ export function Inspector() {
                 </PanelField>
                 {defaultValueTypes.has(node.type) && (
                   <PanelField label="默认值">
-                    <Input
-                      value={props.defaultValue ?? ''}
-                      placeholder="不填则无默认值"
-                      onChange={(event) =>
-                        updateProps({ defaultValue: event.target.value })
-                      }
-                    />
+                    {node.type === 'date' ? (
+                      <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                        <Checkbox
+                          checked={props.defaultNow === true}
+                          onChange={(event) =>
+                            updateProps({ defaultNow: event.target.checked })
+                          }
+                        >
+                          默认当前时间
+                        </Checkbox>
+                        <Input
+                          value={props.defaultValue ?? ''}
+                          disabled={props.defaultNow === true}
+                          placeholder={
+                            String(props.format ?? 'YYYY-MM-DD').includes('HH:mm')
+                              ? 'YYYY-MM-DD HH:mm'
+                              : 'YYYY-MM-DD'
+                          }
+                          onChange={(event) =>
+                            updateProps({ defaultValue: event.target.value })
+                          }
+                        />
+                      </Space>
+                    ) : (
+                      <Input
+                        value={props.defaultValue ?? ''}
+                        placeholder="不填则无默认值"
+                        onChange={(event) =>
+                          updateProps({ defaultValue: event.target.value })
+                        }
+                      />
+                    )}
                   </PanelField>
                 )}
               </Space>
