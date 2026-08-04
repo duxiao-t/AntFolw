@@ -132,11 +132,34 @@ export function ChecklistField(props: MobileFieldProps) {
   const items = useMemo(() => checklistItems(props.node), [props.node]);
   const results = useMemo(() => checklistResults(props.node), [props.node]);
   const oneClick = props.node.props?.oneClick !== false;
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
   const [entries, setEntries] = useState<ChecklistValue>(() => entriesFromValue(props.value, items));
   const allChecked =
     entries.length > 0 &&
     entries.every((entry) => entry.status === (results[0]?.id ?? ''));
+
+  const expandItem = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      // 展开新项时，只自动收回"没有内容"的空展开项；有内容的一直保持展开
+      for (const entry of entries) {
+        if (entry.id !== id && next.has(entry.id) && !entryHasContent(entry)) {
+          next.delete(entry.id);
+        }
+      }
+      return next;
+    });
+  };
+
+  const collapseItem = (id: string) => {
+    setExpandedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     setEntries(entriesFromValue(props.value, items));
@@ -219,7 +242,7 @@ export function ChecklistField(props: MobileFieldProps) {
             images: [],
           };
           const tone = toneOf(results, entry.status);
-          const expanded = expandedId === item.id && tone !== null;
+          const expanded = expandedIds.has(item.id) && tone !== null;
           return (
             <CheckCard
               key={item.id}
@@ -230,7 +253,10 @@ export function ChecklistField(props: MobileFieldProps) {
               expanded={expanded}
               allowDescription={props.node.props?.allowDescription !== false}
               onStatus={(status) => setStatus(item.id, status)}
-              onExpand={(next) => setExpandedId(next ? item.id : null)}
+              onExpand={(next) => {
+                if (next) expandItem(item.id);
+                else collapseItem(item.id);
+              }}
               onEntry={(patch) => updateEntry(item.id, patch)}
             />
           );
@@ -361,6 +387,13 @@ function CheckCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function entryHasContent(entry: ChecklistEntry) {
+  return (
+    String(entry.description ?? '').trim() !== '' ||
+    (Array.isArray(entry.images) && entry.images.length > 0)
   );
 }
 
