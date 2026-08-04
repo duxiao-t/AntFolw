@@ -10,6 +10,7 @@ import {
   Space,
   Typography,
 } from 'antd';
+import { DeleteOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import { findById, formRegistry } from '../../../registry/formRegistry';
 import type { SchemaNode } from '../../../registry/types';
@@ -123,6 +124,109 @@ function mergeOptions(
     });
   });
   return Array.from(map.values());
+}
+
+type ChecklistItemInput = {
+  id?: string;
+  label?: string;
+  required?: boolean;
+};
+
+function ChecklistItemsEditor({
+  value,
+  onChange,
+}: {
+  value?: ChecklistItemInput[];
+  onChange(items: { id: string; label: string; required: boolean }[]): void;
+}) {
+  const items = value ?? [];
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const normalized = items.map((item, index) => ({
+    id: item.id ?? `item-${index}`,
+    label: String(item.label ?? `检查项${index + 1}`),
+    required: item.required !== false,
+  }));
+  const commit = (next: { id: string; label: string; required: boolean }[]) =>
+    onChange(next);
+  const update = (index: number, patch: Partial<{ label: string; required: boolean }>) =>
+    commit(normalized.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, ...patch } : item,
+    ));
+  const add = () =>
+    commit([
+      ...normalized,
+      { id: `item-${Date.now()}-${normalized.length}`, label: `检查项${normalized.length + 1}`, required: true },
+    ]);
+  const remove = (index: number) =>
+    commit(normalized.filter((_, itemIndex) => itemIndex !== index));
+  const applyBulk = () => {
+    const lines = bulkText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return;
+    const additions = lines.map((line, index) => ({
+      id: `item-${Date.now()}-${normalized.length + index}`,
+      label: line,
+      required: true,
+    }));
+    commit([...normalized, ...additions]);
+    setBulkOpen(false);
+    setBulkText('');
+  };
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={8}>
+      {normalized.map((item, index) => (
+        <Space.Compact key={item.id} style={{ width: '100%' }}>
+          <Input
+            placeholder="检查内容"
+            value={item.label}
+            onChange={(event) => update(index, { label: event.target.value })}
+          />
+          <Checkbox
+            checked={item.required}
+            onChange={(event) => update(index, { required: event.target.checked })}
+          >
+            必检
+          </Checkbox>
+          <Button
+            icon={<DeleteOutlined />}
+            aria-label="删除检查项"
+            onClick={() => remove(index)}
+          />
+        </Space.Compact>
+      ))}
+      <Space>
+        <Button size="small" icon={<PlusOutlined />} onClick={add}>
+          新增检查项
+        </Button>
+        <Button size="small" onClick={() => setBulkOpen(true)}>
+          批量添加
+        </Button>
+      </Space>
+      <Modal
+        title="批量添加检查项"
+        open={bulkOpen}
+        onOk={applyBulk}
+        onCancel={() => setBulkOpen(false)}
+        okText="添加"
+        cancelText="取消"
+      >
+        <Typography.Text type="secondary">
+          每行一条，按行拆分，自动生成检查项。
+        </Typography.Text>
+        <Input.TextArea
+          rows={6}
+          value={bulkText}
+          placeholder={'例如：\n设备外观完好\n接地线连接牢固\n指示灯状态正常'}
+          onChange={(event) => setBulkText(event.target.value)}
+          style={{ marginTop: 12 }}
+        />
+      </Modal>
+    </Space>
+  );
 }
 
 function PanelField({
@@ -998,6 +1102,106 @@ function renderComponentSettings(
           </Typography.Text>
         </Space>
       );
+    case 'checklist': {
+      const checklistResults = Array.isArray(props.results) && props.results.length >= 2
+        ? props.results
+        : [
+            { id: 'normal', label: '正常' },
+            { id: 'abnormal', label: '异常' },
+            { id: 'na', label: '不适用' },
+          ];
+      const descMap = props.descriptionRequiredByResult ?? {};
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <PanelField label="检查项列表">
+            <ChecklistItemsEditor
+              value={props.items}
+              onChange={(items) => updateProps({ items })}
+            />
+          </PanelField>
+          <PanelField label="结果选项（2~4 个，文字可自定义）">
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              {checklistResults.map((result, index) => (
+                <Space.Compact key={result.id ?? index} style={{ width: '100%' }}>
+                  <Input
+                    value={result.label ?? ''}
+                    onChange={(event) => {
+                      const next = [...checklistResults];
+                      next[index] = { ...result, label: event.target.value };
+                      updateProps({ results: next });
+                    }}
+                  />
+                  <Checkbox
+                    checked={descMap[result.id] === true}
+                    onChange={(event) =>
+                      updateProps({
+                        descriptionRequiredByResult: {
+                          ...descMap,
+                          [result.id]: event.target.checked,
+                        },
+                      })
+                    }
+                  >
+                    选此项描述必填
+                  </Checkbox>
+                  <Button
+                    icon={<MinusOutlined />}
+                    disabled={checklistResults.length <= 2}
+                    aria-label="删除结果"
+                    onClick={() =>
+                      updateProps({
+                        results: checklistResults.filter((_, itemIndex) => itemIndex !== index),
+                      })
+                    }
+                  />
+                </Space.Compact>
+              ))}
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                disabled={checklistResults.length >= 4}
+                onClick={() =>
+                  updateProps({
+                    results: [
+                      ...checklistResults,
+                      {
+                        id: `result-${Date.now()}`,
+                        label: `结果${checklistResults.length + 1}`,
+                      },
+                    ],
+                  })
+                }
+              >
+                新增结果
+              </Button>
+            </Space>
+          </PanelField>
+          <Checkbox
+            checked={props.allowDescription !== false}
+            onChange={(event) =>
+              updateProps({ allowDescription: event.target.checked })
+            }
+          >
+            允许填写图文描述（文字 + 现场照片）
+          </Checkbox>
+          <Checkbox
+            checked={props.oneClick !== false}
+            onChange={(event) => updateProps({ oneClick: event.target.checked })}
+          >
+            支持一键全部设为某结果
+          </Checkbox>
+          <PanelField label="每条现场照片最多">
+            <InputNumber
+              min={1}
+              max={20}
+              style={{ width: '100%' }}
+              value={props.photoMaxCount ?? 9}
+              onChange={(value) => updateProps({ photoMaxCount: value ?? 9 })}
+            />
+          </PanelField>
+        </Space>
+      );
+    }
     case 'span_layout':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>

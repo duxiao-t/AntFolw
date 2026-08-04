@@ -15,6 +15,7 @@ import { ImageUploadField } from '../components/form-fields/ImageUploadField';
 import { VideoUploadField } from '../components/form-fields/VideoUploadField';
 import { SpanLayoutField } from '../components/form-fields/SpanLayoutField';
 import { TableListField } from '../components/form-fields/TableListField';
+import { ChecklistField } from '../components/form-fields/ChecklistField';
 
 export const formRegistry: Record<string, FieldType> = {
   text: TextField,
@@ -33,6 +34,7 @@ export const formRegistry: Record<string, FieldType> = {
   video_upload: VideoUploadField,
   span_layout: SpanLayoutField,
   table_list: TableListField,
+  checklist: ChecklistField,
 };
 
 export type PaletteEntry = {
@@ -72,6 +74,7 @@ export const paletteGroups: PaletteGroup[] = [
       'dept_picker',
       'span_layout',
       'table_list',
+      'checklist',
     ]
       .map((type) => paletteEntries.find((entry) => entry.type === type))
       .filter((entry): entry is PaletteEntry => Boolean(entry)),

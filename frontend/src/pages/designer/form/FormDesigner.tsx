@@ -14,6 +14,7 @@ import {
   AlignLeftOutlined,
   ApartmentOutlined,
   CalendarOutlined,
+  CheckCircleOutlined,
   CheckSquareOutlined,
   ColumnWidthOutlined,
   DollarOutlined,
@@ -69,6 +70,7 @@ const paletteIcons: Record<string, React.ReactNode> = {
   video_upload: <VideoCameraOutlined />,
   span_layout: <ColumnWidthOutlined />,
   table_list: <TableOutlined />,
+  checklist: <CheckCircleOutlined />,
 };
 
 function FieldTypeIcon({ entry }: { entry: PaletteEntry }) {

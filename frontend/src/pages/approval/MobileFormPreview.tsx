@@ -377,6 +377,14 @@ function renderControl({
           </span>
         </button>
       );
+    case 'checklist':
+      return (
+        <div className="preview-checklist">
+          {Array.isArray(value) && value.length > 0
+            ? `已完成 ${value.filter((entry: any) => entry?.result).length} 项检查`
+            : '未完成'}
+        </div>
+      );
     case 'time':
       return (
         <input
