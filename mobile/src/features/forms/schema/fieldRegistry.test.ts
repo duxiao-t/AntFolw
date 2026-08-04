@@ -6,7 +6,7 @@ describe('mobile field registry', () => {
   it('registers exactly the supported mobile field types once', () => {
     const typeCodes = registeredFields.map((field) => field.type);
 
-    expect(typeCodes).toHaveLength(21);
+    expect(typeCodes).toHaveLength(22);
     expect(new Set(typeCodes).size).toBe(typeCodes.length);
     expect(typeCodes).toEqual([
       'text',
@@ -27,6 +27,7 @@ describe('mobile field registry', () => {
       'file_upload',
       'image_upload',
       'video_upload',
+      'checklist',
       'description',
       'span_layout',
       'table_list',
@@ -108,6 +109,42 @@ describe('mobile field registry', () => {
       approver: '请填写审批人',
       deptId: '请填写部门',
     });
+  });
+
+  it('validates checklist required items and per-result description', () => {
+    const schema: MobileSchemaNode[] = [
+      {
+        id: 'cl',
+        type: 'checklist',
+        label: '检查',
+        props: {
+          items: [
+            { id: 'a', label: '外观', required: true },
+            { id: 'b', label: '接地', required: false },
+          ],
+          results: [
+            { id: 'ok', label: '正常' },
+            { id: 'bad', label: '异常' },
+          ],
+          allowDescription: true,
+          descriptionRequiredByResult: { bad: true },
+        },
+      },
+    ];
+
+    expect(validateSchemaValues(schema, { cl: [] })).toEqual({
+      cl: '请完成检查项「外观」',
+    });
+    expect(
+      validateSchemaValues(schema, {
+        cl: [{ itemId: 'a', result: 'ok', remark: '', photos: [] }],
+      }),
+    ).toEqual({});
+    expect(
+      validateSchemaValues(schema, {
+        cl: [{ itemId: 'a', result: 'bad', remark: '', photos: [] }],
+      }),
+    ).toEqual({ cl: '「外观」的描述必填' });
   });
 
   it('uses an explicit unsupported field definition for unknown type codes', () => {

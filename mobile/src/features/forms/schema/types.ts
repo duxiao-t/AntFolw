@@ -19,6 +19,7 @@ export type FieldTypeCode =
   | 'file_upload'
   | 'image_upload'
   | 'video_upload'
+  | 'checklist'
   | 'description'
   | 'span_layout'
   | 'table_list';

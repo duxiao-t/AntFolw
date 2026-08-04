@@ -7,6 +7,12 @@ import { DeptPickerField } from '../fields/DeptPickerField';
 import { FileUploadField, hasBlockingUploadQueue } from '../fields/FileUploadField';
 import { ImageUploadField } from '../fields/ImageUploadField';
 import { VideoUploadField } from '../fields/VideoUploadField';
+import {
+  ChecklistField,
+  checklistItems,
+  checklistSummary,
+  entriesFromValue,
+} from '../fields/ChecklistField';
 import { MoneyField } from '../fields/MoneyField';
 import { MultiSelectField } from '../fields/MultiSelectField';
 import { NumberField } from '../fields/NumberField';
@@ -154,6 +160,10 @@ export const registeredFields: MobileFieldDefinition[] = [
     validate: validateVideoUpload,
     summarize: (_node, value) => summarizeUploadedFiles(value, '个视频'),
   }),
+  field('checklist', ChecklistField, {
+    validate: validateChecklist,
+    summarize: (_node, value) => checklistSummary(_node, value),
+  }),
   field('description', DescriptionField, {
     validate: () => null,
     summarize: (node) => String(node.props?.text ?? ''),
@@ -292,6 +302,34 @@ function validateMaxCount(node: MobileSchemaNode, value: unknown, unit: string) 
     return null;
   }
   return `最多上传 ${maxCount} ${unit}`;
+}
+
+function validateChecklist(node: MobileSchemaNode, value: unknown) {
+  const items = checklistItems(node);
+  const entries = entriesFromValue(value, items);
+  const allowDescription = node.props?.allowDescription !== false;
+  for (const item of items) {
+    const entry = entries.find((e) => e.itemId === item.id);
+    if (item.required && (!entry || !entry.result)) {
+      return `请完成检查项「${item.label}」`;
+    }
+    if (allowDescription && entry?.result) {
+      const map = node.props?.descriptionRequiredByResult;
+      const required =
+        typeof map === 'object' && map != null && map[entry.result] === true;
+      if (
+        required &&
+        !String(entry.remark ?? '').trim() &&
+        !(Array.isArray(entry.photos) && entry.photos.length > 0)
+      ) {
+        return `「${item.label}」的描述必填`;
+      }
+    }
+  }
+  if (node.props?.required === true && !entries.some((e) => e.result)) {
+    return '请完成检查项';
+  }
+  return null;
 }
 
 function validateImageUpload(node: MobileSchemaNode, value: unknown) {
