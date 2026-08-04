@@ -1,4 +1,4 @@
-import { TextArea, Toast } from 'antd-mobile';
+import { ImageViewer, TextArea, Toast } from 'antd-mobile';
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFileDto } from '../files.api';
@@ -396,6 +396,7 @@ function ChecklistPhotoUpload({
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const albumRef = useRef<HTMLInputElement>(null);
+  const [viewerIndex, setViewerIndex] = useState(-1);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const previewUrlsRef = useRef(new Map<string, string>());
   const photosRef = useRef<MobileFileDto[]>(photos);
@@ -475,6 +476,9 @@ function ChecklistPhotoUpload({
 
   const canAdd = photos.length < maxCount;
   const remaining = Math.max(0, maxCount - photos.length);
+  const previewUrls = photos
+    .map((photo) => previews[photo.id])
+    .filter((url): url is string => Boolean(url));
 
   return (
     <div className="af-check__photos">
@@ -525,24 +529,43 @@ function ChecklistPhotoUpload({
       </div>
       {photos.length > 0 ? (
         <div className="af-check__thumbs">
-          {photos.map((photo) => (
-            <div key={photo.id} className="af-check__thumb">
-              {previews[photo.id] ? (
-                <img src={previews[photo.id]} alt={photo.name ?? '照片'} />
-              ) : (
-                <span className="af-check__thumb-loading" />
-              )}
-              <button
-                type="button"
-                className="af-check__thumb-del"
-                aria-label={`删除${photo.name ?? '照片'}`}
-                onClick={() => removePhoto(photo.id)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          {photos.map((photo) => {
+            const previewUrl = previews[photo.id];
+            const loadedIndex = previewUrl ? previewUrls.indexOf(previewUrl) : -1;
+            return (
+              <div key={photo.id} className="af-check__thumb">
+                {previewUrl ? (
+                  <button
+                    type="button"
+                    className="af-check__thumb-open"
+                    aria-label={`查看${photo.name ?? '照片'}`}
+                    onClick={() => setViewerIndex(loadedIndex)}
+                  >
+                    <img src={previewUrl} alt={photo.name ?? '照片'} />
+                  </button>
+                ) : (
+                  <span className="af-check__thumb-loading" />
+                )}
+                <button
+                  type="button"
+                  className="af-check__thumb-del"
+                  aria-label={`删除${photo.name ?? '照片'}`}
+                  onClick={() => removePhoto(photo.id)}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
+      ) : null}
+      {viewerIndex >= 0 && previewUrls.length > 0 ? (
+        <ImageViewer.Multi
+          images={previewUrls}
+          defaultIndex={viewerIndex}
+          visible
+          onClose={() => setViewerIndex(-1)}
+        />
       ) : null}
     </div>
   );
