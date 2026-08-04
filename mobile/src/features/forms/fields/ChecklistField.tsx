@@ -1,5 +1,6 @@
 import { TextArea, Toast } from 'antd-mobile';
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFileDto } from '../files.api';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldError, fieldLabel, isRequired } from './fieldShared';
@@ -252,6 +253,11 @@ export function ChecklistField(props: MobileFieldProps) {
               tone={tone}
               expanded={expanded}
               allowDescription={props.node.props?.allowDescription !== false}
+              photoMaxCount={
+                typeof props.node.props?.photoMaxCount === 'number'
+                  ? props.node.props.photoMaxCount
+                  : 9
+              }
               onStatus={(status) => setStatus(item.id, status)}
               onExpand={(next) => {
                 if (next) expandItem(item.id);
@@ -273,6 +279,7 @@ function CheckCard({
   tone,
   expanded,
   allowDescription,
+  photoMaxCount,
   onStatus,
   onExpand,
   onEntry,
@@ -283,6 +290,7 @@ function CheckCard({
   tone: Tone;
   expanded: boolean;
   allowDescription: boolean;
+  photoMaxCount: number;
   onStatus(status: string | null): void;
   onExpand(expanded: boolean): void;
   onEntry(patch: Partial<Omit<ChecklistEntry, 'id' | 'name'>>): void;
@@ -366,24 +374,174 @@ function CheckCard({
             value={entry.description}
             onChange={(value) => onEntry({ description: value })}
           />
-          <div className="af-check__upload-row">
-            <button
-              type="button"
-              className="af-check__upload-btn"
-              onClick={() => Toast.show({ icon: 'info', content: '拍照功能开发中' })}
-            >
-              <IconCamera />
-              <span>拍照</span>
-            </button>
-            <button
-              type="button"
-              className="af-check__upload-btn"
-              onClick={() => Toast.show({ icon: 'info', content: '相册上传开发中' })}
-            >
-              <IconImage />
-              <span>相册上传</span>
-            </button>
-          </div>
+          <ChecklistPhotoUpload
+            photos={entry.images}
+            maxCount={photoMaxCount}
+            onChange={(images) => onEntry({ images })}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChecklistPhotoUpload({
+  photos,
+  maxCount,
+  onChange,
+}: {
+  photos: MobileFileDto[];
+  maxCount: number;
+  onChange(photos: MobileFileDto[]): void;
+}) {
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const albumRef = useRef<HTMLInputElement>(null);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const previewUrlsRef = useRef(new Map<string, string>());
+  const photosRef = useRef<MobileFileDto[]>(photos);
+  const [uploading, setUploading] = useState(false);
+  photosRef.current = photos;
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const photo of photos) {
+      if (previewUrlsRef.current.has(photo.id)) continue;
+      const url = photo.contentUrl || photo.url || '';
+      if (!url) continue;
+      void fetchMobileFileBlob(url)
+        .then((blob) => {
+          if (cancelled) return;
+          const objectUrl = URL.createObjectURL(blob);
+          previewUrlsRef.current.set(photo.id, objectUrl);
+          setPreviews(Object.fromEntries(previewUrlsRef.current));
+        })
+        .catch(() => {
+          /* preview unavailable */
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [photos]);
+
+  useEffect(
+    () => () => {
+      for (const url of previewUrlsRef.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      previewUrlsRef.current.clear();
+    },
+    [],
+  );
+
+  const uploadFiles = async (files: File[]) => {
+    if (files.length === 0 || uploading) return;
+    const remaining = maxCount - photosRef.current.length;
+    if (remaining <= 0) return;
+    const batch = files.slice(0, remaining);
+    setUploading(true);
+    for (const file of batch) {
+      try {
+        const dto = await uploadMobileFile('/api/mobile/files', file);
+        let previewUrl = dto.contentUrl || dto.url || '';
+        try {
+          const blob = await fetchMobileFileBlob(previewUrl);
+          const objectUrl = URL.createObjectURL(blob);
+          previewUrlsRef.current.set(dto.id, objectUrl);
+          previewUrl = objectUrl;
+        } catch {
+          /* keep content url */
+        }
+        setPreviews(Object.fromEntries(previewUrlsRef.current));
+        photosRef.current = [...photosRef.current, dto];
+        onChange(photosRef.current);
+      } catch {
+        Toast.show({ icon: 'fail', content: '图片上传失败' });
+      }
+    }
+    setUploading(false);
+  };
+
+  const removePhoto = (id: string) => {
+    const url = previewUrlsRef.current.get(id);
+    if (url) {
+      URL.revokeObjectURL(url);
+      previewUrlsRef.current.delete(id);
+    }
+    setPreviews(Object.fromEntries(previewUrlsRef.current));
+    photosRef.current = photosRef.current.filter((photo) => photo.id !== id);
+    onChange(photosRef.current);
+  };
+
+  const canAdd = photos.length < maxCount;
+  const remaining = Math.max(0, maxCount - photos.length);
+
+  return (
+    <div className="af-check__photos">
+      <div className="af-check__upload-row">
+        <button
+          type="button"
+          className="af-check__upload-btn"
+          disabled={!canAdd || uploading}
+          onClick={() => cameraRef.current?.click()}
+        >
+          <IconCamera />
+          <span>拍照</span>
+        </button>
+        <button
+          type="button"
+          className="af-check__upload-btn"
+          disabled={!canAdd || uploading}
+          onClick={() => albumRef.current?.click()}
+        >
+          <IconImage />
+          <span>相册上传</span>
+        </button>
+        {remaining > 0 ? <span className="af-check__photo-count">{photos.length}/{maxCount}</span> : null}
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void uploadFiles(files);
+          }}
+        />
+        <input
+          ref={albumRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void uploadFiles(files);
+          }}
+        />
+      </div>
+      {photos.length > 0 ? (
+        <div className="af-check__thumbs">
+          {photos.map((photo) => (
+            <div key={photo.id} className="af-check__thumb">
+              {previews[photo.id] ? (
+                <img src={previews[photo.id]} alt={photo.name ?? '照片'} />
+              ) : (
+                <span className="af-check__thumb-loading" />
+              )}
+              <button
+                type="button"
+                className="af-check__thumb-del"
+                aria-label={`删除${photo.name ?? '照片'}`}
+                onClick={() => removePhoto(photo.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
