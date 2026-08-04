@@ -134,6 +134,9 @@ export function ChecklistField(props: MobileFieldProps) {
   const oneClick = props.node.props?.oneClick !== false;
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<ChecklistValue>(() => entriesFromValue(props.value, items));
+  const allChecked =
+    entries.length > 0 &&
+    entries.every((entry) => entry.status === (results[0]?.id ?? ''));
 
   useEffect(() => {
     setEntries(entriesFromValue(props.value, items));
@@ -188,9 +191,17 @@ export function ChecklistField(props: MobileFieldProps) {
           <button
             type="button"
             className="af-checklist__check-all"
-            onClick={() => setAll(results[0].id)}
+            onClick={() => {
+              if (allChecked) {
+                const next = entries.map((entry) => ({ ...entry, status: null }));
+                setEntries(next);
+                props.onValueChange(props.node.id, next);
+              } else {
+                setAll(results[0].id);
+              }
+            }}
           >
-            一键勾选
+            {allChecked ? '一键取消' : '一键勾选'}
           </button>
         ) : null}
       </div>
@@ -289,9 +300,7 @@ function CheckCard({
         <button
           type="button"
           className="af-check__name"
-          onClick={() => {
-            if (expanded) onExpand(false);
-          }}
+          onClick={() => onExpand(false)}
         >
           {item.label}
         </button>
