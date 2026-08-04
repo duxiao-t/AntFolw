@@ -24,7 +24,7 @@ public class FormDefinitionService {
         "text", "textarea", "number", "money",
         "radio", "checkbox", "select", "multi_select", "search",
         "date", "date_range", "time", "switch",
-        "image_upload", "video_upload", "file_upload",
+        "image_upload", "video_upload", "file_upload", "checklist",
         "user_picker", "dept_picker",
         "description", "span_layout", "table_list"
     );
