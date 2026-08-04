@@ -3645,23 +3645,26 @@ body {
   color: #5A6FA8; font-size: 14px; font-weight: 400;
 }
 .af-checklist__error { color: var(--af-color-danger, #D93025); font-size: 13px; margin-bottom: 10px; }
-.af-checklist__list { display: flex; flex-direction: column; gap: 14px; }
+.af-checklist__list { display: flex; flex-direction: column; gap: 10px; }
 .af-checklist__empty { color: #9AA0A6; font-size: 14px; padding: 8px 0; }
 
 .af-check__card {
   border-radius: 8px; overflow: hidden;
-  border: 2px solid #E5E6E8; background: #FFFFFF;
-  box-shadow: 0 1px 4px rgba(0,0,0,.03);
+  border: 1px solid var(--af-color-border, #dfe8f4); background: #FFFFFF;
 }
-.af-check__card--pass { background: #E9F6EE; border-color: #22A052; box-shadow: 0 1px 6px rgba(34,160,82,.10); }
-.af-check__card--fail { background: #FBECEA; border-color: #D93025; box-shadow: 0 1px 6px rgba(217,48,37,.10); }
-.af-check__card--na   { background: #DBDBDB; border-color: #8F8F8F; box-shadow: 0 1px 6px rgba(143,143,143,.10); }
+.af-check__card--pass { background: #E9F6EE; border-color: #22A052; }
+.af-check__card--fail { background: #FBECEA; border-color: #D93025; }
+.af-check__card--na   { background: #DBDBDB; border-color: #8F8F8F; }
 
 .af-check__head {
   display: flex; align-items: center; justify-content: space-between;
-  min-height: 60px; padding: 0 16px; cursor: pointer;
+  min-height: 44px; padding: 0 12px; cursor: pointer;
 }
-.af-check__name { font-size: 14px; font-weight: 500; color: var(--af-color-text, #1F1F1F); }
+.af-check__name {
+  background: none; border: none; padding: 0; margin: 0;
+  text-align: left; font: inherit; font-size: 14px; font-weight: 500;
+  color: var(--af-color-text, #1F1F1F); cursor: pointer; line-height: 1.4;
+}
 
 /* 状态 A：未选中 — 三个图标按钮 + 竖线 */
 .af-check__actions { display: flex; align-items: center; }
@@ -3697,11 +3700,16 @@ body {
 .af-check__card--pass .af-check__detail { border-top: 1px solid #22A052; }
 .af-check__card--fail .af-check__detail { border-top: 1px solid #D93025; }
 .af-check__card--na   .af-check__detail { border-top: 1px solid #8F8F8F; }
-.af-check__desc-input {
-  width: 100%; min-height: 80px; border: none; outline: none; resize: none;
-  background: transparent; font: inherit; font-size: 14px; color: var(--af-color-text, #1F1F1F);
+.af-check__desc-input.adm-text-area {
+  width: 100%; min-height: 80px; padding: 0;
+  border: none; background: transparent; font-size: 14px;
+  color: var(--af-color-text, #1F1F1F);
 }
-.af-check__desc-input::placeholder { color: #C0C4CC; }
+.af-check__desc-input .adm-text-area-element {
+  padding: 0; font-size: 14px; color: var(--af-color-text, #1F1F1F);
+  line-height: 1.5;
+}
+.af-check__desc-input .adm-text-area-element::placeholder { color: #C0C4CC; }
 .af-check__upload-row { display: flex; gap: 24px; margin-top: 24px; }
 .af-check__upload-btn {
   display: inline-flex; align-items: center; gap: 4px;

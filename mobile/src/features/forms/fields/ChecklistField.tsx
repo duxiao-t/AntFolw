@@ -1,4 +1,4 @@
-import { Toast } from 'antd-mobile';
+import { TextArea, Toast } from 'antd-mobile';
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { MobileFileDto } from '../files.api';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
@@ -324,12 +324,12 @@ function CheckCard({
       </div>
       {expanded ? (
         <div className="af-check__detail">
-          <textarea
+          <TextArea
             className="af-check__desc-input"
-            rows={4}
             placeholder="请输入描述"
+            autoSize={{ minRows: 3 }}
             value={entry.description}
-            onChange={(event) => onEntry({ description: event.target.value })}
+            onChange={(value) => onEntry({ description: value })}
           />
           <div className="af-check__upload-row">
             <button
