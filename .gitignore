@@ -58,3 +58,16 @@ backend/data/
 
 # Frontend local preview artifacts
 frontend/frontend/
+
+# Local dev server logs (running processes hold these files)
+backend/run*.log
+backend/server*.log
+frontend/dev*.log
+frontend/preview-server*.log
+frontend/npm-ci*.log
+mobile/dev*.log
+mobile/npm-ci*.log
+
+# Root-level tool caches and E2E-generated preview screenshots
+node_modules/
+_preview/*.png
