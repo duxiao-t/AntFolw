@@ -8,6 +8,7 @@ import {
   Input,
   List,
   Modal,
+  Select,
   Space,
   Steps,
   Switch,
@@ -20,7 +21,7 @@ import {
   CloseCircleOutlined,
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
-import { history, request, useLocation, useParams } from '@umijs/max';
+import { history, request, useLocation, useModel, useParams } from '@umijs/max';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
@@ -57,6 +58,12 @@ type PublishCheckItem = {
   status: PublishCheckStatus;
   title: string;
   description: string;
+};
+
+type FormGrant = { version: number; userIds: number[]; roleIds: number[] };
+type FormGrantCandidates = {
+  users: { id: number; username: string; displayName: string; employeeNo: string }[];
+  roles: { id: number; code: string; name: string }[];
 };
 
 const allSteps = [
@@ -129,9 +136,7 @@ function hasApprovalNode(node: any): boolean {
 }
 
 function getSteps(workflowEnabled: boolean) {
-  return workflowEnabled
-    ? allSteps
-    : allSteps.filter((item) => item.key !== 'process');
+  return allSteps.filter((item) => workflowEnabled || item.key !== 'process');
 }
 
 function stepFromSearch(search: string, steps: typeof allSteps) {
@@ -143,6 +148,7 @@ function stepFromSearch(search: string, steps: typeof allSteps) {
 export default function FormManagementWizard() {
   const params = useParams();
   const location = useLocation();
+  const { initialState } = useModel('@@initialState');
   const qc = useQueryClient();
   const [form] = Form.useForm();
   const { token } = theme.useToken();
@@ -151,6 +157,9 @@ export default function FormManagementWizard() {
   const id = params.id;
   const isNew = !id || id === 'new';
   const formId = isNew ? null : Number(id);
+  const currentUser = initialState?.currentUser as any;
+  const canManageGrants = (currentUser?.roles ?? []).includes('admin')
+    || (currentUser?.permissions ?? []).includes('form.authorization.manage');
 
   const { data: definition } = useQuery<FormDefinition>({
     queryKey: ['form-management-definition', formId],
@@ -175,6 +184,20 @@ export default function FormManagementWizard() {
       }
     },
     enabled: !!formId && !!workflowEnabled,
+  });
+
+  const { data: formGrant } = useQuery<FormGrant>({
+    queryKey: ['form-management-grant', formId],
+    queryFn: () => request<FormGrant>(`/api/forms/${formId}/grants`),
+    enabled: !!formId && canManageGrants,
+  });
+
+  const { data: grantCandidates } = useQuery<FormGrantCandidates>({
+    queryKey: ['form-management-grant-candidates', formId ?? 'new'],
+    queryFn: () => request<FormGrantCandidates>(
+      formId ? `/api/forms/${formId}/grants/candidates` : '/api/forms/grant-candidates',
+    ),
+    enabled: canManageGrants,
   });
 
   const schema = useMemo(
@@ -266,13 +289,25 @@ export default function FormManagementWizard() {
   const canPublish = publishErrors.length === 0;
 
   useEffect(() => {
-    if (!definition) return;
-    form.setFieldsValue({
-      code: definition.code,
-      name: definition.name,
-      workflowEnabled: getWorkflowEnabled(definition.settings),
-    });
-  }, [definition, form]);
+    if (definition) {
+      form.setFieldsValue({
+        code: definition.code,
+        name: definition.name,
+        workflowEnabled: getWorkflowEnabled(definition.settings),
+      });
+    }
+    if (canManageGrants && formGrant) {
+      form.setFieldsValue({
+        userIds: formGrant.userIds,
+        roleIds: formGrant.roleIds,
+      });
+    } else if (canManageGrants && isNew && form.getFieldValue('userIds') === undefined) {
+      form.setFieldsValue({
+        userIds: currentUser?.id ? [currentUser.id] : [],
+        roleIds: [],
+      });
+    }
+  }, [canManageGrants, currentUser?.id, definition, form, formGrant, isNew]);
 
   const goStep = (key: string, nextId = formId) => {
     if (!nextId) return;
@@ -307,7 +342,7 @@ export default function FormManagementWizard() {
         ...parseJsonValue<Record<string, any>>(definition?.settings, {}),
         workflowEnabled: !!values.workflowEnabled,
       };
-      return request<FormDefinition>('/api/forms/definitions', {
+      const saved = await request<FormDefinition>('/api/forms/definitions', {
         method: 'POST',
         data: {
           id: formId,
@@ -317,6 +352,24 @@ export default function FormManagementWizard() {
           settings,
         },
       });
+      if (!canManageGrants) return saved;
+
+      try {
+        const latestGrant = await request<FormGrant>(`/api/forms/${saved.id}/grants`);
+        const userIds = Array.isArray(values.userIds) ? values.userIds : latestGrant.userIds;
+        const roleIds = Array.isArray(values.roleIds) ? values.roleIds : latestGrant.roleIds;
+        await request<FormGrant>(`/api/forms/${saved.id}/grants`, {
+          method: 'PUT',
+          data: { userIds, roleIds, version: latestGrant.version },
+        });
+      } catch (error: any) {
+        const grantError = error instanceof Error
+          ? error
+          : new Error(error?.message ?? '表单管理员保存失败');
+        (grantError as any).formId = saved.id;
+        throw grantError;
+      }
+      return saved;
     },
     onSuccess: (res) => {
       message.success(
@@ -326,6 +379,14 @@ export default function FormManagementWizard() {
       );
       qc.invalidateQueries({ queryKey: ['form-management-definition'] });
       goStep('designer', res.id);
+    },
+    onError: (error: any) => {
+      if (error?.formId) {
+        qc.invalidateQueries({ queryKey: ['form-management-definition', error.formId] });
+        qc.invalidateQueries({ queryKey: ['form-management-grant', error.formId] });
+        goStep('basic', error.formId);
+      }
+      message.error(error?.message ?? '保存失败');
     },
   });
 
@@ -390,9 +451,15 @@ export default function FormManagementWizard() {
           throw new Error('启用审批流程后，至少需要配置一个审批节点');
         }
       }
-      await request(`/api/forms/definitions/${formId}/publish`, { method: 'POST' });
       if (workflowEnabled && processDefinition?.id) {
-        await request(`/api/processes/definitions/${processDefinition.id}/publish`, { method: 'POST' });
+        await request(`/api/forms/definitions/${formId}/publish-with-process`, {
+          method: 'POST',
+          data: { processDefinitionId: processDefinition.id },
+        });
+      } else {
+        await request(`/api/forms/definitions/${formId}/publish`, {
+          method: 'POST',
+        });
       }
     },
     onSuccess: () => {
@@ -449,6 +516,46 @@ export default function FormManagementWizard() {
         >
           <Switch onChange={handleWorkflowEnabledChange} />
         </Form.Item>
+        {canManageGrants && (
+          <div
+            style={{
+              borderTop: `1px solid ${token.colorBorderSecondary}`,
+              marginBottom: 16,
+              marginTop: 8,
+              paddingTop: 20,
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 16 }}>表单管理员</div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: 16,
+              }}
+            >
+              <Form.Item label="用户管理员" name="userIds" style={{ marginBottom: 0 }}>
+                <Select
+                  mode="multiple"
+                  showSearch={{ optionFilterProp: 'label' }}
+                  options={(grantCandidates?.users ?? []).map((user) => ({
+                    value: user.id,
+                    label: `${user.displayName} · ${user.employeeNo || user.username}`,
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item label="角色管理员" name="roleIds" style={{ marginBottom: 0 }}>
+                <Select
+                  mode="multiple"
+                  showSearch={{ optionFilterProp: 'label' }}
+                  options={(grantCandidates?.roles ?? []).map((role) => ({
+                    value: role.id,
+                    label: `${role.name} · ${role.code}`,
+                  }))}
+                />
+              </Form.Item>
+            </div>
+          </div>
+        )}
       </Form>
       <Space>
         <Button type="primary" loading={saveBasic.isPending} onClick={() => saveBasic.mutate()}>

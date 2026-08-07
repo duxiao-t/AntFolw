@@ -1,7 +1,7 @@
 import { PageContainer, ProTable, type ActionType } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Space, Tag } from 'antd';
 import { ApartmentOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { history, request } from '@umijs/max';
+import { history, request, useModel } from '@umijs/max';
 import { useRef } from 'react';
 
 type FormDefinition = {
@@ -42,6 +42,10 @@ function isWorkflowEnabled(settings: FormDefinition['settings']) {
 export default function FormManagementList() {
   const actionRef = useRef<ActionType | undefined>(undefined);
   const { message } = App.useApp();
+  const { initialState } = useModel('@@initialState');
+  const currentUser = initialState?.currentUser as any;
+  const isAdmin = (currentUser?.roles ?? []).includes('admin');
+  const can = (permission: string) => isAdmin || (currentUser?.permissions ?? []).includes(permission);
 
   const handleDelete = async (record: FormDefinition) => {
     try {
@@ -100,8 +104,8 @@ export default function FormManagementList() {
               const deprecated = record.status === 'DEPRECATED';
               return (
                 <Space>
-                  <a onClick={() => history.push(`/approval/forms/${record.id}/wizard?step=basic`)}>编辑</a>
-                  <Popconfirm
+                  {can('form.definition.design') && <a onClick={() => history.push(`/approval/forms/${record.id}/wizard?step=basic`)}>编辑</a>}
+                  {can('form.definition.publish') && <Popconfirm
                     title="确认停用该表单？"
                     description="停用后表单将不再可发起填报。"
                     okText="停用"
@@ -117,8 +121,8 @@ export default function FormManagementList() {
                     >
                       {deprecated ? '已停用' : '停用'}
                     </a>
-                  </Popconfirm>
-                  <Popconfirm
+                  </Popconfirm>}
+                  {can('form.definition.delete') && <Popconfirm
                     title="确认删除该表单？"
                     description="删除后列表不再展示，历史提交数据仍会保留。"
                     okText="删除"
@@ -126,8 +130,8 @@ export default function FormManagementList() {
                     onConfirm={() => handleDelete(record)}
                   >
                     <a style={{ color: '#ff4d4f' }}>删除</a>
-                  </Popconfirm>
-                  <a onClick={() => history.push(`/approval/form-data?formDefId=${record.id}`)}>数据</a>
+                  </Popconfirm>}
+                  {can('form.data.read') && <a onClick={() => history.push(`/approval/form-data?formDefId=${record.id}`)}>数据</a>}
                 </Space>
               );
             },
@@ -151,11 +155,11 @@ export default function FormManagementList() {
         }}
         search={false}
         options={false}
-        toolBarRender={() => [
+        toolBarRender={() => can('form.definition.create') ? [
           <Button key="new" type="primary" icon={<PlusOutlined />} onClick={() => history.push('/approval/forms/new')}>
             新建表单
           </Button>,
-        ]}
+        ] : []}
       />
     </PageContainer>
   );
