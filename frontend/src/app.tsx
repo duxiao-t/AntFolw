@@ -7,6 +7,7 @@ import { history, Link } from '@umijs/max';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import React from 'react';
+import Exception403 from '@/pages/exception/403';
 
 // Initialize dayjs plugins globally
 dayjs.extend(relativeTime);
@@ -160,7 +161,7 @@ export const layout: RunTimeLayoutConfig = ({
     ErrorBoundary,
     menuHeaderRender: undefined,
     // 自定义 403 页面
-    // unAccessible: <div>unAccessible</div>,
+    unAccessible: <Exception403 />,
     // 增加一个 loading 的状态
     childrenRender: (children) => {
       // if (initialState?.loading) return <PageLoading />;

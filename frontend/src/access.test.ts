@@ -9,6 +9,7 @@ describe('access', () => {
         name: 'Admin User',
         avatar: 'https://example.com/avatar.png',
         roles: ['admin'],
+        permissions: [],
       },
     };
 
@@ -25,13 +26,40 @@ describe('access', () => {
         name: 'Regular User',
         avatar: 'https://example.com/avatar.png',
         roles: ['user'],
+        permissions: [
+          'page.workplace', 'page.approval.forms', 'page.approval.records',
+          'workflow.instance.read', 'form.definition.read', 'form.definition.design',
+        ],
       },
     };
 
     const result = access(initialState);
 
     expect(result.canAdmin).toBe(false);
-    expect(result.canDesigner).toBe(false);
+    expect(result.canDesigner).toBe(true);
+    expect(result.canReadInstances).toBe(true);
+    expect(result.canManageOrg).toBe(false);
+    expect(result.canAssignRoles).toBe(false);
+  });
+
+  it('delegates organization pages but keeps role assignment administrator-only', () => {
+    const result = access({
+      currentUser: {
+        userid: '4',
+        name: 'Delegated Manager',
+        avatar: '',
+        roles: ['manager'],
+        permissions: [
+          'page.org.contacts',
+          'org.department.read',
+          'org.user.read',
+          'security.user_role.read',
+        ],
+      },
+    });
+
+    expect(result.canManageOrg).toBe(true);
+    expect(result.canAssignRoles).toBe(false);
   });
 
   it('should return canAdmin false when user roles are empty', () => {
