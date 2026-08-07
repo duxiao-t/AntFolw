@@ -1,6 +1,7 @@
 import { ProTable } from '@ant-design/pro-components';
 import {
-  DeleteOutlined, DownloadOutlined, ImportOutlined, UserAddOutlined,
+  DeleteOutlined, DownloadOutlined, EditOutlined, ImportOutlined, KeyOutlined,
+  UserAddOutlined,
 } from '@ant-design/icons';
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag } from 'antd';
 import type { FormInstance } from 'antd';
@@ -93,6 +94,10 @@ export function MembersSection({
   onBulkRemove,
   onExport,
   onImport,
+  canAdd,
+  canResetPassword,
+  canManageUsersByDept,
+  onResetPassword,
 }: {
   breadcrumb: string;
   members: MemberListItem[];
@@ -106,13 +111,17 @@ export function MembersSection({
   onBulkRemove: () => void;
   onExport: () => void;
   onImport: (event: ChangeEvent<HTMLInputElement>) => void;
+  canAdd?: boolean;
+  canResetPassword?: boolean;
+  canManageUsersByDept?: Record<number, boolean>;
+  onResetPassword?: (member: MemberListItem) => void;
 }) {
   return (
     <>
       <div className="ct-right-header">
         <h2>{breadcrumb} · {members.length}人</h2>
         <Space>
-          <Button icon={<UserAddOutlined />} type="primary" onClick={onAdd}>添加成员</Button>
+          <Button icon={<UserAddOutlined />} type="primary" onClick={onAdd} disabled={!canAdd}>添加成员</Button>
           <Popconfirm
             title={`确定删除选中的 ${selectedMemberIds.length} 名成员?`}
             disabled={!selectedMemberIds.length}
@@ -120,7 +129,7 @@ export function MembersSection({
           >
             <Button danger icon={<DeleteOutlined />} disabled={!selectedMemberIds.length}>批量删除</Button>
           </Popconfirm>
-          <Button icon={<ImportOutlined />} onClick={() => importInputRef.current?.click()}>批量导入</Button>
+          <Button icon={<ImportOutlined />} disabled={!canAdd} onClick={() => importInputRef.current?.click()}>批量导入</Button>
           <Button icon={<DownloadOutlined />} onClick={onExport}>导出</Button>
           <input ref={importInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImport} />
         </Space>
@@ -135,19 +144,26 @@ export function MembersSection({
           { title: '部门', dataIndex: 'deptId', render: (_, r) => deptNameById[r.deptId] ?? '-' },
           { title: '职务', dataIndex: 'position' },
           { title: '性别', dataIndex: 'gender', render: (_, r) => <MemberGenderTag value={r.gender} /> },
-          { title: '操作', key: 'op', width: 160, render: (_, r) => (
-            <Space>
-              <a onClick={() => onEdit(r)}>编辑</a>
-              <Popconfirm title="确定删除?" onConfirm={() => onRemove(r.id)}>
-                <a style={{ color: '#ff4d4f' }}>删除</a>
-              </Popconfirm>
-            </Space>
-          )},
+          { title: '操作', key: 'op', width: 250, render: (_, r) => {
+            const canManage = !!canManageUsersByDept?.[r.deptId];
+            return (
+              <Space size={2}>
+                <Button type="text" size="small" icon={<EditOutlined />} disabled={!canManage} onClick={() => onEdit(r)}>编辑</Button>
+                {canResetPassword && (
+                  <Button type="text" size="small" icon={<KeyOutlined />} onClick={() => onResetPassword?.(r)}>重置密码</Button>
+                )}
+                <Popconfirm title="确定删除?" disabled={!canManage} onConfirm={() => onRemove(r.id)}>
+                  <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={!canManage} aria-label={`删除 ${r.displayName}`} />
+                </Popconfirm>
+              </Space>
+            );
+          } },
         ]}
         dataSource={members}
         rowSelection={{
           selectedRowKeys: selectedMemberIds,
           onChange: onSelectedMemberIdsChange,
+          getCheckboxProps: (record) => ({ disabled: !canManageUsersByDept?.[record.deptId] }),
         }}
         search={false}
         options={false}
@@ -164,6 +180,8 @@ export function MemberFormModal({
   saving,
   onOk,
   onCancel,
+  canResetPassword,
+  onResetPassword,
 }: {
   open: boolean;
   editing: MemberListItem | null;
@@ -171,28 +189,63 @@ export function MemberFormModal({
   saving: boolean;
   onOk: () => void;
   onCancel: () => void;
+  canResetPassword?: boolean;
+  onResetPassword?: () => void;
 }) {
   return (
     <Modal
       title={editing ? '编辑成员' : '添加成员'}
       open={open}
       confirmLoading={saving}
-      width={520}
+      width={600}
       onOk={onOk}
       onCancel={onCancel}
       destroyOnHidden
     >
-      <Form form={form} layout="vertical" preserve={false}
+      <Form className="ct-member-form" form={form} layout="vertical" preserve={false}
         initialValues={editing ? { ...editing, gender: normalizeGender(editing.gender) } : undefined}>
-        <Form.Item label="姓名" name="displayName" rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item label="工号" name="employeeNo" rules={[{ pattern: /^[0-9]{6}$/, message: '工号必须为 6 位数字' }]} extra="留空时由系统自动生成"><Input inputMode="numeric" maxLength={6} /></Form.Item>
-        <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input disabled={!!editing} /></Form.Item>
-        <Form.Item label="手机" name="phone"><Input /></Form.Item>
-        <Form.Item label="邮箱" name="email"><Input /></Form.Item>
-        <Form.Item label="职务" name="position"><Input /></Form.Item>
-        <Form.Item label="性别" name="gender">
-          <Select allowClear options={[{ value: 'M', label: '男' }, { value: 'F', label: '女' }]} />
-        </Form.Item>
+        <div className="ct-member-form__grid">
+          <Form.Item label="姓名" name="displayName" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item label="工号" name="employeeNo" rules={[{ pattern: /^[0-9]{6}$/, message: '工号必须为 6 位数字' }]} extra="留空时自动生成"><Input inputMode="numeric" maxLength={6} /></Form.Item>
+          <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input disabled={!!editing} /></Form.Item>
+          <Form.Item label="手机" name="phone"><Input /></Form.Item>
+          <Form.Item label="邮箱" name="email"><Input /></Form.Item>
+          <Form.Item label="职务" name="position"><Input /></Form.Item>
+          {!editing && (
+            <>
+              <Form.Item label="初始密码" name="password" rules={[
+                { required: true, message: '请设置初始密码' },
+                { min: 8, max: 64, message: '密码长度为 8 到 64 位' },
+              ]}>
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+              <Form.Item label="确认密码" name="confirmPassword" dependencies={['password']} rules={[
+                { required: true, message: '请再次输入密码' },
+                ({ getFieldValue }) => ({
+                  validator(_, value) {
+                    return !value || getFieldValue('password') === value
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('两次输入的密码不一致'));
+                  },
+                }),
+              ]}>
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+            </>
+          )}
+          <Form.Item label="性别" name="gender">
+            <Select allowClear options={[{ value: 'M', label: '男' }, { value: 'F', label: '女' }]} />
+          </Form.Item>
+        </div>
+        {editing && canResetPassword && (
+          <div className="ct-member-form__security">
+            <div>
+              <strong>登录密码</strong>
+              <span>重置后，该用户需要使用新密码重新登录</span>
+            </div>
+            <Button icon={<KeyOutlined />} onClick={onResetPassword}>重置密码</Button>
+          </div>
+        )}
       </Form>
     </Modal>
   );

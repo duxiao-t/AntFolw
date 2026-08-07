@@ -1,5 +1,5 @@
 import { PageContainer } from '@ant-design/pro-components';
-import { request } from '@umijs/max';
+import { request, useAccess } from '@umijs/max';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Input, Tree, Button, Dropdown, Modal, Form, Select, App,
@@ -28,6 +28,8 @@ interface Dept {
   id: number; companyId: number; parentId: number | null;
   path: string; name: string; leaderId: number | null; leaderIds?: number[];
   sortOrder?: number;
+  contextOnly?: boolean; canReadMembers?: boolean;
+  canManageDepartment?: boolean; canManageUsers?: boolean;
 }
 interface UserItem {
   id: number; employeeNo: string; username: string; displayName: string; email: string;
@@ -35,6 +37,7 @@ interface UserItem {
 }
 
 export default function ContactsPage() {
+  const access = useAccess();
   const [selDeptId, setSelDeptId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
@@ -43,6 +46,7 @@ export default function ContactsPage() {
 
   const [deptForm] = Form.useForm();
   const [memberForm] = Form.useForm();
+  const [passwordForm] = Form.useForm();
   const [deptAddOpen, setDeptAddOpen] = useState(false);           // top "+"
   const [deptAddParentId, setDeptAddParentId] = useState<number | null>(null); // for sub-dept
   const [deptEditOpen, setDeptEditOpen] = useState(false);
@@ -51,6 +55,7 @@ export default function ContactsPage() {
   const [leaderDeptId, setLeaderDeptId] = useState<number | null>(null);
   const [memberOpen, setMemberOpen] = useState(false);
   const [memberEdit, setMemberEdit] = useState<UserItem | null>(null);
+  const [passwordTarget, setPasswordTarget] = useState<UserItem | null>(null);
   const [selectedMemberIds, setSelectedMemberIds] = useState<React.Key[]>([]);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -102,6 +107,15 @@ export default function ContactsPage() {
     for (const d of deptList as Dept[]) map[d.id] = d.name;
     return map;
   }, [deptList]);
+
+  const canManageUsersByDept = useMemo(() => Object.fromEntries(
+    (deptList as Dept[]).map((department) => [department.id, !!department.canManageUsers]),
+  ), [deptList]);
+
+  const selectedDepartment = useMemo(
+    () => (deptList as Dept[]).find((department) => department.id === selDeptId),
+    [deptList, selDeptId],
+  );
 
   const selectedDeptIds = useMemo(
     () => collectDepartmentIds(deptList as Dept[], selDeptId),
@@ -196,6 +210,11 @@ export default function ContactsPage() {
     mutationFn: (id: number) => request(`/api/users/${id}`, { method: 'DELETE' }),
     onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已删除'); },
   });
+  const memberPasswordReset = useMutation({
+    mutationFn: ({ id, newPassword }: { id: number; newPassword: string }) =>
+      request(`/api/users/${id}/password`, { method: 'PUT', data: { newPassword } }),
+    onSuccess: () => { msg.success('密码已重置，用户的旧会话已失效'); },
+  });
 
   // --- tree drop ---
   const onDrop = useCallback((info: any) => {
@@ -224,22 +243,26 @@ export default function ContactsPage() {
   // --- tree title render ---
   const titleRender = (node: DataNode) => {
     const currentDept = (deptList as Dept[]).find(x => x.id === node.key);
+    const canManage = !!currentDept?.canManageDepartment;
     const siblings = (deptList as Dept[]).filter(x => (x.parentId ?? null) === (currentDept?.parentId ?? null));
     const siblingIndex = siblings.findIndex(x => x.id === node.key);
     const canMoveUp = siblingIndex > 0;
     const canMoveDown = siblingIndex >= 0 && siblingIndex < siblings.length - 1;
     const items = [
       { key: 'add', label: '添加子部门', icon: <PlusOutlined />,
+        disabled: !canManage,
         onClick: () => { setDeptAddParentId(node.key as number); setDeptAddOpen(true); } },
       { key: 'edit', label: '修改名称', icon: <EditOutlined />,
+        disabled: !canManage,
         onClick: () => { setDeptEditId(node.key as number); setDeptEditOpen(true); } },
       { key: 'leader', label: '设置负责人', icon: <TeamOutlined />,
+        disabled: !canManage,
         onClick: () => { setLeaderDeptId(node.key as number); setLeaderOpen(true); } },
-      { key: 'up', label: '上移', icon: <ArrowUpOutlined />, disabled: !canMoveUp,
+      { key: 'up', label: '上移', icon: <ArrowUpOutlined />, disabled: !canManage || !canMoveUp,
         onClick: () => deptMoveOrder.mutate({ id: node.key as number, direction: 'UP' }) },
-      { key: 'down', label: '下移', icon: <ArrowDownOutlined />, disabled: !canMoveDown,
+      { key: 'down', label: '下移', icon: <ArrowDownOutlined />, disabled: !canManage || !canMoveDown,
         onClick: () => deptMoveOrder.mutate({ id: node.key as number, direction: 'DOWN' }) },
-      { key: 'del', label: '删除部门', icon: <DeleteOutlined />, danger: true,
+      { key: 'del', label: '删除部门', icon: <DeleteOutlined />, danger: true, disabled: !canManage,
         onClick: () => {
           const d = (deptList as Dept[]).find(x => x.id === node.key);
           modal.confirm({
@@ -253,7 +276,7 @@ export default function ContactsPage() {
       { key: 'dept-id', label: `部门ID：${node.key}`, disabled: true },
     ];
     return (
-      <div className="ct-tree-node" onClick={() => setSelDeptId(node.key as number)}>
+      <div className="ct-tree-node" onClick={() => { if (!currentDept?.contextOnly) setSelDeptId(node.key as number); }}>
         <span className="ct-tree-node__name">{node.title as string}</span>
         <Dropdown menu={{ items }} trigger={['click']}>
           <Button type="text" size="small" icon={<MoreOutlined />} onClick={e => e.stopPropagation()} />
@@ -299,9 +322,25 @@ export default function ContactsPage() {
   const handleMemberOk = async () => {
     try {
       const v = await memberForm.validateFields();
-      if (memberEdit) await memberUpdate.mutateAsync({ id: memberEdit.id, ...v });
-      else await memberCreate.mutateAsync({ ...v, deptId: selDeptId });
+      const { confirmPassword: _confirmPassword, ...payload } = v;
+      if (memberEdit) await memberUpdate.mutateAsync({ id: memberEdit.id, ...payload });
+      else await memberCreate.mutateAsync({ ...payload, deptId: selDeptId });
       setMemberOpen(false); setMemberEdit(null); memberForm.resetFields();
+    } catch (error: any) {
+      if (error?.errorFields) return;
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!passwordTarget) return;
+    try {
+      const values = await passwordForm.validateFields();
+      await memberPasswordReset.mutateAsync({
+        id: passwordTarget.id,
+        newPassword: values.newPassword,
+      });
+      setPasswordTarget(null);
+      passwordForm.resetFields();
     } catch (error: any) {
       if (error?.errorFields) return;
     }
@@ -350,14 +389,13 @@ export default function ContactsPage() {
       }
       if (!result.rows.length) { msg.warning('CSV 中没有可导入的成员'); return; }
 
-      const results = await Promise.allSettled(
-        result.rows.map((row) => request('/api/users', { method: 'POST', data: row })),
-      );
-      const successCount = results.filter((r) => r.status === 'fulfilled').length;
-      const failedCount = results.length - successCount;
+      const imported = await request<{
+        successCount: number; failedCount: number; defaultPassword: string;
+      }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
+      const { successCount, failedCount } = imported;
       if (successCount) qc.invalidateQueries({ queryKey: ['all-users'] });
       if (failedCount) msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
-      else msg.success(`已导入 ${successCount} 名成员`);
+      else msg.success(`已导入 ${successCount} 名成员，初始密码为 ${imported.defaultPassword}`);
     } catch (_error) {
       msg.error('批量导入失败');
     }
@@ -386,7 +424,8 @@ export default function ContactsPage() {
           <div className="ct-left-top">
             <Input prefix={<SearchOutlined />} placeholder="搜索部门" allowClear
               value={search} onChange={e => setSearch(e.target.value)} />
-            <Button icon={<PlusOutlined />} onClick={() => { setDeptAddParentId(null); setDeptAddOpen(true); }} />
+            <Button aria-label="新建一级部门" icon={<PlusOutlined />} disabled={!access.canWriteDepartments}
+              onClick={() => { setDeptAddParentId(null); setDeptAddOpen(true); }} />
           </div>
           <div className="ct-tree-wrap">
             <Tree
@@ -394,10 +433,19 @@ export default function ContactsPage() {
               treeData={filteredTree}
               expandedKeys={expandedKeys}
               onExpand={keys => setExpandedKeys(keys)}
-              onSelect={keys => { if (keys[0]) setSelDeptId(keys[0] as number); }}
+              onSelect={keys => {
+                const id = keys[0] as number | undefined;
+                if (id && !(deptList as Dept[]).find((department) => department.id === id)?.contextOnly) {
+                  setSelDeptId(id);
+                }
+              }}
               selectedKeys={selDeptId ? [selDeptId] : []}
               titleRender={titleRender}
-              draggable={{ icon: false }}
+              draggable={{
+                icon: false,
+                nodeDraggable: (node) => !!(deptList as Dept[])
+                  .find((department) => department.id === node.key)?.canManageDepartment,
+              }}
               blockNode
               onDrop={onDrop}
             />
@@ -420,6 +468,10 @@ export default function ContactsPage() {
               onBulkRemove={handleBulkMemberRemove}
               onExport={handleExportMembers}
               onImport={handleImportMembers}
+              canAdd={!!selectedDepartment?.canManageUsers}
+              canResetPassword={!!access.canAdmin}
+              canManageUsersByDept={canManageUsersByDept}
+              onResetPassword={(member) => { passwordForm.resetFields(); setPasswordTarget(member); }}
             />
           ) : (
             <div className="ct-empty">请从左侧选择部门</div>
@@ -443,7 +495,7 @@ export default function ContactsPage() {
           {!deptAddParentId && (
             <Form.Item label="所属部门" name="parentId">
               <Select allowClear placeholder="留空则为一级部门" options={
-                (deptList as Dept[]).map(d => ({ value: d.id, label: d.name }))
+                (deptList as Dept[]).filter(d => d.canManageDepartment).map(d => ({ value: d.id, label: d.name }))
               } />
             </Form.Item>
           )}
@@ -496,7 +548,45 @@ export default function ContactsPage() {
         saving={memberCreate.isPending || memberUpdate.isPending}
         onOk={handleMemberOk}
         onCancel={() => { setMemberOpen(false); setMemberEdit(null); memberForm.resetFields(); }}
+        canResetPassword={!!access.canAdmin}
+        onResetPassword={() => {
+          if (!memberEdit) return;
+          setMemberOpen(false);
+          passwordForm.resetFields();
+          setPasswordTarget(memberEdit);
+        }}
       />
+
+      <Modal
+        title={passwordTarget ? `重置密码 · ${passwordTarget.displayName}` : '重置密码'}
+        open={!!passwordTarget}
+        width={440}
+        confirmLoading={memberPasswordReset.isPending}
+        onOk={handlePasswordReset}
+        onCancel={() => { setPasswordTarget(null); passwordForm.resetFields(); }}
+        destroyOnHidden
+      >
+        <Form form={passwordForm} layout="vertical" preserve={false} className="ct-member-form">
+          <Form.Item label="新密码" name="newPassword" rules={[
+            { required: true, message: '请输入新密码' },
+            { min: 8, max: 64, message: '密码长度为 8 到 64 位' },
+          ]}>
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item label="确认新密码" name="confirmPassword" dependencies={['newPassword']} rules={[
+            { required: true, message: '请再次输入新密码' },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                return !value || getFieldValue('newPassword') === value
+                  ? Promise.resolve()
+                  : Promise.reject(new Error('两次输入的密码不一致'));
+              },
+            }),
+          ]}>
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </PageContainer>
   );
 }
