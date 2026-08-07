@@ -16,6 +16,7 @@ public class FormDefinition {
     @TableField(typeHandler = JsonbJacksonTypeHandler.class) private String settings;     // JSONB
     private String status;       // DRAFT / PUBLISHED / DEPRECATED
     private Long createdBy;
+    private Integer authzVersion;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE) private java.time.OffsetDateTime updatedAt;
     @TableLogic(value = "0", delval = "1") private Integer deleted;

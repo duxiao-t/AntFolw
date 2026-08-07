@@ -1,5 +1,6 @@
 package com.antflow.auth;
 
+import com.antflow.authz.AuthorizationService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
@@ -13,7 +14,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 
 @RequiredArgsConstructor
@@ -21,6 +22,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final AuthSessionService sessionService;
+    private final AuthorizationService authorizationService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
@@ -33,15 +35,19 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 long userId = Long.parseLong(c.getSubject());
                 String sessionId = c.get("sid", String.class);
                 if (sessionId != null && sessionService.isActive(userId, UUID.fromString(sessionId))) {
-                    String username = c.get("username", String.class);
-                    @SuppressWarnings("unchecked")
-                    List<String> roles = (List<String>) c.get("roles", List.class);
-                    PrincipalHolder.set(new PrincipalHolder.Principal(userId, username, roles));
-                    var authorities = roles.stream()
-                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
-                        .toList();
-                    var auth = new UsernamePasswordAuthenticationToken(username, null, authorities);
-                    SecurityContextHolder.getContext().setAuthentication(auth);
+                    UUID parsedSessionId = UUID.fromString(sessionId);
+                    authorizationService.principalForRequest(userId, parsedSessionId)
+                        .ifPresent(principal -> {
+                            PrincipalHolder.set(principal);
+                            var authorities = new ArrayList<SimpleGrantedAuthority>();
+                            principal.roles().forEach(role -> authorities.add(
+                                new SimpleGrantedAuthority("ROLE_" + role)));
+                            principal.permissions().forEach(permission -> authorities.add(
+                                new SimpleGrantedAuthority(permission)));
+                            var auth = new UsernamePasswordAuthenticationToken(
+                                principal.username(), null, authorities);
+                            SecurityContextHolder.getContext().setAuthentication(auth);
+                        });
                 }
             } catch (JwtException | IllegalArgumentException ignored) {
                 // invalid token → leave anonymous; SecurityConfig rejects with 401

@@ -1,6 +1,7 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.audit.AuditService;
 import com.antflow.common.GlobalExceptionHandler;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -25,7 +26,7 @@ class MobileAppControllerTest {
     void setUp() {
         mobileAppService = Mockito.mock(MobileAppService.class);
         mockMvc = MockMvcBuilders.standaloneSetup(new MobileAppController(mobileAppService))
-            .setControllerAdvice(new GlobalExceptionHandler())
+            .setControllerAdvice(new GlobalExceptionHandler(Mockito.mock(AuditService.class)))
             .build();
     }
 

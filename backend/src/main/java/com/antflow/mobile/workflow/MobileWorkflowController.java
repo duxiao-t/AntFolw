@@ -1,7 +1,13 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
+import com.antflow.audit.AuditService;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,24 +26,40 @@ import org.springframework.web.bind.annotation.RestController;
 public class MobileWorkflowController {
     private final MobileDraftService draftService;
     private final MobileWorkflowService workflowService;
+    private final AuthorizationService authorizationService;
+    private final AuditService auditService;
 
     @PostMapping("/drafts")
     public Long createDraft(@RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
-        return draftService.create(request.formCode(), request.data(), principal.userId());
+        return auditService.execute(
+            () -> draftService.create(request.formCode(), request.data(), principal.userId()),
+            id -> auditService.success("form.draft.create", "FORM_DRAFT", id,
+                AuditService.RiskLevel.NORMAL,
+                Map.of("changedFields", dataFields(request.data())),
+                Map.of("fieldCount", dataFieldCount(request.data()))));
     }
 
     @PutMapping("/drafts/{id}")
     public MobileDraftDto updateDraft(@PathVariable Long id,
                                       @RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
-        return draftService.get(draftService.update(id, request.data(), principal.userId()).getId(),
-            principal.userId());
+        return auditService.execute(() -> draftService.get(
+                draftService.update(id, request.data(), principal.userId()).getId(),
+                principal.userId()),
+            updated -> auditService.success("form.draft.update", "FORM_DRAFT", id,
+                AuditService.RiskLevel.NORMAL,
+                Map.of("changedFields", dataFields(request.data())),
+                Map.of("fieldCount", dataFieldCount(request.data()))));
     }
 
     @DeleteMapping("/drafts/{id}")
     public void deleteDraft(@PathVariable Long id) {
-        draftService.delete(id, principal().userId());
+        long userId = principal().userId();
+        auditService.execute(() -> draftService.delete(id, userId),
+            () -> auditService.success("form.draft.delete", "FORM_DRAFT", id,
+                AuditService.RiskLevel.NORMAL,
+                Map.of("changedFields", List.of("deleted")), Map.of()));
     }
 
     @GetMapping("/drafts")
@@ -53,12 +75,24 @@ public class MobileWorkflowController {
     @GetMapping("/forms/{code}")
     public MobileFormDto form(@PathVariable String code) {
         principal();
+        authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         return workflowService.getMobileForm(code);
     }
 
     @PostMapping("/instances")
     public MobileStartResult start(@RequestBody StartMobileInstanceRequest request) {
-        return workflowService.start(request, principal().userId());
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
+        long userId = principal().userId();
+        return auditService.execute(() -> workflowService.start(request, userId),
+            result -> auditService.success("workflow.instance.start", "PROCESS_INSTANCE",
+                result.instanceId(), AuditService.RiskLevel.NORMAL,
+                Map.of("changedFields", List.of("status", "startedBy", "startedAt",
+                    "startedDeptId")),
+                Map.of("formCode", request.formCode(),
+                    "fieldCount", dataFieldCount(request.data()),
+                    "fileCount", request.files() == null ? 0 : request.files().size(),
+                    "selfSelectedNodeCount",
+                    request.selfSelected() == null ? 0 : request.selfSelected().size())));
     }
 
     @GetMapping("/instances")
@@ -72,12 +106,22 @@ public class MobileWorkflowController {
     @GetMapping("/instances/{id}")
     public MobileInstanceDetailDto instance(@PathVariable Long id) {
         PrincipalHolder.Principal principal = principal();
-        return workflowService.getInstanceDetail(id, principal.userId(), principal.roles());
+        MobileInstanceDetailDto detail = workflowService.getInstanceDetail(
+            id, principal.userId(), principal.roles());
+        auditService.success("workflow.instance.detail.read", "PROCESS_INSTANCE", id,
+            AuditService.RiskLevel.HIGH, Map.of(), Map.of("client", "mobile"));
+        return detail;
     }
 
     @PostMapping("/instances/{id}/withdraw")
     public void withdraw(@PathVariable Long id) {
-        workflowService.withdraw(id, principal().userId());
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW);
+        long userId = principal().userId();
+        auditService.execute(() -> workflowService.withdraw(id, userId),
+            () -> auditService.success("workflow.instance.withdraw", "PROCESS_INSTANCE", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", List.of("status", "endedAt")),
+                Map.of("client", "mobile")));
     }
 
     @GetMapping("/tasks")
@@ -92,19 +136,35 @@ public class MobileWorkflowController {
     @GetMapping("/tasks/{id}")
     public MobileTaskDetailDto task(@PathVariable Long id) {
         PrincipalHolder.Principal principal = principal();
-        return workflowService.getTaskDetail(id, principal.userId(), principal.roles());
+        MobileTaskDetailDto detail = workflowService.getTaskDetail(
+            id, principal.userId(), principal.roles());
+        auditService.success("workflow.task.detail.read", "TASK", id,
+            AuditService.RiskLevel.HIGH, Map.of(), Map.of("client", "mobile"));
+        return detail;
     }
 
     @PostMapping("/tasks/{id}/approve")
     public void approve(@PathVariable Long id,
                         @RequestBody(required = false) MobileTaskActionRequest request) {
-        workflowService.approve(id, request, principal().userId());
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_APPROVE);
+        long userId = principal().userId();
+        auditService.execute(() -> workflowService.approve(id, request, userId),
+            () -> auditService.success("workflow.task.approve", "TASK", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", List.of("status", "approvedBy", "approvedAt")),
+                Map.of("client", "mobile", "commentLength", commentLength(request))));
     }
 
     @PostMapping("/tasks/{id}/reject")
     public void reject(@PathVariable Long id,
                        @RequestBody(required = false) MobileTaskActionRequest request) {
-        workflowService.reject(id, request, principal().userId());
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_REJECT);
+        long userId = principal().userId();
+        auditService.execute(() -> workflowService.reject(id, request, userId),
+            () -> auditService.success("workflow.task.reject", "TASK", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", List.of("status", "approvedBy", "approvedAt")),
+                Map.of("client", "mobile", "commentLength", commentLength(request))));
     }
 
     @GetMapping("/rework-tasks/{id}")
@@ -115,17 +175,45 @@ public class MobileWorkflowController {
     @PutMapping("/rework-tasks/{id}")
     public ReworkTaskDto saveReworkTask(@PathVariable Long id,
                                         @RequestBody ReworkTaskRequest request) {
-        return workflowService.saveRework(id, request, principal().userId());
+        long userId = principal().userId();
+        return auditService.execute(() -> workflowService.saveRework(id, request, userId),
+            result -> auditService.success("workflow.rework.save", "TASK", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", dataFields(request.data())),
+                Map.of("client", "mobile", "fieldCount", dataFieldCount(request.data()),
+                    "fileCount", request.files() == null ? 0 : request.files().size())));
     }
 
     @PostMapping("/rework-tasks/{id}/resubmit")
     public ReworkResult resubmitReworkTask(@PathVariable Long id,
                                            @RequestBody ReworkTaskRequest request) {
-        return workflowService.resubmitRework(id, request, principal().userId());
+        long userId = principal().userId();
+        return auditService.execute(() -> workflowService.resubmitRework(id, request, userId),
+            result -> auditService.success("workflow.rework.resubmit", "TASK", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", dataFields(request.data())),
+                Map.of("client", "mobile", "processInstanceId", result.instanceId(),
+                    "fieldCount", dataFieldCount(request.data()),
+                    "fileCount", request.files() == null ? 0 : request.files().size())));
     }
 
     private static PrincipalHolder.Principal principal() {
         return PrincipalHolder.current()
             .orElseThrow(() -> new AccessDeniedException("authentication required"));
+    }
+
+    private static List<String> dataFields(JsonNode data) {
+        if (data == null || !data.isObject()) return List.of();
+        List<String> fields = new ArrayList<>();
+        data.fieldNames().forEachRemaining(fields::add);
+        return List.copyOf(fields);
+    }
+
+    private static int dataFieldCount(JsonNode data) {
+        return data == null || !data.isObject() ? 0 : data.size();
+    }
+
+    private static int commentLength(MobileTaskActionRequest request) {
+        return request == null || request.comment() == null ? 0 : request.comment().length();
     }
 }

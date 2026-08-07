@@ -1,5 +1,6 @@
 package com.antflow.form;
 
+import com.antflow.authz.FormGrantService;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -18,6 +19,7 @@ public class FormDefinitionService {
 
     private final FormDefinitionMapper mapper;
     private final ObjectMapper json;
+    private final FormGrantService formGrantService;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
@@ -31,6 +33,11 @@ public class FormDefinitionService {
     private static final Set<String> CONTAINER_TYPES = Set.of("span_layout");
 
     public Page<FormDefinition> list(long page, long size, String keyword, String status) {
+        return list(page, size, keyword, status, null, true);
+    }
+
+    public Page<FormDefinition> list(long page, long size, String keyword, String status,
+                                     Long userId, boolean admin) {
         long safePage = Math.max(page, 1);
         long safeSize = Math.min(Math.max(size, 1), 100);
         var q = new QueryWrapper<FormDefinition>();
@@ -40,6 +47,13 @@ public class FormDefinitionService {
         if (status != null && !status.isBlank()) {
             validateStatus(status);
             q.eq("status", status);
+        }
+        if (!admin && userId != null) {
+            q.inSql("id", "SELECT grant_row.form_def_id FROM t_form_resource_grant grant_row "
+                + "WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = " + userId + ") "
+                + "OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN "
+                + "(SELECT ur.role_id FROM t_user_role ur JOIN t_role role ON role.id = ur.role_id "
+                + "WHERE ur.user_id = " + userId + " AND role.enabled = true))");
         }
         q.orderByDesc("updated_at").orderByDesc("id");
         return mapper.selectPage(Page.of(safePage, safeSize), q);
@@ -76,6 +90,7 @@ public class FormDefinitionService {
             fd.setCreatedBy(userId);
             fd.setDeleted(0);
             mapper.insert(fd);
+            formGrantService.grantCreator(fd.getId(), userId);
         } else {
             fd = mapper.selectById(id);
             if (fd == null) {

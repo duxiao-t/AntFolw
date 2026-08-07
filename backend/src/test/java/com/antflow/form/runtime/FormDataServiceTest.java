@@ -1,5 +1,7 @@
 package com.antflow.form.runtime;
 
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.FormGrantService;
 import com.antflow.common.FormalNumberService;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
@@ -28,8 +30,10 @@ class FormDataServiceTest {
         formDataMapper = Mockito.mock(FormDataMapper.class);
         formDefinitionMapper = Mockito.mock(FormDefinitionMapper.class);
         formalNumberService = Mockito.mock(FormalNumberService.class);
-        var formDefinitionService = new FormDefinitionService(formDefinitionMapper, json);
-        service = new FormDataService(formDataMapper, formDefinitionService, json, formalNumberService);
+        var formDefinitionService = new FormDefinitionService(formDefinitionMapper, json,
+            Mockito.mock(FormGrantService.class));
+        service = new FormDataService(formDataMapper, formDefinitionService, json,
+            formalNumberService, Mockito.mock(AuthorizationService.class));
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(formDataMapper.insert(any(FormData.class))).thenAnswer(invocation -> {

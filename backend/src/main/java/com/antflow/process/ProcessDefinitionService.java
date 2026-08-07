@@ -111,6 +111,16 @@ public class ProcessDefinitionService {
         return mapper.selectList(null);
     }
 
+    public List<ProcessDefinition> listAuthorized(long userId, boolean admin) {
+        if (admin) return list();
+        return mapper.selectList(new QueryWrapper<ProcessDefinition>().inSql("form_def_id",
+            "SELECT grant_row.form_def_id FROM t_form_resource_grant grant_row "
+                + "WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = " + userId + ") "
+                + "OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN "
+                + "(SELECT ur.role_id FROM t_user_role ur JOIN t_role role ON role.id = ur.role_id "
+                + "WHERE ur.user_id = " + userId + " AND role.enabled = true))"));
+    }
+
     @Transactional
     public void deleteByForm(Long formDefId) {
         mapper.delete(new QueryWrapper<ProcessDefinition>().eq("form_def_id", formDefId));

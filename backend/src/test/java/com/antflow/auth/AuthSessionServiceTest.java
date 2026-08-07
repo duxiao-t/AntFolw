@@ -53,6 +53,7 @@ class AuthSessionServiceTest {
         assertThat(stored.getCsrfTokenHash()).hasSize(64);
         assertThat(stored.getDeviceName()).isEqualTo("Chrome Windows");
         assertThat(result.accessToken()).isEqualTo("session-access-token");
+        assertThat(result.sessionId()).isEqualTo(stored.getId());
 
         List<String> cookies = response.getHeaders("Set-Cookie");
         assertThat(cookies).anySatisfy(cookie -> {
@@ -81,6 +82,7 @@ class AuthSessionServiceTest {
             refreshToken, csrfToken, csrfToken, request("Mozilla/5.0 iPhone Safari/17"), response);
 
         assertThat(result.accessToken()).isEqualTo("rotated-access-token");
+        assertThat(result.sessionId()).isEqualTo(session.getId());
         assertThat(session.getRefreshTokenHash()).isNotEqualTo(AuthSessionService.hash(refreshToken));
         assertThat(session.getCsrfTokenHash()).isNotEqualTo(AuthSessionService.hash(csrfToken));
         verify(sessionMapper).updateById(session);

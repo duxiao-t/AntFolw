@@ -1,6 +1,7 @@
 package com.antflow.mobile.workflow;
 
 import java.util.UUID;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -20,6 +21,14 @@ public interface MobileFileAccessMapper {
           )
         """)
     long countReadableProcessLinks(@Param("fileId") UUID fileId, @Param("userId") long userId);
+
+    @Select("""
+        SELECT DISTINCT pi.id
+        FROM t_form_data_file fdf
+        JOIN t_process_instance pi ON pi.form_data_id = fdf.form_data_id
+        WHERE fdf.file_id = #{fileId}
+        """)
+    List<Long> selectLinkedInstanceIds(@Param("fileId") UUID fileId);
 
     @Select("SELECT COUNT(*) FROM t_form_data_file WHERE file_id = #{fileId}")
     long countLinks(@Param("fileId") UUID fileId);

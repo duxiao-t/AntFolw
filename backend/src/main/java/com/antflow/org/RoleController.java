@@ -1,5 +1,7 @@
 package com.antflow.org;
 
+import com.antflow.authz.RoleAdminService;
+import com.antflow.authz.AuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -9,10 +11,12 @@ import java.util.List;
 @RequestMapping("/api/roles")
 @RequiredArgsConstructor
 public class RoleController {
-    private final RoleMapper mapper;
+    private final RoleAdminService roleAdminService;
+    private final AuthorizationService authorizationService;
 
     @GetMapping
-    public List<Role> all() {
-        return mapper.selectList(null);
+    public List<RoleAdminService.RoleDto> all() {
+        authorizationService.requireAdmin();
+        return roleAdminService.roles();
     }
 }

@@ -17,6 +17,7 @@ public class ProcessInstance {
     private String currentNodeId;
     @Version private Integer version;
     private Long startedBy;
+    private Long startedDeptId;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime startedAt;
     private java.time.OffsetDateTime finishedAt;
 }

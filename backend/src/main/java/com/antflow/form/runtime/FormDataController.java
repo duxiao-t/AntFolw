@@ -1,9 +1,10 @@
 package com.antflow.form.runtime;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,9 +15,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class FormDataController {
     private final FormDataService service;
+    private final AuthorizationService authorizationService;
 
     @PostMapping
     public Map<String, Object> submit(@RequestBody Map<String, Object> body) {
+        authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
         Long id = service.submit(
             (String) body.get("formCode"),
@@ -33,18 +36,20 @@ public class FormDataController {
     }
 
     @GetMapping("/admin")
-    @PreAuthorize("hasRole('admin')")
     public Page<FormData> adminPage(@RequestParam(defaultValue = "1") long page,
                                     @RequestParam(defaultValue = "20") long size,
                                     @RequestParam(required = false) Long formDefId,
                                     @RequestParam(required = false) String status,
                                     @RequestParam(required = false) Long createdBy) {
-        return service.adminPage(page, size, formDefId, status, createdBy);
+        authorizationService.requirePermission(PermissionCodes.FORM_DATA_READ);
+        var principal = PrincipalHolder.current().orElseThrow();
+        return service.authorizedPage(page, size, formDefId, status, createdBy,
+            principal.userId(), principal.isAdmin());
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('admin')")
     public FormData get(@PathVariable Long id) {
+        authorizationService.requireReadableFormData(id);
         return service.getById(id);
     }
 }

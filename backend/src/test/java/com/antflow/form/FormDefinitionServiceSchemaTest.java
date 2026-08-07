@@ -1,5 +1,6 @@
 package com.antflow.form;
 
+import com.antflow.authz.FormGrantService;
 import com.antflow.engine.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +28,7 @@ class FormDefinitionServiceSchemaTest {
 
     @BeforeEach void setup() {
         mapper = Mockito.mock(FormDefinitionMapper.class);
-        service = new FormDefinitionService(mapper, json);
+        service = new FormDefinitionService(mapper, json, Mockito.mock(FormGrantService.class));
     }
 
     @Test void publishAcceptsNonEmptySchema() {

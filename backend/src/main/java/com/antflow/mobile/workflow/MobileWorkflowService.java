@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
@@ -59,6 +61,7 @@ public class MobileWorkflowService {
     private final UserMapper userMapper;
     private final DepartmentMapper departmentMapper;
     private final ObjectMapper objectMapper;
+    private final AuthorizationService authorizationService;
 
     public MobileFormDto getMobileForm(String code) {
         FormDefinition form = formDefinitionService.getByCode(code);
@@ -129,8 +132,8 @@ public class MobileWorkflowService {
     }
 
     public MobileInstanceDetailDto getInstanceDetail(Long instanceId, long userId,
-                                                     List<String> roles) {
-        ProcessInstance instance = requireReadableInstance(instanceId, userId, roles);
+                                                      java.util.Collection<String> roles) {
+        ProcessInstance instance = requireReadableInstance(instanceId, userId);
         FormData formData = requireFormData(instance.getFormDataId());
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
         JsonNode snapshot = readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON");
@@ -177,13 +180,12 @@ public class MobileWorkflowService {
         );
     }
 
-    public MobileTaskDetailDto getTaskDetail(Long taskId, long userId, List<String> roles) {
+    public MobileTaskDetailDto getTaskDetail(Long taskId, long userId,
+                                             java.util.Collection<String> roles) {
         TaskEntity task = requireExistingTask(taskId);
         ProcessInstance instance = requireExistingInstance(task.getProcInstId());
-        if (!isAdmin(roles)
-            && !Objects.equals(task.getAssigneeId(), userId)
-            && !Objects.equals(instance.getStartedBy(), userId)) {
-            throw new AccessDeniedException("task is not readable");
+        if (!authorizationService.canReadInstance(instance.getId(), userId)) {
+            throw new HiddenResourceException("task not found");
         }
         FormData formData = requireFormData(instance.getFormDataId());
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
@@ -264,14 +266,12 @@ public class MobileWorkflowService {
         return file;
     }
 
-    private ProcessInstance requireReadableInstance(Long instanceId, long userId,
-                                                    List<String> roles) {
+    private ProcessInstance requireReadableInstance(Long instanceId, long userId) {
         ProcessInstance instance = requireExistingInstance(instanceId);
-        if (isAdmin(roles) || Objects.equals(instance.getStartedBy(), userId)
-            || isParticipant(instanceId, userId)) {
+        if (authorizationService.canReadInstance(instanceId, userId)) {
             return instance;
         }
-        throw new AccessDeniedException("instance is not readable");
+        throw new HiddenResourceException("instance not found");
     }
 
     private TaskEntity requireOwnedReworkTask(Long taskId, long userId) {
@@ -596,7 +596,7 @@ public class MobileWorkflowService {
         return request.files() == null ? List.of() : request.files();
     }
 
-    private static boolean isAdmin(List<String> roles) {
+    private static boolean isAdmin(java.util.Collection<String> roles) {
         return roles != null && roles.contains(ADMIN_ROLE);
     }
 

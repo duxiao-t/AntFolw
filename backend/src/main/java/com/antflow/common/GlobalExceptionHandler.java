@@ -1,6 +1,9 @@
 package com.antflow.common;
 
 import com.antflow.engine.BizException;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.audit.AuditService;
+import lombok.RequiredArgsConstructor;
 import com.antflow.engine.NoAssigneeFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -21,10 +24,25 @@ import java.util.UUID;
 
 @RestControllerAdvice
 @Slf4j
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
+    private final AuditService auditService;
+
+    @ExceptionHandler(HiddenResourceException.class)
+    public ResponseEntity<Map<String, Object>> handleHiddenResource(HiddenResourceException e) {
+        try {
+            auditService.denied("security.resource.hidden", "HTTP_RESOURCE", null,
+                "NOT_FOUND", Map.of());
+        } catch (RuntimeException ignored) {
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(envelope("NOT_FOUND", e.getMessage()));
+    }
 
     @ExceptionHandler(NoAssigneeFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNoAssignee(NoAssigneeFoundException e) {
+        recordFailure("workflow.operation.failed", "WORKFLOW_NODE", e.nodeId(),
+            AuditService.RiskLevel.HIGH, e.getCode(), e);
         Map<String, Object> body = envelope(e.getCode(), e.getMessage());
         body.put("nodeId", e.nodeId());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
@@ -32,6 +50,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BizException.class)
     public ResponseEntity<Map<String, Object>> handleBiz(BizException e) {
+        recordFailure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.HIGH, e.getCode(), e);
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
             .body(envelope(e.getCode(), e.getMessage()));
     }
@@ -40,14 +60,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleDataIntegrity(DataIntegrityViolationException e) {
         String detail = e.getMostSpecificCause().getMessage();
         if (detail != null && detail.contains("t_user_username_key")) {
+            recordFailure("request.failed", "HTTP_RESOURCE", null,
+                AuditService.RiskLevel.HIGH, "USERNAME_EXISTS", e);
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(envelope("USERNAME_EXISTS", "账号已存在"));
         }
         if (detail != null && detail.contains("t_user_dept_id_fkey")) {
+            recordFailure("request.failed", "HTTP_RESOURCE", null,
+                AuditService.RiskLevel.HIGH, "HAS_USERS", e);
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(envelope("HAS_USERS", "部门下仍有成员，请先移动或删除成员"));
         }
         log.warn("data integrity conflict: {}", detail);
+        recordFailure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.HIGH, "DATA_CONFLICT", e);
         return ResponseEntity.status(HttpStatus.CONFLICT)
             .body(envelope("DATA_CONFLICT", "数据存在关联或重复，请检查后重试"));
     }
@@ -66,6 +92,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException e) {
+        recordFailure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.NORMAL, "VALIDATION_FAILED", e);
         Map<String, Object> body = envelope("VALIDATION_FAILED", "Request validation failed");
         body.put("fieldErrors", e.getBindingResult().getFieldErrors().stream()
             .map(fe -> Map.of("field", fe.getField(), "message", fe.getDefaultMessage()))
@@ -83,6 +111,8 @@ public class GlobalExceptionHandler {
     /** Multipart upload exceeded the configured per-file / per-request limit. */
     @ExceptionHandler({ MaxUploadSizeExceededException.class, MultipartException.class })
     public ResponseEntity<Map<String, Object>> handleMultipart(Exception e) {
+        recordFailure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.HIGH, "FILE_TOO_LARGE", e);
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
             .body(envelope("FILE_TOO_LARGE", "uploaded file exceeds size limit"));
     }
@@ -90,8 +120,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleAny(Exception e) {
         log.error("unhandled exception", e);
+        recordFailure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.CRITICAL, "INTERNAL_ERROR", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(envelope("INTERNAL_ERROR", "internal error"));
+    }
+
+    private void recordFailure(String action, String resourceType, Object resourceId,
+                               AuditService.RiskLevel riskLevel, String failureCode,
+                               Exception exception) {
+        try {
+            auditService.failure(action, resourceType, resourceId, riskLevel, failureCode,
+                Map.of("exceptionType", exception.getClass().getSimpleName()));
+        } catch (RuntimeException auditFailure) {
+            log.error("failed to persist failure audit event", auditFailure);
+        }
     }
 
     private Map<String, Object> envelope(String code, String message) {

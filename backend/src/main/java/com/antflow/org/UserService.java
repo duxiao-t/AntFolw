@@ -1,5 +1,8 @@
 package com.antflow.org;
 
+import com.antflow.auth.AuthSessionService;
+import com.antflow.audit.AuditService;
+import com.antflow.authz.AuthorizationService;
 import com.antflow.common.FormalNumberService;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -11,10 +14,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
+    public static final String DEFAULT_IMPORTED_PASSWORD = "ant.design";
 
     private final UserMapper userMapper;
     private final UserRoleMapper userRoleMapper;
@@ -24,39 +30,104 @@ public class UserService {
     private final DepartmentLeaderMapper leaderMapper;
     private final JdbcTemplate jdbcTemplate;
     private final FormalNumberService formalNumberService;
+    private final AuthorizationService authorizationService;
+    private final AuthSessionService authSessionService;
+    private final AuditService auditService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds) {
+        String rawPassword = u.getPasswordHash() == null
+            ? DEFAULT_IMPORTED_PASSWORD : u.getPasswordHash();
+        return create(u, roleIds, rawPassword);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Long create(User u, List<Long> roleIds, String rawPassword) {
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        List<Long> normalizedRoleIds = new LinkedHashSet<>(roleIds == null ? List.of() : roleIds)
+            .stream().toList();
+        if (!normalizedRoleIds.isEmpty() && !authorizationService.isAdmin()) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                "only administrators can assign roles while creating a user");
+        }
+        validateUserRoles(normalizedRoleIds);
         validateUsernameAvailable(u.getUsername(), null);
         validateDisplayName(u.getDisplayName());
         validateDepartment(u.getDeptId());
+        authorizationService.requireManageableDepartment(
+            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, u.getDeptId());
+        validatePassword(rawPassword);
         u.setEmployeeNo(formalNumberService.employeeNo(u.getEmployeeNo(), null));
         u.setUsername(u.getUsername().trim());
         u.setDisplayName(u.getDisplayName().trim());
-        // MVP demo default — production must require explicit password
-        // and force first-login change.
-        String raw = u.getPasswordHash() == null ? "ant.design" : u.getPasswordHash();
-        u.setPasswordHash(encoder.encode(raw));
+        u.setPasswordHash(encoder.encode(rawPassword));
         u.setStatus("ACTIVE");
         userMapper.insert(u);
-        setRolesInternal(u.getId(), roleIds);
+        setRolesInternal(u.getId(), normalizedRoleIds);
         return u.getId();
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void setRoles(Long userId, List<Long> roleIds) {
+        authorizationService.requireAdmin();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        List<Long> normalizedRoleIds = new LinkedHashSet<>(roleIds == null ? List.of() : roleIds)
+            .stream().toList();
+        validateUserRoles(normalizedRoleIds);
+        List<String> currentRoles = rolesOf(userId);
+        boolean assigningAdmin = normalizedRoleIds.stream().anyMatch(this::isAdminRole);
+        if (currentRoles.contains("admin") || assigningAdmin) {
+            lockAdminRole();
+            user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BizException("NOT_FOUND", "用户不存在");
+            }
+            currentRoles = rolesOf(userId);
+        }
+        boolean removingAdmin = currentRoles.contains("admin")
+            && normalizedRoleIds.stream().noneMatch(this::isAdminRole);
+        if (removingAdmin && "ACTIVE".equals(user.getStatus()) && activeAdminCount() <= 1) {
+            throw new BizException("LAST_ADMIN_PROTECTED", "至少保留一个启用的管理员");
+        }
         userRoleMapper.delete(new QueryWrapper<UserRole>().eq("user_id", userId));
-        setRolesInternal(userId, roleIds);
+        setRolesInternal(userId, normalizedRoleIds);
+        authorizationChanged(userId);
+        auditService.success("security.user_role.update", "USER", userId,
+            AuditService.RiskLevel.HIGH,
+            java.util.Map.of("changedFields", List.of("roleIds")),
+            java.util.Map.of("roleCount", normalizedRoleIds.size()));
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId) {
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
         User u = userMapper.selectById(userId);
         if (u == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
         }
-        if (rolesOf(userId).contains("admin")) {
-            throw new BizException("ADMIN_USER_PROTECTED", "管理员用户不能删除");
+        List<String> currentRoles = rolesOf(userId);
+        if (!authorizationService.isAdmin() && currentRoles.contains("admin")) {
+            throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
+        }
+        authorizationService.requireCurrentDataScope(
+            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, u.getDeptId());
+        if (!authorizationService.isAdmin() && authorizationService.currentUserId() == userId) {
+            throw new BizException("SELF_USER_PROTECTED", "不能删除当前登录账号");
+        }
+        if (currentRoles.contains("admin")) {
+            lockAdminRole();
+            u = userMapper.selectById(userId);
+            if (u == null) {
+                throw new BizException("NOT_FOUND", "用户不存在");
+            }
+            currentRoles = rolesOf(userId);
+        }
+        if (currentRoles.contains("admin") && "ACTIVE".equals(u.getStatus())
+            && activeAdminCount() <= 1) {
+            throw new BizException("LAST_ADMIN_PROTECTED", "至少保留一个启用的管理员");
         }
         if (hasWorkflowReferences(userId)) {
             throw new BizException("USER_IN_USE", "用户已被流程、任务或表单历史引用，不能删除");
@@ -65,6 +136,8 @@ public class UserService {
         leaderMapper.delete(new QueryWrapper<DepartmentLeader>().eq("user_id", userId));
         departmentMapper.update(null, new UpdateWrapper<Department>().eq("leader_id", userId).set("leader_id", null));
         userMapper.deleteById(userId);
+        authSessionService.revokeAll(userId);
+        authorizationService.evict(userId);
     }
 
     void validateUsernameAvailable(String username, Long excludedUserId) {
@@ -104,8 +177,155 @@ public class UserService {
             .toList();
     }
 
+    public List<User> listAuthorized(String keyword, Long departmentId) {
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_READ);
+        QueryWrapper<User> query = new QueryWrapper<>();
+        if (keyword != null && !keyword.isBlank()) {
+            query.and(wrapper -> wrapper.like("username", keyword.trim())
+                .or().like("display_name", keyword.trim())
+                .or().like("employee_no", keyword.trim()));
+        }
+        if (departmentId != null) {
+            query.eq("dept_id", departmentId);
+        }
+        return userMapper.selectList(query).stream()
+            .filter(user -> authorizationService.inCurrentDataScope(
+                com.antflow.authz.PermissionCodes.ORG_USER_READ,
+                user.getId(), user.getDeptId()))
+            .toList();
+    }
+
+    private void changeStatus(User user, String status) {
+        if (!List.of("ACTIVE", "DISABLED").contains(status)) {
+            throw new BizException("BAD_USER_STATUS", "用户状态无效");
+        }
+        if ("ACTIVE".equals(user.getStatus()) && "DISABLED".equals(status)
+            && rolesOf(user.getId()).contains("admin") && activeAdminCount() <= 1) {
+            throw new BizException("LAST_ADMIN_PROTECTED", "至少保留一个启用的管理员");
+        }
+        user.setStatus(status);
+        if (!"ACTIVE".equals(status)) {
+            authSessionService.revokeAll(user.getId());
+        }
+    }
+
+    public void authorizationChanged(Long userId) {
+        jdbcTemplate.update("UPDATE t_user SET authz_version = authz_version + 1 WHERE id = ?",
+            userId);
+        authorizationService.evict(userId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public User update(Long userId, Map<String, Object> body) {
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        List<String> targetRoles = rolesOf(userId);
+        if (!authorizationService.isAdmin() && targetRoles.contains("admin")) {
+            throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
+        }
+        authorizationService.requireCurrentDataScope(
+            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, user.getDeptId());
+        if (body.containsKey("status") && rolesOf(userId).contains("admin")) {
+            lockAdminRole();
+            user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BizException("NOT_FOUND", "用户不存在");
+            }
+        }
+        if (body.containsKey("displayName")) user.setDisplayName((String) body.get("displayName"));
+        if (body.containsKey("email")) user.setEmail((String) body.get("email"));
+        if (body.containsKey("phone")) user.setPhone((String) body.get("phone"));
+        if (body.containsKey("position")) user.setPosition((String) body.get("position"));
+        if (body.containsKey("gender")) user.setGender((String) body.get("gender"));
+        if (body.containsKey("employeeNo")) {
+            user.setEmployeeNo(normalizeEmployeeNo((String) body.get("employeeNo"), userId));
+        }
+        if (body.containsKey("deptId")) {
+            Long departmentId = body.get("deptId") == null
+                ? null : ((Number) body.get("deptId")).longValue();
+            validateDepartment(departmentId);
+            authorizationService.requireManageableDepartment(
+                com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
+            user.setDeptId(departmentId);
+        }
+        if (body.containsKey("username")) {
+            String username = (String) body.get("username");
+            validateUsernameAvailable(username, userId);
+            user.setUsername(username.trim());
+        }
+        if (body.containsKey("status")) {
+            if (!authorizationService.isAdmin()
+                && authorizationService.currentUserId() == userId
+                && "DISABLED".equals(String.valueOf(body.get("status")))) {
+                throw new BizException("SELF_USER_PROTECTED", "不能停用当前登录账号");
+            }
+            changeStatus(user, String.valueOf(body.get("status")));
+        }
+        userMapper.updateById(user);
+        authorizationChanged(userId);
+        return user;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void resetPassword(Long userId, String rawPassword) {
+        authorizationService.requireAdmin();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        validatePassword(rawPassword);
+        user.setPasswordHash(encoder.encode(rawPassword));
+        userMapper.updateById(user);
+        authSessionService.revokeAll(userId);
+    }
+
+    private void validatePassword(String rawPassword) {
+        if (rawPassword == null || rawPassword.isBlank()) {
+            throw new BizException("PASSWORD_REQUIRED", "密码不能为空");
+        }
+        if (rawPassword.length() < 8 || rawPassword.length() > 64) {
+            throw new BizException("PASSWORD_INVALID", "密码长度必须为 8 到 64 位");
+        }
+    }
+
     private void setRolesInternal(Long userId, List<Long> roleIds) {
         roleIds.forEach(rid -> userRoleMapper.insert(new UserRole(userId, rid)));
+    }
+
+    private boolean isAdminRole(Long roleId) {
+        Role role = roleMapper.selectById(roleId);
+        return role != null && "admin".equals(role.getCode());
+    }
+
+    private void validateUserRoles(List<Long> roleIds) {
+        for (Long roleId : roleIds) {
+            Role role = roleMapper.selectById(roleId);
+            if (role == null || !Boolean.TRUE.equals(role.getEnabled())) {
+                throw new BizException("ROLE_NOT_FOUND", "角色不存在或未启用");
+            }
+        }
+    }
+
+    private void lockAdminRole() {
+        Long roleId = jdbcTemplate.query("SELECT id FROM t_role WHERE code = 'admin' FOR UPDATE",
+            resultSet -> resultSet.next() ? resultSet.getLong(1) : null);
+        if (roleId == null) {
+            throw new BizException("ADMIN_ROLE_MISSING", "管理员角色不存在");
+        }
+    }
+
+    private long activeAdminCount() {
+        Long count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(DISTINCT u.id)
+            FROM t_user u
+            JOIN t_user_role ur ON ur.user_id = u.id
+            JOIN t_role role ON role.id = ur.role_id
+            WHERE u.status = 'ACTIVE' AND role.code = 'admin' AND role.enabled = true
+            """, Long.class);
+        return count == null ? 0L : count;
     }
 
     private boolean hasWorkflowReferences(Long userId) {

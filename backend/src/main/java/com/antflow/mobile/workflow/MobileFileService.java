@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.io.ByteArrayInputStream;
@@ -30,6 +32,7 @@ public class MobileFileService {
     private final FileStorage storage;
     private final MobileFileProperties properties;
     private final MediaWatermarkProcessor watermarkProcessor;
+    private final AuthorizationService authorizationService;
 
     @Transactional(rollbackFor = Exception.class)
     public MobileFileDto upload(MultipartFile file, long ownerId) {
@@ -89,11 +92,11 @@ public class MobileFileService {
         }
     }
 
-    public MobileFileDto getMetadata(UUID id, long userId, List<String> roles) {
+    public MobileFileDto getMetadata(UUID id, long userId, java.util.Collection<String> roles) {
         return toDto(requireReadable(id, userId, roles));
     }
 
-    public MobileFileContent readContent(UUID id, long userId, List<String> roles) {
+    public MobileFileContent readContent(UUID id, long userId, java.util.Collection<String> roles) {
         MobileFile file = requireReadable(id, userId, roles);
         return new MobileFileContent(toDto(file), storage.get(file.getStorageKey()));
     }
@@ -261,14 +264,17 @@ public class MobileFileService {
         return name.isBlank() ? "file" : name;
     }
 
-    private MobileFile requireReadable(UUID id, long userId, List<String> roles) {
+    private MobileFile requireReadable(UUID id, long userId, java.util.Collection<String> roles) {
         MobileFile file = requireExisting(id);
         boolean admin = roles != null && roles.contains("admin");
         boolean owner = Objects.equals(file.getOwnerId(), userId);
-        if (admin || owner || accessMapper.countReadableProcessLinks(id, userId) > 0) {
+        boolean participant = accessMapper.countReadableProcessLinks(id, userId) > 0;
+        boolean linkedInstanceReadable = accessMapper.selectLinkedInstanceIds(id).stream()
+            .anyMatch(instanceId -> authorizationService.canReadInstance(instanceId, userId));
+        if (admin || owner || participant || linkedInstanceReadable) {
             return file;
         }
-        throw new AccessDeniedException("file is not readable");
+        throw new HiddenResourceException("file not found");
     }
 
     private MobileFile requireExisting(UUID id) {

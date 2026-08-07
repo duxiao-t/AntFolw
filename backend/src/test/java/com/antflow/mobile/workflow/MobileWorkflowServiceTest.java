@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
@@ -30,7 +32,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-import org.springframework.security.access.AccessDeniedException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -52,6 +53,7 @@ class MobileWorkflowServiceTest {
     private UserMapper userMapper;
     private DepartmentMapper departmentMapper;
     private MobileWorkflowService service;
+    private AuthorizationService authorizationService;
 
     @BeforeEach
     void setUp() {
@@ -67,9 +69,13 @@ class MobileWorkflowServiceTest {
         fileMapper = Mockito.mock(MobileFileMapper.class);
         userMapper = Mockito.mock(UserMapper.class);
         departmentMapper = Mockito.mock(DepartmentMapper.class);
+        authorizationService = Mockito.mock(AuthorizationService.class);
+        Mockito.when(authorizationService.canReadInstance(Mockito.anyLong(), Mockito.anyLong()))
+            .thenReturn(true);
         service = new MobileWorkflowService(engine, draftService, workflowMapper,
             formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
-            taskMapper, historyMapper, fileMapper, userMapper, departmentMapper, objectMapper);
+            taskMapper, historyMapper, fileMapper, userMapper, departmentMapper, objectMapper,
+            authorizationService);
     }
 
     @Test
@@ -230,9 +236,10 @@ class MobileWorkflowServiceTest {
         Mockito.when(taskMapper.selectById(401L))
             .thenReturn(task(401L, 501L, "a1", 8L, "PENDING"));
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
+        Mockito.when(authorizationService.canReadInstance(501L, 9L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.getTaskDetail(401L, 9L, List.of("user")))
-            .isInstanceOf(AccessDeniedException.class);
+            .isInstanceOf(HiddenResourceException.class);
     }
 
     @Test

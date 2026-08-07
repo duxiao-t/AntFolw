@@ -1,5 +1,7 @@
 package com.antflow.common;
 
+import com.antflow.audit.AuditService;
+import com.antflow.engine.BizException;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
@@ -7,9 +9,11 @@ import org.springframework.http.ResponseEntity;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
 
 class GlobalExceptionHandlerTest {
-    private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+    private final AuditService auditService = org.mockito.Mockito.mock(AuditService.class);
+    private final GlobalExceptionHandler handler = new GlobalExceptionHandler(auditService);
 
     @Test
     void mapsDuplicateUsernameConstraintToReadableConflict() {
@@ -35,5 +39,17 @@ class GlobalExceptionHandlerTest {
         assertEquals(409, response.getStatusCode().value());
         assertEquals("HAS_USERS", response.getBody().get("code"));
         assertEquals("部门下仍有成员，请先移动或删除成员", response.getBody().get("message"));
+    }
+
+    @Test
+    void auditsBusinessFailureWithoutPersistingExceptionMessage() {
+        BizException error = new BizException("FORM_DATA_INVALID", "private field value");
+
+        ResponseEntity<Map<String, Object>> response = handler.handleBiz(error);
+
+        assertEquals(422, response.getStatusCode().value());
+        verify(auditService).failure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.HIGH, "FORM_DATA_INVALID",
+            Map.of("exceptionType", "BizException"));
     }
 }

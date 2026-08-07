@@ -1,7 +1,11 @@
 package com.antflow.auth;
 
+import com.antflow.authz.AuthorizationService;
+import com.antflow.audit.AuditDenialFilter;
+import com.antflow.audit.RequestIdFilter;
 import com.antflow.common.IdempotencyFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -23,9 +27,26 @@ public class SecurityConfig {
 
     private final JwtService jwtService;
     private final AuthSessionService authSessionService;
+    private final AuthorizationService authorizationService;
     private final CorsProperties corsProperties;
     private final LoginRateLimitFilter loginRateLimitFilter;
     private final IdempotencyFilter idempotencyFilter;
+    private final RequestIdFilter requestIdFilter;
+    private final AuditDenialFilter auditDenialFilter;
+
+    @Bean
+    public FilterRegistrationBean<RequestIdFilter> requestIdFilterRegistration() {
+        FilterRegistrationBean<RequestIdFilter> registration = new FilterRegistrationBean<>(requestIdFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<AuditDenialFilter> auditDenialFilterRegistration() {
+        FilterRegistrationBean<AuditDenialFilter> registration = new FilterRegistrationBean<>(auditDenialFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
 
     @Bean
     public SecurityFilterChain filter(HttpSecurity http) throws Exception {
@@ -63,8 +84,10 @@ public class SecurityConfig {
             // Order matters: idempotency check needs the principal set by JwtAuthFilter,
             // so register idempotency AFTER jwt.
             .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(new JwtAuthFilter(jwtService, authSessionService), UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(requestIdFilter, LoginRateLimitFilter.class)
+            .addFilterBefore(new JwtAuthFilter(jwtService, authSessionService, authorizationService), UsernamePasswordAuthenticationFilter.class)
             .addFilterAfter(idempotencyFilter, JwtAuthFilter.class)
+            .addFilterAfter(auditDenialFilter, IdempotencyFilter.class)
             .httpBasic(AbstractHttpConfigurer::disable)
             .formLogin(AbstractHttpConfigurer::disable)
             .build();

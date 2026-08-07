@@ -96,6 +96,9 @@ public class ProcessEngine {
         pi.setFormDataId(fd2.getId());
         pi.setStatus("RUNNING");
         pi.setStartedBy(userId);
+        PrincipalHolder.current()
+            .filter(principal -> principal.userId() == userId)
+            .ifPresent(principal -> pi.setStartedDeptId(principal.departmentId()));
         pi.setStartedAt(OffsetDateTime.now());
         processInstanceMapper.insert(pi);
 

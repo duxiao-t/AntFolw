@@ -19,5 +19,6 @@ public class User {
     private String position;
     private String gender;
     private String status;
+    private Long authzVersion;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }

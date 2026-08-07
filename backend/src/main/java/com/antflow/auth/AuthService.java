@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +30,7 @@ public class AuthService {
             userMapper.selectOne(new QueryWrapper<User>().eq("username", username)));
         if (opt.isEmpty()) return Optional.empty();
         User u = opt.get();
+        if (!"ACTIVE".equals(u.getStatus())) return Optional.empty();
         if (!encoder.matches(password, u.getPasswordHash())) {
             return Optional.empty();
         }
@@ -50,9 +52,14 @@ public class AuthService {
             .stream()
             .map(ur -> roleMapper.selectById(ur.getRoleId()))
             .filter(java.util.Objects::nonNull)
+            .filter(role -> Boolean.TRUE.equals(role.getEnabled()))
             .map(Role::getCode)
             .toList();
     }
 
-    public record Authenticated(String accessToken, User user, List<String> roles) {}
+    public record Authenticated(String accessToken, User user, List<String> roles, UUID sessionId) {
+        public Authenticated(String accessToken, User user, List<String> roles) {
+            this(accessToken, user, roles, null);
+        }
+    }
 }

@@ -28,7 +28,7 @@ class MobileFileControllerTest {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02
         };
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "admin", List.of("admin")));
-        Mockito.when(fileService.readContent(fileId, 7L, List.of("admin")))
+        Mockito.when(fileService.readContent(Mockito.eq(fileId), Mockito.eq(7L), Mockito.anyCollection()))
             .thenReturn(new MobileFileContent(
                 new MobileFileDto(fileId, "原图.png", "image/png", originalBytes.length,
                     "/api/mobile/files/" + fileId + "/content"),

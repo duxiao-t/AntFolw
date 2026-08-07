@@ -1,6 +1,7 @@
 package com.antflow.form.runtime;
 
 import com.antflow.common.FormalNumberService;
+import com.antflow.authz.AuthorizationService;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
@@ -20,6 +21,7 @@ public class FormDataService {
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper json;
     private final FormalNumberService formalNumberService;
+    private final AuthorizationService authorizationService;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -65,6 +67,29 @@ public class FormDataService {
         if (createdBy != null) q.eq("created_by", createdBy);
         q.orderByDesc("created_at").orderByDesc("id");
         return mapper.selectPage(Page.of(safePage, safeSize), q);
+    }
+
+    public Page<FormData> authorizedPage(long page, long size, Long formDefId,
+                                         String status, Long createdBy,
+                                         long userId, boolean admin) {
+        if (admin) {
+            return adminPage(page, size, formDefId, status, createdBy);
+        }
+        var q = new QueryWrapper<FormData>();
+        if (formDefId != null) q.eq("form_def_id", formDefId);
+        if (status != null && !status.isBlank()) q.eq("status", status);
+        if (createdBy != null) q.eq("created_by", createdBy);
+        q.orderByDesc("created_at").orderByDesc("id");
+        List<FormData> readable = mapper.selectList(q).stream()
+            .filter(data -> authorizationService.canReadFormData(data.getId(), userId))
+            .toList();
+        long safePage = Math.max(page, 1);
+        long safeSize = Math.min(Math.max(size, 1), 100);
+        int from = (int) Math.min((safePage - 1) * safeSize, readable.size());
+        int to = (int) Math.min(from + safeSize, readable.size());
+        Page<FormData> result = Page.of(safePage, safeSize, readable.size());
+        result.setRecords(readable.subList(from, to));
+        return result;
     }
 
     public FormData getById(Long id) {

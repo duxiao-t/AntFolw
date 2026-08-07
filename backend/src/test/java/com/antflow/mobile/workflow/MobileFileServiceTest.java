@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
 import com.antflow.engine.BizException;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -15,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.security.access.AccessDeniedException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,6 +28,7 @@ class MobileFileServiceTest {
     private CapturingStorage storage;
     private MediaWatermarkProcessor processor;
     private MobileFileService service;
+    private AuthorizationService authorizationService;
 
     @BeforeEach
     void setUp() {
@@ -34,9 +36,11 @@ class MobileFileServiceTest {
         accessMapper = Mockito.mock(MobileFileAccessMapper.class);
         storage = new CapturingStorage();
         processor = Mockito.mock(MediaWatermarkProcessor.class);
+        authorizationService = Mockito.mock(AuthorizationService.class);
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService);
     }
 
     @Test
@@ -52,7 +56,8 @@ class MobileFileServiceTest {
     void uploadRejectsOversizedFileBeforeStorageWrite() {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4L);
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService);
         MockMultipartFile file = pngFile("large.png", new byte[] {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D
         });
@@ -123,7 +128,8 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
         properties.setMaxVideoBytes(8L);
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService);
 
         MockMultipartFile file = new MockMultipartFile("file", "clip.mp4", "video/mp4", new byte[9]);
 
@@ -136,7 +142,8 @@ class MobileFileServiceTest {
     @Test
     void uploadAcceptsMp4Video() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = mp4Bytes();
@@ -153,7 +160,8 @@ class MobileFileServiceTest {
     @Test
     void uploadAppliesWatermarkForVideoAndRenamesToMp4() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
-        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
         Mockito.when(processor.apply(Mockito.any(), Mockito.eq("video/quicktime"), Mockito.eq("AntFlow")))
@@ -238,7 +246,7 @@ class MobileFileServiceTest {
         Mockito.when(fileMapper.selectById(id)).thenReturn(existingFile(id, 7L));
 
         assertThatThrownBy(() -> service.getMetadata(id, 8L, List.of("user")))
-            .isInstanceOf(AccessDeniedException.class);
+            .isInstanceOf(HiddenResourceException.class);
     }
 
     @Test

@@ -1,9 +1,12 @@
 package com.antflow.auth;
 
+import com.antflow.authz.AuthorizationService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import java.util.List;
 import java.util.UUID;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -26,6 +29,7 @@ class JwtAuthFilterTest {
     void activeSessionAuthenticatesRequestAndCleansThreadContext() throws Exception {
         JwtService jwtService = Mockito.mock(JwtService.class);
         AuthSessionService sessionService = Mockito.mock(AuthSessionService.class);
+        AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
         Claims claims = Mockito.mock(Claims.class);
         UUID sessionId = UUID.randomUUID();
         when(jwtService.parse("token")).thenReturn(claims);
@@ -34,13 +38,23 @@ class JwtAuthFilterTest {
         when(claims.get("username", String.class)).thenReturn("admin");
         when(claims.get("roles", List.class)).thenReturn(List.of("admin"));
         when(sessionService.isActive(7L, sessionId)).thenReturn(true);
+        when(authorizationService.principalForRequest(7L, sessionId)).thenReturn(Optional.of(
+            new PrincipalHolder.Principal(7L, "database-user", "Database User",
+                Set.of("user"), Set.of("workflow.instance.read"), 9L, 3L, sessionId)));
         MockHttpServletRequest request = bearerRequest();
         boolean[] authenticatedInChain = { false };
-        FilterChain chain = (req, res) -> authenticatedInChain[0] =
-            PrincipalHolder.current().isPresent()
-                && SecurityContextHolder.getContext().getAuthentication() != null;
+        FilterChain chain = (req, res) -> {
+            var principal = PrincipalHolder.current().orElseThrow();
+            var authentication = SecurityContextHolder.getContext().getAuthentication();
+            authenticatedInChain[0] = authentication != null
+                && principal.username().equals("database-user")
+                && authentication.getAuthorities().stream()
+                    .anyMatch(authority -> authority.getAuthority().equals("workflow.instance.read"))
+                && authentication.getAuthorities().stream()
+                    .noneMatch(authority -> authority.getAuthority().equals("ROLE_admin"));
+        };
 
-        new JwtAuthFilter(jwtService, sessionService).doFilter(
+        new JwtAuthFilter(jwtService, sessionService, authorizationService).doFilter(
             request, new MockHttpServletResponse(), chain);
 
         assertThat(authenticatedInChain[0]).isTrue();
@@ -52,6 +66,7 @@ class JwtAuthFilterTest {
     void revokedSessionDoesNotAuthenticateRequest() throws Exception {
         JwtService jwtService = Mockito.mock(JwtService.class);
         AuthSessionService sessionService = Mockito.mock(AuthSessionService.class);
+        AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
         Claims claims = Mockito.mock(Claims.class);
         UUID sessionId = UUID.randomUUID();
         when(jwtService.parse("token")).thenReturn(claims);
@@ -64,7 +79,7 @@ class JwtAuthFilterTest {
             PrincipalHolder.current().isPresent()
                 || SecurityContextHolder.getContext().getAuthentication() != null;
 
-        new JwtAuthFilter(jwtService, sessionService).doFilter(
+        new JwtAuthFilter(jwtService, sessionService, authorizationService).doFilter(
             bearerRequest(), new MockHttpServletResponse(), chain);
 
         assertThat(authenticatedInChain[0]).isFalse();

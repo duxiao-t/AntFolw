@@ -143,12 +143,25 @@ public class AuthSessionService {
             && session.getExpiresAt().isAfter(now());
     }
 
+    @Transactional
+    public void revokeAll(long userId) {
+        OffsetDateTime revokedAt = now();
+        sessionMapper.selectList(new QueryWrapper<AuthSession>()
+                .eq("user_id", userId)
+                .isNull("revoked_at"))
+            .forEach(session -> {
+                session.setRevokedAt(revokedAt);
+                sessionMapper.updateById(session);
+            });
+    }
+
     private AuthService.Authenticated bindAccessToken(AuthService.Authenticated authenticated, UUID sessionId) {
         return new AuthService.Authenticated(
             jwtService.issue(authenticated.user().getId(), authenticated.user().getUsername(),
                 authenticated.roles(), sessionId),
             authenticated.user(),
-            authenticated.roles());
+            authenticated.roles(),
+            sessionId);
     }
 
     private AuthSession requireActive(String refreshToken) {

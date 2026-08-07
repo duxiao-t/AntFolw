@@ -44,6 +44,18 @@ antflow:
     per-hour: 30
   auth:
     session-ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:2592000}
+  audit:
+    trusted-proxies: ${AUDIT_TRUSTED_PROXIES:}
+    online-retention-days: ${AUDIT_ONLINE_RETENTION_DAYS:365}
+    archive-cron: ${AUDIT_ARCHIVE_CRON:0 20 2 * * *}
+    archive-endpoint: ${AUDIT_ARCHIVE_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
+    archive-access-key: ${AUDIT_ARCHIVE_ACCESS_KEY:${MINIO_ACCESS_KEY:minioadmin}}
+    archive-secret-key: ${AUDIT_ARCHIVE_SECRET_KEY:${MINIO_SECRET_KEY:minioadmin}}
+    archive-bucket: ${AUDIT_ARCHIVE_BUCKET:antflow-audit-archives}
+    archive-region: ${AUDIT_ARCHIVE_REGION:}
+    archive-create-bucket: ${AUDIT_ARCHIVE_CREATE_BUCKET:true}
+    archive-encryption-secret: ${AUDIT_ARCHIVE_ENCRYPTION_SECRET:antflow-dev-audit-archive-key-change-me}
+    archive-key-id: ${AUDIT_ARCHIVE_KEY_ID:local-dev-v1}
   mobile:
     files:
       storage: ${MOBILE_FILE_STORAGE:minio}

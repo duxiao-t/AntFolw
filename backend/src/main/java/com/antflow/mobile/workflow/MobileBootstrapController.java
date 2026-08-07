@@ -43,7 +43,8 @@ public class MobileBootstrapController {
             principal.userId(), MAX_RECENT_PROCESSES);
 
         MobileUserDto mobileUser = new MobileUserDto(
-            user.getId(), user.getUsername(), user.getDisplayName(), principal.roles());
+            user.getId(), user.getUsername(), user.getDisplayName(),
+            java.util.List.copyOf(principal.roles()));
         return new MobileBootstrapDto(
             mobileUser,
             pendingCount.intValue(),

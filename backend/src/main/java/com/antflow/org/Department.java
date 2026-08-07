@@ -17,5 +17,9 @@ public class Department {
     private Long leaderId;
     private Integer sortOrder;
     @TableField(exist = false) private List<Long> leaderIds = List.of();
+    @TableField(exist = false) private boolean contextOnly;
+    @TableField(exist = false) private boolean canReadMembers;
+    @TableField(exist = false) private boolean canManageDepartment;
+    @TableField(exist = false) private boolean canManageUsers;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }
