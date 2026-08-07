@@ -316,7 +316,7 @@ function validateChecklist(node: MobileSchemaNode, value: unknown) {
     if (allowDescription && entry?.status) {
       const map = node.props?.descriptionRequiredByResult;
       const required =
-        typeof map === 'object' && map != null && map[entry.status] === true;
+        typeof map === 'object' && map != null && (map as Record<string, boolean>)[entry.status] === true;
       if (
         required &&
         !String(entry.description ?? '').trim() &&

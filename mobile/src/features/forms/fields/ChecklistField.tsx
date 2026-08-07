@@ -122,12 +122,6 @@ function toneOf(results: ChecklistResultOption[], status: string | null): Tone {
   return index >= 3 ? 'extra' : null;
 }
 
-function descriptionRequired(node: MobileSchemaNode, resultId: string | null) {
-  if (!resultId) return false;
-  const map = node.props?.descriptionRequiredByResult;
-  return typeof map === 'object' && map != null && map[resultId] === true;
-}
-
 export function ChecklistField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const items = useMemo(() => checklistItems(props.node), [props.node]);
@@ -221,7 +215,8 @@ export function ChecklistField(props: MobileFieldProps) {
                 setEntries(next);
                 props.onValueChange(props.node.id, next);
               } else {
-                setAll(results[0].id);
+                const first = results[0];
+                if (first) setAll(first.id);
               }
             }}
           >
