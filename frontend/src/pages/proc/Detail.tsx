@@ -8,9 +8,11 @@ import {
   Select,
   Space,
   Spin,
+  Table,
   Tag,
   Timeline,
 } from 'antd';
+import { RedoOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
 import { useMemo, useState } from 'react';
@@ -26,6 +28,13 @@ const ACTION_LABEL: Record<string, string> = {
   COMPLETE: '完成',
   CC: '抄送',
   AUTO_PASS: '自动通过',
+  DELAY_SCHEDULED: '延时已计划',
+  DELAY_COMPLETED: '延时已完成',
+  TRIGGER_QUEUED: '触发器已入队',
+  TRIGGER_SUCCEEDED: '触发器发送成功',
+  TRIGGER_FAILED: '触发器发送失败',
+  FORCE_APPROVE: '紧急同意',
+  FORCE_REJECT: '紧急驳回',
 };
 
 function actionLabel(action: string): string {
@@ -49,15 +58,24 @@ function statusTagColor(status: string): string {
   }
 }
 
-// 从 process_snapshot 里 DFS 出所有可作为驳回目标的 APPROVAL 节点
-function findApproverNodes(node: any, acc: any[] = []): any[] {
+// 并行分支节点需要 parallelId/branchId 上下文，不能直接作为重建入口。
+function findApproverNodes(
+  node: any,
+  acc: any[] = [],
+  insideParallelBranch = false,
+): any[] {
   if (!node) return acc;
-  if (node.type === 'APPROVAL') {
+  if (node.type === 'APPROVAL' && !insideParallelBranch) {
     acc.push({ id: node.id, name: node.name ?? node.id });
   }
-  if (node.children) findApproverNodes(node.children, acc);
+  if (node.children) {
+    findApproverNodes(node.children, acc, insideParallelBranch);
+  }
   if (Array.isArray(node.branchs)) {
-    for (const b of node.branchs) findApproverNodes(b, acc);
+    const branchContext = insideParallelBranch || node.type === 'PARALLEL';
+    for (const branch of node.branchs) {
+      findApproverNodes(branch, acc, branchContext);
+    }
   }
   return acc;
 }
@@ -68,6 +86,11 @@ export default function DetailPage() {
   const qc = useQueryClient();
   const { initialState } = useModel('@@initialState');
   const currentUserId = (initialState?.currentUser as any)?.id;
+  const roles = (initialState?.currentUser as any)?.roles ?? [];
+  const permissions = (initialState?.currentUser as any)?.permissions ?? [];
+  const isAdmin = roles.includes('admin');
+  const canOverride = isAdmin || permissions.includes('workflow.instance.override');
+  const canRetryAutomation = isAdmin || permissions.includes('workflow.automation.retry');
 
   const { data, isFetching } = useQuery({
     queryKey: ['instance', id],
@@ -79,6 +102,11 @@ export default function DetailPage() {
   >(null);
   const [rejectComment, setRejectComment] = useState('');
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideAction, setOverrideAction] = useState<'APPROVE' | 'REJECT'>('APPROVE');
+  const [overrideTicket, setOverrideTicket] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideTarget, setOverrideTarget] = useState<string | undefined>();
 
   const snapshotObj = useMemo(() => {
     const raw = (data as any)?.instance?.processSnapshot;
@@ -106,6 +134,7 @@ export default function DetailPage() {
     currentUserId != null && instance.startedBy === currentUserId;
   const isRunner = instance.status === 'RUNNING';
   const rejectTargets = snapshotObj ? findApproverNodes(snapshotObj) : [];
+  const pendingTask = (tasks ?? []).find((task: any) => task.status === 'PENDING' && task.taskType !== 'REWORK');
 
   async function doApprove(taskId: number) {
     try {
@@ -156,6 +185,53 @@ export default function DetailPage() {
     }
   }
 
+  async function retryAutomationJob(jobId: number) {
+    try {
+      await request(`/api/instances/${id}/jobs/${jobId}/retry`, {
+        method: 'POST',
+      });
+      message.success('自动化作业已重新入队');
+      qc.invalidateQueries({ queryKey: ['instance', id] });
+    } catch (error: any) {
+      message.error(error?.message ?? '重试失败');
+    }
+  }
+
+  async function submitOverride() {
+    if (!pendingTask || !overrideTicket.trim() || !overrideReason.trim()) {
+      message.error('请填写工单号和介入原因');
+      return;
+    }
+    const execute = async () => {
+      await request(`/api/tasks/${pendingTask.id}/override`, {
+        method: 'POST',
+        data: {
+          action: overrideAction,
+          ticketNo: overrideTicket.trim(),
+          reason: overrideReason.trim(),
+          rejectToNodeId: overrideAction === 'REJECT' ? overrideTarget : undefined,
+        },
+      });
+      message.success(overrideAction === 'APPROVE' ? '已紧急同意' : '已紧急驳回');
+      setOverrideOpen(false);
+      setOverrideTicket('');
+      setOverrideReason('');
+      setOverrideTarget(undefined);
+      qc.invalidateQueries({ queryKey: ['instance', id] });
+    };
+    if (isStarter) {
+      Modal.confirm({
+        title: '介入本人发起的流程？',
+        content: '该操作会记录为关键风险审计事件。',
+        okText: '确认介入',
+        okButtonProps: { danger: true },
+        onOk: execute,
+      });
+      return;
+    }
+    await execute();
+  }
+
   return (
     <Card
       title={`流程实例 #${instance.id}`}
@@ -181,6 +257,11 @@ export default function DetailPage() {
           )}
           {isStarter && isRunner && (
             <Button onClick={() => setWithdrawOpen(true)}>撤回流程</Button>
+          )}
+          {canOverride && isRunner && pendingTask && (
+            <Button danger icon={<ThunderboltOutlined />} onClick={() => setOverrideOpen(true)}>
+              紧急介入
+            </Button>
           )}
           <Button onClick={() => history.back()}>返回</Button>
         </Space>
@@ -282,6 +363,72 @@ export default function DetailPage() {
         }))}
       />
 
+      {(data as any).automationJobs?.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 24 }}>自动化作业</h3>
+          <Table
+            rowKey="id"
+            size="small"
+            pagination={false}
+            dataSource={(data as any).automationJobs}
+            scroll={{ x: 760 }}
+            columns={[
+              {
+                title: '节点',
+                dataIndex: 'nodeId',
+                minWidth: 140,
+                render: (value: string, row: any) => (
+                  <Space size={6}>
+                    <strong>{value}</strong>
+                    <Tag>{row.jobType === 'DELAY' ? '延时' : 'Webhook'}</Tag>
+                  </Space>
+                ),
+              },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                width: 110,
+                render: (value: string) => (
+                  <Tag color={statusTagColor(value)}>{value}</Tag>
+                ),
+              },
+              {
+                title: '执行',
+                width: 150,
+                render: (_: unknown, row: any) =>
+                  `${row.attempts}/${row.maxAttempts} · ${row.blocking ? '成功后继续' : '发送后继续'}`,
+              },
+              {
+                title: '计划时间',
+                dataIndex: 'scheduledAt',
+                width: 190,
+              },
+              {
+                title: '失败原因',
+                dataIndex: 'lastError',
+                minWidth: 180,
+                render: (value: string | null) => value ?? '—',
+              },
+              {
+                title: '操作',
+                width: 92,
+                fixed: 'right',
+                render: (_: unknown, row: any) =>
+                  canRetryAutomation && row.status === 'FAILED' ? (
+                    <Button
+                      size="small"
+                      icon={<RedoOutlined />}
+                      onClick={() => retryAutomationJob(row.id)}
+                    >
+                      重试
+                    </Button>
+                  ) : null,
+              },
+            ]}
+          />
+        </>
+      )}
+
       <Modal
         title="驳回"
         open={!!rejectFor}
@@ -323,6 +470,51 @@ export default function DetailPage() {
             placeholder="请说明驳回原因"
           />
         </div>
+      </Modal>
+
+      <Modal
+        title="紧急介入"
+        open={overrideOpen}
+        onCancel={() => setOverrideOpen(false)}
+        onOk={submitOverride}
+        okText="执行介入"
+        okButtonProps={{ danger: true }}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div>
+            <div>处理动作</div>
+            <Select
+              style={{ width: '100%' }}
+              value={overrideAction}
+              onChange={(value) => setOverrideAction(value)}
+              options={[
+                { value: 'APPROVE', label: '同意并继续流程' },
+                { value: 'REJECT', label: '驳回' },
+              ]}
+            />
+          </div>
+          <div>
+            <div>工单号</div>
+            <Input value={overrideTicket} onChange={(event) => setOverrideTicket(event.target.value)} />
+          </div>
+          <div>
+            <div>原因</div>
+            <Input.TextArea rows={3} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} />
+          </div>
+          {overrideAction === 'REJECT' && (
+            <div>
+              <div>驳回目标</div>
+              <Select
+                allowClear
+                style={{ width: '100%' }}
+                value={overrideTarget}
+                onChange={setOverrideTarget}
+                placeholder="默认退回上一级"
+                options={rejectTargets.map((target: any) => ({ value: target.id, label: target.name }))}
+              />
+            </div>
+          )}
+        </Space>
       </Modal>
 
       <Modal
