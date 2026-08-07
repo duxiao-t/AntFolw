@@ -1,39 +1,25 @@
-import { CloseOutlined } from '@ant-design/icons';
+import { UserSwitchOutlined } from '@ant-design/icons';
 import type { TreeNode } from '../types';
-import { useProcessDesignerStore } from '../useProcessDesignerStore';
+import { NodeCard } from './NodeCard';
 
 export function ApprovalNode({ node }: { node: TreeNode }) {
-  const select = useProcessDesignerStore((s) => s.select);
-  const remove = useProcessDesignerStore((s) => s.removeNode);
-  const p = node.props ?? {};
+  const props = node.props ?? {};
   const summary =
-    p.assignedType === 'ASSIGN_USER'
-      ? `指定成员 ${p.assignedUser?.length ?? 0} 人`
-      : p.assignedType === 'ROLE'
-        ? `角色 ${p.role?.length ?? 0} 个`
-        : p.assignedType === 'LEADER'
-          ? `第 ${p.leader?.level ?? 1} 级主管`
-          : p.assignedType === 'SELF'
+    props.assignedType === 'ASSIGN_USER'
+      ? `指定成员 ${props.assignedUser?.length ?? 0} 人`
+      : props.assignedType === 'ROLE'
+        ? `角色 ${props.role?.length ?? 0} 个`
+        : props.assignedType === 'LEADER'
+          ? `第 ${props.leader?.level ?? 1} 级主管`
+          : props.assignedType === 'SELF'
             ? '发起人本人'
             : '发起人自选';
   return (
-    <div
-      className="pt-node pt-node--approval"
-      onClick={() => select(node.id)}
-    >
-      <div className="pt-node__title">
-        <span>{node.name || '审批人'}</span>
-        <CloseOutlined
-          className="pt-node__del"
-          onClick={(e) => {
-            e.stopPropagation();
-            remove(node.id);
-          }}
-        />
-      </div>
-      <div className="pt-node__body">
-        {summary} · {p.mode === 'AND' ? '会签' : '或签'}
-      </div>
-    </div>
+    <NodeCard
+      node={node}
+      kind="approval"
+      icon={<UserSwitchOutlined />}
+      summary={`${summary} · ${props.mode === 'AND' ? '会签' : '或签'}`}
+    />
   );
 }

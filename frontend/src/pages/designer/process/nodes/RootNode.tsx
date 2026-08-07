@@ -1,17 +1,16 @@
+import { PlayCircleOutlined } from '@ant-design/icons';
 import type { TreeNode } from '../types';
-import { useProcessDesignerStore } from '../useProcessDesignerStore';
+import { NodeCard } from './NodeCard';
 
 export function RootNode({ node }: { node: TreeNode }) {
-  const select = useProcessDesignerStore((s) => s.select);
+  const count = node.props?.assignedUser?.length ?? 0;
   return (
-    <div
-      className="pt-node pt-node--root"
-      onClick={() => select(node.id)}
-    >
-      <div className="pt-node__title">
-        <span>{node.name || '发起人'}</span>
-      </div>
-      <div className="pt-node__body">所有人可发起</div>
-    </div>
+    <NodeCard
+      node={node}
+      kind="root"
+      icon={<PlayCircleOutlined />}
+      summary={count > 0 ? `指定 ${count} 人可发起` : '所有人可发起'}
+      removable={false}
+    />
   );
 }

@@ -1,21 +1,33 @@
-import { App, Button, Drawer, Space } from 'antd';
-import { useEffect, useState } from 'react';
-import { useParams, request, useNavigate } from '@umijs/max';
+import {
+  CheckCircleOutlined,
+  CompressOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { ProcessTree } from './ProcessTree';
-import { useProcessDesignerStore } from './useProcessDesignerStore';
+import { request, useNavigate, useParams } from '@umijs/max';
+import { App, Button, Drawer, Space, Tooltip } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApprovalNodeConfig } from './config/ApprovalNodeConfig';
+import { BranchNodeConfig } from './config/BranchNodeConfig';
 import { CcNodeConfig } from './config/CcNodeConfig';
 import { ConditionNodeConfig } from './config/ConditionNodeConfig';
+import { DelayNodeConfig } from './config/DelayNodeConfig';
+import { ParallelNodeConfig } from './config/ParallelNodeConfig';
 import { RootNodeConfig } from './config/RootNodeConfig';
+import { TriggerNodeConfig } from './config/TriggerNodeConfig';
+import { ProcessTree } from './ProcessTree';
 import type { TreeNode } from './types';
+import { useProcessDesignerStore } from './useProcessDesignerStore';
+import { validateProcessTree } from './validation';
 
 function find(node: TreeNode | null | undefined, id: string): TreeNode | null {
   if (!node) return null;
   if (node.id === id) return node;
-  for (const b of node.branchs ?? []) {
-    const h = find(b, id);
-    if (h) return h;
+  for (const branch of node.branchs ?? []) {
+    const match = find(branch, id);
+    if (match) return match;
   }
   return find(node.children, id);
 }
@@ -48,102 +60,166 @@ export function ProcessDesignerSurface({
   const routeParams = useParams();
   const formDefId = String(formDefIdProp ?? routeParams.formDefId ?? '');
   const { message } = App.useApp();
-  const process = useProcessDesignerStore(
-    (s: ReturnType<typeof useProcessDesignerStore.getState>) => s.process,
-  );
-  const selectedId = useProcessDesignerStore(
-    (s: ReturnType<typeof useProcessDesignerStore.getState>) => s.selectedId,
-  );
-  const load = useProcessDesignerStore(
-    (s: ReturnType<typeof useProcessDesignerStore.getState>) => s.load,
-  );
-  const select = useProcessDesignerStore(
-    (s: ReturnType<typeof useProcessDesignerStore.getState>) => s.select,
-  );
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const process = useProcessDesignerStore((state) => state.process);
+  const selectedId = useProcessDesignerStore((state) => state.selectedId);
+  const load = useProcessDesignerStore((state) => state.load);
+  const select = useProcessDesignerStore((state) => state.select);
   const [pdId, setPdId] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(100);
+  const [saving, setSaving] = useState(false);
 
-  // Load existing process definition for this form; fall back to fresh root on 404.
   useEffect(() => {
     (async () => {
       try {
-        const pd = await request<any>(
+        const definition = await request<any>(
           `/api/processes/definitions/draft/by-form/${formDefId}`,
         );
-        if (pd?.process) {
-          setPdId(pd.id);
-          load(parseJsonValue(pd.process, null));
+        if (definition?.process) {
+          setPdId(definition.id);
+          load(parseJsonValue(definition.process, null));
           return;
         }
       } catch {
-        /* no saved process yet — use fresh root */
+        // A new form has no process draft yet.
       }
       load(null);
     })();
   }, [formDefId, load]);
 
-  // Pull the form schema so the condition node can offer field choices.
   const { data: formDef } = useQuery<FormDefinition>({
     queryKey: ['form-def-for-flow', formDefId],
-    queryFn: () => request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
+    queryFn: () =>
+      request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
     enabled: !!formDefId,
   });
-  const formFields = parseJsonValue<any[]>(formDef?.schema, []).map((n) => ({
-    id: n.id,
-    label: n.props?.label ?? n.type,
-    type: n.type,
+  const formFields = parseJsonValue<any[]>(formDef?.schema, []).map((node) => ({
+    id: node.id,
+    label: node.label ?? node.props?.label ?? node.id,
+    type: node.type,
   }));
+  const issues = useMemo(() => validateProcessTree(process), [process]);
 
   const save = async (): Promise<void> => {
-    const res = await request<any>('/api/processes/definitions', {
-      method: 'POST',
-      data: { id: pdId, formDefId: Number(formDefId), process },
-    });
-    setPdId(res.id);
-    onSaved?.(res);
-    message.success('已保存草稿');
+    setSaving(true);
+    try {
+      const response = await request<any>('/api/processes/definitions', {
+        method: 'POST',
+        data: { id: pdId, formDefId: Number(formDefId), process },
+      });
+      setPdId(response.id);
+      onSaved?.(response);
+      message.success('流程草稿已保存');
+    } catch (error: any) {
+      message.error(error?.message ?? '保存失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const publish = async (): Promise<void> => {
-    let id = pdId;
-    if (!id) {
-      const res = await request<any>('/api/processes/definitions', {
-        method: 'POST',
-        data: { id: null, formDefId: Number(formDefId), process },
-      });
-      id = res.id;
-      setPdId(id);
+  const validate = (): void => {
+    const first = issues[0];
+    if (!first) {
+      message.success('流程校验通过');
+      return;
     }
-    await request(`/api/processes/definitions/${id}/publish`, { method: 'POST' });
-    message.success('已发布');
+    select(first.nodeId);
+    message.error(first.message);
+    window.setTimeout(() => {
+      const target = viewportRef.current?.querySelector<HTMLElement>(
+        `[data-node-id="${first.nodeId}"]`,
+      );
+      target?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'center',
+      });
+    }, 50);
   };
 
   const selected = selectedId ? find(process, selectedId) : null;
 
   return (
-    <div style={{ height: embedded ? 'calc(100vh - 260px)' : '100vh', minHeight: embedded ? 560 : undefined, display: 'flex', flexDirection: 'column' }}>
-      <Space style={{ padding: 8 }}>
-        <Button type="primary" onClick={save}>
-          保存草稿
-        </Button>
-        {!embedded && <Button onClick={publish}>发布</Button>}
-      </Space>
-      <div
-        style={{ flex: 1, overflow: 'auto', background: '#f5f6f6', padding: 24 }}
-      >
-        <ProcessTree />
+    <div
+      className="process-designer"
+      style={{
+        height: embedded ? 'calc(100vh - 260px)' : '100vh',
+        minHeight: embedded ? 560 : undefined,
+      }}
+    >
+      <div className="process-designer__toolbar">
+        <Space size={8}>
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            loading={saving}
+            onClick={save}
+          >
+            保存草稿
+          </Button>
+          <Button icon={<CheckCircleOutlined />} onClick={validate}>
+            流程校验
+          </Button>
+          {issues.length > 0 && (
+            <span className="process-designer__issue-count">
+              {issues.length} 项待配置
+            </span>
+          )}
+        </Space>
+        <Space.Compact className="process-designer__zoom">
+          <Tooltip title="缩小">
+            <Button
+              aria-label="缩小画布"
+              icon={<MinusOutlined />}
+              disabled={zoom <= 60}
+              onClick={() => setZoom((value) => Math.max(60, value - 10))}
+            />
+          </Tooltip>
+          <span className="process-designer__zoom-value">{zoom}%</span>
+          <Tooltip title="放大">
+            <Button
+              aria-label="放大画布"
+              icon={<PlusOutlined />}
+              disabled={zoom >= 140}
+              onClick={() => setZoom((value) => Math.min(140, value + 10))}
+            />
+          </Tooltip>
+          <Tooltip title="恢复 100%">
+            <Button
+              aria-label="恢复 100%"
+              icon={<CompressOutlined />}
+              onClick={() => setZoom(100)}
+            />
+          </Tooltip>
+        </Space.Compact>
+      </div>
+      <div ref={viewportRef} className="process-designer__viewport">
+        <ProcessTree zoom={zoom} />
       </div>
       <Drawer
         open={!!selected}
-        width={400}
+        size={440}
         onClose={() => select(null)}
         title={selected?.name}
-        destroyOnClose
+        destroyOnHidden
       >
         {selected?.type === 'ROOT' && <RootNodeConfig node={selected} />}
-        {selected?.type === 'APPROVAL' && <ApprovalNodeConfig node={selected} />}
+        {selected?.type === 'APPROVAL' && (
+          <ApprovalNodeConfig node={selected} />
+        )}
         {selected?.type === 'CC' && <CcNodeConfig node={selected} />}
         {selected?.type === 'CONDITION' && (
           <ConditionNodeConfig node={selected} formFields={formFields} />
+        )}
+        {selected?.type === 'PARALLEL' && (
+          <ParallelNodeConfig node={selected} />
+        )}
+        {selected?.type === 'BRANCH' && (
+          <BranchNodeConfig node={selected} formFields={formFields} />
+        )}
+        {selected?.type === 'DELAY' && <DelayNodeConfig node={selected} />}
+        {selected?.type === 'TRIGGER' && (
+          <TriggerNodeConfig node={selected} formFields={formFields} />
         )}
       </Drawer>
     </div>
@@ -151,8 +227,6 @@ export function ProcessDesignerSurface({
 }
 
 export default function ProcessDesigner() {
-  // 旧入口 /designer/process/:formDefId 统一重定向到带面包屑与分步导航的向导页，
-  // 保证「表单属性-表单设计-流程设计-预览」导航永久存在（用户指定不可移除）。
   const routeParams = useParams();
   const navigate = useNavigate();
   const formDefId = String(routeParams.formDefId ?? '');

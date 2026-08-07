@@ -1,0 +1,173 @@
+import type { TreeNode } from './types';
+
+export type ProcessValidationIssue = {
+  nodeId: string;
+  message: string;
+};
+
+const hasConfiguredApproval = (node: TreeNode | null | undefined): boolean => {
+  if (!node) return false;
+  if (node.type === 'APPROVAL') return true;
+  return (
+    (node.branchs ?? []).some(hasConfiguredApproval) ||
+    hasConfiguredApproval(node.children)
+  );
+};
+
+const approvalReady = (node: TreeNode): boolean => {
+  const props = node.props ?? {};
+  if (props.assignedType === 'ASSIGN_USER') {
+    return (props.assignedUser?.length ?? 0) > 0;
+  }
+  if (props.assignedType === 'ROLE') return (props.role?.length ?? 0) > 0;
+  return ['LEADER', 'SELF', 'SELF_SELECT'].includes(props.assignedType);
+};
+
+const conditionReady = (node: TreeNode): boolean => {
+  if (node.props?.isDefault) return true;
+  const groups = node.props?.groups ?? [];
+  return (
+    groups.length > 0 &&
+    groups.every(
+      (group: any) =>
+        (group.conditions?.length ?? 0) > 0 &&
+        group.conditions.every((condition: any) => {
+          const valueReady =
+            condition.operator === 'in'
+              ? Array.isArray(condition.value) &&
+                condition.value.length > 0 &&
+                condition.value.every((value: unknown) =>
+                  Boolean(String(value).trim()),
+                )
+              : condition.value !== undefined &&
+                !Array.isArray(condition.value) &&
+                String(condition.value).trim() !== '';
+          return !!condition.field && !!condition.operator && valueReady;
+        }),
+    )
+  );
+};
+
+const branchConditionMode = (node: TreeNode): string =>
+  node.props?.conditionMode ?? 'ALWAYS';
+
+const branchConditionReady = (node: TreeNode): boolean => {
+  const mode = branchConditionMode(node);
+  if (mode === 'ALWAYS') return true;
+  return mode === 'WHEN_MATCHED' && conditionReady(node);
+};
+
+const delayReady = (node: TreeNode): boolean => {
+  const props = node.props ?? {};
+  if (props.mode === 'UNTIL_TIME') {
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(props.time ?? '');
+  }
+  const amount = Number(props.amount);
+  const max =
+    props.unit === 'DAYS' ? 365 : props.unit === 'HOURS' ? 8760 : 525600;
+  return (
+    ['MINUTES', 'HOURS', 'DAYS'].includes(props.unit) &&
+    amount > 0 &&
+    amount <= max
+  );
+};
+
+const triggerReady = (node: TreeNode): boolean => {
+  const props = node.props ?? {};
+  let validUrl = false;
+  try {
+    const parsed = new URL(props.url ?? '');
+    validUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    validUrl = false;
+  }
+  const rowsReady = (props.headers ?? []).every(
+    (row: any) =>
+      String(row.key ?? '').trim() && String(row.value ?? '').trim(),
+  );
+  const parametersReady = (props.parameters ?? []).every(
+    (row: any) =>
+      String(row.key ?? '').trim() &&
+      (row.source === 'FIELD'
+        ? String(row.fieldId ?? '').trim()
+        : row.value !== undefined),
+  );
+  return (
+    validUrl &&
+    ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(props.method) &&
+    ['application/json', 'application/x-www-form-urlencoded'].includes(
+      props.contentType,
+    ) &&
+    ['ON_SUCCESS', 'AFTER_SEND'].includes(props.continueMode) &&
+    String(props.secret ?? '').trim().length >= 8 &&
+    rowsReady &&
+    parametersReady
+  );
+};
+
+export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
+  const issues: ProcessValidationIssue[] = [];
+  const add = (nodeId: string, message: string) =>
+    issues.push({ nodeId, message });
+
+  const walkParallelChain = (node: TreeNode | null | undefined): void => {
+    if (!node) return;
+    if (!['APPROVAL', 'CC'].includes(node.type)) {
+      add(node.id, '并行分支内只允许审批和抄送节点');
+      return;
+    }
+    if (node.type === 'APPROVAL' && !approvalReady(node)) {
+      add(node.id, '请配置审批人');
+    }
+    if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
+      add(node.id, '请配置抄送人');
+    }
+    walkParallelChain(node.children);
+  };
+
+  const walk = (node: TreeNode | null | undefined): void => {
+    if (!node) return;
+    if (node.type === 'APPROVAL' && !approvalReady(node))
+      add(node.id, '请配置审批人');
+    if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
+      add(node.id, '请配置抄送人');
+    }
+    if (node.type === 'DELAY' && !delayReady(node))
+      add(node.id, '请配置有效的延时规则');
+    if (node.type === 'TRIGGER' && !triggerReady(node)) {
+      add(node.id, '请完整配置 Webhook 地址、签名和参数');
+    }
+    if (node.type === 'CONDITIONS') {
+      const branches = node.branchs ?? [];
+      const defaults = branches.filter((branch) => branch.props?.isDefault);
+      if (branches.length < 2) add(node.id, '条件节点至少需要两个分支');
+      if (defaults.length !== 1)
+        add(node.id, '条件节点必须且只能有一个默认分支');
+      branches.forEach((branch) => {
+        if (!conditionReady(branch)) add(branch.id, '请完整配置分支条件');
+        walk(branch.children);
+      });
+    } else if (node.type === 'PARALLEL') {
+      const branches = node.branchs ?? [];
+      if (branches.length < 2) add(node.id, '并行节点至少需要两个分支');
+      if (
+        !branches.some((branch) => branchConditionMode(branch) === 'ALWAYS')
+      ) {
+        add(node.id, '并行节点至少需要一个始终执行的分支');
+      }
+      branches.forEach((branch) => {
+        if (!branchConditionReady(branch)) {
+          add(branch.id, '请完整配置分支执行条件');
+        }
+        if (!branch.children) add(branch.id, '并行分支不能为空');
+        walkParallelChain(branch.children);
+      });
+    }
+    walk(node.children);
+  };
+
+  if (root.type !== 'ROOT') add(root.id, '流程必须从发起人节点开始');
+  walk(root);
+  if (!hasConfiguredApproval(root)) add(root.id, '流程至少需要一个审批节点');
+  return issues;
+}

@@ -1,7 +1,7 @@
 import { Form, Input } from 'antd';
+import { AssigneePicker } from '../../../../components/AssigneePicker';
 import type { TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
-import { AssigneePicker } from '../../../../components/AssigneePicker';
 
 export function CcNodeConfig({ node }: { node: TreeNode }) {
   const updateProps = useProcessDesignerStore((s) => s.updateProps);

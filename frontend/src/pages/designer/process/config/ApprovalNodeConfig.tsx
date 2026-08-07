@@ -1,13 +1,7 @@
-import {
-  Divider,
-  Form,
-  Input,
-  InputNumber,
-  Radio,
-} from 'antd';
+import { Divider, Form, Input, InputNumber, Radio } from 'antd';
+import { AssigneePicker } from '../../../../components/AssigneePicker';
 import type { TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
-import { AssigneePicker } from '../../../../components/AssigneePicker';
 
 export function ApprovalNodeConfig({ node }: { node: TreeNode }) {
   const updateProps = useProcessDesignerStore((s) => s.updateProps);
