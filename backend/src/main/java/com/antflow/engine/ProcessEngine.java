@@ -1,5 +1,8 @@
 package com.antflow.engine;
 
+import com.antflow.automation.WorkflowJob;
+import com.antflow.automation.WorkflowJobMapper;
+import com.antflow.auth.PrincipalHolder;
 import com.antflow.common.FormalNumberService;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
@@ -64,6 +67,7 @@ public class ProcessEngine {
     private final NotificationPublisher notifier;
     private final ObjectMapper json;
     private final FormalNumberService formalNumberService;
+    private final WorkflowJobMapper workflowJobMapper;
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
@@ -122,14 +126,22 @@ public class ProcessEngine {
 
     @Transactional
     public void approve(CompleteCmd cmd, long operatorId) {
-        TaskEntity t = taskMapper.selectById(cmd.taskId());
-        if (t == null || !"PENDING".equals(t.getStatus())) {
-            throw new BizException("TASK_NOT_PENDING", "Task not pending");
-        }
+        approveInternal(cmd, operatorId, false);
+    }
+
+    @Transactional
+    public void forceApprove(CompleteCmd cmd, long operatorId) {
+        approveInternal(cmd, operatorId, true);
+    }
+
+    private void approveInternal(CompleteCmd cmd, long operatorId, boolean force) {
+        LockedTask locked = lockPendingTask(cmd.taskId());
+        TaskEntity t = locked.task();
+        ProcessInstance pi = locked.instance();
         if ("REWORK".equals(t.getTaskType())) {
             throw new BizException("BAD_TASK_TYPE", "Rework task must be resubmitted from the form");
         }
-        if (!Objects.equals(t.getAssigneeId(), operatorId)) {
+        if (!force && !Objects.equals(t.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
         }
 
@@ -138,9 +150,9 @@ public class ProcessEngine {
         t.setApprovedAt(OffsetDateTime.now());
         t.setComment(cmd.comment());
         taskMapper.updateById(t);
-        insertHistory(t, null, t.getNodeId(), "APPROVE", operatorId, cmd.comment());
+        insertHistory(t, null, t.getNodeId(), force ? "FORCE_APPROVE" : "APPROVE",
+            operatorId, cmd.comment());
 
-        ProcessInstance pi = taskMapperExt.selectInstanceById(t.getProcInstId()).orElseThrow();
         // 永远走快照，不依赖 pd.getProcess()（避免流程改版后已发起的实例跑飞）
         JsonNode root = readTree(pi.getProcessSnapshot());
         JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
@@ -178,20 +190,77 @@ public class ProcessEngine {
         }
 
         JsonNode formData = readFormData(pi.getFormDataId());
+        if (t.getParallelId() != null) {
+            // Advance this branch's remaining single chain before checking the join.
+            landParallelContinuation(root, pi, formData, t, cur);
+            Long stillPending = taskMapper.selectCount(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", pi.getId())
+                .eq("parallel_id", t.getParallelId())
+                .eq("status", "PENDING"));
+            if (stillPending != null && stillPending > 0) {
+                processInstanceMapper.updateById(pi);
+                return;
+            }
+            JsonNode parallelNode = ProcessTreeNav.findById(root, t.getParallelId());
+            if (parallelNode == null) {
+                throw new BizException("BAD_FLOW", "parallel node not found: " + t.getParallelId());
+            }
+            processInstanceMapper.updateById(pi);
+            resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), parallelNode);
+            return;
+        }
         // 仅首轮 start 时传入过 selfSelected；后续（理论上不会出现）传空 map。
         resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
     }
 
+    private void landParallelContinuation(JsonNode root, ProcessInstance instance,
+                                          JsonNode formData, TaskEntity completedTask,
+                                          JsonNode completedNode) {
+        JsonNode node = ProcessTreeNav.childrenOf(completedNode);
+        NodeContext context = new NodeContext(
+            instance.getStartedBy(), formData, Map.of(), completedNode.path("id").asText(null),
+            completedTask.getParallelId(), completedTask.getBranchId()
+        );
+        while (node != null) {
+            String type = node.path("type").asText();
+            if (!"APPROVAL".equals(type) && !"CC".equals(type)) {
+                throw new BizException("BAD_FLOW", "并行分支内只允许审批和抄送节点: " + type);
+            }
+            NodeHandler handler = pickHandler(type);
+            if (handler == null) {
+                throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);
+            }
+            JsonNode handled = node;
+            NodeOutcome outcome = handler.handle(root, handled, instance, context);
+            if (outcome.type() == NodeOutcome.Type.HALT || outcome.type() == NodeOutcome.Type.END) {
+                return;
+            }
+            node = outcome.node();
+            context = new NodeContext(
+                instance.getStartedBy(), formData, Map.of(), handled.path("id").asText(null),
+                completedTask.getParallelId(), completedTask.getBranchId()
+            );
+        }
+    }
+
     @Transactional
     public void reject(CompleteCmd cmd, long operatorId) {
-        TaskEntity t = taskMapper.selectById(cmd.taskId());
-        if (t == null || !"PENDING".equals(t.getStatus())) {
-            throw new BizException("TASK_NOT_PENDING", "Task not pending");
-        }
+        rejectInternal(cmd, operatorId, false);
+    }
+
+    @Transactional
+    public void forceReject(CompleteCmd cmd, long operatorId) {
+        rejectInternal(cmd, operatorId, true);
+    }
+
+    private void rejectInternal(CompleteCmd cmd, long operatorId, boolean force) {
+        LockedTask locked = lockPendingTask(cmd.taskId());
+        TaskEntity t = locked.task();
+        ProcessInstance pi = locked.instance();
         if ("REWORK".equals(t.getTaskType())) {
             throw new BizException("BAD_TASK_TYPE", "Rework task cannot be rejected as approval");
         }
-        if (!Objects.equals(t.getAssigneeId(), operatorId)) {
+        if (!force && !Objects.equals(t.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
         }
 
@@ -201,11 +270,17 @@ public class ProcessEngine {
         t.setComment(cmd.comment());
         taskMapper.updateById(t);
 
-        ProcessInstance pi = taskMapperExt.selectInstanceById(t.getProcInstId()).orElseThrow();
-        // 同节点兄弟一律 SKIPPED
-        List<TaskEntity> siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", pi.getId()).eq("status", "PENDING")
-            .eq("node_id", t.getNodeId()).ne("id", t.getId()));
+        // 同节点兄弟一律 SKIPPED；并行分支任务则把整个并行网关的 PENDING 任务都跳过
+        List<TaskEntity> siblings;
+        if (t.getParallelId() != null) {
+            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", pi.getId()).eq("status", "PENDING")
+                .eq("parallel_id", t.getParallelId()).ne("id", t.getId()));
+        } else {
+            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", pi.getId()).eq("status", "PENDING")
+                .eq("node_id", t.getNodeId()).ne("id", t.getId()));
+        }
         for (TaskEntity sib : siblings) {
             sib.setStatus("SKIPPED");
             taskMapper.updateById(sib);
@@ -217,6 +292,22 @@ public class ProcessEngine {
         JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
         if (cur == null) {
             throw new BizException("BAD_FLOW", "current node not in tree: " + t.getNodeId());
+        }
+        if (force && cmd.rejectToNodeId() != null && !cmd.rejectToNodeId().isBlank()) {
+            JsonNode target = ProcessTreeNav.findById(root, cmd.rejectToNodeId());
+            if (target == null || !"APPROVAL".equals(target.path("type").asText())
+                || ProcessTreeNav.isInsideParallelBranch(root, cmd.rejectToNodeId())) {
+                throw new BizException("BAD_REJECT_TARGET", "reject target is not an approval node");
+            }
+            pi.setStatus("RUNNING");
+            pi.setFinishedAt(null);
+            pi.setCurrentNodeId(target.path("id").asText());
+            processInstanceMapper.updateById(pi);
+            insertHistory(t, t.getNodeId(), target.path("id").asText(),
+                force ? "FORCE_REJECT" : "REJECT_TO_NODE", operatorId, cmd.comment());
+            resolveAndLandFromNode(root, pi, readFormData(pi.getFormDataId()),
+                pi.getStartedBy(), Map.of(), target);
+            return;
         }
         TaskEntity previous = previousApproval(t);
         TaskEntity returned = new TaskEntity();
@@ -232,7 +323,8 @@ public class ProcessEngine {
         pi.setFinishedAt(null);
         pi.setCurrentNodeId(returned.getNodeId());
         processInstanceMapper.updateById(pi);
-        insertHistory(t, t.getNodeId(), returned.getNodeId(), "REJECT", operatorId,
+        insertHistory(t, t.getNodeId(), returned.getNodeId(),
+            force ? "FORCE_REJECT" : "REJECT", operatorId,
             cmd.comment());
 
         if (previous == null) {
@@ -250,16 +342,15 @@ public class ProcessEngine {
 
     @Transactional
     public List<Long> resubmitRework(long taskId, long operatorId) {
-        TaskEntity task = taskMapper.selectById(taskId);
-        if (task == null || !"PENDING".equals(task.getStatus())
-            || !"REWORK".equals(task.getTaskType())) {
+        LockedTask locked = lockPendingTask(taskId);
+        TaskEntity task = locked.task();
+        if (!"REWORK".equals(task.getTaskType())) {
             throw new BizException("TASK_NOT_PENDING", "Rework task not pending");
         }
         if (!Objects.equals(task.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
         }
-        ProcessInstance instance = taskMapperExt.selectInstanceById(task.getProcInstId())
-            .orElseThrow(() -> new BizException("NOT_FOUND", "instance not found"));
+        ProcessInstance instance = locked.instance();
         FormData formDataRow = formDataMapper.selectById(instance.getFormDataId());
         if (formDataRow == null) {
             throw new BizException("NOT_FOUND", "form data not found");
@@ -310,6 +401,7 @@ public class ProcessEngine {
         QueryWrapper<TaskEntity> query = new QueryWrapper<TaskEntity>()
             .eq("proc_inst_id", current.getProcInstId())
             .eq("status", "APPROVED")
+            .isNull("parallel_id")
             .ne("node_id", current.getNodeId());
         if (before != null) {
             query.lt("approved_at", before);
@@ -320,7 +412,7 @@ public class ProcessEngine {
 
     @Transactional
     public void withdraw(long instanceId, long operatorId) {
-        ProcessInstance pi = processInstanceMapper.selectById(instanceId);
+        ProcessInstance pi = processInstanceMapper.selectForUpdate(instanceId);
         if (pi == null) throw new BizException("NOT_FOUND", "instance not found");
         if (!Objects.equals(pi.getStartedBy(), operatorId)) {
             throw new AccessDeniedException("only starter can withdraw");
@@ -343,11 +435,82 @@ public class ProcessEngine {
         pi.setStatus("WITHDRAWN");
         pi.setFinishedAt(OffsetDateTime.now());
         processInstanceMapper.updateById(pi);
+        workflowJobMapper.cancelActive(pi.getId());
         insertHistoryOnInstance(pi.getId(), null, pi.getCurrentNodeId(),
             "WITHDRAW", operatorId, null);
         notifier.publish(new NotificationEvent(this, "INSTANCE_WITHDRAWN",
             pi.getId(), null, pi.getStartedBy(), "实例 #" + pi.getId() + " 已撤回"));
     }
+
+    /**
+     * Completes a claimed automation job and, for blocking nodes, advances the
+     * process in the same transaction. Repeated completion calls are no-ops.
+     */
+    @Transactional
+    public boolean completeAutomation(Long jobId) {
+        WorkflowJob job = workflowJobMapper.selectForUpdate(jobId);
+        if (job == null || !"RUNNING".equals(job.getStatus())) return false;
+
+        ProcessInstance instance = processInstanceMapper.selectForUpdate(job.getProcInstId());
+        if (instance == null || (Boolean.TRUE.equals(job.getBlocking())
+            && !"RUNNING".equals(instance.getStatus()))) {
+            job.setStatus("CANCELLED");
+            job.setLockedAt(null);
+            job.setLockedBy(null);
+            workflowJobMapper.updateById(job);
+            return false;
+        }
+        if (Boolean.TRUE.equals(job.getBlocking())
+            && !Objects.equals(instance.getCurrentNodeId(), job.getNodeId())) {
+            job.setStatus("CANCELLED");
+            job.setLastError("instance is no longer waiting at the automation node");
+            job.setLockedAt(null);
+            job.setLockedBy(null);
+            workflowJobMapper.updateById(job);
+            return false;
+        }
+
+        job.setStatus("SUCCEEDED");
+        job.setCompletedAt(OffsetDateTime.now());
+        job.setLastError(null);
+        job.setLockedAt(null);
+        job.setLockedBy(null);
+        workflowJobMapper.updateById(job);
+        String action = "DELAY".equals(job.getJobType())
+            ? "DELAY_COMPLETED" : "TRIGGER_SUCCEEDED";
+        insertHistoryOnInstance(instance.getId(), job.getNodeId(), job.getNodeId(),
+            action, null, "deliveryId=" + job.getDeliveryId());
+
+        if (Boolean.TRUE.equals(job.getBlocking())) {
+            JsonNode root = readTree(instance.getProcessSnapshot());
+            JsonNode current = ProcessTreeNav.findById(root, job.getNodeId());
+            if (current == null) {
+                throw new BizException("BAD_FLOW", "automation node not found: " + job.getNodeId());
+            }
+            resolveAndLand(root, instance, readFormData(instance.getFormDataId()),
+                instance.getStartedBy(), Map.of(), current);
+        }
+        return true;
+    }
+
+    private LockedTask lockPendingTask(long taskId) {
+        TaskEntity initial = taskMapper.selectById(taskId);
+        if (initial == null) {
+            throw new BizException("TASK_NOT_PENDING", "Task not pending");
+        }
+        ProcessInstance instance = processInstanceMapper.selectForUpdate(initial.getProcInstId());
+        if (instance == null) {
+            throw new BizException("NOT_FOUND", "instance not found");
+        }
+        TaskEntity current = taskMapper.selectById(taskId);
+        if (current == null || !Objects.equals(current.getProcInstId(), instance.getId())
+            || !"PENDING".equals(current.getStatus())) {
+            throw new BizException("TASK_NOT_PENDING", "Task not pending");
+        }
+        return new LockedTask(current, instance);
+    }
+
+    private record LockedTask(TaskEntity task, ProcessInstance instance) { }
 
     // -----------------------------------------------------------------------
     // 核心：resolveAndLand — 从刚完成/起点节点起沿树前进，直到落到一个需要建
@@ -391,8 +554,7 @@ public class ProcessEngine {
                                           Map<String, List<Long>> selfSelected,
                                           JsonNode fromNode, JsonNode startNode) {
         JsonNode node = startNode;
-        NodeContext ctx = new NodeContext(starterId, formData, selfSelected,
-            fromNode == null ? null : fromNode.path("id").asText(null));
+        NodeContext ctx = new NodeContext(starterId, formData, selfSelected, fromNode == null ? null : fromNode.path("id").asText(null), null, null);
         while (true) {
             if (node == null) {
                 // 末端 → 实例 APPROVED
@@ -416,16 +578,16 @@ public class ProcessEngine {
             NodeOutcome outcome = handler.handle(root, node, pi, ctx);
             switch (outcome.type()) {
                 case NEXT:
+                    String nextFromId = node.path("id").asText(null);
                     fromNode = node;
                     node = outcome.node();
-                    ctx = new NodeContext(starterId, formData, selfSelected,
-                        node == null ? null : node.path("id").asText(null));
+                    ctx = new NodeContext(starterId, formData, selfSelected, nextFromId, null, null);
                     continue;
                 case JUMP:
+                    String jumpFromId = node.path("id").asText(null);
                     fromNode = node;
                     node = outcome.node();
-                    ctx = new NodeContext(starterId, formData, selfSelected,
-                        node == null ? null : node.path("id").asText(null));
+                    ctx = new NodeContext(starterId, formData, selfSelected, jumpFromId, null, null);
                     continue;
                 case END:
                     processInstanceMapper.updateById(pi);

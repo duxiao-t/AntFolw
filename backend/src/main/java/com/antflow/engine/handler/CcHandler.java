@@ -35,6 +35,8 @@ public class CcHandler implements NodeHandler {
             ct.setAssigneeId(u);
             ct.setStatus("CC");
             ct.setApprovalMode("OR");
+            ct.setParallelId(ctx.parallelId());
+            ct.setBranchId(ctx.branchId());
             taskMapper.insert(ct);
         }
         var h = new TaskHistoryEntity();

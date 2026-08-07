@@ -80,7 +80,9 @@ public class ConditionEvaluator {
             case ">=" -> cmp(actual, expected) >= 0;
             case "<"  -> cmp(actual, expected) < 0;
             case "<=" -> cmp(actual, expected) <= 0;
-            case "in" -> arrayContains(expected, actual);
+            case "in" -> expected.isArray()
+                ? arrayContains(expected, actual)
+                : nodeEquals(expected, actual);
             case "contains" -> arrayContains(actual, expected) || actual.asText().contains(expected.asText());
             default -> false;
         };

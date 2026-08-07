@@ -7,7 +7,9 @@ public final class ProcessTreeNav {
     private ProcessTreeNav() {}
 
     public static boolean isBranch(JsonNode n) {
-        return n != null && "CONDITIONS".equals(n.path("type").asText());
+        if (n == null) return false;
+        String type = n.path("type").asText();
+        return "CONDITIONS".equals(type) || "PARALLEL".equals(type);
     }
 
     public static boolean isEmpty(JsonNode n) {
@@ -32,5 +34,23 @@ public final class ProcessTreeNav {
             }
         }
         return findById(node.get("children"), id);
+    }
+
+    public static boolean isInsideParallelBranch(JsonNode root, String id) {
+        return isInsideParallelBranch(root, id, false);
+    }
+
+    private static boolean isInsideParallelBranch(JsonNode node, String id,
+                                                  boolean insideParallelBranch) {
+        if (node == null || node.isNull() || !node.has("id")) return false;
+        if (id.equals(node.path("id").asText())) return insideParallelBranch;
+        if (isBranch(node)) {
+            boolean branchContext = insideParallelBranch
+                || "PARALLEL".equals(node.path("type").asText());
+            for (JsonNode branch : node.withArray("branchs")) {
+                if (isInsideParallelBranch(branch, id, branchContext)) return true;
+            }
+        }
+        return isInsideParallelBranch(node.get("children"), id, insideParallelBranch);
     }
 }

@@ -14,5 +14,9 @@ public record NodeContext(
         JsonNode formData,
         Map<String, List<Long>> selfSelected,
         /** 上一节点 id（用于 ARRIVE 历史 fromNodeId） */
-        String fromNodeId
+        String fromNodeId,
+        /** 所属并行网关节点 id（并行分支内任务）；null 表示非并行 */
+        String parallelId,
+        /** 所属并行分支 id（并行分支内任务）；null 表示非并行 */
+        String branchId
 ) {}

@@ -6,7 +6,8 @@ import org.springframework.stereotype.Component;
 public class NodeDispatcher {
 
     public void assertKnown(String type) {
-        if ("start".equals(type) || "approval".equals(type) || "end".equals(type)) {
+        if ("start".equals(type) || "approval".equals(type) || "end".equals(type)
+            || "PARALLEL".equals(type) || "DELAY".equals(type) || "TRIGGER".equals(type)) {
             return;
         }
         throw new BadNodeTypeException("unknown node type: " + type);

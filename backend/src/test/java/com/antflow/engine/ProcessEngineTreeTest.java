@@ -83,7 +83,7 @@ class ProcessEngineTreeTest {
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
             historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class),
-            json, formalNumberService
+            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class)
         );
     }
 
@@ -93,6 +93,8 @@ class ProcessEngineTreeTest {
         processDefinitionService = Mockito.mock(ProcessDefinitionService.class);
         taskMapper = Mockito.mock(TaskMapper.class);
         processInstanceMapper = Mockito.mock(ProcessInstanceMapper.class);
+        Mockito.when(processInstanceMapper.selectForUpdate(Mockito.anyLong()))
+            .thenAnswer(invocation -> processInstanceMapper.selectById(invocation.getArgument(0)));
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         assigneeResolver = Mockito.mock(AssigneeResolver.class);
         json = new ObjectMapper();

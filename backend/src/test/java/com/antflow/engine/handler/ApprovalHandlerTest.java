@@ -32,7 +32,7 @@ class ApprovalHandlerTest {
             {"id":"manager","type":"APPROVAL","props":{"assignedType":"SELF_SELECT","mode":"OR"}}
             """);
         NodeContext context = new NodeContext(7L, objectMapper.createObjectNode(),
-            Map.of("manager", List.of(42L)), "root");
+            Map.of("manager", List.of(42L)), "root", null, null);
 
         handler.handle(objectMapper.createObjectNode(), node, instance, context);
 

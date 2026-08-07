@@ -59,6 +59,17 @@ antflow:
   media:
     ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
     watermark-font: ${WATERMARK_FONT:}
+  automation:
+    zone-id: ${ANTFLOW_TIME_ZONE:Asia/Shanghai}
+    allowed-hosts: ${ANTFLOW_WEBHOOK_ALLOWED_HOSTS:}
+    https-only: ${ANTFLOW_WEBHOOK_HTTPS_ONLY:false}
+    allow-private-addresses: ${ANTFLOW_WEBHOOK_ALLOW_PRIVATE:false}
+    connect-timeout: 3s
+    request-timeout: 10s
+    stale-lock-timeout: 2m
+    max-attempts: 8
+    poll-interval-ms: ${ANTFLOW_JOB_POLL_INTERVAL_MS:1000}
+    recovery-interval-ms: ${ANTFLOW_JOB_RECOVERY_INTERVAL_MS:60000}
 
 mybatis-plus:
   configuration:

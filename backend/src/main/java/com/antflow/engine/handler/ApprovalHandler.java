@@ -57,6 +57,8 @@ public class ApprovalHandler implements NodeHandler {
             nt.setTaskType("APPROVAL");
             nt.setStatus("PENDING");
             nt.setApprovalMode(mode);
+            nt.setParallelId(ctx.parallelId());
+            nt.setBranchId(ctx.branchId());
             taskMapper.insert(nt);
             ids.add(nt.getId());
         }

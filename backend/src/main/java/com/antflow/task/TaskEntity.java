@@ -19,6 +19,10 @@ public class TaskEntity {
     private String comment;
     /** 父任务 id（加签/转交产生的子任务）；null 表示原始任务 */
     private Long parentTaskId;
+    /** 所属并行网关节点 id（并行分支任务）；null 表示非并行 */
+    private String parallelId;
+    /** 所属并行分支 id */
+    private String branchId;
     /** 委托来源 user_id（forwardee 真正审批，原始 assignee 仅审计） */
     private Long delegatedFrom;
     /** 是否加签任务（与原任务 OR/AND 合并决签） */

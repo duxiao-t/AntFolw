@@ -63,6 +63,81 @@ class ProcessDefinitionServiceValidationTest {
         assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
+    @Test void validate_accepts_delay_and_trigger_with_complete_configuration() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF"},"children":{"id":"d1","type":"DELAY",
+              "props":{"mode":"DURATION","amount":1,"unit":"HOURS"},"children":{
+              "id":"t1","type":"TRIGGER","props":{"method":"POST",
+              "url":"https://hooks.example.com/flow","contentType":"application/json",
+              "continueMode":"ON_SUCCESS","secret":"12345678","headers":[],"parameters":[]}}}}}
+            """;
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+    }
+
+    @Test void validate_rejects_async_node_inside_parallel_branch() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
+              "branchs":[
+                {"id":"b1","type":"BRANCH","children":{"id":"d1","type":"DELAY",
+                  "props":{"mode":"DURATION","amount":1,"unit":"HOURS"}}},
+                {"id":"b2","type":"BRANCH","children":{"id":"a1","type":"APPROVAL",
+                  "props":{"assignedType":"SELF"}}}
+              ],"children":{"id":"join","type":"EMPTY"}}}
+            """;
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("只允许审批/抄送");
+    }
+
+    @Test void validate_accepts_conditional_parallel_branch_with_always_fallback() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
+              "branchs":[
+                {"id":"b1","type":"BRANCH","props":{"conditionMode":"WHEN_MATCHED",
+                  "groupsType":"OR","groups":[{"groupType":"AND","conditions":[
+                    {"field":"amount","operator":">","value":"100"}]}]},
+                  "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF"}}},
+                {"id":"b2","type":"BRANCH","props":{"conditionMode":"ALWAYS"},
+                  "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"SELF"}}}
+              ],"children":{"id":"join","type":"EMPTY"}}}
+            """;
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+    }
+
+    @Test void validate_accepts_nonempty_array_for_in_condition() {
+        String tree = conditionalTree("[\"BJ\",\"SH\"]");
+
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+    }
+
+    @Test void validate_rejects_scalar_for_in_condition() {
+        String tree = conditionalTree("\"BJ\"");
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("条件表达式配置不完整");
+    }
+
+    @Test void validate_rejects_parallel_without_always_branch() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
+              "branchs":[
+                {"id":"b1","type":"BRANCH","props":{"conditionMode":"WHEN_MATCHED",
+                  "groups":[{"groupType":"AND","conditions":[
+                    {"field":"amount","operator":">","value":"100"}]}]},
+                  "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF"}}},
+                {"id":"b2","type":"BRANCH","props":{"conditionMode":"WHEN_MATCHED",
+                  "groups":[{"groupType":"AND","conditions":[
+                    {"field":"amount","operator":"<=","value":"100"}]}]},
+                  "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"SELF"}}}
+              ],"children":{"id":"join","type":"EMPTY"}}}
+            """;
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("始终执行");
+    }
+
     @Test void findByForm_returns_current_definition_including_draft() {
         ProcessDefinitionMapper mapper = Mockito.mock(ProcessDefinitionMapper.class);
         ProcessDefinitionService service =
@@ -103,5 +178,17 @@ class ProcessDefinitionServiceValidationTest {
 
         assertThat(result.getStatus()).isEqualTo("DRAFT");
         verify(mapper).updateById(published);
+    }
+
+    private static String conditionalTree(String value) {
+        return """
+            {"id":"root","type":"ROOT","children":{"id":"c1","type":"CONDITIONS",
+              "branchs":[
+                {"id":"b1","type":"CONDITION","props":{"groups":[{"groupType":"AND",
+                  "conditions":[{"field":"city","operator":"in","value":%s}]}]},
+                  "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF"}}},
+                {"id":"b2","type":"CONDITION","props":{"isDefault":true},"children":null}
+              ],"children":null}}
+            """.formatted(value);
     }
 }

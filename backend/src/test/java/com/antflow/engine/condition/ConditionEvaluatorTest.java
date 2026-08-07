@@ -63,4 +63,18 @@ class ConditionEvaluatorTest {
         assertThat(evaluator.matches(props, node("{ \"city\":\"SH\" }"))).isTrue();
         assertThat(evaluator.matches(props, node("{ \"city\":\"GZ\" }"))).isFalse();
     }
+
+    @Test
+    void in_operator_treatsLegacyScalarAsSingleton() throws Exception {
+        JsonNode props = node("""
+            { "groupsType":"OR", "groups":[
+              { "groupType":"AND", "conditions":[
+                { "field":"city", "operator":"in", "value":"BJ" }
+              ]}
+            ]}
+            """);
+
+        assertThat(evaluator.matches(props, node("{ \"city\":\"BJ\" }"))).isTrue();
+        assertThat(evaluator.matches(props, node("{ \"city\":\"SH\" }"))).isFalse();
+    }
 }
