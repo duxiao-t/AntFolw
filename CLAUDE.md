@@ -73,6 +73,7 @@ cd mobile && npm run test:e2e              # Playwright 四视口
 
 - 操作级 RBAC：`t_permission`（`kind = ACTION | PAGE`）、`t_role_permission`、`t_role_department`；`authz.AuthorizationService` / `RoleAdminService` / `SecurityAuthorizationController`（`/api/security/*`）。
 - 表单资源授权：`t_form_resource_grant`（USER/ROLE 授权），**发起/填报/建草稿均要求表单授权**，未授权按资源不存在处理；`t_process_instance.started_dept_id` 保存发起部门快照。
+- 节点级字段权限：APPROVAL 节点 `props.formPerms` 支持三态（`HIDDEN`/`READONLY`/`EDITABLE`，未配置默认只读）；`EDITABLE` 字段在同意时按 schema 校验并回写表单数据，条件分支会按新值路由。
 - 审计：`t_audit_event` 追加只读（trigger 保护），`AuditController` 提供 `/api/audit/events`、`/api/audit/export`、`/api/audit/archives/{id}/download`；`t_audit_archive` 支持归档校验与下载。
 - 自动化：`t_workflow_job`（DELAY/TRIGGER）+ `AutomationJobScheduler` 轮询/恢复 + `WebhookClient`（SSRF 防护：allowed hosts、https-only、禁私网地址可配）。
 
@@ -85,7 +86,7 @@ cd mobile && npm run test:e2e              # Playwright 四视口
 
 ## 二期（未做）
 
-连续多级主管(LEADER_TOP)、依次会签(NEXT)、任务级超时处理、节点级表单字段权限、转交/加签、流程发布版本快照、列表分页、实例详情读权限收敛。
+连续多级主管(LEADER_TOP)、依次会签(NEXT)、任务级超时处理、转交/加签、流程发布版本快照、列表分页、实例详情读权限收敛。
 
 ## 企业级移动端
 

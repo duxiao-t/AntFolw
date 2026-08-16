@@ -9,6 +9,7 @@ Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterp
 - ✅ Custom approval engine — tree process, OR/AND, SELF_SELECT, withdraw, optimistic locking, parallel gateway (`PARALLEL`), delay/trigger automation, reject-to-previous + rework-on-original-instance.
 - ✅ Formal numbers — `t_user.employee_no` (6-digit) + `t_form_data.business_no` (12-digit); desktop contacts maintain/import/export employee numbers.
 - ✅ RBAC & audit — action/page permissions (`t_permission`, `t_role_permission`), form resource grants (`t_form_resource_grant`), append-only audit events and audit archive (`/api/audit/*`).
+- ✅ Node-level field permissions — per-approval-node `HIDDEN`/`READONLY`/`EDITABLE` (default readonly), with editable values validated and written back into form data on approve.
 - ✅ Automation — persistent `t_workflow_job` for DELAY/TRIGGER nodes with scheduler, webhook SSRF guard, retry/recovery.
 - ✅ Form designer storage + runtime snapshot (`form_def_version`).
 - ✅ Org module — Company / Department (ltree) / User / Role + JWT + login rate limit.

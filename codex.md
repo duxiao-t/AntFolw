@@ -19,6 +19,7 @@ ant-flow/
 
 - 审批引擎：树流程 + `PARALLEL` 并行网关 + `DELAY`/`TRIGGER` 自动化节点 + `REWORK` 原单重提。
 - 权限审计：操作/页面权限（`t_permission`）、角色授权（`t_role_permission`）、表单资源授权（`t_form_resource_grant`，发起/填报/草稿均校验）、追加只读审计（`t_audit_event`）与归档（`t_audit_archive`）。
+- 节点级字段权限：审批节点 `formPerms` 三态（隐藏/只读/可编辑），可编辑字段同意时回写表单数据。
 - 自动化：`t_workflow_job` + `AutomationJobScheduler` + `WebhookClient`（SSRF 防护）。
 - 桌面端对应页面：`frontend/src/pages/security/*`、`frontend/src/pages/report/*`、`frontend/src/pages/settings/*`。
 
