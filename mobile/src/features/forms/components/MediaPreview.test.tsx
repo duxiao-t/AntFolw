@@ -82,22 +82,23 @@ describe('ReadonlyMediaList', () => {
     );
   });
 
-  it('plays video after clicking without preloading the blob', async () => {
+  it('loads the video once for the cover and reuses it for playback', async () => {
     const { container } = render(<ReadonlyMediaList files={[VIDEO_FILE]} />);
-    fetchMock().mockClear();
 
     const playButton = screen.getByRole('button', { name: '播放 b.mp4' });
     expect(screen.getByText('1.0 MB · 视频')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载b.mp4' })).toBeInTheDocument();
-    expect(fetchMock()).not.toHaveBeenCalled();
-
-    await userEvent.click(playButton);
-
-    await waitFor(() => expect(container.querySelector('video')).toBeTruthy());
     expect(fetchMock()).toHaveBeenCalledWith(
       '/api/mobile/files/v1/content',
       expect.anything(),
     );
+
+    await userEvent.click(playButton);
+
+    await waitFor(() => expect(container.querySelector('video')).toBeTruthy());
+    expect(
+      fetchMock().mock.calls.filter(([input]) => String(input).includes('/v1/content')),
+    ).toHaveLength(1);
   });
 
   it('renders non-media files with icon, name, size and download', () => {
