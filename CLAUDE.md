@@ -72,7 +72,7 @@ cd mobile && npm run test:e2e              # Playwright 四视口
 ## 权限、审计与自动化（V20/V21）
 
 - 操作级 RBAC：`t_permission`（`kind = ACTION | PAGE`）、`t_role_permission`、`t_role_department`；`authz.AuthorizationService` / `RoleAdminService` / `SecurityAuthorizationController`（`/api/security/*`）。
-- 表单资源授权：`t_form_resource_grant`（USER/ROLE 授权）；`t_process_instance.started_dept_id` 保存发起部门快照。
+- 表单资源授权：`t_form_resource_grant`（USER/ROLE 授权），**发起/填报/建草稿均要求表单授权**，未授权按资源不存在处理；`t_process_instance.started_dept_id` 保存发起部门快照。
 - 审计：`t_audit_event` 追加只读（trigger 保护），`AuditController` 提供 `/api/audit/events`、`/api/audit/export`、`/api/audit/archives/{id}/download`；`t_audit_archive` 支持归档校验与下载。
 - 自动化：`t_workflow_job`（DELAY/TRIGGER）+ `AutomationJobScheduler` 轮询/恢复 + `WebhookClient`（SSRF 防护：allowed hosts、https-only、禁私网地址可配）。
 
