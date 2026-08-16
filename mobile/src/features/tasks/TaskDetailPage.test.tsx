@@ -28,8 +28,21 @@ const TASK_DETAIL: MobileTaskDetail = {
   schema: [
     { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
     { id: 'days', type: 'number', label: '请假天数' },
+    { id: 'proof', type: 'file_upload', label: '证明文件' },
   ],
-  formData: { reason: '回家探亲', days: 2 },
+  formData: {
+    reason: '回家探亲',
+    days: 2,
+    proof: [
+      {
+        id: 'd2cecb38-11a8-4d2e-9f43-96ce6f4a7e60',
+        name: '证明.pdf',
+        contentType: 'application/pdf',
+        size: 1024,
+        contentUrl: '/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content',
+      },
+    ],
+  },
   processSnapshot: {
     id: 'root',
     type: 'ROOT',
@@ -295,25 +308,31 @@ describe('TaskDetailPage', () => {
     });
   });
 
-  it('filters image attachments out of the attachment panel', async () => {
+  it('renders image attachments inside form fields with download actions', async () => {
     const detail: typeof TASK_DETAIL = {
       ...TASK_DETAIL,
-      files: [
-        {
-          id: 'img-1',
-          name: 'photo.png',
-          contentType: 'image/png',
-          size: 10,
-          contentUrl: '/api/mobile/files/img-1/content',
-        },
-      ],
+      schema: [...TASK_DETAIL.schema, { id: 'photo', type: 'image_upload', label: '图片' }],
+      formData: {
+        ...TASK_DETAIL.formData,
+        photo: [
+          {
+            id: 'img-1',
+            name: 'photo.png',
+            contentType: 'image/png',
+            size: 2048,
+            contentUrl: '/api/mobile/files/img-1/content',
+          },
+        ],
+      },
+      files: [],
     };
     setupFetch({ detail });
     renderDetail();
 
-    expect(await screen.findByText('暂无附件')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '预览photo.png' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '下载photo.png' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'photo.png' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载photo.png' })).toBeInTheDocument();
+    expect(screen.getByText('2 KB · 图片')).toBeInTheDocument();
+    expect(screen.queryByText('附件')).not.toBeInTheDocument();
   });
 
   it('requires reject comment and lets the server choose the previous level', async () => {

@@ -5,9 +5,7 @@ import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { AttachmentDownloadButton } from "../forms/components/AttachmentDownloadButton";
 import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
-import { isImageFile, isVideoFile } from "../forms/components/MediaPreview";
 import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ApprovalRecords, approvalSummaryLabel } from "../tasks/ApprovalRecords";
@@ -37,10 +35,6 @@ export function ProcessDetailPage() {
 
   const instance = instanceQuery.data;
   const rows = summarizeSchemaRows(schema, values);
-  const files = instance.files ?? [];
-  const attachmentFiles = files.filter(
-    (file) => !isImageFile(file) && !isVideoFile(file),
-  );
   const approvalRecords = Array.isArray(instance.approvalRecords) ? instance.approvalRecords : [];
   const approvalSummary = instance.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   return (
@@ -74,7 +68,6 @@ export function ProcessDetailPage() {
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
-      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {attachmentFiles.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(attachmentFiles.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{attachmentFiles.length === 0 ? <p className="muted small">暂无附件</p> : attachmentFiles.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {instance.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
     </AppPage>
   );
 }
@@ -85,7 +78,6 @@ function normalizeSchema(schema: unknown): MobileSchemaNode[] { return Array.isA
 function normalizeValues(data?: Record<string, unknown> | null): MobileFormValues { return data && typeof data === "object" && !Array.isArray(data) ? data : {}; }
 function statusLabel(status: string) { return ({ RUNNING: "审批中", APPROVED: "已通过", REJECTED: "已驳回", WITHDRAWN: "已撤回" } as Record<string, string>)[status] ?? status; }
 function formatDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false }); }
-function formatSize(size: number) { if (!size) return "0 KB"; return size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`; }
 function fallbackApprovalSummary(flowedCount: number) { return { flowedCount, completedCount: flowedCount, processingCount: 0, complete: false }; }
 function createIdempotencyKey() { return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `withdraw-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function avatarText(name?: string | null) { return name?.trim().slice(0, 1) || "—"; }

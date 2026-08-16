@@ -5,10 +5,8 @@ import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { AttachmentDownloadButton } from "../forms/components/AttachmentDownloadButton";
 import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
-import { isImageFile, isVideoFile } from "../forms/components/MediaPreview";
 import type {
   FieldMode,
   MobileFormValues,
@@ -71,9 +69,6 @@ export function TaskDetailPage() {
   const detail = detailQuery.data;
   const task = detail.task;
   const rows = summarizeSchemaRows(schema, values);
-  const attachmentFiles = detail.files.filter(
-    (file) => !isImageFile(file) && !isVideoFile(file),
-  );
   const approvalRecords = Array.isArray(detail.approvalRecords) ? detail.approvalRecords : [];
   const approvalSummary = detail.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   const canApprove = detail.allowedActions.includes("APPROVE");
@@ -113,8 +108,6 @@ export function TaskDetailPage() {
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
-      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {attachmentFiles.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(attachmentFiles.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{attachmentFiles.length === 0 ? <p className="muted small">暂无附件</p> : attachmentFiles.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {task.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
-
       <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload: { ...payload, ...(hasEditableFields ? { data: editablePayload } : {}) }, idempotencyKey })} />
       <RejectSheet open={rejectOpen} loading={actionMutation.isPending} error={rejectOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setRejectOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "reject", payload, idempotencyKey })} />
     </AppPage>
@@ -138,7 +131,6 @@ function findProcessNode(node: any, id: string): any {
   return findProcessNode(node.children, id);
 }
 function formatDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false }); }
-function formatSize(size: number) { if (!size) return "0 KB"; return size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`; }
 function fallbackApprovalSummary(flowedCount: number) { return { flowedCount, completedCount: flowedCount, processingCount: 0, complete: false }; }
 function shareTask(title: string) { if (typeof navigator.share === "function") void navigator.share({ title, url: window.location.href }).catch(() => undefined); }
 function ShareIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" /></svg>; }

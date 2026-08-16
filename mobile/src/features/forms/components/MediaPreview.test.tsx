@@ -12,18 +12,21 @@ const IMAGE_FILE = {
   name: 'a.png',
   contentType: 'image/png',
   contentUrl: '/api/mobile/files/p1/content',
+  size: 2048,
 };
 const VIDEO_FILE = {
   id: 'v1',
   name: 'b.mp4',
   contentType: 'video/mp4',
   contentUrl: '/api/mobile/files/v1/content',
+  size: 1048576,
 };
 const PDF_FILE = {
   id: 'd1',
   name: 'c.pdf',
   contentType: 'application/pdf',
   contentUrl: '/api/mobile/files/d1/content',
+  size: 512,
 };
 
 function fetchMock() {
@@ -65,10 +68,13 @@ describe('media file helpers', () => {
 });
 
 describe('ReadonlyMediaList', () => {
-  it('renders image thumbnails without upload progress bars', async () => {
+  it('renders image rows with name, size and download without upload progress', async () => {
     const { container } = render(<ReadonlyMediaList files={[IMAGE_FILE]} />);
 
     expect(await screen.findByRole('img', { name: 'a.png' })).toBeInTheDocument();
+    expect(screen.getByText('a.png')).toBeInTheDocument();
+    expect(screen.getByText('2 KB · 图片')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载a.png' })).toBeInTheDocument();
     expect(container.querySelector('.af-upload-list__progress')).toBeNull();
     expect(fetchMock()).toHaveBeenCalledWith(
       '/api/mobile/files/p1/content',
@@ -81,6 +87,8 @@ describe('ReadonlyMediaList', () => {
     fetchMock().mockClear();
 
     const playButton = screen.getByRole('button', { name: '播放 b.mp4' });
+    expect(screen.getByText('1.0 MB · 视频')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载b.mp4' })).toBeInTheDocument();
     expect(fetchMock()).not.toHaveBeenCalled();
 
     await userEvent.click(playButton);
@@ -92,9 +100,11 @@ describe('ReadonlyMediaList', () => {
     );
   });
 
-  it('keeps non-media files as plain name summaries', () => {
+  it('renders non-media files with icon, name, size and download', () => {
     render(<ReadonlyMediaList files={[PDF_FILE]} />);
 
     expect(screen.getByText('c.pdf')).toBeInTheDocument();
+    expect(screen.getByText('1 KB · 文件')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载c.pdf' })).toBeInTheDocument();
   });
 });

@@ -140,8 +140,6 @@ describe('ProcessDetailPage', () => {
     expect(screen.getByText('显示器')).toBeInTheDocument();
     expect(screen.getByText('审批中', { selector: '.approval-record-card__status' })).toBeInTheDocument();
     expect(screen.getAllByText(/部门审批/).length).toBeGreaterThan(0);
-    expect(screen.getByText('暂无附件')).toBeInTheDocument();
-    expect(screen.getByText('合计 0 KB')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '撤回流程' })).toBeInTheDocument();
   });
 
@@ -149,15 +147,20 @@ describe('ProcessDetailPage', () => {
     setupFetch({
       detail: {
         ...INSTANCE_DETAIL,
-        files: [
-          {
-            id: 'af5f8d74-9c79-4d2c-9c41-f2b0cf1e82f0',
-            name: '报价单.pdf',
-            contentType: 'application/pdf',
-            size: 2048,
-            contentUrl: '/api/mobile/files/af5f8d74-9c79-4d2c-9c41-f2b0cf1e82f0/content',
-          },
-        ],
+        schema: [...INSTANCE_DETAIL.schema, { id: 'quote', type: 'file_upload', label: '报价单' }],
+        formData: {
+          ...INSTANCE_DETAIL.formData,
+          quote: [
+            {
+              id: 'af5f8d74-9c79-4d2c-9c41-f2b0cf1e82f0',
+              name: '报价单.pdf',
+              contentType: 'application/pdf',
+              size: 2048,
+              contentUrl: '/api/mobile/files/af5f8d74-9c79-4d2c-9c41-f2b0cf1e82f0/content',
+            },
+          ],
+        },
+        files: [],
       },
     });
 
@@ -167,36 +170,48 @@ describe('ProcessDetailPage', () => {
     expect(screen.queryByRole('link', { name: '下载报价单.pdf' })).not.toBeInTheDocument();
   });
 
-  it('filters image and video attachments out of the panel', async () => {
+  it('renders all attachments inside form fields with download actions', async () => {
     setupFetch({
       detail: {
         ...INSTANCE_DETAIL,
-        files: [
-          {
-            id: 'pdf-1',
-            name: '报价单.pdf',
-            contentType: 'application/pdf',
-            size: 2048,
-            contentUrl: '/api/mobile/files/pdf-1/content',
-          },
-          {
-            id: 'img-1',
-            name: 'photo.png',
-            contentType: 'image/png',
-            size: 10,
-            contentUrl: '/api/mobile/files/img-1/content',
-          },
+        schema: [
+          ...INSTANCE_DETAIL.schema,
+          { id: 'photo', type: 'image_upload', label: '图片' },
+          { id: 'quote', type: 'file_upload', label: '报价单' },
         ],
+        formData: {
+          ...INSTANCE_DETAIL.formData,
+          photo: [
+            {
+              id: 'img-1',
+              name: 'photo.png',
+              contentType: 'image/png',
+              size: 2048,
+              contentUrl: '/api/mobile/files/img-1/content',
+            },
+          ],
+          quote: [
+            {
+              id: 'pdf-1',
+              name: '报价单.pdf',
+              contentType: 'application/pdf',
+              size: 2048,
+              contentUrl: '/api/mobile/files/pdf-1/content',
+            },
+          ],
+        },
+        files: [],
       },
     });
 
     renderProcess();
 
-    expect(await screen.findByRole('button', { name: '下载报价单.pdf' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '下载photo.png' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '预览photo.png' })).not.toBeInTheDocument();
-    expect(screen.getByText('共 1 个文件')).toBeInTheDocument();
-    expect(screen.getByText('合计 2 KB')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'photo.png' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载photo.png' })).toBeInTheDocument();
+    expect(screen.getByText('2 KB · 图片')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载报价单.pdf' })).toBeInTheDocument();
+    expect(screen.getByText('2 KB · 文件')).toBeInTheDocument();
+    expect(screen.queryByText('暂无附件')).not.toBeInTheDocument();
   });
 
   it('renders media previews inside the readonly form', async () => {
@@ -227,7 +242,8 @@ describe('ProcessDetailPage', () => {
     renderProcess();
 
     expect(await screen.findByRole('img', { name: 'a.png' })).toBeInTheDocument();
-    expect(screen.getByText('暂无附件')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载a.png' })).toBeInTheDocument();
+    expect(screen.queryByText('暂无附件')).not.toBeInTheDocument();
   });
 
   it('hides withdraw when canWithdraw is false', async () => {

@@ -3200,17 +3200,22 @@ body {
 .af-field__error { color: var(--af-color-danger); }
 .af-field__summary { min-height: 30px; color: var(--af-color-text-secondary); font-size: 13px; }
 
-/* 审批只读态图片/视频预览（无上传进度条） */
-.af-field__media-list { display: grid; gap: 8px; }
-.af-field__media-grid {
+/* 审批只读态统一附件行：缩略图/图标 + 文件名/大小 + 下载（无上传进度条） */
+.af-field__attachments { display: grid; }
+.af-field__attachment {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--af-color-line);
 }
-.af-field__media-thumb {
+.af-field__attachment:first-child { border-top: 0; }
+.af-field__attachment-thumb {
   display: grid;
   place-items: center;
-  min-height: 76px;
+  width: 48px;
+  height: 48px;
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--af-color-line);
@@ -3218,24 +3223,60 @@ body {
   background: color-mix(in srgb, var(--af-color-bg) 62%, var(--af-color-surface));
   color: var(--af-color-muted);
   font-size: 11px;
+}
+.af-field__attachment-thumb--image { cursor: pointer; }
+.af-field__attachment-thumb--image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.af-field__attachment-thumb--video {
+  border-color: color-mix(in srgb, #fff 18%, var(--af-color-line));
+  background: #0b1d33;
+  color: #fff;
   cursor: pointer;
 }
-.af-field__media-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.af-field__media-video { display: grid; gap: 6px; }
-.af-field__media-video-btn {
+.af-field__attachment-thumb--video svg { width: 22px; height: 22px; }
+.af-field__attachment-thumb--file { color: var(--af-color-primary-action); }
+.af-field__attachment-thumb--file svg { width: 22px; height: 22px; }
+.af-field__attachment-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.af-field__attachment-name {
+  overflow: hidden;
+  color: var(--af-color-text);
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.af-field__attachment-meta { color: var(--af-color-muted); font-size: 11px; line-height: 1.4; }
+.af-field__attachment-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid var(--af-color-line);
+}
+.af-field__attachment-actions .attachment-file__download button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--af-color-primary) 16%, var(--af-color-line));
   border-radius: 10px;
-  background: color-mix(in srgb, var(--af-color-bg) 62%, var(--af-color-surface));
+  background: color-mix(in srgb, var(--af-color-primary) 7%, var(--af-color-surface));
   color: var(--af-color-primary-action);
-  font-size: 13px;
   cursor: pointer;
 }
-.af-field__media-video-btn svg { width: 18px; height: 18px; }
+.af-field__attachment-actions .attachment-file__download button svg { width: 16px; height: 16px; }
+.af-field__attachment-actions .attachment-file__download-error {
+  color: var(--af-color-danger);
+  font-size: 11px;
+}
 .af-field__media-error { color: var(--af-color-danger); font-size: 11px; }
 .af-media-viewer {
   position: fixed;

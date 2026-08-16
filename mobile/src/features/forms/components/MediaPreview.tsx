@@ -1,14 +1,17 @@
 import { ImageViewer } from 'antd-mobile';
-import { PlayOutline } from 'antd-mobile-icons';
+import { FileOutline, PlayOutline } from 'antd-mobile-icons';
 import { useEffect, useRef, useState } from 'react';
 import { isApiError } from '../../../shared/api/errors';
 import { fetchMobileFileBlob } from '../files.api';
+import { AttachmentDownloadButton } from './AttachmentDownloadButton';
 
 export type MediaFile = {
   id?: string;
   name?: string;
   contentType?: string;
   contentUrl: string;
+  url?: string;
+  size?: number;
 };
 
 const IMAGE_EXTENSION = /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i;
@@ -22,52 +25,30 @@ export function isVideoFile(file: MediaFile) {
   return /^video\//i.test(file.contentType ?? '') || VIDEO_EXTENSION.test(file.name ?? '');
 }
 
-/** 审批只读态：图片缩略图网格（多图滑动）、视频播放瓦片、其他附件仅名称。 */
-export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
-  const images = files.filter(isImageFile);
-  const videos = files.filter(isVideoFile);
-  const others = files.filter((file) => !isImageFile(file) && !isVideoFile(file));
-
-  return (
-    <div className="af-field__media-list">
-      {images.length > 0 ? <ReadonlyImages files={images} /> : null}
-      {videos.length > 0 ? (
-        <div className="af-field__media-grid">
-          {videos.map((file, index) => (
-            <ReadonlyVideoTile key={file.id ?? index} file={file} />
-          ))}
-        </div>
-      ) : null}
-      {others.length > 0 ? (
-        <div className="af-field__media-names">
-          {others.map((file) => (
-            <div key={file.id ?? file.name} className="af-field__summary">
-              {file.name ?? '附件'}
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+export function formatFileSize(size?: number) {
+  if (!size) return '0 KB';
+  return size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`;
 }
 
-function ReadonlyImages({ files }: { files: MediaFile[] }) {
-  const [urls, setUrls] = useState<Array<string | null>>(() => files.map(() => null));
-  const [failed, setFailed] = useState<boolean[]>(() => files.map(() => false));
+/** 审批只读态：所有附件统一以「缩略图/图标 + 文件名 + 大小 + 下载」行展示。 */
+export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
+  const imageFiles = files.filter(isImageFile);
+  const [imageUrls, setImageUrls] = useState<Array<string | null>>(() => imageFiles.map(() => null));
+  const [imageFailed, setImageFailed] = useState<boolean[]>(() => imageFiles.map(() => false));
   const [viewerIndex, setViewerIndex] = useState(-1);
 
   useEffect(() => {
     let alive = true;
-    const objectUrls = new Array<string | null>(files.length).fill(null);
-    setUrls(files.map(() => null));
-    setFailed(files.map(() => false));
-    files.forEach((file, index) => {
+    const objectUrls = new Array<string | null>(imageFiles.length).fill(null);
+    setImageUrls(imageFiles.map(() => null));
+    setImageFailed(imageFiles.map(() => false));
+    imageFiles.forEach((file, index) => {
       fetchMobileFileBlob(file.contentUrl)
         .then((blob) => {
           if (!alive) return;
           const objectUrl = URL.createObjectURL(blob);
           objectUrls[index] = objectUrl;
-          setUrls((previous) => {
+          setImageUrls((previous) => {
             const next = [...previous];
             next[index] = objectUrl;
             return next;
@@ -75,7 +56,7 @@ function ReadonlyImages({ files }: { files: MediaFile[] }) {
         })
         .catch(() => {
           if (alive) {
-            setFailed((previous) => {
+            setImageFailed((previous) => {
               const next = [...previous];
               next[index] = true;
               return next;
@@ -90,33 +71,30 @@ function ReadonlyImages({ files }: { files: MediaFile[] }) {
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.map((file) => file.contentUrl).join('|')]);
+  }, [imageFiles.map((file) => file.contentUrl).join('|')]);
 
-  const readyUrls = urls.filter((url): url is string => url != null);
+  const readyUrls = imageUrls.filter((url): url is string => url != null);
   return (
-    <>
-      <div className="af-field__media-grid">
-        {files.map((file, index) => (
-          <button
-            key={file.id ?? index}
-            type="button"
-            className="af-field__media-thumb"
-            aria-label={`预览 ${file.name ?? '图片'}`}
-            disabled={urls[index] == null && !failed[index]}
-            onClick={() => {
-              const currentUrl = urls[index];
-              const targetIndex = currentUrl ? readyUrls.indexOf(currentUrl) : -1;
-              if (targetIndex >= 0) setViewerIndex(targetIndex);
-            }}
-          >
-            {urls[index] ? (
-              <img src={urls[index] as string} alt={file.name ?? '图片'} />
-            ) : (
-              <span>{failed[index] ? '预览失败' : '加载中…'}</span>
-            )}
-          </button>
-        ))}
-      </div>
+    <div className="af-field__attachments">
+      {files.map((file, index) => (
+        <AttachmentRow
+          key={file.id ?? `${file.contentUrl}-${index}`}
+          file={file}
+          imageUrl={isImageFile(file) ? imageUrls[imageFiles.indexOf(file)] ?? null : null}
+          imageFailed={
+            isImageFile(file) ? imageFailed[imageFiles.indexOf(file)] ?? false : false
+          }
+          onOpenImage={
+            isImageFile(file)
+              ? () => {
+                  const currentUrl = imageUrls[imageFiles.indexOf(file)];
+                  const targetIndex = currentUrl ? readyUrls.indexOf(currentUrl) : -1;
+                  if (targetIndex >= 0) setViewerIndex(targetIndex);
+                }
+              : undefined
+          }
+        />
+      ))}
       {viewerIndex >= 0 && readyUrls.length > 0 ? (
         <ImageViewer.Multi
           images={readyUrls}
@@ -125,11 +103,75 @@ function ReadonlyImages({ files }: { files: MediaFile[] }) {
           onClose={() => setViewerIndex(-1)}
         />
       ) : null}
-    </>
+    </div>
   );
 }
 
-function ReadonlyVideoTile({ file }: { file: MediaFile }) {
+function AttachmentRow({
+  file,
+  imageUrl,
+  imageFailed,
+  onOpenImage,
+}: {
+  file: MediaFile;
+  imageUrl: string | null;
+  imageFailed: boolean;
+  onOpenImage?: () => void;
+}) {
+  if (isImageFile(file)) {
+    return (
+      <div className="af-field__attachment">
+        <button
+          type="button"
+          className="af-field__attachment-thumb af-field__attachment-thumb--image"
+          aria-label={`预览 ${file.name ?? '图片'}`}
+          disabled={!imageUrl && !imageFailed}
+          onClick={onOpenImage}
+        >
+          {imageUrl ? (
+            <img src={imageUrl} alt={file.name ?? '图片'} />
+          ) : (
+            <span>{imageFailed ? '预览失败' : '加载中…'}</span>
+          )}
+        </button>
+        <div className="af-field__attachment-main">
+          <strong className="af-field__attachment-name" title={file.name}>
+            {file.name ?? '图片'}
+          </strong>
+          <small className="af-field__attachment-meta">
+            {formatFileSize(file.size)} · 图片
+          </small>
+        </div>
+        <div className="af-field__attachment-actions">
+          <AttachmentDownloadButton file={file} />
+        </div>
+      </div>
+    );
+  }
+  if (isVideoFile(file)) {
+    return <VideoAttachmentRow file={file} />;
+  }
+  return (
+    <div className="af-field__attachment">
+      <span className="af-field__attachment-thumb af-field__attachment-thumb--file" aria-hidden="true">
+        <FileOutline />
+      </span>
+      <div className="af-field__attachment-main">
+        <strong className="af-field__attachment-name" title={file.name}>
+          {file.name ?? '附件'}
+        </strong>
+        <small className="af-field__attachment-meta">
+          {formatFileSize(file.size)} · 文件
+        </small>
+      </div>
+      <div className="af-field__attachment-actions">
+        <AttachmentDownloadButton file={file} />
+      </div>
+    </div>
+  );
+}
+
+function VideoAttachmentRow({ file }: { file: MediaFile }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
   const [url, setUrl] = useState<string | null>(null);
@@ -160,22 +202,33 @@ function ReadonlyVideoTile({ file }: { file: MediaFile }) {
   };
 
   return (
-    <div className="af-field__media-video">
+    <div className="af-field__attachment">
       <button
         type="button"
-        className="af-field__media-video-btn"
+        className="af-field__attachment-thumb af-field__attachment-thumb--video"
         aria-label={`播放 ${file.name ?? '视频'}`}
         disabled={opening}
         onClick={() => void open()}
       >
-        <PlayOutline aria-hidden="true" />
-        <span>{opening ? '加载中…' : file.name ?? '视频'}</span>
+        {opening ? <span>加载中…</span> : <PlayOutline aria-hidden="true" />}
       </button>
-      {error ? (
-        <small className="af-field__media-error" role="alert">
-          {error}
+      <div className="af-field__attachment-main">
+        <strong className="af-field__attachment-name" title={file.name}>
+          {file.name ?? '视频'}
+        </strong>
+        <small className="af-field__attachment-meta">
+          {formatFileSize(file.size)} · 视频
+          {error ? (
+            <span className="af-field__media-error" role="alert">
+              {' '}
+              {error}
+            </span>
+          ) : null}
         </small>
-      ) : null}
+      </div>
+      <div className="af-field__attachment-actions">
+        <AttachmentDownloadButton file={file} />
+      </div>
       {url ? (
         <MediaVideoPlayer url={url} name={file.name ?? '视频'} onClose={close} />
       ) : null}
