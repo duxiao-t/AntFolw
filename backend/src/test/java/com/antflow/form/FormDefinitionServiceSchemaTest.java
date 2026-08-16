@@ -157,4 +157,84 @@ class FormDefinitionServiceSchemaTest {
             Map.of("a", "张三")
         )).doesNotThrowAnyException();
     }
+
+    @Test void publishAcceptsValidMatrixFillSchema() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setVersion(1);
+        fd.setSchema(matrixSchema("textarea", "\"maxLength\":2000"));
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThat(service.publish(1L).getStatus()).isEqualTo("PUBLISHED");
+    }
+
+    @Test void publishRejectsInvalidMatrixFillSchema() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setSchema("""
+            [{"id":"matrix","type":"matrix_fill","props":{
+              "rows":[{"id":"row_1","label":"行1"},{"id":"row_1","label":"行2"}],
+              "columns":[{"id":"col_1","label":"列1"}],
+              "cellType":"textarea","maxRows":20,"maxColumns":10,"maxLength":2000
+            }}]
+            """);
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("unique");
+    }
+
+    @Test void validateMatrixSubmissionIdentifiesRequiredCell() {
+        assertThatThrownBy(() -> service.validateSubmission(
+            matrixSchema("textarea", "\"maxLength\":20,\"required\":true"),
+            Map.of("matrix", Map.of("customRows", List.of(), "customColumns", List.of(), "cells", Map.of()))
+        )).isInstanceOf(BizException.class)
+            .hasMessageContaining("行1 / 列1");
+    }
+
+    @Test void validateMatrixSubmissionChecksRuntimeAxesAndNumberRules() {
+        var schema = matrixSchema("number", "\"precision\":1,\"min\":0,\"max\":20");
+        var value = Map.of(
+            "customRows", List.of(Map.of("id", "runtime_row_a", "label", "运行行")),
+            "customColumns", List.of(Map.of("id", "runtime_column_a", "label", "运行列")),
+            "cells", Map.of(
+                "row_1", Map.of("col_1", 5),
+                "runtime_row_a", Map.of("runtime_column_a", 10.25)
+            )
+        );
+
+        assertThatThrownBy(() -> service.validateSubmission(schema, Map.of("matrix", value)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("运行行 / 运行列")
+            .hasMessageContaining("precision");
+    }
+
+    @Test void validateMatrixSubmissionKeepsOrphanedCellsCompatible() {
+        var value = Map.of(
+            "customRows", List.of(),
+            "customColumns", List.of(),
+            "cells", Map.of(
+                "row_1", Map.of("col_1", "有效值"),
+                "deleted_row", Map.of("deleted_col", Map.of("legacy", true))
+            )
+        );
+
+        assertThatCode(() -> service.validateSubmission(
+            matrixSchema("textarea", "\"maxLength\":20"),
+            Map.of("matrix", value)
+        )).doesNotThrowAnyException();
+    }
+
+    private String matrixSchema(String cellType, String extraProps) {
+        return """
+            [{"id":"matrix","type":"matrix_fill","label":"矩阵","props":{
+              "rows":[{"id":"row_1","label":"行1"}],
+              "columns":[{"id":"col_1","label":"列1"}],
+              "cellType":"%s","maxRows":20,"maxColumns":10,%s
+            }}]
+            """.formatted(cellType, extraProps);
+    }
 }
