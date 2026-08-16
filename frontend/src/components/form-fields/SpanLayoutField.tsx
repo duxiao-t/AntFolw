@@ -12,7 +12,7 @@ export const SpanLayoutField: FieldType = {
     showBorder: true,
     mobileSingleColumn: true,
   },
-  Component: ({ node, mode, value, onChange }) => {
+  Component: ({ node, mode, value, onChange, fieldModes }) => {
     const cols = node.props?.columns ?? 2;
     const span = Math.floor(24 / cols);
     return (
@@ -37,6 +37,7 @@ export const SpanLayoutField: FieldType = {
                 value={value ?? {}}
                 onChange={(nextValue: any) => onChange?.(nextValue)}
                 mode={mode}
+                fieldModes={fieldModes}
               />
             </Col>
           ))}

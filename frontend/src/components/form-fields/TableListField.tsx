@@ -15,7 +15,7 @@ export const TableListField: FieldType = {
     addButtonText: '新增一行',
     mobileMode: 'card',
   },
-  Component: ({ node, mode, value, onChange }) => {
+  Component: ({ node, mode, value, onChange, fieldModes }) => {
     const createDefaultRows = () =>
       Array.from({ length: node.props?.defaultRows ?? node.props?.minRows ?? 1 }).map(
         () => ({}),
@@ -86,6 +86,7 @@ export const TableListField: FieldType = {
                   value={row}
                   onChange={(nextRow: any) => update(index, nextRow)}
                   mode={mode}
+                  fieldModes={fieldModes}
                 />
               </Card>
             ))}
@@ -105,6 +106,7 @@ export const TableListField: FieldType = {
                     value={r[c.id]}
                     onChange={(v: any) => update(r._idx, { ...r, [c.id]: v })}
                     mode={mode}
+                    fieldModes={fieldModes}
                   />
                 ),
               },

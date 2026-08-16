@@ -15,7 +15,9 @@ import {
 import { RedoOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
+import type { FieldMode } from '../../registry/types';
 
 const ACTION_LABEL: Record<string, string> = {
   START: '发起',
@@ -80,6 +82,18 @@ function findApproverNodes(
   return acc;
 }
 
+function findNodeById(node: any, id: string): any {
+  if (!node || typeof node !== 'object' || !node.id) return null;
+  if (node.id === id) return node;
+  if (Array.isArray(node.branchs)) {
+    for (const branch of node.branchs) {
+      const hit = findNodeById(branch, id);
+      if (hit) return hit;
+    }
+  }
+  return findNodeById(node.children, id);
+}
+
 export default function DetailPage() {
   const { id } = useParams();
   const { message } = App.useApp();
@@ -107,6 +121,7 @@ export default function DetailPage() {
   const [overrideTicket, setOverrideTicket] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideTarget, setOverrideTarget] = useState<string | undefined>();
+  const [editableValues, setEditableValues] = useState<Record<string, any>>({});
 
   const snapshotObj = useMemo(() => {
     const raw = (data as any)?.instance?.processSnapshot;
@@ -118,18 +133,58 @@ export default function DetailPage() {
     }
   }, [data]);
 
+  const formSchema = useMemo(() => {
+    const raw = (data as any)?.schema;
+    if (!raw) return [];
+    try {
+      return typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      return [];
+    }
+  }, [data]);
+
+  const initialFormData = useMemo(() => {
+    const raw = (data as any)?.formData;
+    if (!raw) return {};
+    try {
+      return typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      return {};
+    }
+  }, [data]);
+
+  const myPending = (data as any)?.tasks?.find(
+    (t: any) =>
+      t.status === 'PENDING' &&
+      currentUserId != null &&
+      t.assigneeId === currentUserId,
+  );
+  useEffect(() => {
+    if (myPending) {
+      setEditableValues(initialFormData);
+    }
+    // 每个待办任务只初始化一次，重新拉取详情后字段值以服务端为准。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myPending?.id]);
+  const currentFormModes = useMemo(() => {
+    const modes: Record<string, FieldMode> = {};
+    if (!snapshotObj || !myPending) return modes;
+    const node = findNodeById(snapshotObj, myPending.nodeId);
+    for (const entry of node?.props?.formPerms ?? []) {
+      if (entry.mode === 'HIDDEN') modes[entry.fieldId] = 'hidden';
+      else if (entry.mode === 'EDITABLE') modes[entry.fieldId] = 'runtime-fill';
+      else modes[entry.fieldId] = 'readonly';
+    }
+    return modes;
+  }, [snapshotObj, myPending]);
+  const hasEditableFields = Object.values(currentFormModes).includes('runtime-fill');
+
   if (isFetching || !data) return <Spin />;
   const { instance, tasks, history: historyRows } = data as any;
   if (!instance) return <Spin />;
 
   const ccTasks = (tasks ?? []).filter((t: any) => t.status === 'CC');
   const normalTasks = (tasks ?? []).filter((t: any) => t.status !== 'CC');
-  const myPending = (tasks ?? []).find(
-    (t: any) =>
-      t.status === 'PENDING' &&
-      currentUserId != null &&
-      t.assigneeId === currentUserId,
-  );
   const isStarter =
     currentUserId != null && instance.startedBy === currentUserId;
   const isRunner = instance.status === 'RUNNING';
@@ -140,7 +195,7 @@ export default function DetailPage() {
     try {
       await request(`/api/tasks/${taskId}/approve`, {
         method: 'POST',
-        data: {},
+        data: hasEditableFields ? editableValues : {},
       });
       message.success('已同意');
       qc.invalidateQueries({ queryKey: ['instance', id] });
@@ -281,6 +336,19 @@ export default function DetailPage() {
           {instance.finishedAt ?? '—'}
         </Descriptions.Item>
       </Descriptions>
+
+      {formSchema.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h3>表单详情</h3>
+          <FormRenderer
+            schema={formSchema}
+            mode="readonly"
+            fieldModes={currentFormModes}
+            value={editableValues}
+            onChange={hasEditableFields ? setEditableValues : undefined}
+          />
+        </div>
+      )}
 
       {snapshotObj && (
         <div

@@ -1,9 +1,16 @@
 import { Divider, Form, Input, InputNumber, Radio } from 'antd';
 import { AssigneePicker } from '../../../../components/AssigneePicker';
-import type { TreeNode } from '../types';
+import type { FieldPerm, FormFieldOption, TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
+import { FieldPermissionEditor } from './FieldPermissionEditor';
 
-export function ApprovalNodeConfig({ node }: { node: TreeNode }) {
+export function ApprovalNodeConfig({
+  node,
+  formFields,
+}: {
+  node: TreeNode;
+  formFields: FormFieldOption[];
+}) {
   const updateProps = useProcessDesignerStore((s) => s.updateProps);
   const updateName = useProcessDesignerStore((s) => s.updateName);
   const p: Record<string, any> = node.props ?? {};
@@ -101,6 +108,14 @@ export function ApprovalNodeConfig({ node }: { node: TreeNode }) {
             { value: 'TO_PASS', label: '自动通过' },
             { value: 'TO_REFUSE', label: '自动驳回' },
           ]}
+        />
+      </Form.Item>
+      <Divider />
+      <Form.Item label="字段权限">
+        <FieldPermissionEditor
+          formFields={formFields}
+          value={p.formPerms as FieldPerm[] | undefined}
+          onChange={(formPerms) => set({ formPerms })}
         />
       </Form.Item>
     </Form>

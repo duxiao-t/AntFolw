@@ -69,4 +69,29 @@ describe('FormRenderer', () => {
     expect(fieldFrame).toBeTruthy();
     expect(fieldFrame?.querySelector('.form-renderer__designer-card')).toBeTruthy();
   });
+
+  it('applies per-field mode overrides and hides hidden fields', () => {
+    const schema: SchemaNode[] = [
+      { id: 'edit', type: 'text', label: '可编辑' },
+      { id: 'ro', type: 'text', label: '只读' },
+      { id: 'secret', type: 'text', label: '隐藏' },
+    ];
+
+    render(
+      <FormRenderer
+        schema={schema}
+        mode="readonly"
+        fieldModes={{ edit: 'runtime-fill', secret: 'hidden' }}
+        value={{ edit: 'a', ro: 'b', secret: 'c' }}
+      />,
+    );
+
+    const inputs = screen.getAllByRole('textbox');
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0]).toHaveValue('a');
+    expect(inputs[0]).not.toBeDisabled();
+    expect(inputs[1]).toHaveValue('b');
+    expect(inputs[1]).toBeDisabled();
+    expect(screen.queryByDisplayValue('c')).not.toBeInTheDocument();
+  });
 });

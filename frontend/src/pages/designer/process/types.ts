@@ -58,6 +58,19 @@ export type ProcessConditionProps = {
   groups?: ProcessConditionGroup[];
 };
 
+export type FieldPermMode = 'HIDDEN' | 'READONLY' | 'EDITABLE';
+
+export type FieldPerm = {
+  fieldId: string;
+  mode: FieldPermMode;
+};
+
+export type FormFieldOption = {
+  id: string;
+  label: string;
+  type: string;
+};
+
 export const APPROVAL_PROPS = () => ({
   assignedType: 'ASSIGN_USER',
   mode: 'OR',

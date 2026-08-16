@@ -23,6 +23,26 @@ const approvalReady = (node: TreeNode): boolean => {
   return ['LEADER', 'SELF', 'SELF_SELECT'].includes(props.assignedType);
 };
 
+const formPermsIssue = (node: TreeNode): string | null => {
+  const perms = node.props?.formPerms;
+  if (perms == null) return null;
+  if (!Array.isArray(perms)) return '字段权限配置必须是数组';
+  const seen = new Set<string>();
+  for (const entry of perms) {
+    if (!entry || typeof entry.fieldId !== 'string' || !entry.fieldId.trim()) {
+      return '字段权限缺少字段 id';
+    }
+    if (!['HIDDEN', 'READONLY', 'EDITABLE'].includes(entry.mode)) {
+      return `字段 ${entry.fieldId} 的权限模式非法`;
+    }
+    if (seen.has(entry.fieldId)) {
+      return `字段 ${entry.fieldId} 重复配置权限`;
+    }
+    seen.add(entry.fieldId);
+  }
+  return null;
+};
+
 const conditionReady = (node: TreeNode): boolean => {
   if (node.props?.isDefault) return true;
   const groups = node.props?.groups ?? [];
@@ -119,6 +139,10 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
     if (node.type === 'APPROVAL' && !approvalReady(node)) {
       add(node.id, '请配置审批人');
     }
+    if (node.type === 'APPROVAL') {
+      const permIssue = formPermsIssue(node);
+      if (permIssue) add(node.id, permIssue);
+    }
     if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
       add(node.id, '请配置抄送人');
     }
@@ -129,6 +153,10 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
     if (!node) return;
     if (node.type === 'APPROVAL' && !approvalReady(node))
       add(node.id, '请配置审批人');
+    if (node.type === 'APPROVAL') {
+      const permIssue = formPermsIssue(node);
+      if (permIssue) add(node.id, permIssue);
+    }
     if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
       add(node.id, '请配置抄送人');
     }

@@ -18,7 +18,7 @@ import { ParallelNodeConfig } from './config/ParallelNodeConfig';
 import { RootNodeConfig } from './config/RootNodeConfig';
 import { TriggerNodeConfig } from './config/TriggerNodeConfig';
 import { ProcessTree } from './ProcessTree';
-import type { TreeNode } from './types';
+import type { FormFieldOption, TreeNode } from './types';
 import { useProcessDesignerStore } from './useProcessDesignerStore';
 import { validateProcessTree } from './validation';
 
@@ -46,6 +46,29 @@ function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+const FIELD_CONTAINER_TYPES = new Set(['span_layout', 'table_list']);
+
+function flattenFormFields(nodes: any[]): FormFieldOption[] {
+  const result: FormFieldOption[] = [];
+  const visit = (list: any[]) => {
+    for (const node of list) {
+      if (!node?.id) continue;
+      if (FIELD_CONTAINER_TYPES.has(node.type)) {
+        if (Array.isArray(node.children)) visit(node.children);
+        continue;
+      }
+      if (node.type === 'description') continue;
+      result.push({
+        id: node.id,
+        label: node.label ?? node.props?.label ?? node.id,
+        type: node.type,
+      });
+    }
+  };
+  visit(nodes);
+  return result;
 }
 
 export function ProcessDesignerSurface({
@@ -93,11 +116,7 @@ export function ProcessDesignerSurface({
       request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
     enabled: !!formDefId,
   });
-  const formFields = parseJsonValue<any[]>(formDef?.schema, []).map((node) => ({
-    id: node.id,
-    label: node.label ?? node.props?.label ?? node.id,
-    type: node.type,
-  }));
+  const formFields = flattenFormFields(parseJsonValue<any[]>(formDef?.schema, []));
   const issues = useMemo(() => validateProcessTree(process), [process]);
 
   const save = async (): Promise<void> => {
@@ -205,7 +224,7 @@ export function ProcessDesignerSurface({
       >
         {selected?.type === 'ROOT' && <RootNodeConfig node={selected} />}
         {selected?.type === 'APPROVAL' && (
-          <ApprovalNodeConfig node={selected} />
+          <ApprovalNodeConfig node={selected} formFields={formFields} />
         )}
         {selected?.type === 'CC' && <CcNodeConfig node={selected} />}
         {selected?.type === 'CONDITION' && (

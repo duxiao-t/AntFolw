@@ -10,6 +10,7 @@ import './FormRenderer.less';
 type Props = {
   schema: SchemaNode[];
   mode: FieldMode;
+  fieldModes?: Record<string, FieldMode>;
   value?: any;
   onChange?(v: any): void;
   sortableIds?: string[];
@@ -322,6 +323,7 @@ function DesignerFieldFrame({
 export function FormRenderer({
   schema,
   mode,
+  fieldModes,
   value,
   onChange,
   onDesignerNodeChange,
@@ -342,7 +344,9 @@ export function FormRenderer({
         if (!node) return null;
         const ft = formRegistry[node.type];
         if (!ft) return null;
-        if (!shouldRenderNode(node, mode, value ?? {})) return null;
+        const effectiveMode = fieldModes?.[node.id] ?? mode;
+        if (effectiveMode === 'hidden') return null;
+        if (!shouldRenderNode(node, effectiveMode, value ?? {})) return null;
         const flatContainer = isFlatContainerNode(node.type);
         const nodeValue = flatContainer
           ? value ?? {}
@@ -360,8 +364,9 @@ export function FormRenderer({
         const field = (
           <ft.Component
             node={renderNode}
-            mode={mode}
+            mode={effectiveMode}
             value={nodeValue}
+            fieldModes={fieldModes}
             onChange={(v: any) => {
               if (flatContainer) {
                 onChange?.(v);
