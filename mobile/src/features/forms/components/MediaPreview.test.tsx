@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   isImageFile,
   isVideoFile,
-  MediaPreviewButton,
   ReadonlyMediaList,
 } from './MediaPreview';
 
@@ -97,25 +96,5 @@ describe('ReadonlyMediaList', () => {
     render(<ReadonlyMediaList files={[PDF_FILE]} />);
 
     expect(screen.getByText('c.pdf')).toBeInTheDocument();
-  });
-});
-
-describe('MediaPreviewButton', () => {
-  it('opens image preview from the attachment panel', async () => {
-    render(<MediaPreviewButton file={IMAGE_FILE} />);
-    fetchMock().mockClear();
-
-    await userEvent.click(screen.getByRole('button', { name: '预览a.png' }));
-
-    expect(fetchMock()).toHaveBeenCalledWith(
-      '/api/mobile/files/p1/content',
-      expect.anything(),
-    );
-  });
-
-  it('renders nothing for non-media attachments', () => {
-    const { container } = render(<MediaPreviewButton file={PDF_FILE} />);
-
-    expect(container).toBeEmptyDOMElement();
   });
 });

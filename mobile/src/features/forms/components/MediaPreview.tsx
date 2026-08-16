@@ -1,5 +1,5 @@
 import { ImageViewer } from 'antd-mobile';
-import { EyeOutline, PlayOutline } from 'antd-mobile-icons';
+import { PlayOutline } from 'antd-mobile-icons';
 import { useEffect, useRef, useState } from 'react';
 import { isApiError } from '../../../shared/api/errors';
 import { fetchMobileFileBlob } from '../files.api';
@@ -48,73 +48,6 @@ export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-/** 附件面板：图片/视频显示「预览」按钮，普通附件不渲染。 */
-export function MediaPreviewButton({ file }: { file: MediaFile }) {
-  const [opening, setOpening] = useState(false);
-  const [error, setError] = useState('');
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
-
-  if (!isImageFile(file) && !isVideoFile(file)) {
-    return null;
-  }
-
-  const close = () => {
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-    setImageUrl(null);
-    setVideoUrl(null);
-    setError('');
-  };
-
-  const open = async () => {
-    setError('');
-    setOpening(true);
-    try {
-      const blob = await fetchMobileFileBlob(file.contentUrl);
-      const objectUrl = URL.createObjectURL(blob);
-      objectUrlRef.current = objectUrl;
-      if (isVideoFile(file)) {
-        setVideoUrl(objectUrl);
-      } else {
-        setImageUrl(objectUrl);
-      }
-    } catch (previewError) {
-      setError(mediaErrorMessage(previewError));
-    } finally {
-      setOpening(false);
-    }
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        className="attachment-file__preview"
-        aria-label={`预览${file.name ?? '附件'}`}
-        disabled={opening}
-        onClick={() => void open()}
-      >
-        {opening ? <span>加载中</span> : <EyeOutline aria-hidden="true" />}
-      </button>
-      {error ? (
-        <small className="attachment-file__download-error" role="alert">
-          {error}
-        </small>
-      ) : null}
-      {imageUrl ? (
-        <ImageViewer.Multi images={[imageUrl]} visible onClose={close} />
-      ) : null}
-      {videoUrl ? (
-        <MediaVideoPlayer url={videoUrl} name={file.name ?? '视频'} onClose={close} />
-      ) : null}
-    </>
   );
 }
 

@@ -295,7 +295,7 @@ describe('TaskDetailPage', () => {
     });
   });
 
-  it('shows an in-app preview button for image attachments', async () => {
+  it('filters image attachments out of the attachment panel', async () => {
     const detail: typeof TASK_DETAIL = {
       ...TASK_DETAIL,
       files: [
@@ -311,7 +311,9 @@ describe('TaskDetailPage', () => {
     setupFetch({ detail });
     renderDetail();
 
-    expect(await screen.findByRole('button', { name: '预览photo.png' })).toBeInTheDocument();
+    expect(await screen.findByText('暂无附件')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览photo.png' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下载photo.png' })).not.toBeInTheDocument();
   });
 
   it('requires reject comment and lets the server choose the previous level', async () => {

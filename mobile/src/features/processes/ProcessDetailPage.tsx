@@ -6,7 +6,8 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { AttachmentDownloadButton } from "../forms/components/AttachmentDownloadButton";
-import { MediaPreviewButton } from "../forms/components/MediaPreview";
+import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
+import { isImageFile, isVideoFile } from "../forms/components/MediaPreview";
 import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ApprovalRecords, approvalSummaryLabel } from "../tasks/ApprovalRecords";
@@ -37,6 +38,9 @@ export function ProcessDetailPage() {
   const instance = instanceQuery.data;
   const rows = summarizeSchemaRows(schema, values);
   const files = instance.files ?? [];
+  const attachmentFiles = files.filter(
+    (file) => !isImageFile(file) && !isVideoFile(file),
+  );
   const approvalRecords = Array.isArray(instance.approvalRecords) ? instance.approvalRecords : [];
   const approvalSummary = instance.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   return (
@@ -58,12 +62,19 @@ export function ProcessDetailPage() {
 
       <section className="approval-panel form-detail-panel">
         <header className="approval-panel__head form-detail-panel__head"><div><h2>表单详情</h2><p>单号 <strong>{instance.businessNo}</strong></p></div><div className="field-total"><span>字段总数</span><strong>{rows.length}</strong></div></header>
-        {rows.length > 0 ? <dl className="form-fields">{rows.map((row, index) => <div className={`form-field-row${index === rows.length - 1 && row.value.length > 24 ? " form-field-row--stack" : ""}`} key={row.id}><dt>{row.label}</dt><dd>{row.value || "未填写"}</dd></div>)}</dl> : <p className="muted small">暂无表单字段</p>}
+        {schema.length > 0 ? (
+          <DynamicFormRenderer
+            schema={schema}
+            values={values}
+            mode="readonly"
+            onValueChange={() => undefined}
+          />
+        ) : <p className="muted small">暂无表单字段</p>}
       </section>
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
-      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {files.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(files.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{files.length === 0 ? <p className="muted small">暂无附件</p> : files.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {instance.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><MediaPreviewButton file={file} /><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
+      <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {attachmentFiles.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(attachmentFiles.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{attachmentFiles.length === 0 ? <p className="muted small">暂无附件</p> : attachmentFiles.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {instance.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
     </AppPage>
   );
 }

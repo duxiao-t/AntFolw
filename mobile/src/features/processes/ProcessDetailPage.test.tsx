@@ -167,6 +167,69 @@ describe('ProcessDetailPage', () => {
     expect(screen.queryByRole('link', { name: '下载报价单.pdf' })).not.toBeInTheDocument();
   });
 
+  it('filters image and video attachments out of the panel', async () => {
+    setupFetch({
+      detail: {
+        ...INSTANCE_DETAIL,
+        files: [
+          {
+            id: 'pdf-1',
+            name: '报价单.pdf',
+            contentType: 'application/pdf',
+            size: 2048,
+            contentUrl: '/api/mobile/files/pdf-1/content',
+          },
+          {
+            id: 'img-1',
+            name: 'photo.png',
+            contentType: 'image/png',
+            size: 10,
+            contentUrl: '/api/mobile/files/img-1/content',
+          },
+        ],
+      },
+    });
+
+    renderProcess();
+
+    expect(await screen.findByRole('button', { name: '下载报价单.pdf' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下载photo.png' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览photo.png' })).not.toBeInTheDocument();
+    expect(screen.getByText('共 1 个文件')).toBeInTheDocument();
+    expect(screen.getByText('合计 2 KB')).toBeInTheDocument();
+  });
+
+  it('renders media previews inside the readonly form', async () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:media'),
+      revokeObjectURL: vi.fn(),
+    });
+    setupFetch({
+      detail: {
+        ...INSTANCE_DETAIL,
+        schema: [{ id: 'photo', type: 'image_upload', label: '图片' }],
+        formData: {
+          photo: [
+            {
+              id: 'p1',
+              name: 'a.png',
+              contentUrl: '/api/mobile/files/p1/content',
+              contentType: 'image/png',
+              size: 1,
+            },
+          ],
+        },
+        files: [],
+      },
+    });
+
+    renderProcess();
+
+    expect(await screen.findByRole('img', { name: 'a.png' })).toBeInTheDocument();
+    expect(screen.getByText('暂无附件')).toBeInTheDocument();
+  });
+
   it('hides withdraw when canWithdraw is false', async () => {
     setupFetch({ detail: WITHDRAWN_DETAIL });
     renderProcess();
