@@ -40,7 +40,7 @@ export function ProcessDetailPage() {
   const approvalSummary = instance.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   return (
     <AppPage
-      title="流程进度"
+      title="审批详情"
       contentClassName="approval-detail-page"
       action={<button className="app-bar__action" type="button" aria-label="分享" onClick={() => shareProcess(instance.formName ?? `流程 #${instance.id}`)}><ShareIcon /></button>}
       bottomBar={instance.canWithdraw ? <div className="action-bar process-action-bar"><button className="btn btn--danger btn--lg" type="button" disabled={withdrawMutation.isPending} onClick={() => { if (typeof window.confirm === "function" && !window.confirm("确认撤回该流程？撤回后不可恢复。")) return; setActionError(""); withdrawKeyRef.current = createIdempotencyKey(); withdrawMutation.mutate(); }}>{withdrawMutation.isPending ? "撤回中..." : "撤回流程"}</button></div> : null}

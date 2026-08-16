@@ -290,7 +290,7 @@ describe('TaskDetailPage', () => {
       );
       expect(approveCall).toBeTruthy();
       const body = JSON.parse(String(approveCall?.[1]?.body)) as Record<string, unknown>;
-      expect(body.data).toEqual(expect.objectContaining({ reason: '回家探亲修改' }));
+      expect(body.data).toEqual({ reason: '回家探亲修改' });
     });
   });
 

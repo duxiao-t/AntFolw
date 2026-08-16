@@ -59,6 +59,9 @@ export function TaskDetailPage() {
     return modes;
   }, [detailQuery.data]);
   const hasEditableFields = Object.values(fieldModes).includes("fill");
+  const editablePayload = Object.fromEntries(
+    Object.entries(editableValues).filter(([fieldId]) => fieldModes[fieldId] === "fill"),
+  );
 
   if (!Number.isSafeInteger(numericTaskId) || numericTaskId <= 0) return <PageError title="任务不存在" message="请返回任务中心重新打开。" />;
   if (detailQuery.isPending) return <PageSkeleton rows={5} />;
@@ -90,7 +93,8 @@ export function TaskDetailPage() {
       {statusNotice ? <p className="status-notice" role="status">{statusNotice}</p> : null}
       <section className="approval-panel form-detail-panel">
         <header className="approval-panel__head form-detail-panel__head"><div><h2>表单详情</h2><p>单号 <strong>{task.businessNo}</strong></p></div><div className="field-total"><span>字段总数</span><strong>{rows.length}</strong></div></header>
-        {hasEditableFields ? (
+        {hasEditableFields ? <p className="muted small">以下字段可在审批时修改</p> : null}
+        {schema.length > 0 ? (
           <DynamicFormRenderer
             schema={schema}
             values={editableValues}
@@ -100,14 +104,14 @@ export function TaskDetailPage() {
               setEditableValues((previous) => ({ ...previous, [fieldId]: value }))
             }
           />
-        ) : rows.length > 0 ? <dl className="form-fields">{rows.map((row, index) => <div key={row.id} className={`form-field-row${index === rows.length - 1 && row.value.length > 24 ? " form-field-row--stack" : ""}`}><dt>{row.label}</dt><dd>{row.value || "未填写"}</dd></div>)}</dl> : <p className="muted small">暂无表单字段</p>}
+        ) : <p className="muted small">暂无表单字段</p>}
       </section>
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
       <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {detail.files.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(detail.files.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{detail.files.length === 0 ? <p className="muted small">暂无附件</p> : detail.files.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {task.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
 
-      <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload: { ...payload, ...(hasEditableFields ? { data: editableValues } : {}) }, idempotencyKey })} />
+      <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload: { ...payload, ...(hasEditableFields ? { data: editablePayload } : {}) }, idempotencyKey })} />
       <RejectSheet open={rejectOpen} loading={actionMutation.isPending} error={rejectOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setRejectOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "reject", payload, idempotencyKey })} />
     </AppPage>
   );

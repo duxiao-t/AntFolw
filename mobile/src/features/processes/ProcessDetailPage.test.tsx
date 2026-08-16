@@ -130,7 +130,7 @@ describe('ProcessDetailPage', () => {
   it('renders process snapshot timeline and withdraw when allowed', async () => {
     renderProcess();
 
-    expect(await screen.findByText('流程进度')).toBeInTheDocument();
+    expect(await screen.findByText('审批详情')).toBeInTheDocument();
     expect(await screen.findByText('表单详情')).toBeInTheDocument();
     expect(screen.getAllByText('张三').length).toBeGreaterThan(0);
     expect(screen.getAllByText('研发部').length).toBeGreaterThan(0);
