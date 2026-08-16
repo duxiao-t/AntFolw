@@ -318,6 +318,33 @@ describe('advanced mobile fields', () => {
     expect(screen.getByLabelText('图片')).toHaveAttribute('accept', 'image/*');
   });
 
+  it('renders readonly media preview without upload progress', async () => {
+    render(
+      <ImageUploadField
+        {...baseProps(
+          {
+            id: 'photo',
+            type: 'image_upload',
+            label: '图片',
+          },
+          [
+            {
+              id: 'p1',
+              name: 'a.png',
+              contentUrl: '/api/mobile/files/p1/content',
+              contentType: 'image/png',
+              size: 1,
+            },
+          ],
+        )}
+        mode="readonly"
+      />,
+    );
+
+    expect(await screen.findByRole('img', { name: 'a.png' })).toBeInTheDocument();
+    expect(document.querySelector('.af-upload-list__progress')).toBeNull();
+  });
+
   it('does not notify the parent form from a React state updater while uploading', async () => {
     const user = userEvent.setup();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);

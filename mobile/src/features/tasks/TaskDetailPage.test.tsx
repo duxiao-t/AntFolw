@@ -181,6 +181,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载证明.pdf' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '下载证明.pdf' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览证明.pdf' })).not.toBeInTheDocument();
     expect(screen.getByText('审批中')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '同意' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '驳回' })).toBeInTheDocument();
@@ -292,6 +293,25 @@ describe('TaskDetailPage', () => {
       const body = JSON.parse(String(approveCall?.[1]?.body)) as Record<string, unknown>;
       expect(body.data).toEqual({ reason: '回家探亲修改' });
     });
+  });
+
+  it('shows an in-app preview button for image attachments', async () => {
+    const detail: typeof TASK_DETAIL = {
+      ...TASK_DETAIL,
+      files: [
+        {
+          id: 'img-1',
+          name: 'photo.png',
+          contentType: 'image/png',
+          size: 10,
+          contentUrl: '/api/mobile/files/img-1/content',
+        },
+      ],
+    };
+    setupFetch({ detail });
+    renderDetail();
+
+    expect(await screen.findByRole('button', { name: '预览photo.png' })).toBeInTheDocument();
   });
 
   it('requires reject comment and lets the server choose the previous level', async () => {

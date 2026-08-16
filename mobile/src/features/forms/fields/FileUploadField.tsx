@@ -3,7 +3,8 @@ import { DeleteOutline, FileOutline, PictureOutline, UploadOutline } from 'antd-
 import type { MobileFileDto, UploadProgressEvent } from '../files.api';
 import { deleteMobileFile, fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
-import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
+import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
+import { ReadonlyMediaList } from '../components/MediaPreview';
 
 export type UploadItem = {
   localId: string;
@@ -170,9 +171,10 @@ export function FileUploadField(props: MobileFieldProps) {
       label={label}
       required={isRequired(props.node)}
       error={fieldError(props) || localBlocker(items) || localError}
-      summary={props.mode === 'readonly' ? readonlySummary(readyValues) : undefined}
     >
-      {props.mode === 'readonly' ? null : (
+      {props.mode === 'readonly' ? (
+        <ReadonlyMediaList files={readyValues} />
+      ) : (
         <div className="upload-control af-upload-control">
           <div className="af-upload-list">
             {items.map((item) => {
