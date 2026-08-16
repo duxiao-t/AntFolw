@@ -11,6 +11,7 @@ export type DynamicFormRendererProps = {
   schema: MobileSchemaNode[];
   values: MobileFormValues;
   mode: FieldMode;
+  modeOverride?: Record<string, FieldMode>;
   errors?: FieldValidationErrors;
   onValueChange: (fieldId: string, value: unknown) => void;
 };
@@ -19,11 +20,16 @@ export function DynamicFormRenderer({
   schema,
   values,
   mode,
+  modeOverride = {},
   errors = {},
   onValueChange,
 }: DynamicFormRendererProps) {
   function renderNodes(nodes: MobileSchemaNode[]) {
     return nodes.flatMap((node) => {
+      const effectiveMode = modeOverride[node.id] ?? mode;
+      if (effectiveMode === 'hidden') {
+        return [];
+      }
       if (!isVisibleNode(node, values)) {
         return [];
       }
@@ -35,7 +41,7 @@ export function DynamicFormRenderer({
             node={node}
             value={values[node.id]}
             values={values}
-            mode={mode}
+            mode={effectiveMode}
             error={errors[node.id]}
             onValueChange={onValueChange}
             renderChildren={renderNodes}

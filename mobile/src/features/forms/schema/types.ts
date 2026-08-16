@@ -46,7 +46,7 @@ export type MobileFlowNode = {
 
 export type MobileFormValues = Record<string, unknown>;
 
-export type FieldMode = 'fill' | 'readonly';
+export type FieldMode = 'fill' | 'readonly' | 'hidden';
 
 export type FieldValidationErrors = Record<string, string>;
 

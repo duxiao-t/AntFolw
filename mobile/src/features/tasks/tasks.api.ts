@@ -5,6 +5,7 @@ export type TaskView = 'pending' | 'done' | 'process';
 export type TaskListItem = {
   id: number;
   instanceId: number;
+  nodeId: string;
   formCode: string;
   formName: string;
   businessNo: string;
@@ -148,6 +149,7 @@ export type MobileTaskDetail = {
 
 export type TaskActionPayload = {
   comment?: string;
+  data?: Record<string, unknown>;
 };
 
 export async function fetchTaskDetail(taskId: number): Promise<MobileTaskDetail> {

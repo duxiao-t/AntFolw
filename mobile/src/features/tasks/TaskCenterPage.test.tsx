@@ -9,6 +9,7 @@ const PENDING_TASKS = [
   {
     id: 401,
     instanceId: 9001,
+    nodeId: 'a1',
     formName: '请假申请',
     applicantName: '张三',
     applicantDepartment: '研发部',
@@ -32,6 +33,7 @@ const DONE_TASKS = [
   {
     id: 402,
     instanceId: 9002,
+    nodeId: 'a3',
     formName: '报销申请',
     applicantName: '李四',
     applicantDepartment: '财务部',

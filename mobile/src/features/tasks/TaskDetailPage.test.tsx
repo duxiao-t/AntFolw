@@ -12,6 +12,7 @@ const TASK_DETAIL: MobileTaskDetail = {
   task: {
     id: 401,
     instanceId: 9001,
+    nodeId: 'a1',
     formCode: 'leave',
     formName: '请假申请',
     businessNo: '000000009001',
@@ -253,6 +254,44 @@ describe('TaskDetailPage', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '确认同意' }));
 
     expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
+  });
+
+  it('renders editable fields and submits their values on approve', async () => {
+    const editableDetail: typeof TASK_DETAIL = {
+      ...TASK_DETAIL,
+      processSnapshot: {
+        id: 'root',
+        type: 'ROOT',
+        children: {
+          id: 'a1',
+          type: 'APPROVAL',
+          props: {
+            name: '直属主管',
+            formPerms: [{ fieldId: 'reason', mode: 'EDITABLE' }],
+          },
+        },
+      },
+    };
+    setupFetch({ detail: editableDetail });
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByRole('button', { name: '同意' });
+    const input = await screen.findByLabelText('请假事由');
+    await user.clear(input);
+    await user.type(input, '回家探亲修改');
+    await user.click(screen.getByRole('button', { name: '同意' }));
+    const dialog = await screen.findByRole('dialog', { name: '同意审批' });
+    await user.click(within(dialog).getByRole('button', { name: '确认同意' }));
+
+    await waitFor(() => {
+      const approveCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([input]) => String(input).includes('/api/mobile/tasks/401/approve'),
+      );
+      expect(approveCall).toBeTruthy();
+      const body = JSON.parse(String(approveCall?.[1]?.body)) as Record<string, unknown>;
+      expect(body.data).toEqual(expect.objectContaining({ reason: '回家探亲修改' }));
+    });
   });
 
   it('requires reject comment and lets the server choose the previous level', async () => {

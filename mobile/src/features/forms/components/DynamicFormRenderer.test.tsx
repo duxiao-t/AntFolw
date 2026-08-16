@@ -82,4 +82,28 @@ describe('DynamicFormRenderer', () => {
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
     expect(screen.queryByLabelText('请假事由')).not.toBeInTheDocument();
   });
+
+  it('applies per-field mode override and hides hidden fields', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'editable', type: 'text', label: '可编辑' },
+      { id: 'readonly', type: 'text', label: '只读' },
+      { id: 'secret', type: 'text', label: '隐藏' },
+    ];
+
+    render(
+      <DynamicFormRenderer
+        mode="readonly"
+        modeOverride={{ editable: 'fill', secret: 'hidden' }}
+        schema={schema}
+        values={{ editable: 'a', readonly: 'b', secret: 'c' }}
+        onValueChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('可编辑')).toHaveValue('a');
+    expect(screen.queryByLabelText('只读')).not.toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
+    expect(screen.queryByText('隐藏')).not.toBeInTheDocument();
+    expect(screen.queryByText('c')).not.toBeInTheDocument();
+  });
 });

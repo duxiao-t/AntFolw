@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { isApiError } from "../../shared/api/errors";
@@ -7,7 +7,12 @@ import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { AttachmentDownloadButton } from "../forms/components/AttachmentDownloadButton";
 import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
-import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
+import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
+import type {
+  FieldMode,
+  MobileFormValues,
+  MobileSchemaNode,
+} from "../forms/schema/types";
 import { ApproveSheet } from "./ApproveSheet";
 import { ApprovalRecords, approvalSummaryLabel } from "./ApprovalRecords";
 import { RejectSheet } from "./RejectSheet";
@@ -31,6 +36,29 @@ export function TaskDetailPage() {
   });
   const schema = useMemo(() => normalizeSchema(detailQuery.data?.schema), [detailQuery.data?.schema]);
   const values = useMemo(() => normalizeValues(detailQuery.data?.formData), [detailQuery.data?.formData]);
+  const [editableValues, setEditableValues] = useState<MobileFormValues>({});
+  useEffect(() => {
+    setEditableValues(values);
+    // 任务切换时以服务端表单数据为准重新初始化。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailQuery.data?.task.id]);
+  const fieldModes = useMemo(() => {
+    const modes: Record<string, FieldMode> = {};
+    const rawSnapshot = detailQuery.data?.processSnapshot;
+    if (!rawSnapshot) return modes;
+    const snapshot =
+      typeof rawSnapshot === "string" ? safeParse(rawSnapshot) : rawSnapshot;
+    const nodeId = detailQuery.data?.task.nodeId;
+    if (!snapshot || !nodeId) return modes;
+    const node = findProcessNode(snapshot, nodeId);
+    for (const entry of node?.props?.formPerms ?? []) {
+      if (entry.mode === "HIDDEN") modes[entry.fieldId] = "hidden";
+      else if (entry.mode === "EDITABLE") modes[entry.fieldId] = "fill";
+      else modes[entry.fieldId] = "readonly";
+    }
+    return modes;
+  }, [detailQuery.data]);
+  const hasEditableFields = Object.values(fieldModes).includes("fill");
 
   if (!Number.isSafeInteger(numericTaskId) || numericTaskId <= 0) return <PageError title="任务不存在" message="请返回任务中心重新打开。" />;
   if (detailQuery.isPending) return <PageSkeleton rows={5} />;
@@ -62,14 +90,24 @@ export function TaskDetailPage() {
       {statusNotice ? <p className="status-notice" role="status">{statusNotice}</p> : null}
       <section className="approval-panel form-detail-panel">
         <header className="approval-panel__head form-detail-panel__head"><div><h2>表单详情</h2><p>单号 <strong>{task.businessNo}</strong></p></div><div className="field-total"><span>字段总数</span><strong>{rows.length}</strong></div></header>
-        {rows.length > 0 ? <dl className="form-fields">{rows.map((row, index) => <div key={row.id} className={`form-field-row${index === rows.length - 1 && row.value.length > 24 ? " form-field-row--stack" : ""}`}><dt>{row.label}</dt><dd>{row.value || "未填写"}</dd></div>)}</dl> : <p className="muted small">暂无表单字段</p>}
+        {hasEditableFields ? (
+          <DynamicFormRenderer
+            schema={schema}
+            values={editableValues}
+            mode="readonly"
+            modeOverride={fieldModes}
+            onValueChange={(fieldId, value) =>
+              setEditableValues((previous) => ({ ...previous, [fieldId]: value }))
+            }
+          />
+        ) : rows.length > 0 ? <dl className="form-fields">{rows.map((row, index) => <div key={row.id} className={`form-field-row${index === rows.length - 1 && row.value.length > 24 ? " form-field-row--stack" : ""}`}><dt>{row.label}</dt><dd>{row.value || "未填写"}</dd></div>)}</dl> : <p className="muted small">暂无表单字段</p>}
       </section>
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
 
       <section className="approval-panel attachment-panel"><header className="approval-panel__head"><div><h2>附件</h2><p>共 {detail.files.length} 个文件</p></div><span className="approval-panel__summary">合计 {formatSize(detail.files.reduce((sum, file) => sum + (file.size || 0), 0))}</span></header><div className="attachment-list">{detail.files.length === 0 ? <p className="muted small">暂无附件</p> : detail.files.map((file) => <article className="attachment-file" key={file.id}><div className="attachment-file__main"><strong title={file.name}>{file.name}</strong><span><b>文件类型</b> {file.contentType || "未知"}</span><span><b>关联单号</b> {task.businessNo}</span></div><div className="attachment-file__aside"><span>{formatSize(file.size)}</span><AttachmentDownloadButton file={file} /></div></article>)}</div></section>
 
-      <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload, idempotencyKey })} />
+      <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload: { ...payload, ...(hasEditableFields ? { data: editableValues } : {}) }, idempotencyKey })} />
       <RejectSheet open={rejectOpen} loading={actionMutation.isPending} error={rejectOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setRejectOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "reject", payload, idempotencyKey })} />
     </AppPage>
   );
@@ -79,6 +117,18 @@ async function invalidateTaskCaches(queryClient: ReturnType<typeof useQueryClien
 function returnPath(params: URLSearchParams) { const next = new URLSearchParams(); const view = params.get("returnView"); const keyword = params.get("returnKeyword"); const status = params.get("returnStatus"); if (view) next.set("view", view); if (keyword) next.set("keyword", keyword); if (status) next.set("status", status); return next.size ? `/tasks?${next}` : "/tasks"; }
 function normalizeSchema(schema: unknown): MobileSchemaNode[] { return Array.isArray(schema) ? schema as MobileSchemaNode[] : []; }
 function normalizeValues(data?: Record<string, unknown> | null): MobileFormValues { return data && typeof data === "object" && !Array.isArray(data) ? data : {}; }
+function safeParse(value: string): unknown { try { return JSON.parse(value); } catch { return null; } }
+function findProcessNode(node: any, id: string): any {
+  if (!node || typeof node !== "object" || !node.id) return null;
+  if (node.id === id) return node;
+  if (Array.isArray(node.branchs)) {
+    for (const branch of node.branchs) {
+      const hit = findProcessNode(branch, id);
+      if (hit) return hit;
+    }
+  }
+  return findProcessNode(node.children, id);
+}
 function formatDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false }); }
 function formatSize(size: number) { if (!size) return "0 KB"; return size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`; }
 function fallbackApprovalSummary(flowedCount: number) { return { flowedCount, completedCount: flowedCount, processingCount: 0, complete: false }; }
