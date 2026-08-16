@@ -11,6 +11,7 @@ import {
 import type { ReactNode } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
+import { validateMatrixValue } from '../../components/form-fields/matrixFill';
 import './MobileFormPreview.less';
 
 type PreviewValues = Record<string, any>;
@@ -173,6 +174,20 @@ function PreviewField({
     return (
       <FieldShell node={node} label={label} error={error} description={description} help={help}>
         <TableListPreview node={node} value={value} />
+      </FieldShell>
+    );
+  }
+
+  if (node.type === 'matrix_fill') {
+    const MatrixComponent = formRegistry.matrix_fill.Component;
+    return (
+      <FieldShell node={node} label={label} error={error} description={description} help={help}>
+        <MatrixComponent
+          node={node}
+          mode="runtime-fill"
+          value={value}
+          onChange={(nextValue) => onValueChange(node.id, nextValue)}
+        />
       </FieldShell>
     );
   }
@@ -526,7 +541,9 @@ function collectNodeErrors(
       continue;
     }
     const value = values[node.id] ?? node.props?.defaultValue;
-    const error = validateCommonRules(node, value);
+    const error = node.type === 'matrix_fill'
+      ? validateMatrixValue(value, node.props, fieldLabel(node))
+      : validateCommonRules(node, value);
     if (error) {
       errors[node.id] = error;
     }

@@ -1,0 +1,205 @@
+.matrix-fill {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--form-designer-text, #1f2329);
+}
+
+.matrix-fill__viewport {
+  position: relative;
+  min-width: 0;
+}
+
+.matrix-fill__viewport::before,
+.matrix-fill__viewport::after {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  z-index: 6;
+  width: 14px;
+  pointer-events: none;
+  content: "";
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.matrix-fill__viewport::before {
+  left: 1px;
+  background: linear-gradient(90deg, rgb(11 29 51 / 16%), transparent);
+}
+
+.matrix-fill__viewport::after {
+  right: 1px;
+  background: linear-gradient(270deg, rgb(11 29 51 / 16%), transparent);
+}
+
+.matrix-fill__viewport[data-scroll-left="true"]::before,
+.matrix-fill__viewport[data-scroll-right="true"]::after {
+  opacity: 1;
+}
+
+.matrix-fill__scroll {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  border: 1px solid var(--form-designer-border, #d9d9d9);
+  border-radius: 6px;
+  background: var(--form-designer-surface, #fff);
+}
+
+.matrix-fill__table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.matrix-fill__caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.matrix-fill__table th,
+.matrix-fill__table td {
+  min-width: 156px;
+  padding: 8px;
+  border-right: 1px solid var(--form-designer-border, #d9d9d9);
+  border-bottom: 1px solid var(--form-designer-border, #d9d9d9);
+  vertical-align: top;
+  text-align: left;
+}
+
+.matrix-fill__table th:last-child,
+.matrix-fill__table td:last-child {
+  border-right: 0;
+}
+
+.matrix-fill__table tbody tr:last-child th,
+.matrix-fill__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.matrix-fill__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-width: 160px;
+  background: color-mix(in srgb, var(--form-designer-primary-bg, #e6f4ff) 58%, #fff);
+  color: var(--form-designer-text, #1f2329);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.matrix-fill__table thead .matrix-fill__corner {
+  left: 0;
+  z-index: 5;
+  min-width: 132px;
+  background: var(--form-designer-primary-bg, #e6f4ff);
+}
+
+.matrix-fill__table thead th.matrix-fill__axis--active {
+  background: color-mix(in srgb, var(--form-designer-primary, #1677ff) 19%, #fff);
+}
+
+.matrix-fill__row-header.matrix-fill__axis--active {
+  background: color-mix(in srgb, var(--form-designer-primary, #1677ff) 10%, #fff);
+}
+
+.matrix-fill__table td.matrix-fill__cell--active {
+  background: color-mix(in srgb, var(--form-designer-primary, #1677ff) 5%, #fff);
+}
+
+.matrix-fill__row-header {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 132px;
+  background: var(--form-designer-surface, #fff);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.matrix-fill__axis-label {
+  display: inline-block;
+  max-width: 118px;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+
+.matrix-fill__axis-actions {
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.matrix-fill__axis-actions .ant-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.matrix-fill__text-input,
+.matrix-fill__number-input {
+  width: 100%;
+}
+
+.matrix-fill__text-input.ant-input {
+  min-height: 62px;
+  resize: vertical;
+}
+
+.matrix-fill__readonly-value {
+  display: block;
+  min-height: 32px;
+  color: var(--form-designer-text-secondary, #6b7280);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.matrix-fill__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.matrix-fill__counter {
+  margin-left: auto;
+  color: var(--form-designer-text-secondary, #6b7280);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .matrix-fill__table th,
+  .matrix-fill__table td {
+    min-width: 148px;
+    padding: 7px;
+  }
+
+  .matrix-fill__table thead .matrix-fill__corner,
+  .matrix-fill__row-header {
+    min-width: 116px;
+  }
+
+  .matrix-fill__counter {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .matrix-fill * {
+    scroll-behavior: auto;
+  }
+  .matrix-fill__viewport::before,
+  .matrix-fill__viewport::after {
+    transition: none;
+  }
+}

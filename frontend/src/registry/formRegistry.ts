@@ -16,6 +16,7 @@ import { VideoUploadField } from '../components/form-fields/VideoUploadField';
 import { SpanLayoutField } from '../components/form-fields/SpanLayoutField';
 import { TableListField } from '../components/form-fields/TableListField';
 import { ChecklistField } from '../components/form-fields/ChecklistField';
+import { MatrixFillField } from '../components/form-fields/MatrixFillField';
 
 export const formRegistry: Record<string, FieldType> = {
   text: TextField,
@@ -35,6 +36,7 @@ export const formRegistry: Record<string, FieldType> = {
   span_layout: SpanLayoutField,
   table_list: TableListField,
   checklist: ChecklistField,
+  matrix_fill: MatrixFillField,
 };
 
 export type PaletteEntry = {
@@ -75,6 +77,7 @@ export const paletteGroups: PaletteGroup[] = [
       'span_layout',
       'table_list',
       'checklist',
+      'matrix_fill',
     ]
       .map((type) => paletteEntries.find((entry) => entry.type === type))
       .filter((entry): entry is PaletteEntry => Boolean(entry)),

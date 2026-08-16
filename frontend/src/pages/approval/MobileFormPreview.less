@@ -155,6 +155,102 @@
   display: grid;
 }
 
+/* The publish preview keeps the worksheet model but uses phone-density columns. */
+.approval-mobile-preview .matrix-fill {
+  width: 100%;
+  min-width: 0;
+}
+
+.approval-mobile-preview .matrix-fill__viewport {
+  position: relative;
+  min-width: 0;
+}
+
+.approval-mobile-preview .matrix-fill__viewport::before,
+.approval-mobile-preview .matrix-fill__viewport::after {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  z-index: 6;
+  width: 14px;
+  pointer-events: none;
+  content: "";
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.approval-mobile-preview .matrix-fill__viewport::before {
+  left: 1px;
+  background: linear-gradient(90deg, rgb(11 29 51 / 16%), transparent);
+}
+
+.approval-mobile-preview .matrix-fill__viewport::after {
+  right: 1px;
+  background: linear-gradient(270deg, rgb(11 29 51 / 16%), transparent);
+}
+
+.approval-mobile-preview .matrix-fill__viewport[data-scroll-left="true"]::before,
+.approval-mobile-preview .matrix-fill__viewport[data-scroll-right="true"]::after {
+  opacity: 1;
+}
+
+.approval-mobile-preview .matrix-fill__table th,
+.approval-mobile-preview .matrix-fill__table td {
+  width: 108px;
+  min-width: 108px;
+  max-width: 108px;
+  padding: 6px;
+}
+
+.approval-mobile-preview .matrix-fill__table {
+  width: min-content;
+}
+
+.approval-mobile-preview .matrix-fill__table thead th {
+  min-width: 108px;
+  padding-block: 7px;
+}
+
+.approval-mobile-preview .matrix-fill__table thead .matrix-fill__corner,
+.approval-mobile-preview .matrix-fill__row-header {
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+}
+
+.approval-mobile-preview .matrix-fill__axis-label {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.approval-mobile-preview .matrix-fill__axis-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 3px;
+  margin-left: 0;
+}
+
+.approval-mobile-preview .matrix-fill__text-input.ant-input {
+  min-height: 52px;
+}
+
+.approval-mobile-preview .matrix-fill__number-input {
+  min-height: 44px;
+}
+
+.approval-mobile-preview .matrix-fill__table thead th.matrix-fill__axis--active {
+  background: color-mix(in srgb, var(--af-color-primary) 19%, var(--af-color-surface));
+}
+
+.approval-mobile-preview .matrix-fill__row-header.matrix-fill__axis--active {
+  background: color-mix(in srgb, var(--af-color-primary) 10%, var(--af-color-surface));
+}
+
+.approval-mobile-preview .matrix-fill__table td.matrix-fill__cell--active {
+  background: color-mix(in srgb, var(--af-color-primary) 5%, var(--af-color-surface));
+}
+
 .approval-mobile-preview .af-form-renderer__item + .af-form-renderer__item > .af-field {
   border-top: 1px solid var(--af-color-line);
 }

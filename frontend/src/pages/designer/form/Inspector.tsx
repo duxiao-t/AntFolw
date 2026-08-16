@@ -7,6 +7,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Segmented,
   Select,
   Space,
   Typography,
@@ -15,6 +16,9 @@ import { DeleteOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import { findById, formRegistry } from '../../../registry/formRegistry';
 import type { SchemaNode } from '../../../registry/types';
+import { SelectOptionsEditor } from './SelectOptionsEditor';
+import { MatrixAxisEditor } from './MatrixAxisEditor';
+import { normalizeMatrixProps } from '../../../components/form-fields/matrixFill';
 import { useFormDesignerStore } from './useFormDesignerStore';
 
 const placeholderTypes = new Set([
@@ -44,88 +48,10 @@ const requiredTypes = new Set([
   'file_upload',
   'image_upload',
   'video_upload',
+  'matrix_fill',
 ]);
 
-const defaultValueTypes = new Set([
-  'text',
-  'textarea',
-  'number',
-  'money',
-  'date',
-  'select',
-]);
-
-type OptionsEditorProps = {
-  value?: Array<{ label?: string; value?: string }>;
-  onChange(options: Array<{ label: string; value: string }>): void;
-};
-
-function cleanOptionText(value: string) {
-  return value
-    .trim()
-    .replace(/^[(（]?\d+[)）.、]\s*/, '')
-    .replace(/^[-•]\s*/, '')
-    .trim();
-}
-
-function parseBulkOptions(text: string) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const cleanedLine = cleanOptionText(line);
-      if (cleanedLine.includes('\t')) {
-        const [label, value] = cleanedLine.split('\t').map((item) => item.trim());
-        return {
-          label: cleanOptionText(label ?? ''),
-          value: cleanOptionText(value || label || ''),
-        };
-      }
-      if (cleanedLine.includes('|')) {
-        const [value, label] = cleanedLine.split('|').map((item) => item.trim());
-        return {
-          label: cleanOptionText(label || value || ''),
-          value: cleanOptionText(value || label || ''),
-        };
-      }
-      if (cleanedLine.includes(',') || cleanedLine.includes('，')) {
-        const [label, value] = cleanedLine
-          .split(/[，,]/)
-          .map((item) => item.trim());
-        return {
-          label: cleanOptionText(label ?? ''),
-          value: cleanOptionText(value || label || ''),
-        };
-      }
-      return {
-        label: cleanedLine,
-        value: cleanedLine,
-      };
-    })
-    .filter((item) => item.label || item.value)
-    .map((item) => ({
-      label: item.label || item.value,
-      value: item.value || item.label,
-    }));
-}
-
-function mergeOptions(
-  base: Array<{ label?: string; value?: string }>,
-  next: Array<{ label: string; value: string }>,
-) {
-  const map = new Map<string, { label: string; value: string }>();
-  [...base, ...next].forEach((item) => {
-    const label = item.label ?? item.value ?? '';
-    const value = item.value ?? item.label ?? '';
-    if (!label && !value) return;
-    map.set(value || label, {
-      label: label || value,
-      value: value || label,
-    });
-  });
-  return Array.from(map.values());
-}
+const defaultValueTypes = new Set(['text', 'textarea', 'number', 'money', 'date']);
 
 type ChecklistItemInput = {
   id?: string;
@@ -243,131 +169,6 @@ function PanelField({
       <Typography.Text type="secondary">{label}</Typography.Text>
       {children}
     </div>
-  );
-}
-
-function OptionsEditor({ value, onChange }: OptionsEditorProps) {
-  const options = value ?? [];
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkText, setBulkText] = useState('');
-  const parsedBulkOptions = parseBulkOptions(bulkText);
-  const update = (
-    index: number,
-    key: 'label' | 'value',
-    nextValue: string,
-  ) => {
-    const next = options.map((item, itemIndex) =>
-      itemIndex === index ? { ...item, [key]: nextValue } : item,
-    );
-    onChange(
-      next.map((item) => ({
-        label: item.label ?? '',
-        value: item.value ?? '',
-      })),
-    );
-  };
-  const add = () =>
-    onChange([
-      ...options.map((item) => ({
-        label: item.label ?? '',
-        value: item.value ?? '',
-      })),
-      { label: `选项${options.length + 1}`, value: `option_${options.length + 1}` },
-    ]);
-  const remove = (index: number) =>
-    onChange(
-      options
-        .filter((_, itemIndex) => itemIndex !== index)
-        .map((item) => ({
-          label: item.label ?? '',
-          value: item.value ?? '',
-        })),
-    );
-  const applyBulkOptions = (mode: 'replace' | 'append') => {
-    if (parsedBulkOptions.length === 0) return;
-    onChange(
-      mode === 'replace'
-        ? mergeOptions([], parsedBulkOptions)
-        : mergeOptions(options, parsedBulkOptions),
-    );
-    setBulkOpen(false);
-    setBulkText('');
-  };
-
-  return (
-    <Space direction="vertical" style={{ width: '100%' }} size={8}>
-      {options.map((item, index) => (
-        <Space.Compact
-          key={`${item.value ?? ''}_${item.label ?? ''}`}
-          style={{ width: '100%' }}
-        >
-          <Input
-            placeholder="显示文本"
-            value={item.label}
-            onChange={(event) => update(index, 'label', event.target.value)}
-          />
-          <Input
-            placeholder="选项值"
-            value={item.value}
-            onChange={(event) => update(index, 'value', event.target.value)}
-          />
-          <Button danger onClick={() => remove(index)}>
-            删除
-          </Button>
-        </Space.Compact>
-      ))}
-      <Button block onClick={add}>
-        添加选项
-      </Button>
-      <Space.Compact style={{ width: '100%' }}>
-        <Button block onClick={() => setBulkOpen(true)}>
-          批量粘贴
-        </Button>
-        <Button danger onClick={() => onChange([])}>
-          清空
-        </Button>
-      </Space.Compact>
-      <Modal
-        title="批量粘贴选项"
-        open={bulkOpen}
-        onCancel={() => setBulkOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setBulkOpen(false)}>
-            取消
-          </Button>,
-          <Button
-            key="append"
-            disabled={parsedBulkOptions.length === 0}
-            onClick={() => applyBulkOptions('append')}
-          >
-            追加
-          </Button>,
-          <Button
-            key="replace"
-            type="primary"
-            disabled={parsedBulkOptions.length === 0}
-            onClick={() => applyBulkOptions('replace')}
-          >
-            覆盖
-          </Button>,
-        ]}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <Input.TextArea
-            rows={8}
-            value={bulkText}
-            placeholder={`北京\n上海\n广州\n\n或：bj|北京\n或：北京,bj\n或从 Excel 复制两列`}
-            onChange={(event) => setBulkText(event.target.value)}
-          />
-          <Typography.Text type="secondary">
-            支持每行一个选项、value|label、label,value、Excel 两列复制；会自动清理编号并按选项值去重。
-          </Typography.Text>
-          <Typography.Text type="secondary">
-            已识别 {parsedBulkOptions.length} 个选项
-          </Typography.Text>
-        </Space>
-      </Modal>
-    </Space>
   );
 }
 
@@ -842,24 +643,31 @@ function renderComponentSettings(
     case 'multi_select':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <PanelField label="选项列表">
-            <OptionsEditor
-              value={props.options}
-              onChange={(options) => updateProps({ options })}
-            />
-          </PanelField>
-          <Checkbox
-            checked={props.allowClear !== false}
-            onChange={(event) => updateProps({ allowClear: event.target.checked })}
-          >
-            允许清空
-          </Checkbox>
-          <Checkbox
-            checked={!!props.showSearch}
-            onChange={(event) => updateProps({ showSearch: event.target.checked })}
-          >
-            支持搜索
-          </Checkbox>
+          <SelectOptionsEditor
+            value={props.options}
+            multiple={node.type === 'multi_select'}
+            defaultValue={props.defaultValue}
+            enableColors={props.enableOptionColor === true}
+            onChange={(options) => updateProps({ options })}
+            onDefaultChange={(defaultValue) => updateProps({ defaultValue })}
+            onEnableColorsChange={(enableOptionColor, options) =>
+              updateProps({ enableOptionColor, options })
+            }
+          />
+          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Checkbox
+              checked={props.allowClear !== false}
+              onChange={(event) => updateProps({ allowClear: event.target.checked })}
+            >
+              允许清空
+            </Checkbox>
+            <Checkbox
+              checked={!!props.showSearch}
+              onChange={(event) => updateProps({ showSearch: event.target.checked })}
+            >
+              支持搜索
+            </Checkbox>
+          </Space>
           {node.type === 'multi_select' && (
             <PanelField label="最多选择数">
               <InputNumber
@@ -1267,6 +1075,108 @@ function renderComponentSettings(
           </Typography.Text>
         </Space>
       );
+    case 'matrix_fill': {
+      const matrix = normalizeMatrixProps(props);
+      return (
+        <Space
+          direction="vertical"
+          style={{ width: '100%' }}
+          size={16}
+          split={<Divider style={{ margin: 0 }} />}
+        >
+          <div style={{ display: 'grid', gap: 10 }}>
+            <Typography.Text strong>矩阵行</Typography.Text>
+            <MatrixAxisEditor
+              axis="row"
+              items={matrix.rows}
+              max={matrix.maxRows}
+              onChange={(rows) => updateProps({ rows })}
+            />
+            <PanelField label="最大行数（含填报时新增）">
+              <InputNumber
+                min={matrix.rows.length}
+                precision={0}
+                style={{ width: '100%' }}
+                value={matrix.maxRows}
+                onChange={(value) => updateProps({ maxRows: Math.max(value ?? 20, matrix.rows.length) })}
+              />
+            </PanelField>
+          </div>
+
+          <div style={{ display: 'grid', gap: 10 }}>
+            <Typography.Text strong>矩阵列</Typography.Text>
+            <MatrixAxisEditor
+              axis="column"
+              items={matrix.columns}
+              max={matrix.maxColumns}
+              onChange={(columns) => updateProps({ columns })}
+            />
+            <PanelField label="最大列数（含填报时新增）">
+              <InputNumber
+                min={matrix.columns.length}
+                precision={0}
+                style={{ width: '100%' }}
+                value={matrix.maxColumns}
+                onChange={(value) => updateProps({ maxColumns: Math.max(value ?? 10, matrix.columns.length) })}
+              />
+            </PanelField>
+          </div>
+
+          <div style={{ display: 'grid', gap: 12 }}>
+            <PanelField label="单元格类型">
+              <Segmented
+                block
+                value={matrix.cellType}
+                options={[
+                  { label: '多行文本', value: 'textarea' },
+                  { label: '数字', value: 'number' },
+                ]}
+                onChange={(cellType) => updateProps({ cellType })}
+              />
+            </PanelField>
+            {matrix.cellType === 'textarea' ? (
+              <PanelField label="最大字符数">
+                <InputNumber
+                  min={1}
+                  precision={0}
+                  style={{ width: '100%' }}
+                  value={matrix.maxLength}
+                  onChange={(value) => updateProps({ maxLength: value ?? 2000 })}
+                />
+              </PanelField>
+            ) : (
+              <>
+                <PanelField label="最小值">
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    value={matrix.min}
+                    max={matrix.max}
+                    onChange={(value) => updateProps({ min: value ?? undefined })}
+                  />
+                </PanelField>
+                <PanelField label="最大值">
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    value={matrix.max}
+                    min={matrix.min}
+                    onChange={(value) => updateProps({ max: value ?? undefined })}
+                  />
+                </PanelField>
+                <PanelField label="小数位数">
+                  <InputNumber
+                    min={0}
+                    precision={0}
+                    style={{ width: '100%' }}
+                    value={matrix.precision}
+                    onChange={(value) => updateProps({ precision: value ?? 0 })}
+                  />
+                </PanelField>
+              </>
+            )}
+          </div>
+        </Space>
+      );
+    }
     case 'table_list':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>

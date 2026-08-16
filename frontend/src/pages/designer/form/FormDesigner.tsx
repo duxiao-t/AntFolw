@@ -71,6 +71,7 @@ const paletteIcons: Record<string, React.ReactNode> = {
   span_layout: <ColumnWidthOutlined />,
   table_list: <TableOutlined />,
   checklist: <CheckCircleOutlined />,
+  matrix_fill: <TableOutlined />,
 };
 
 function FieldTypeIcon({ entry }: { entry: PaletteEntry }) {

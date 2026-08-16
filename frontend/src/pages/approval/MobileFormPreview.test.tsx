@@ -76,4 +76,35 @@ describe('MobileFormPreview', () => {
       startDate: '请填写开始日期',
     });
   });
+
+  it('renders and validates matrix cells in the mobile preview', () => {
+    const matrixSchema: SchemaNode[] = [{
+      id: 'matrix',
+      type: 'matrix_fill',
+      label: '检查矩阵',
+      props: {
+        rows: [{ id: 'row_1', label: '设备' }],
+        columns: [{ id: 'col_1', label: '结果' }],
+        cellType: 'textarea',
+        maxRows: 2,
+        maxColumns: 2,
+        maxLength: 20,
+        precision: 0,
+        required: true,
+      },
+    }];
+    render(
+      <MobileFormPreview
+        title="检查表"
+        schema={matrixSchema}
+        values={{}}
+        onValueChange={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('设备')).toBeInTheDocument();
+    expect(screen.getByLabelText('设备 / 结果')).toBeInTheDocument();
+    expect(collectPreviewFieldErrors(matrixSchema, {}).matrix)
+      .toBe('请填写“设备 / 结果”');
+  });
 });
