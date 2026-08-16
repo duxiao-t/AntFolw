@@ -32,6 +32,7 @@ infra/data/
 *-run.log
 *-run.err.log
 screenshots/
+*.tmpdir/
 
 # OS
 Thumbs.db
