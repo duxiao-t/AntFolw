@@ -610,4 +610,59 @@ class ProcessEngineTreeTest {
                 && "__rework__".equals(h.getToNodeId()));
         assertThat(hasRtn).isTrue();
     }
+
+    @Test
+    void reject_andPreviousNode_recreatesTaskForEveryPreviousAssignee() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":
+              {"id":"a1","type":"APPROVAL",
+               "props":{"assignedType":"ASSIGN_USER","assignedUser":[42,43],"mode":"AND"},
+               "children":
+              {"id":"a2","type":"APPROVAL",
+               "props":{"assignedType":"ASSIGN_USER","assignedUser":[99]},
+               "children":null}}}
+            """;
+        stubFormAndPd("F1", processJson);
+
+        TaskEntity current = taskWithId(9L, "a2", 99L, "PENDING");
+        current.setCreatedAt(OffsetDateTime.parse("2026-07-30T10:00:00+08:00"));
+        Mockito.when(taskMapper.selectById(9L)).thenReturn(current);
+        ProcessInstance pi = new ProcessInstance();
+        pi.setId(1L); pi.setProcDefId(10L); pi.setFormDataId(1L);
+        pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
+        pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a2");
+        Mockito.when(processInstanceMapper.selectById(1L)).thenReturn(pi);
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData fd = new FormData();
+            fd.setId(1L); fd.setData("{\"k\":\"v\"}");
+            return fd;
+        });
+
+        Mockito.when(taskMapper.selectList(Mockito.argThat(qw -> {
+            QueryWrapper<TaskEntity> query = (QueryWrapper<TaskEntity>) qw;
+            return "a2".equals(query.getParamNameValuePairs().get("node_id"));
+        }))).thenReturn(List.of());
+
+        TaskEntity first = taskWithId(1L, "a1", 42L, "APPROVED");
+        first.setApprovedAt(OffsetDateTime.parse("2026-07-30T09:00:00+08:00"));
+        first.setApprovalMode("AND");
+        TaskEntity second = taskWithId(2L, "a1", 43L, "APPROVED");
+        second.setApprovedAt(OffsetDateTime.parse("2026-07-30T09:05:00+08:00"));
+        second.setApprovalMode("AND");
+        Mockito.when(taskMapper.selectList(Mockito.argThat(qw -> {
+            QueryWrapper<TaskEntity> query = (QueryWrapper<TaskEntity>) qw;
+            return "a1".equals(query.getParamNameValuePairs().get("node_id"));
+        }))).thenReturn(List.of(first, second));
+        Mockito.when(taskMapper.selectOne(any())).thenReturn(second);
+
+        engine().reject(new CompleteCmd(9L, "reject", "请重新会签", null), 99L);
+
+        assertThat(capturesOfTaskInsert())
+            .filteredOn(task -> "a1".equals(task.getNodeId())
+                && "APPROVAL".equals(task.getTaskType()))
+            .extracting(TaskEntity::getAssigneeId)
+            .containsExactlyInAnyOrder(42L, 43L);
+        assertThat(lastInstance().getCurrentNodeId()).isEqualTo("a1");
+    }
+
 }

@@ -199,6 +199,7 @@ class ProcessEngineParallelTest {
         assertThat(t2.getBranchId()).isEqualTo("b2");
         // a3 (join target) must NOT be created yet.
         assertThat(tasks).noneMatch(t -> "a3".equals(t.getNodeId()));
+        assertThat(lastInstance().getCurrentNodeId()).isEqualTo("p1");
     }
 
     @Test

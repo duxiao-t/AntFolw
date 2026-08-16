@@ -141,6 +141,7 @@ public class ProcessEngine {
         LockedTask locked = lockPendingTask(cmd.taskId());
         TaskEntity t = locked.task();
         ProcessInstance pi = locked.instance();
+        skipDelegatedParentIfNeeded(t, operatorId);
         if ("REWORK".equals(t.getTaskType())) {
             throw new BizException("BAD_TASK_TYPE", "Rework task must be resubmitted from the form");
         }
@@ -313,20 +314,31 @@ public class ProcessEngine {
             return;
         }
         TaskEntity previous = previousApproval(t);
-        TaskEntity returned = new TaskEntity();
-        returned.setProcInstId(pi.getId());
-        returned.setStatus("PENDING");
-        returned.setTaskType(previous == null ? "REWORK" : "APPROVAL");
-        returned.setNodeId(previous == null ? "__rework__" : previous.getNodeId());
-        returned.setAssigneeId(previous == null ? pi.getStartedBy() : previous.getAssigneeId());
-        returned.setApprovalMode(previous == null ? "OR_SIGN" : previous.getApprovalMode());
-        taskMapper.insert(returned);
+        List<TaskEntity> returnedTasks = previous == null
+            ? List.of(newReturnedTask(pi.getId(), "__rework__", "REWORK", "OR_SIGN",
+                pi.getStartedBy(), null, null))
+            : previousNodeAssignees(previous).stream()
+                .map(assigneeId -> newReturnedTask(pi.getId(), previous.getNodeId(), "APPROVAL",
+                    previous.getApprovalMode(), assigneeId, null, null))
+                .toList();
+        String returnedNodeId = previous == null ? "__rework__" : previous.getNodeId();
+        if (returnedTasks.isEmpty()) {
+            throw new BizException("BAD_FLOW", "previous approval has no assignee to return to");
+        }
+
+
+
+
+
+        for (TaskEntity returned : returnedTasks) {
+            taskMapper.insert(returned);
+        }
 
         pi.setStatus("RUNNING");
         pi.setFinishedAt(null);
-        pi.setCurrentNodeId(returned.getNodeId());
+        pi.setCurrentNodeId(returnedNodeId);
         processInstanceMapper.updateById(pi);
-        insertHistory(t, t.getNodeId(), returned.getNodeId(),
+        insertHistory(t, t.getNodeId(), returnedNodeId,
             force ? "FORCE_REJECT" : "REJECT", operatorId,
             cmd.comment());
 
@@ -338,9 +350,11 @@ public class ProcessEngine {
             formData.setStatus("NEEDS_REVISION");
             formDataMapper.updateById(formData);
         }
-        notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
-            pi.getId(), returned.getId(), returned.getAssigneeId(),
-            previous == null ? "申请已退回修改" : "审批已退回上一级"));
+        for (TaskEntity returned : returnedTasks) {
+            notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
+                pi.getId(), returned.getId(), returned.getAssigneeId(),
+                previous == null ? "申请已退回修改" : "审批已退回上一级"));
+        }
     }
 
     @Transactional
@@ -412,6 +426,42 @@ public class ProcessEngine {
         query.orderByDesc("approved_at").orderByDesc("id").last("LIMIT 1");
         return taskMapper.selectOne(query);
     }
+
+    private List<Long> previousNodeAssignees(TaskEntity previous) {
+        List<TaskEntity> rows = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+            .eq("proc_inst_id", previous.getProcInstId())
+            .eq("node_id", previous.getNodeId())
+            .eq("status", "APPROVED")
+            .isNull("parallel_id")
+            .orderByAsc("id"));
+        List<Long> assignees = rows.stream()
+            .filter(task -> Objects.equals(previous.getNodeId(), task.getNodeId())
+                && "APPROVED".equals(task.getStatus())
+                && task.getAssigneeId() != null)
+            .map(TaskEntity::getAssigneeId)
+            .distinct()
+            .collect(Collectors.toList());
+        if (assignees.isEmpty()) {
+            return previous.getAssigneeId() == null ? List.of() : List.of(previous.getAssigneeId());
+        }
+        return assignees;
+    }
+
+    private static TaskEntity newReturnedTask(Long procInstId, String nodeId, String taskType,
+                                              String approvalMode, Long assigneeId,
+                                              String parallelId, String branchId) {
+        TaskEntity task = new TaskEntity();
+        task.setProcInstId(procInstId);
+        task.setNodeId(nodeId);
+        task.setTaskType(taskType);
+        task.setStatus("PENDING");
+        task.setApprovalMode(approvalMode);
+        task.setAssigneeId(assigneeId);
+        task.setParallelId(parallelId);
+        task.setBranchId(branchId);
+        return task;
+    }
+
 
     @Transactional
     public void withdraw(long instanceId, long operatorId) {
@@ -514,6 +564,28 @@ public class ProcessEngine {
     }
 
     private record LockedTask(TaskEntity task, ProcessInstance instance) { }
+
+    /**
+     * 委托任务（delegatedFrom != null 且非加签）审批时，原任务若仍为 PENDING，
+     * 则由委托任务替代原任务完成，避免 AND 模式把“同一审批人的镜像任务”算成两个人。
+     */
+    private void skipDelegatedParentIfNeeded(TaskEntity task, long operatorId) {
+        if (task.getDelegatedFrom() == null || Boolean.TRUE.equals(task.getIsAdditional())
+                || task.getParentTaskId() == null) {
+            return;
+        }
+        TaskEntity parent = taskMapper.selectById(task.getParentTaskId());
+        if (parent == null || !"PENDING".equals(parent.getStatus())
+                || !Objects.equals(parent.getNodeId(), task.getNodeId())) {
+            return;
+        }
+        parent.setStatus("SKIPPED");
+        parent.setComment("由委托任务 #" + task.getId() + " 处理");
+        taskMapper.updateById(parent);
+        insertHistoryOnInstance(parent.getProcInstId(), parent.getNodeId(), parent.getNodeId(),
+            "SKIP", operatorId, "delegated task acted");
+    }
+
 
     // -----------------------------------------------------------------------
     // 核心：resolveAndLand — 从刚完成/起点节点起沿树前进，直到落到一个需要建

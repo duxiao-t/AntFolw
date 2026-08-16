@@ -61,11 +61,14 @@ public class TaskOperationService {
         child.setProcInstId(parent.getProcInstId());
         child.setNodeId(parent.getNodeId());
         child.setAssigneeId(targetUserId);
+          child.setTaskType(parent.getTaskType());
         child.setStatus("PENDING");
         child.setApprovalMode(parent.getApprovalMode());
         child.setParentTaskId(parent.getId());
         child.setDelegatedFrom(parent.getAssigneeId());
         child.setIsAdditional(false);
+          child.setParallelId(parent.getParallelId());
+          child.setBranchId(parent.getBranchId());
         taskMapper.insert(child);
         // 写历史
         historyMapper.insert(historyRow(parent.getProcInstId(),
@@ -93,11 +96,14 @@ public class TaskOperationService {
         child.setProcInstId(parent.getProcInstId());
         child.setNodeId(parent.getNodeId());
         child.setAssigneeId(targetUserId);
+          child.setTaskType(parent.getTaskType());
         child.setStatus("PENDING");
         child.setApprovalMode(parent.getApprovalMode());
         child.setParentTaskId(parent.getId());
         child.setDelegatedFrom(parent.getAssigneeId());
         child.setIsAdditional(false);
+          child.setParallelId(parent.getParallelId());
+          child.setBranchId(parent.getBranchId());
         taskMapper.insert(child);
         historyMapper.insert(historyRow(parent.getProcInstId(),
             parent.getId(), child.getId(), parent.getNodeId(), parent.getNodeId(),
@@ -123,10 +129,13 @@ public class TaskOperationService {
         child.setProcInstId(parent.getProcInstId());
         child.setNodeId(parent.getNodeId());
         child.setAssigneeId(targetUserId);
+          child.setTaskType(parent.getTaskType());
         child.setStatus("PENDING");
         child.setApprovalMode(parent.getApprovalMode());
         child.setParentTaskId(parent.getId());
         child.setIsAdditional(true);
+          child.setParallelId(parent.getParallelId());
+          child.setBranchId(parent.getBranchId());
         taskMapper.insert(child);
         historyMapper.insert(historyRow(parent.getProcInstId(),
             parent.getId(), child.getId(), parent.getNodeId(), parent.getNodeId(),
@@ -151,21 +160,28 @@ public class TaskOperationService {
 
         // TRANSFER 类型：父任务已被 SKIPPED，恢复父任务
         // DELEGATE/ADD_ASSIGNEE 类型：父任务原状，无须恢复
-        TaskHistoryEntity latestTrans = null;
-        var hists = historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
-            .eq("task_id", child.getId())
-            .in("action", "TRANSFER", "DELEGATE", "ADD_ASSIGNEE")
-            .orderByDesc("id"));
-        if (!hists.isEmpty()) {
-            latestTrans = hists.get(0);
+        TaskEntity parent = child.getParentTaskId() == null
+            ? null
+            : taskMapper.selectById(child.getParentTaskId());
+        if (parent != null
+            && "SKIPPED".equals(parent.getStatus())
+            && java.util.Objects.equals(parent.getNodeId(), child.getNodeId())) {
+            parent.setStatus("PENDING");
+            parent.setComment(null);
+            taskMapper.updateById(parent);
         }
-        if ("TRANSFER".equals(latestTrans != null ? latestTrans.getAction() : null)) {
-            TaskEntity parent = taskMapper.selectById(child.getParentTaskId());
-            if (parent != null && "SKIPPED".equals(parent.getStatus())) {
-                parent.setStatus("PENDING");
-                parent.setComment(null);
-                taskMapper.updateById(parent);
-            }
+
+
+
+
+
+
+
+        if (child.getParentTaskId() == null) {
+            // 原始任务没有父任务可恢复，继续写撤回历史。
+        }
+        if (parent == null) {
+            // 父任务不存在时无需恢复，仅记录撤回历史。
         }
         historyMapper.insert(historyRow(child.getProcInstId(),
             child.getId(), null, child.getNodeId(), child.getNodeId(),

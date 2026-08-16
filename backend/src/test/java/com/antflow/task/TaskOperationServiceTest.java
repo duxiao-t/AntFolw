@@ -45,7 +45,10 @@ class TaskOperationServiceTest {
         t.setNodeId("a1");
         t.setAssigneeId(assigneeId);
         t.setStatus(status);
+        t.setTaskType("APPROVAL");
         t.setApprovalMode("OR");
+        t.setParallelId("p1");
+        t.setBranchId("b1");
         return t;
     }
 
@@ -77,6 +80,9 @@ class TaskOperationServiceTest {
         assertThat(child.getParentTaskId()).isEqualTo(100L);
         assertThat(child.getDelegatedFrom()).isEqualTo(42L);
         assertThat(child.getIsAdditional()).isFalse();
+        assertThat(child.getTaskType()).isEqualTo("APPROVAL");
+        assertThat(child.getParallelId()).isEqualTo("p1");
+        assertThat(child.getBranchId()).isEqualTo("b1");
         assertThat(childId).isEqualTo(child.getId());
     }
 
@@ -116,6 +122,9 @@ class TaskOperationServiceTest {
         assertThat(child.getParentTaskId()).isEqualTo(100L);
         assertThat(child.getDelegatedFrom()).isEqualTo(42L);
         assertThat(child.getIsAdditional()).isFalse();
+        assertThat(child.getTaskType()).isEqualTo("APPROVAL");
+        assertThat(child.getParallelId()).isEqualTo("p1");
+        assertThat(child.getBranchId()).isEqualTo("b1");
         assertThat(childId).isEqualTo(child.getId());
     }
 
@@ -136,6 +145,9 @@ class TaskOperationServiceTest {
         assertThat(child.getParentTaskId()).isEqualTo(100L);
         assertThat(child.getIsAdditional()).isTrue();
         assertThat(child.getDelegatedFrom()).isNull();
+        assertThat(child.getTaskType()).isEqualTo("APPROVAL");
+        assertThat(child.getParallelId()).isEqualTo("p1");
+        assertThat(child.getBranchId()).isEqualTo("b1");
         assertThat(childId).isEqualTo(child.getId());
     }
 

@@ -63,6 +63,7 @@ public class ParallelHandler implements NodeHandler {
         if (allCompleted) {
             return NodeOutcome.next(ProcessTreeNav.childrenOf(node));
         }
+        pi.setCurrentNodeId(node.path("id").asText());
         return NodeOutcome.halt(allTaskIds);
     }
 
