@@ -1679,6 +1679,16 @@ body {
   white-space: nowrap;
 }
 
+/* 白卡内整表渲染与直接子级段落统一 15px 左右内边距，避免内容贴卡片边 */
+.approval-panel .af-form-renderer {
+  padding: 0 15px;
+}
+.approval-panel > .muted.small,
+.approval-panel .attachment-list > .muted.small {
+  margin: 0;
+  padding: 12px 15px;
+}
+
 /* 任意表单字段均使用同一键值结构，不依赖字段图标 */
 .field-total {
   display: grid;
