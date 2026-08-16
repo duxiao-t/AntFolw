@@ -22,7 +22,8 @@ export type FieldTypeCode =
   | 'checklist'
   | 'description'
   | 'span_layout'
-  | 'table_list';
+  | 'table_list'
+  | 'matrix_fill';
 
 export type MobileSchemaNode = {
   id: string;

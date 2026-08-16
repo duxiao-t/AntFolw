@@ -33,6 +33,14 @@ export function schemaDefaultValue(node: MobileSchemaNode): unknown {
     return undefined;
   }
   const value = props.defaultValue;
+  if (node.type === 'multi_select') {
+    return Array.isArray(value)
+      ? value.filter((item) => typeof item === 'string' || typeof item === 'number')
+      : undefined;
+  }
+  if (node.type === 'select' && (typeof value === 'string' || typeof value === 'number')) {
+    return typeof value === 'string' && value.trim() === '' ? undefined : value;
+  }
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 }
 

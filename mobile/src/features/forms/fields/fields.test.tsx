@@ -183,6 +183,70 @@ describe('leaf mobile fields', () => {
     expect(onValueChange).toHaveBeenLastCalledWith('cc', ['zhangsan', 'lisi']);
   });
 
+  it('hides unavailable options and submits custom single-select text', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <SelectField
+        {...baseProps(
+          {
+            id: 'machine',
+            type: 'select',
+            label: '设备',
+            props: {
+              options: [
+                { label: '隐藏设备', value: 'hidden', hidden: true },
+                { label: '铁面', value: 'iron' },
+                { label: '其他', value: '__antflow_other__', isOther: true },
+              ],
+            },
+          },
+          '',
+          onValueChange,
+        )}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '选择设备' }));
+    expect(screen.queryByRole('option', { name: '隐藏设备' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: '其他' }));
+    const input = screen.getAllByLabelText('设备其他内容').at(-1) as HTMLInputElement;
+    await user.type(input, '自定义设备');
+    expect(onValueChange).toHaveBeenLastCalledWith('machine', '自定义设备');
+  });
+
+  it('submits standard and custom multi-select values together', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <MultiSelectField
+        {...baseProps(
+          {
+            id: 'machines',
+            type: 'multi_select',
+            label: '设备',
+            props: {
+              options: [
+                { label: '铁面', value: 'iron' },
+                { label: '其他', value: '__antflow_other__', isOther: true },
+              ],
+            },
+          },
+          [],
+          onValueChange,
+        )}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '选择设备' }));
+    await user.click(screen.getByRole('checkbox', { name: '铁面' }));
+    await user.click(screen.getByRole('checkbox', { name: '其他' }));
+    await user.click(screen.getByRole('button', { name: '完成' }));
+    const input = screen.getAllByLabelText('设备其他内容').at(-1) as HTMLInputElement;
+    await user.type(input, '定制机');
+    expect(onValueChange).toHaveBeenLastCalledWith('machines', ['iron', '定制机']);
+  });
+
   it('renders radio options as large touch choices', async () => {
     const onValueChange = vi.fn();
     render(

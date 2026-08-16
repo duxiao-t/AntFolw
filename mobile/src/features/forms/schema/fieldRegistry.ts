@@ -24,9 +24,11 @@ import { SwitchField } from '../fields/SwitchField';
 import { TextField } from '../fields/TextField';
 import { TextareaField } from '../fields/TextareaField';
 import { TableListField } from '../fields/TableListField';
+import { MatrixFillField } from '../fields/MatrixFillField';
 import { TimeField } from '../fields/TimeField';
 import { UserPickerField } from '../fields/UserPickerField';
 import { isVisibleNode, summarizeValue, validateCommonRules } from './validators';
+import { summarizeMatrix, validateMatrixValue } from './matrixFill';
 import type {
   FieldValidationErrors,
   MobileFieldDefinition,
@@ -176,6 +178,10 @@ export const registeredFields: MobileFieldDefinition[] = [
     validate: validateTableList,
     summarize: (_node, value) => summarizeRows(value),
   }),
+  field('matrix_fill', MatrixFillField, {
+    validate: validateMatrixValue,
+    summarize: summarizeMatrix,
+  }),
 ];
 
 const unsupportedField: MobileFieldDefinition = {
@@ -270,6 +276,9 @@ function options(node: MobileSchemaNode) {
       return [];
     }
     const option = item as Record<string, unknown>;
+    if (option.hidden === true) {
+      return [];
+    }
     const value = option.value;
     if (typeof value !== 'string' && typeof value !== 'number') {
       return [];

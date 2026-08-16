@@ -39,6 +39,15 @@ describe('form schema defaults', () => {
     ).toBeUndefined();
   });
 
+  it('supports single and multiple select defaults', () => {
+    expect(
+      schemaDefaultValue({ id: 's', type: 'select', props: { defaultValue: 'option_1' } }),
+    ).toBe('option_1');
+    expect(
+      schemaDefaultValue({ id: 'm', type: 'multi_select', props: { defaultValue: ['a', 'b'] } }),
+    ).toEqual(['a', 'b']);
+  });
+
   it('fills empty fields but keeps existing values', () => {
     const schema: MobileSchemaNode[] = [
       { id: 'a', type: 'text', props: { defaultValue: '默认A' } },

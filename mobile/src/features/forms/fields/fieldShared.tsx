@@ -96,10 +96,13 @@ export function readonlySummary(value: unknown) {
 export type FieldOption = {
   label: string;
   value: string | number;
+  hidden?: boolean;
   disabled?: boolean;
+  color?: string;
+  isOther?: boolean;
 };
 
-export function fieldOptions(node: MobileSchemaNode): FieldOption[] {
+export function allFieldOptions(node: MobileSchemaNode): FieldOption[] {
   const options = node.props?.options;
   if (!Array.isArray(options)) {
     return [];
@@ -113,8 +116,19 @@ export function fieldOptions(node: MobileSchemaNode): FieldOption[] {
     if (typeof value !== 'string' && typeof value !== 'number') {
       return [];
     }
-    return [{ label: String(option.label ?? value), value, disabled: option.disabled === true }];
+    return [{
+      label: String(option.label ?? value),
+      value,
+      hidden: option.hidden === true,
+      disabled: option.disabled === true,
+      color: typeof option.color === 'string' ? option.color : undefined,
+      isOther: option.isOther === true,
+    }];
   });
+}
+
+export function fieldOptions(node: MobileSchemaNode): FieldOption[] {
+  return allFieldOptions(node).filter((option) => !option.hidden);
 }
 
 export function optionLabel(node: MobileSchemaNode, value: unknown) {

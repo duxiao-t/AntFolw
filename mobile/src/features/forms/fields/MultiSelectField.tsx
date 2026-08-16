@@ -1,8 +1,11 @@
 import { DownOutline } from 'antd-mobile-icons';
+import { Input } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
-import { fieldError, fieldLabel, fieldOptions, FieldShell, isRequired } from './fieldShared';
+import { allFieldOptions, fieldError, fieldLabel, fieldOptions, FieldShell, isRequired } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
+
+const OTHER_OPTION_VALUE = '__antflow_other__';
 
 export function MultiSelectField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
@@ -11,17 +14,28 @@ export function MultiSelectField(props: MobileFieldProps) {
   const [draftSelected, setDraftSelected] = useState<Array<string | number>>(values);
   const [visible, setVisible] = useState(false);
   const options = fieldOptions(props.node);
+  const allOptions = allFieldOptions(props.node);
+  const useColor = props.node.props?.enableOptionColor === true;
+  const otherOption = options.find((option) => option.isOther);
+  const hasOtherOption = Boolean(otherOption);
+  const standardValues = allOptions.filter((option) => !option.isOther).map((option) => option.value);
+  const customValues = values.filter((item) => !standardValues.includes(item));
+  const [otherSelected, setOtherSelected] = useState(Boolean(otherOption && customValues.length > 0));
 
   useEffect(() => {
     setSelected(values);
-    if (!visible) {
-      setDraftSelected(values);
-    }
-  }, [values, visible]);
+  }, [values]);
+
+  useEffect(() => {
+    if (!hasOtherOption) setOtherSelected(false);
+    else if (customValues.length > 0) setOtherSelected(true);
+  }, [customValues.length, hasOtherOption]);
 
   const selectedLabels = options
     .filter((option) => selected.includes(option.value))
     .map((option) => option.label);
+  const selectedCustomValues = selected.filter((item) => !standardValues.includes(item));
+  if (otherSelected) selectedLabels.push('其他');
   const placeholder = String(props.node.props?.placeholder ?? `选择${label}`);
 
   return (
@@ -38,7 +52,10 @@ export function MultiSelectField(props: MobileFieldProps) {
             type="button"
             className={`control form-picker control--multi${selectedLabels.length > 0 ? '' : ' af-field-picker--placeholder'}`}
             onClick={() => {
-              setDraftSelected(selected);
+              setDraftSelected([
+                ...selected.filter((item) => standardValues.includes(item)),
+                ...(otherSelected ? [OTHER_OPTION_VALUE] : []),
+              ]);
               setVisible(true);
             }}
           >
@@ -70,7 +87,9 @@ export function MultiSelectField(props: MobileFieldProps) {
             <fieldset className="af-full-picker__list af-full-picker__fieldset">
               <legend className="visually-hidden">{label}</legend>
               {options.map((option) => {
-                const checked = draftSelected.includes(option.value);
+                const checked = draftSelected.includes(
+                  option.isOther ? OTHER_OPTION_VALUE : option.value,
+                );
                 return (
                   <label
                     key={option.value}
@@ -78,7 +97,11 @@ export function MultiSelectField(props: MobileFieldProps) {
                     data-disabled={option.disabled ? 'true' : 'false'}
                     className="af-full-picker__option af-full-picker__option--select af-full-picker__option--check"
                   >
-                    <span className="af-full-picker__avatar af-full-picker__avatar--choice" aria-hidden="true">
+                    <span
+                      className="af-full-picker__avatar af-full-picker__avatar--choice"
+                      aria-hidden="true"
+                      style={useColor && option.color ? { background: option.color } : undefined}
+                    >
                       {option.label.trim().slice(0, 1)}
                     </span>
                     <span className="af-full-picker__option-text">
@@ -90,7 +113,7 @@ export function MultiSelectField(props: MobileFieldProps) {
                       checked={checked}
                       disabled={option.disabled}
                       className="af-full-picker__native-check"
-                      onChange={() => toggleDraft(option.value)}
+                      onChange={() => toggleDraft(option.isOther ? OTHER_OPTION_VALUE : option.value)}
                     />
                   </label>
                 );
@@ -101,16 +124,36 @@ export function MultiSelectField(props: MobileFieldProps) {
       ) : (
         <div className="af-field__empty-options">暂无可选项</div>
       )}
+      {otherOption && otherSelected ? (
+        <Input
+          aria-label={`${label}其他内容`}
+          placeholder="请输入"
+          value={selectedCustomValues[0] == null ? '' : String(selectedCustomValues[0])}
+          onChange={(text) => {
+            const standard = selected.filter((item) => !selectedCustomValues.includes(item));
+            const next = text.trim() ? [...standard, text] : standard;
+            setSelected(next);
+            props.onValueChange(props.node.id, next);
+          }}
+          style={{ marginTop: 8 }}
+        />
+      ) : null}
     </FieldShell>
   );
 
   function closePicker() {
-    setDraftSelected(selected);
+    setDraftSelected([
+      ...selected.filter((item) => standardValues.includes(item)),
+      ...(otherSelected ? [OTHER_OPTION_VALUE] : []),
+    ]);
     setVisible(false);
   }
 
   function confirmPicker() {
-    const next = [...draftSelected];
+    const hasOther = draftSelected.includes(OTHER_OPTION_VALUE);
+    const nextStandard = draftSelected.filter((item) => item !== OTHER_OPTION_VALUE);
+    const next = hasOther ? [...nextStandard, ...customValues] : nextStandard;
+    setOtherSelected(hasOther);
     setSelected(next);
     props.onValueChange(props.node.id, next);
     setVisible(false);
