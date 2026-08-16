@@ -45,7 +45,7 @@ class AssigneeResolverTest {
             new LeaderStrategy(userMapper, deptMapper),
             new LeaderTopStrategy(userMapper, deptMapper),
             new SelfStrategy(),
-            new SelfSelectStrategy()
+            new SelfSelectStrategy(userMapper)
         ));
     }
 
@@ -109,8 +109,47 @@ class AssigneeResolverTest {
     }
 
     @Test void resolve_selfSelect_returnsChosen() {
+        Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "ACTIVE"));
+        Mockito.when(userMapper.selectById(8L)).thenReturn(user(8L, "ACTIVE"));
         var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null, List.of(7L, 8L));
         assertThat(resolver().resolve("n1", spec)).containsExactly(7L, 8L);
+    }
+
+    @Test void resolve_selfSelect_deduplicatesChosenUsers() {
+        Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "ACTIVE"));
+        var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null,
+            java.util.Arrays.asList(7L, 7L, null));
+        assertThat(resolver().resolve("n1", spec)).containsExactly(7L);
+    }
+
+    @Test void resolve_selfSelect_rejectsInactiveUsers() {
+        Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "DISABLED"));
+        var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null, List.of(7L));
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode())
+                .isEqualTo("SELF_SELECT_INVALID"));
+    }
+
+    @Test void resolve_selfSelect_rejectsMissingUsers() {
+        Mockito.when(userMapper.selectById(7L)).thenReturn(null);
+        var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null, List.of(7L));
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode())
+                .isEqualTo("SELF_SELECT_INVALID"));
+    }
+
+    @Test void resolve_selfSelect_rejectsMoreThanOneHundred() {
+        List<Long> ids = java.util.stream.IntStream.range(1, 102)
+            .mapToLong(id -> id)
+            .boxed()
+            .toList();
+        var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null, ids);
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode())
+                .isEqualTo("SELF_SELECT_TOO_MANY"));
     }
 
     @Test void resolve_selfSelect_emptyThrows() {
