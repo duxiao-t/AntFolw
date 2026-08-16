@@ -49,6 +49,8 @@ public final class PermissionCodes {
     public static final String WORKFLOW_TASK_ADD_ASSIGNEE = "workflow.task.add_assignee";
     public static final String WORKFLOW_TASK_RECALL = "workflow.task.recall";
     public static final String WORKFLOW_AUTOMATION_RETRY = "workflow.automation.retry";
+    public static final String FILE_UPLOAD = "file.upload";
+    public static final String FILE_READ = "file.read";
 
     private PermissionCodes() {
     }
