@@ -32,11 +32,15 @@ export default function access(
     canWriteDepartments: can('org.department.write'),
     canWriteUsers: can('org.user.write'),
     canManageSecurity:
-      (page('page.security.roles') && can('security.role.read')) ||
+      (page('page.security.roles') &&
+          can('security.role.read') &&
+          can('security.permission.read')) ||
       admin ||
       (page('page.security.audit_log') && can('security.audit.read')),
     canManageRoles:
-      page('page.security.roles') && can('security.role.read'),
+      page('page.security.roles') &&
+      can('security.role.read') &&
+      can('security.permission.read'),
     canAssignRoles: admin,
     canReadAudit:
       page('page.security.audit_log') && can('security.audit.read'),
