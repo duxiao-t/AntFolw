@@ -1,5 +1,8 @@
 # AntFlow 会话交接总结（2026-07-31）
 
+> 补充（文档更新时）：本总结之后仓库又落地 V18–V21（并行网关、自动化任务、权限审计、页面权限）与桌面 `security`/`report`/`settings` 页面；根 `README.md`、`CLAUDE.md`、`codex.md`、`agent.md` 与移动端验收记录已同步至最新进度。
+
+
 ## 1. 项目是什么
 
 AntFlow 是企业审批平台，包含三个主要部分：

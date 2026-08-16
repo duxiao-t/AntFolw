@@ -2,18 +2,22 @@
 
 Ant Design Pro + wflow fusion. Visual form designer + approval workflow + enterprise mobile client.
 
-## Status (2026-07-22)
+## Status (2026-07-31)
 
-- ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway) — unit tests green (**88** tests, 1 skipped).
-- ✅ PostgreSQL 17 schema (Flyway V1+) + MinIO object storage for mobile attachments.
-- ✅ Custom approval engine — tree process, OR/AND, SELF_SELECT, withdraw, optimistic locking.
+- ✅ Backend (Spring Boot 3 + Java 17 + MyBatis-Plus + JWT + Flyway V1–V21) — `mvn test` green.
+- ✅ PostgreSQL 17 schema (Flyway V1–V21) + MinIO object storage for mobile attachments.
+- ✅ Custom approval engine — tree process, OR/AND, SELF_SELECT, withdraw, optimistic locking, parallel gateway (`PARALLEL`), delay/trigger automation, reject-to-previous + rework-on-original-instance.
+- ✅ Formal numbers — `t_user.employee_no` (6-digit) + `t_form_data.business_no` (12-digit); desktop contacts maintain/import/export employee numbers.
+- ✅ RBAC & audit — action/page permissions (`t_permission`, `t_role_permission`), form resource grants (`t_form_resource_grant`), append-only audit events and audit archive (`/api/audit/*`).
+- ✅ Automation — persistent `t_workflow_job` for DELAY/TRIGGER nodes with scheduler, webhook SSRF guard, retry/recovery.
 - ✅ Form designer storage + runtime snapshot (`form_def_version`).
 - ✅ Org module — Company / Department (ltree) / User / Role + JWT + login rate limit.
-- ✅ Desktop frontend — 14-field registry + FormRenderer + process designer + admin/task pages.
-- ✅ **Mobile client (`mobile/`)** — independent Vite app at `/mobile/`: workbench, dynamic form fill/draft, self-select, submit, task approve/reject, process detail, offline recovery, branding fallback, enterprise gates (bundle/perf/a11y/e2e).
+- ✅ Desktop frontend — 14-field registry + FormRenderer + process designer + contacts + approval forms/records + security roles/audit + report center + system settings.
+- ✅ **Mobile client (`mobile/`)** — independent Vite app at `/mobile/`: workbench, dynamic form fill/draft, self-select, submit, task approve/reject, process detail, rework resubmit, offline recovery, branding fallback, enterprise gates (bundle/perf/a11y/e2e).
 - ✅ CI — backend `mvn test` + frontend lint/tsc/build + mobile enterprise checks.
-- 📄 Mobile acceptance evidence — `docs/mobile-enterprise-verification.md`.
+- 📄 Mobile acceptance evidence — `docs/mobile-enterprise-verification.md`; handover — `docs/session-summary-2026-07-31.md`.
 - ⏸ Full live integration depends on local PostgreSQL, local MinIO, and backend started from this branch.
+- ✅ Workspace changes committed; see git log for the backend/desktop/mobile split.
 
 ## Prerequisites
 
@@ -93,13 +97,16 @@ npm run test:e2e                     # Playwright, 4 viewports
 
 ```text
 antflow/
-├── backend/                 # Spring Boot 3 + Java 17
+├── backend/                 # Spring Boot 3 + Java 17 + Flyway V1–V21
 ├── frontend/                # Umi Max desktop — port 8000
 ├── mobile/                  # Vite mobile SPA — base /mobile/
 ├── infra/                   # nginx example
+├── _preview/                # mobile UI design reference (static)
 ├── docs/
 │   ├── mobile-enterprise-verification.md
+│   ├── session-summary-2026-07-31.md
 │   └── superpowers/         # specs + implementation plans
+├── agent.md                 # mobile UI task context (historical)
 ├── codex.md                 # agent quick reference (incl. mobile)
 ├── CLAUDE.md
 └── README.md
@@ -140,6 +147,9 @@ npm run check:enterprise
 npm run test:e2e
 ```
 
+当前基线：移动端 `check:enterprise` 为 183 个 Vitest 测试 + bundle ≤ 250 KiB；`test:e2e` 为 Playwright 四视口 + `rework-original-form` 原单重提用例。
+
+
 ### Desktop E2E (optional live)
 
 Pre-req: local PostgreSQL, local MinIO, backend on :8080.
@@ -168,11 +178,11 @@ npx playwright test
 
 Per fusion + mobile enterprise specs:
 
-- Parallel branches / multi-counter-sign / reject-back (engine phase-two items)
+- Sequential multi-counter-sign / task-level timeout (remaining engine phase-two items)
 - Dynamic form permissions per node
 - Mobile form/process designers; mobile org administration
 - Enterprise WeChat silent login / JS-SDK / app messages (adapter only)
 - Full theme editor; arbitrary CSS from server
 - Multi-tenancy guard, OAuth2/OIDC, Redis caching, i18n
-- Print/export/dashboards
+- Print
 - Core flows that require PWA install or Service Worker

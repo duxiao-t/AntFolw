@@ -6,14 +6,22 @@ Agent / Codex 在本仓库工作时的速查说明。更完整的领域约定见
 
 ```text
 ant-flow/
-├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway + PostgreSQL
-├── frontend/    # Umi Max 4 桌面管理端（表单/流程设计、组织、任务）
+├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway V1–V21 + PostgreSQL + MinIO；审批引擎 + RBAC/审计/自动化
+├── frontend/    # Umi Max 4 桌面管理端（表单/流程设计、组织、任务、权限安全、报表、系统设置）
 ├── mobile/      # 独立移动端（Vite + React + Ant Design Mobile），base `/mobile/`
 ├── infra/       # nginx 示例
-└── docs/        # superpowers specs/plans、企业级验收记录
+└── docs/        # superpowers specs/plans、企业级验收记录、会话交接总结
 ```
 
 **先 `cd` 进模块再执行命令**，不要在仓库根直接跑 `mvn` / `npm`。
+
+## 当前后端能力（Flyway V1–V21）
+
+- 审批引擎：树流程 + `PARALLEL` 并行网关 + `DELAY`/`TRIGGER` 自动化节点 + `REWORK` 原单重提。
+- 权限审计：操作/页面权限（`t_permission`）、角色授权（`t_role_permission`）、表单资源授权（`t_form_resource_grant`）、追加只读审计（`t_audit_event`）与归档（`t_audit_archive`）。
+- 自动化：`t_workflow_job` + `AutomationJobScheduler` + `WebhookClient`（SSRF 防护）。
+- 桌面端对应页面：`frontend/src/pages/security/*`、`frontend/src/pages/report/*`、`frontend/src/pages/settings/*`。
+
 
 ## 本地运行
 
@@ -109,7 +117,39 @@ E2E 默认端口优先 `5174`（`E2E_PORT`），避免与本机 5173 冲突。
 示例：`功能(移动端): …` / `测试(移动端): …` / `文档: 更新企业级移动端运行与验收说明`  
 作者历史常用：`AntFlow Bot <bot@antflow.local>`。
 
-## 移动端 UI 设计稿与现状差异（2026-07-23）
+## 移动端 UI 设计稿对齐（2026-07-31 完成）
+
+设计稿源：`_preview/`（19 个关键页面）与 `docs/superpowers` 移动端设计文档。移动端已按设计稿完成全部关键页面重做，并补齐真实交互、加载态、空态、错误态和离线态。
+
+### 已完成页面
+
+登录/会话恢复、工作台/最近流程/待办入口、应用目录/收藏、动态表单/草稿列表/草稿恢复、自选审批人/提交确认/提交成功、待办/我发起的/已处理任务中心与筛选、审批详情/审批记录/同意驳回面板、流程详情/撤回、个人中心/安全设置、网络异常/权限错误/离线恢复。
+
+### 已落地业务规则
+
+- 审批详情显示工号，不显示任务号；表单详情显示单号，不显示实例 ID。
+- 审批记录结构化展示：当前处理节点蓝色卡片、驳回节点红色卡片、已完成节点普通卡片；汇总 `X 已完成 · Y 处理中`，全部结束为 `已完成`。
+- 驳回回到上一级；第一级驳回生成申请人 `REWORK` 任务，原表单、附件、流程实例和单号保留，可在原单重提（`mobile/e2e/rework-original-form.spec.ts` 验证）。
+- 移动端 API：`GET/PUT /api/mobile/rework-tasks/{id}`、`POST /api/mobile/rework-tasks/{id}/resubmit`。
+- 正式编号：`t_user.employee_no`（六位数字、唯一非空）；`t_form_data.business_no`（十二位数字，正式提交后生成）。
+- 桌面通讯录支持工号查看、新增/编辑、六位数字校验与唯一性提示、CSV 导入导出。
+
+### 当前验收基线（2026-07-31）
+
+- 后端 `mvn -q test` 通过。
+- 移动端 `npm run check:enterprise` 通过（30 个测试文件、183 个测试；lint 保留 7 个既存 Biome warning/4 个 info；入口 gzip 约 181.12 KiB / 250 KiB）。
+- 移动端 Playwright E2E iPhone 390 12/12，四视口视觉回归通过。
+- 前端 73 个测试、生产构建通过。
+- 本地真实 HTTP 冒烟通过（登录、bootstrap、rework 详情、`/api/users` 工号、历史实例 `currentNodeName` 返回 `待修改原单`）。
+
+### 待验证/未完成
+
+- 干净 PostgreSQL 17 上完整执行 V1–V21 迁移。
+- 真实后端二级及更高层驳回、AND/多审批人和复杂条件分支、附件删除/新增/重提一致性。
+- 工作区已按后端/桌面端/移动端拆分提交。
+
+
+## 附：移动端 UI 设计稿差异记录（2026-07-23，已于 2026-07-31 完成整改）
 
 设计稿源：`/.superpowers/brainstorm/mobile-design-20260718/content/`（含 `all-key-pages-gallery.html`、`core-page-map.html`、`enterprise-visual-directions.html`、`mobile-data-flow.html` 等）。本次以 `all-key-pages-gallery.html` 为最终对齐基准，遵循「A. 清晰秩序」企业蓝配色（`#1677ff`）。
 

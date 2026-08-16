@@ -2,27 +2,28 @@
 
 > 分支：`feature/mobile-approval-workflow`  
 > 计划：`docs/superpowers/plans/2026-07-18-antflow-mobile-approval-workflow.md` Task 15  
-> 验收时间：2026-07-22T13:49:21+08:00（Asia/Shanghai）
+> 最近验收：2026-07-31（移动端 UI 整改 + 正式编号 + 原单驳回重提）
+> 初版验收时间：2026-07-22T13:49:21+08:00（Asia/Shanghai）
 
 ## 1. 命令与结果摘要
 
 | 步骤 | 命令 | 结果 | 备注 |
 |---|---|---|---|
-| Backend | `cd backend; mvn -B test` | **PASS** | 88 tests, 0 fail, 1 skipped（`AntFlowApplicationTests`） |
-| Desktop lint | `cd frontend; npm run biome:lint` | **PASS** | exit 0（warnings only） |
-| Desktop unit | `cd frontend; npm test` | **PASS** | exit 0（含 `access` 角色鉴权用例修复） |
-| Desktop tsc | `cd frontend; npm run tsc` | **PASS** | exit 0（修复 `Company.tsx` 未定义 `setLogo`） |
-| Desktop build | `cd frontend; npm run build` | **PASS** | exit 0 |
-| Mobile enterprise | `cd mobile; npm run check:enterprise` | **PASS** | lint + 163 unit tests + build + bundle |
-| Mobile e2e | `cd mobile; npm run test:e2e` | **PASS** | 44 passed / 4 viewports |
-| Security smoke | 单测 + E2E mock + 本分支后端完整 live HTTP 冒烟 | **PASS** | 见第 4 节（45 用例全过，含 Idempotency/Uuid/413/404 修复） |
+| Backend | `cd backend; mvn -q test` | **PASS** | 2026-07-31 复验通过 |
+| Desktop lint | `cd frontend; npm run biome:lint` | **PASS** | 07-22 通过（warnings only） |
+| Desktop unit | `cd frontend; npm test` | **PASS** | 73 tests，07-31 复验通过 |
+| Desktop tsc | `cd frontend; npm run tsc` | **PASS** | 07-22 通过（修复 `Company.tsx` 未定义 `setLogo`） |
+| Desktop build | `cd frontend; npm run build` | **PASS** | 07-31 复验通过 |
+| Mobile enterprise | `cd mobile; npm run check:enterprise` | **PASS** | lint + 183 unit tests + build + bundle（07-31） |
+| Mobile e2e | `cd mobile; npm run test:e2e` | **PASS** | iPhone 390 12/12；四视口视觉回归通过（07-31） |
+| Security smoke | 单测 + E2E mock + live HTTP 冒烟 | **PASS** | 07-31 复验：登录、bootstrap、rework 详情、`/api/users` 工号、历史实例 `currentNodeName` |
 
 ## 2. 体积与性能门禁
 
 ### 2.1 Bundle budget
 
 ```
-[check:bundle] entry gzip total: 192.85 KiB / 250 KiB
+[check:bundle] entry gzip total: 181.12 KiB / 250 KiB（07-31）
 [check:bundle] OK
 ```
 
@@ -53,7 +54,17 @@
 - 视口：android-360 / iphone-375 / iphone-390 / iphone-430
 - 关键页快照目录：`mobile/e2e/key-pages.visual.spec.ts-snapshots/`
 - Task 14 主色变更后，于 Task 15 更新了任务详情 / 同意驳回 Sheet / 流程详情等基线 PNG
-- `npm run test:e2e` 全量 **44 passed**
+- `npm run test:e2e`：07-22 全量 **44 passed**；07-31 iPhone 390 功能 E2E **12/12**，四视口视觉回归通过
+
+## 3.1 正式编号与驳回重做（2026-07-31）
+
+- Flyway `V17__formal_numbers_and_rework.sql`：`t_user.employee_no`（六位数字、唯一非空）、`t_form_data.business_no`（十二位数字、提交后生成）、`t_task.task_type`（`APPROVAL`/`REWORK`）。
+- 第一级驳回生成申请人 `REWORK` 任务，表单状态 `NEEDS_REVISION`；原表单、附件、流程实例和单号保留，可在原单上重提。
+- 移动端 API：`GET/PUT /api/mobile/rework-tasks/{id}`、`POST /api/mobile/rework-tasks/{id}/resubmit`。
+- E2E：`mobile/e2e/rework-original-form.spec.ts` 验证「驳回 → 待修改任务 → 原表单恢复 → 流程实例数量不增加 → 原单号不变 → 重提生成新审批任务」。
+- 桌面通讯录已支持正式工号查看、新增/编辑、六位数字校验与唯一性提示、CSV 导入导出。
+- 07-31 本地真实 HTTP 冒烟通过：登录可用、移动端 bootstrap 返回两个待修改任务、rework 详情返回原表单和原单号、`/api/users` 返回正式工号、历史实例详情 `currentNodeName` 返回 `待修改原单`。
+
 
 ## 4. 安全冒烟
 

@@ -2,6 +2,11 @@
 
 本文件是 Codex / Agent 在移动端 UI 整改任务里的上下文说明，与 `codex.md` 互补：后者是仓库级速查表，本文件是「当前任务」的输入约束、视觉基线与执行原则。
 
+## 当前状态（2026-07-31 更新）
+
+移动端 UI 整改任务已完成并验证通过。本文件保留为设计基线/历史上下文；后续开发应以「已实现页面」和最新验收记录为准。关键结果见 `codex.md` 与 `docs/session-summary-2026-07-31.md`。
+
+
 ## 任务输入
 
 - 设计基线：`.superpowers/brainstorm/mobile-design-20260718/content/all-key-pages-gallery.html`（18 个关键页面 + 1 个离线状态）。

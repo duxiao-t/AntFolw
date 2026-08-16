@@ -2,6 +2,9 @@
 
 独立移动端应用，使用 React、Vite、React Router、TanStack Query 和 Ant Design Mobile。构建产物部署在同域 `/mobile/`，API 继续走 `/api/`。
 
+> 注意：当前仓库位于 `E:\code\ant-flow`；下文命令中若出现旧路径 `D:\code\ant-flow\mobile`，请替换为 `E:\code\ant-flow\mobile`。
+
+
 ## 本地开发
 
 后端开发端口按移动端约定使用 `8081`。附件存储默认并且必须走本机
@@ -17,7 +20,7 @@ MinIO 控制台：`http://localhost:9001`，默认账号密码：
 `minioadmin / minioadmin`。
 
 ```powershell
-Set-Location D:\code\ant-flow\backend
+Set-Location E:\code\ant-flow\backend
 $env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/antflow?stringtype=unspecified'
 $env:SPRING_DATASOURCE_USERNAME='antflow'
 $env:SPRING_DATASOURCE_PASSWORD='antflow'
@@ -50,6 +53,9 @@ npm test
 npm run build
 ```
 
+完整企业级门禁：`npm run check:enterprise`（lint + unit + build + bundle≤250KiB gzip）。
+
+
 视觉回归测试使用 Playwright：
 
 ```powershell
@@ -71,6 +77,13 @@ npm run build
 将 `mobile/dist/` 的内容发布到站点根目录下的 `mobile/` 子目录，例如 `mobile/dist/index.html` 对应 `/usr/share/nginx/html/mobile/index.html`，`mobile/dist/assets/*` 对应 `/usr/share/nginx/html/mobile/assets/*`。Vite 产物使用绝对 `/mobile/` 路径，不能把 `dist/` 内容直接放到 Web 根目录。
 
 示例 Nginx 配置见 `infra/mobile-nginx.example.conf`。
+
+## 原单驳回重做（REWORK）
+
+- 第一级驳回会生成申请人 `REWORK` 任务，原表单、附件、流程实例和单号保留。
+- 移动端 API：`GET/PUT /api/mobile/rework-tasks/{id}`、`POST /api/mobile/rework-tasks/{id}/resubmit`。
+- 普通同意/驳回接口会拒绝处理 `REWORK` 任务；申请人必须在原单上修改后重提。
+
 
 ## 品牌与企业微信
 
