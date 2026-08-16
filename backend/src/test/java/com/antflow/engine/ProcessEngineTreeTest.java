@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -286,6 +287,132 @@ class ProcessEngineTreeTest {
         t.setId(id); t.setProcInstId(1L); t.setNodeId(nodeId);
         t.setAssigneeId(assignee); t.setStatus(status);
         return t;
+    }
+
+    // ---------- 2b. 节点级字段权限 ----------
+    @Test
+    void approve_editableFields_mergeValidatedValuesIntoFormData() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[42],
+                "formPerms":[{"fieldId":"amount","mode":"EDITABLE"}]},
+              "children":null}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+
+        ProcessEngine eng = engine();
+        eng.start(new StartCmd("F1", Map.of("amount", 1, "name", "x"), null), 7L);
+
+        Mockito.when(taskMapper.selectById(1L))
+            .thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance pi = new ProcessInstance();
+            pi.setId(1L); pi.setProcDefId(10L); pi.setFormDataId(1L);
+            pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
+            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            return pi;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData fd = new FormData();
+            fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"amount\":1,\"name\":\"x\"}");
+            return fd;
+        });
+        FormDefinition editableForm = new FormDefinition();
+        editableForm.setId(1L);
+        editableForm.setCode("F1");
+        editableForm.setVersion(1);
+        editableForm.setSchema("""
+            [{"id":"amount","type":"number","props":{"required":true}},
+             {"id":"name","type":"text"}]
+            """);
+        editableForm.setStatus("PUBLISHED");
+        Mockito.when(formDefinitionService.getById(1L)).thenReturn(editableForm);
+
+        eng.approve(new CompleteCmd(1L, "approve", "ok", null, Map.of("amount", 5)), 42L);
+
+        ArgumentCaptor<FormData> formDataCaptor = ArgumentCaptor.forClass(FormData.class);
+        Mockito.verify(formDataMapper).updateById(formDataCaptor.capture());
+        String merged = formDataCaptor.getValue().getData();
+        assertThat(merged).contains("\"amount\":5").contains("\"name\":\"x\"");
+    }
+
+    @Test
+    void approve_rejectsEditsOutsideEditableWhitelist() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[42],
+                "formPerms":[{"fieldId":"amount","mode":"EDITABLE"}]},
+              "children":null}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+
+        ProcessEngine eng = engine();
+        eng.start(new StartCmd("F1", Map.of("amount", 1, "name", "x"), null), 7L);
+
+        Mockito.when(taskMapper.selectById(1L))
+            .thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance pi = new ProcessInstance();
+            pi.setId(1L); pi.setProcDefId(10L); pi.setFormDataId(1L);
+            pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
+            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            return pi;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData fd = new FormData();
+            fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"amount\":1,\"name\":\"x\"}");
+            return fd;
+        });
+        Mockito.when(formDefinitionService.getById(1L))
+            .thenReturn(publishedForm("F1"));
+
+        assertThatThrownBy(() -> eng.approve(
+            new CompleteCmd(1L, "approve", "ok", null, Map.of("name", "y")), 42L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("字段不可编辑");
+    }
+
+    @Test
+    void approve_rejectsDataWhenNodeHasNoEditableFields() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[42]},
+              "children":null}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+
+        ProcessEngine eng = engine();
+        eng.start(new StartCmd("F1", Map.of("amount", 1), null), 7L);
+
+        Mockito.when(taskMapper.selectById(1L))
+            .thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance pi = new ProcessInstance();
+            pi.setId(1L); pi.setProcDefId(10L); pi.setFormDataId(1L);
+            pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
+            pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
+            return pi;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData fd = new FormData();
+            fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"amount\":1}");
+            return fd;
+        });
+        Mockito.when(formDefinitionService.getById(1L))
+            .thenReturn(publishedForm("F1"));
+
+        assertThatThrownBy(() -> eng.approve(
+            new CompleteCmd(1L, "approve", "ok", null, Map.of("amount", 2)), 42L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不允许编辑表单字段");
+
+        // 空 data 视为无修改，允许通过。
+        assertThatCode(() -> eng.approve(
+            new CompleteCmd(1L, "approve", "ok", null, Map.of()), 42L))
+            .doesNotThrowAnyException();
     }
 
     // ---------- 3. AND-sign ----------

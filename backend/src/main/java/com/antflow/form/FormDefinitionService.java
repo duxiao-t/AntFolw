@@ -178,6 +178,62 @@ public class FormDefinitionService {
         }
     }
 
+    /** 只校验指定字段集合（节点级字段权限用）：容器递归，其余字段跳过。 */
+    public void validateSubmission(String schema, Object data, Set<String> fieldIds) {
+        var root = parseSchema(schema);
+        Map<?, ?> values = data instanceof Map<?, ?> map ? map : Map.of();
+        for (var node : root) {
+            validateNodeValue(node, values, fieldIds);
+        }
+    }
+
+    /** 返回可配置字段权限的叶子字段 id（排除分栏/明细表/说明等展示型节点，含嵌套子字段）。 */
+    public Set<String> leafFieldIds(String schema) {
+        return leafFieldTypes(schema).keySet();
+    }
+
+    /** 返回叶子字段 id → 字段类型映射，供发布校验判断可编辑类型。 */
+    public Map<String, String> leafFieldTypes(String schema) {
+        var root = parseSchema(schema);
+        var types = new java.util.LinkedHashMap<String, String>();
+        for (var node : root) {
+            collectLeafFieldTypes(node, types);
+        }
+        return java.util.Collections.unmodifiableMap(types);
+    }
+
+    private void collectLeafFieldTypes(com.fasterxml.jackson.databind.JsonNode node,
+                                       Map<String, String> types) {
+        String type = node.path("type").asText("");
+        if (CONTAINER_TYPES.contains(type) || "table_list".equals(type)) {
+            var containerChildren = node.path("children");
+            if (containerChildren.isArray()) {
+                containerChildren.forEach(child -> collectLeafFieldTypes(child, types));
+            }
+            return;
+        }
+        if ("description".equals(type)) {
+            return;
+        }
+        types.put(node.path("id").asText(), type);
+    }
+
+    private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node,
+                                   Map<?, ?> values, Set<String> fieldIds) {
+        String type = node.path("type").asText("");
+        if (CONTAINER_TYPES.contains(type) || "table_list".equals(type)) {
+            var containerChildren = node.path("children");
+            if (containerChildren.isArray()) {
+                containerChildren.forEach(child -> validateNodeValue(child, values, fieldIds));
+            }
+            return;
+        }
+        if (!fieldIds.contains(node.path("id").asText())) {
+            return;
+        }
+        validateNodeValue(node, values);
+    }
+
     private String writeJson(Object o) {
         try {
             return json.writeValueAsString(o);

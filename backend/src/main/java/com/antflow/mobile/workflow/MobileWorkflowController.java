@@ -153,7 +153,9 @@ public class MobileWorkflowController {
             () -> auditService.success("workflow.task.approve", "TASK", id,
                 AuditService.RiskLevel.HIGH,
                 Map.of("changedFields", List.of("status", "approvedBy", "approvedAt")),
-                Map.of("client", "mobile", "commentLength", commentLength(request))));
+                Map.of("client", "mobile", "commentLength", commentLength(request),
+                    "changedFieldCount", dataFieldCount(request == null ? null : request.data()),
+                    "changedFieldIds", dataFields(request == null ? null : request.data()))));
     }
 
     @PostMapping("/tasks/{id}/reject")

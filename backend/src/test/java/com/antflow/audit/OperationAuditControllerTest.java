@@ -156,7 +156,9 @@ class OperationAuditControllerTest {
         InstanceController controller = new InstanceController(engine,
             Mockito.mock(ProcessInstanceMapper.class), Mockito.mock(TaskMapper.class),
             Mockito.mock(TaskHistoryMapper.class), Mockito.mock(WorkflowJobService.class),
-            Mockito.mock(AuthorizationService.class), auditService);
+            Mockito.mock(AuthorizationService.class), auditService,
+            Mockito.mock(FormDefinitionService.class),
+            Mockito.mock(com.antflow.form.runtime.FormDataMapper.class));
         StartCmd command = new StartCmd("leave", Map.of("salary", "private-value"), Map.of());
         when(engine.start(command, 7L)).thenReturn(Map.of(
             "instanceId", 61L, "businessNo", "PRIVATE-BUSINESS-NO"));

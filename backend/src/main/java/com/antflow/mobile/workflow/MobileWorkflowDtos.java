@@ -22,13 +22,13 @@ record MobileFormDto(String code, String name, Integer version, JsonNode schema,
                      JsonNode settings, JsonNode process) {
 }
 
-record MobileTaskActionRequest(String comment) {
+record MobileTaskActionRequest(String comment, JsonNode data) {
 }
 
 record MobileDraftRequest(String formCode, JsonNode data) {
 }
 
-record MobileTaskDto(Long id, Long instanceId, String formCode, String formName,
+record MobileTaskDto(Long id, Long instanceId, String nodeId, String formCode, String formName,
                      String businessNo, String applicantName, String applicantEmployeeNo,
                      String applicantDepartment, String nodeName, String taskType,
                      String taskStatus, String instanceStatus, OffsetDateTime createdAt) {

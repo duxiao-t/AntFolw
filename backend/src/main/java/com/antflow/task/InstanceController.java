@@ -8,6 +8,8 @@ import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
+import com.antflow.form.FormDefinitionService;
+import com.antflow.form.runtime.FormDataMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +28,8 @@ public class InstanceController {
     private final WorkflowJobService workflowJobService;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
+    private final FormDefinitionService formDefinitionService;
+    private final FormDataMapper formDataMapper;
 
     @PostMapping("/start")
     public Map<String, Object> start(@RequestBody StartCmd cmd) {
@@ -63,11 +67,15 @@ public class InstanceController {
         var tasks = taskMapper.selectList(new QueryWrapper<TaskEntity>().eq("proc_inst_id", id));
         var history = historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
             .eq("proc_inst_id", id).orderByAsc("created_at"));
+        var formData = formDataMapper.selectById(pi.getFormDataId());
+        var form = formData == null ? null : formDefinitionService.getById(formData.getFormDefId());
         Map<String, Object> result = Map.of(
             "instance", pi,
             "tasks", tasks,
             "history", history,
-            "automationJobs", workflowJobService.listViews(id)
+            "automationJobs", workflowJobService.listViews(id),
+            "schema", form == null ? null : form.getSchema(),
+            "formData", formData == null ? null : formData.getData()
         );
         auditService.success("workflow.instance.detail.read", "PROCESS_INSTANCE", id,
             AuditService.RiskLevel.HIGH, Map.of(), Map.of());

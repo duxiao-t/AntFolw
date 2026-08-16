@@ -214,8 +214,10 @@ public class MobileWorkflowService {
 
     @Transactional(rollbackFor = Exception.class)
     public void approve(Long taskId, MobileTaskActionRequest request, long userId) {
+        Object data = request == null || request.data() == null
+            ? null : objectMapper.convertValue(request.data(), Map.class);
         engine.approve(new CompleteCmd(taskId, "APPROVE",
-            request == null ? null : request.comment(), null), userId);
+            request == null ? null : request.comment(), null, data), userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -407,6 +409,7 @@ public class MobileWorkflowService {
         return new MobileTaskDto(
             task.getId(),
             task.getProcInstId(),
+            task.getNodeId(),
             form == null ? null : form.getCode(),
             form == null ? null : form.getName(),
             form == null ? null : requireFormData(instance.getFormDataId()).getBusinessNo(),

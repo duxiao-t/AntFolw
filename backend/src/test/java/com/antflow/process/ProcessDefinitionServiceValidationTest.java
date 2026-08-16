@@ -138,6 +138,81 @@ class ProcessDefinitionServiceValidationTest {
             .hasMessageContaining("始终执行");
     }
 
+    @Test void validate_accepts_formPerms_for_existing_fields() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[1],
+                "formPerms":[
+                  {"fieldId":"amount","mode":"EDITABLE"},
+                  {"fieldId":"secret","mode":"HIDDEN"}
+                ]},"children":null}}
+            """;
+
+        assertThatCode(() -> service.validateProcessTree(tree,
+            Map.of("amount", "number", "secret", "text")))
+            .doesNotThrowAnyException();
+    }
+
+    @Test void validate_rejects_formPerms_for_unknown_field() {
+        String tree = approvalWithPerms("[{\"fieldId\":\"ghost\",\"mode\":\"EDITABLE\"}]");
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree,
+            Map.of("amount", "number")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不存在于当前表单");
+    }
+
+    @Test void validate_rejects_formPerms_with_invalid_mode() {
+        String tree = approvalWithPerms("[{\"fieldId\":\"amount\",\"mode\":\"WRITE\"}]");
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree,
+            Map.of("amount", "number")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("权限模式非法");
+    }
+
+    @Test void validate_rejects_formPerms_with_duplicate_field() {
+        String tree = approvalWithPerms("""
+            [{"fieldId":"amount","mode":"EDITABLE"},
+             {"fieldId":"amount","mode":"HIDDEN"}]
+            """);
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree,
+            Map.of("amount", "number")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("重复配置权限");
+    }
+
+    @Test void validate_rejects_editable_attachment_field() {
+        String tree = approvalWithPerms("[{\"fieldId\":\"proof\",\"mode\":\"EDITABLE\"}]");
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree,
+            Map.of("proof", "file_upload")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("暂不支持编辑");
+    }
+
+    @Test void validate_rejects_formPerms_that_is_not_array() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[1],
+                "formPerms":{"amount":"EDITABLE"}},"children":null}}
+            """;
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree,
+            Map.of("amount", "number")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("必须是数组");
+    }
+
+    private static String approvalWithPerms(String formPerms) {
+        return """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[1],
+                "formPerms":%s},"children":null}}
+            """.formatted(formPerms);
+    }
+
     @Test void findByForm_returns_current_definition_including_draft() {
         ProcessDefinitionMapper mapper = Mockito.mock(ProcessDefinitionMapper.class);
         ProcessDefinitionService service =

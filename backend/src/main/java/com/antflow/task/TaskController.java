@@ -35,7 +35,8 @@ public class TaskController {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_APPROVE);
         var p = PrincipalHolder.current().orElseThrow();
         auditService.execute(() -> engine.approve(new CompleteCmd(id, "APPROVE",
-                body == null ? null : asString(body.get("comment")), null), p.userId()),
+                body == null ? null : asString(body.get("comment")), null,
+                body == null ? null : body.get("data")), p.userId()),
             () -> auditService.success("workflow.task.approve", "TASK", id,
                 AuditService.RiskLevel.HIGH,
                 Map.of("changedFields", List.of("status", "approvedBy", "approvedAt")),
@@ -169,7 +170,14 @@ public class TaskController {
     private static String asString(Object o) { return o == null ? null : o.toString(); }
 
     private static Map<String, Object> commentMetadata(Map<String, Object> body) {
-        return Map.of("commentLength", lengthOf(body == null ? null : body.get("comment")));
+        var metadata = new java.util.LinkedHashMap<String, Object>();
+        metadata.put("commentLength", lengthOf(body == null ? null : body.get("comment")));
+        Object data = body == null ? null : body.get("data");
+        if (data instanceof Map<?, ?> map) {
+            metadata.put("changedFieldCount", map.size());
+            metadata.put("changedFieldIds", map.keySet().stream().map(String::valueOf).toList());
+        }
+        return metadata;
     }
 
     private static int lengthOf(Object value) {

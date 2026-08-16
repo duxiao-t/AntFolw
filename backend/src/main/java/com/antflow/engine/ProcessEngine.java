@@ -31,9 +31,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -154,6 +156,16 @@ public class ProcessEngine {
             throw new AccessDeniedException("not your task");
         }
 
+        // 永远走快照，不依赖 pd.getProcess()（避免流程改版后已发起的实例跑飞）
+        JsonNode root = readTree(pi.getProcessSnapshot());
+        JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
+        if (cur == null) {
+            throw new BizException("BAD_FLOW", "approval node not in tree: " + t.getNodeId());
+        }
+        if (cmd.data() != null) {
+            applyNodeFieldEdits(pi, cur, cmd.data());
+        }
+
         t.setStatus("APPROVED");
         t.setApprovedBy(operatorId);
         t.setApprovedAt(OffsetDateTime.now());
@@ -161,13 +173,6 @@ public class ProcessEngine {
         taskMapper.updateById(t);
         insertHistory(t, null, t.getNodeId(), force ? "FORCE_APPROVE" : "APPROVE",
             operatorId, cmd.comment());
-
-        // 永远走快照，不依赖 pd.getProcess()（避免流程改版后已发起的实例跑飞）
-        JsonNode root = readTree(pi.getProcessSnapshot());
-        JsonNode cur = ProcessTreeNav.findById(root, t.getNodeId());
-        if (cur == null) {
-            throw new BizException("BAD_FLOW", "approval node not in tree: " + t.getNodeId());
-        }
 
         String mode = cur.path("props").path("mode").asText("OR");
         boolean andMode = "AND".equals(mode);
@@ -589,6 +594,55 @@ public class ProcessEngine {
         taskMapper.updateById(parent);
         insertHistoryOnInstance(parent.getProcInstId(), parent.getNodeId(), parent.getNodeId(),
             "SKIP", operatorId, "delegated task acted");
+    }
+
+    /**
+     * 审批节点可编辑字段回写：只允许修改当前节点 formPerms 中标记为 EDITABLE 的字段，
+     * 逐字段按 schema 校验后合并进 t_form_data.data（未提交的字段保持不变）。
+     */
+    private void applyNodeFieldEdits(ProcessInstance pi, JsonNode cur, Object data) {
+        if (data instanceof Map<?, ?> edits && edits.isEmpty()) {
+            return;
+        }
+        Set<String> editable = editableFieldIds(cur);
+        if (editable.isEmpty()) {
+            throw new BizException("FORM_DATA_INVALID", "该审批节点不允许编辑表单字段");
+        }
+        if (!(data instanceof Map<?, ?> edits)) {
+            throw new BizException("FORM_DATA_INVALID", "表单字段更新必须是对象");
+        }
+        for (Object key : edits.keySet()) {
+            if (!(key instanceof String fieldId) || !editable.contains(fieldId)) {
+                throw new BizException("FORM_DATA_INVALID", "字段不可编辑: " + key);
+            }
+        }
+        FormData formData = formDataMapper.selectById(pi.getFormDataId());
+        if (formData == null) {
+            throw new BizException("NOT_FOUND", "form data not found");
+        }
+        FormDefinition fd = formDefinitionService.getById(formData.getFormDefId());
+        if (fd == null) {
+            throw new BizException("NOT_FOUND", "form definition not found");
+        }
+        formDefinitionService.validateSubmission(fd.getSchema(), edits, editable);
+        var merged = (com.fasterxml.jackson.databind.node.ObjectNode)
+            readTreeOrEmpty(formData.getData()).deepCopy();
+        edits.forEach((key, value) -> merged.set((String) key, json.valueToTree(value)));
+        formData.setData(writeJson(merged));
+        formDataMapper.updateById(formData);
+    }
+
+    private Set<String> editableFieldIds(JsonNode node) {
+        var perms = node.path("props").path("formPerms");
+        var ids = new LinkedHashSet<String>();
+        if (perms.isArray()) {
+            for (var entry : perms) {
+                if ("EDITABLE".equals(entry.path("mode").asText())) {
+                    ids.add(entry.path("fieldId").asText());
+                }
+            }
+        }
+        return ids;
     }
 
 

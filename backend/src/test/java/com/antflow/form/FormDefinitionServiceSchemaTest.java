@@ -9,6 +9,7 @@ import org.mockito.Mockito;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -226,6 +227,38 @@ class FormDefinitionServiceSchemaTest {
             matrixSchema("textarea", "\"maxLength\":20"),
             Map.of("matrix", value)
         )).doesNotThrowAnyException();
+    }
+
+    @Test void leafFieldTypesExcludesContainersAndDescription() {
+        String schema = """
+            [{"id":"layout","type":"span_layout","children":[
+               {"id":"name","type":"text"},
+               {"id":"file","type":"file_upload"}
+             ]},
+             {"id":"table","type":"table_list","children":[{"id":"qty","type":"number"}]},
+             {"id":"note","type":"description"}]
+            """;
+
+        assertThat(service.leafFieldIds(schema))
+            .containsExactlyInAnyOrder("name", "file", "qty");
+        assertThat(service.leafFieldTypes(schema))
+            .containsEntry("file", "file_upload")
+            .containsEntry("qty", "number");
+    }
+
+    @Test void subsetValidationOnlyValidatesSelectedFields() {
+        String schema = """
+            [{"id":"name","type":"text","props":{"required":true}},
+             {"id":"note","type":"text","props":{"required":true}}]
+            """;
+
+        assertThatCode(() -> service.validateSubmission(
+            schema, Map.of("name", "张三"), Set.of("name")))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateSubmission(
+            schema, Map.of("name", ""), Set.of("name")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("required");
     }
 
     private String matrixSchema(String cellType, String extraProps) {

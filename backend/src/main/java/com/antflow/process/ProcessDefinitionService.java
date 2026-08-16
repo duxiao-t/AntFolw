@@ -13,10 +13,15 @@ import java.util.List;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 @Service
 public class ProcessDefinitionService {
+    /** 附件/检查项等复杂字段在 v1 不支持审批节点编辑，只能隐藏或只读。 */
+    private static final Set<String> EDITABLE_FORBIDDEN_TYPES = Set.of(
+        "image_upload", "video_upload", "file_upload", "checklist");
+
     private final ProcessDefinitionMapper mapper;
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper json;
@@ -87,7 +92,8 @@ public class ProcessDefinitionService {
                 "Associated form must be PUBLISHED before publishing the flow");
         }
 
-        validateProcessTree(pd.getProcess());
+        validateProcessTree(pd.getProcess(),
+            formDefinitionService.leafFieldTypes(fd.getSchema()));
 
         pd.setStatus("PUBLISHED");
         pd.setVersion(pd.getVersion() + 1);
@@ -129,13 +135,18 @@ public class ProcessDefinitionService {
     /** Tree validation: ROOT is the unique root; APPROVAL has assignees configured;
      *  CONDITIONS has at least 1 branch including a default branch; node type is known. */
     void validateProcessTree(String processJson) {
+        validateProcessTree(processJson, Map.of());
+    }
+
+    /** 带表单字段表校验流程树（节点级字段权限需要知道字段是否存在于当前表单）。 */
+    void validateProcessTree(String processJson, Map<String, String> fieldTypes) {
         try {
             com.fasterxml.jackson.databind.JsonNode root =
                 json.readTree(processJson == null ? "{}" : processJson);
             if (!"ROOT".equals(root.path("type").asText())) {
                 throw new BizException("BAD_FLOW", "流程必须以 ROOT 节点开始");
             }
-            if (!walk(root, new HashSet<>())) {
+            if (!walk(root, new HashSet<>(), fieldTypes)) {
                 throw new BizException("BAD_FLOW", "审批流程至少需要 1 个审批节点");
             }
         } catch (BizException e) {
@@ -145,7 +156,8 @@ public class ProcessDefinitionService {
         }
     }
 
-    private boolean walk(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids) {
+    private boolean walk(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids,
+                         Map<String, String> fieldTypes) {
         if (n == null || n.isNull() || !n.has("id")) return false;
         registerId(n, ids);
         boolean hasApprovalNode = false;
@@ -154,7 +166,7 @@ public class ProcessDefinitionService {
             case "ROOT", "EMPTY" -> {}
             case "CC" -> validateCc(n);
             case "APPROVAL" -> {
-                validateApproval(n);
+                validateApproval(n, fieldTypes);
                 hasApprovalNode = true;
             }
             case "DELAY" -> validateDelay(n);
@@ -175,7 +187,8 @@ public class ProcessDefinitionService {
                     } else {
                         validateCondition(b);
                     }
-                    hasApprovalNode = walk(b.path("children"), ids) || hasApprovalNode;
+                    hasApprovalNode = walk(b.path("children"), ids, fieldTypes)
+                        || hasApprovalNode;
                 }
                 if (defaultCount != 1) {
                     throw new BizException("BAD_FLOW", "条件分支必须且只能包含一个默认分支");
@@ -206,7 +219,8 @@ public class ProcessDefinitionService {
                     if (inner == null || inner.isNull() || !inner.has("id")) {
                         throw new BizException("BAD_FLOW", "并行分支不能为空");
                     }
-                    hasApprovalNode = walkParallelBranch(inner, ids) || hasApprovalNode;
+                    hasApprovalNode = walkParallelBranch(inner, ids, fieldTypes)
+                        || hasApprovalNode;
                 }
                 if (alwaysBranchCount == 0) {
                     throw new BizException("BAD_FLOW", "并行网关至少需要一个始终执行的分支");
@@ -218,11 +232,12 @@ public class ProcessDefinitionService {
             }
             default -> throw new BizException("BAD_NODE_TYPE", "未知节点类型: " + type);
         }
-        return walk(n.path("children"), ids) || hasApprovalNode;
+        return walk(n.path("children"), ids, fieldTypes) || hasApprovalNode;
     }
 
     /** 并行分支内校验：单链 APPROVAL/CC/EMPTY，不允许嵌套 CONDITIONS/PARALLEL。 */
-    private boolean walkParallelBranch(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids) {
+    private boolean walkParallelBranch(com.fasterxml.jackson.databind.JsonNode n,
+                                       Set<String> ids, Map<String, String> fieldTypes) {
         if (n == null || n.isNull() || !n.has("id")) return false;
         registerId(n, ids);
         boolean hasApprovalNode = false;
@@ -230,7 +245,7 @@ public class ProcessDefinitionService {
         switch (type) {
             case "CC" -> validateCc(n);
             case "APPROVAL" -> {
-                validateApproval(n);
+                validateApproval(n, fieldTypes);
                 hasApprovalNode = true;
             }
             default -> throw new BizException("BAD_FLOW", "并行分支内只允许审批/抄送/空节点: " + type);
@@ -238,7 +253,7 @@ public class ProcessDefinitionService {
         if (n.has("branchs") && n.path("branchs").isArray() && n.path("branchs").size() > 0) {
             throw new BizException("BAD_FLOW", "并行分支内不允许嵌套分支节点");
         }
-        return walkParallelBranch(n.path("children"), ids) || hasApprovalNode;
+        return walkParallelBranch(n.path("children"), ids, fieldTypes) || hasApprovalNode;
     }
 
     private void registerId(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids) {
@@ -357,7 +372,8 @@ public class ProcessDefinitionService {
             }
         }
     }
-    private void validateApproval(com.fasterxml.jackson.databind.JsonNode n) {
+    private void validateApproval(com.fasterxml.jackson.databind.JsonNode n,
+                                  Map<String, String> fieldTypes) {
         com.fasterxml.jackson.databind.JsonNode p = n.path("props");
         String at = p.path("assignedType").asText();
         boolean empty = switch (at) {
@@ -367,6 +383,46 @@ public class ProcessDefinitionService {
             default -> true;
         };
         if (empty) throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText() + " 未配置审批人");
+        validateFormPerms(n, fieldTypes);
+    }
+
+    /** 校验节点级字段权限：字段必须存在于表单、模式合法、无重复；附件/检查项不可编辑。 */
+    private void validateFormPerms(com.fasterxml.jackson.databind.JsonNode n,
+                                   Map<String, String> fieldTypes) {
+        com.fasterxml.jackson.databind.JsonNode perms = n.path("props").path("formPerms");
+        if (perms.isMissingNode() || perms.isNull()) {
+            return;
+        }
+        if (!perms.isArray()) {
+            throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                + " 的 formPerms 必须是数组");
+        }
+        Set<String> seen = new HashSet<>();
+        for (var entry : perms) {
+            String fieldId = entry.path("fieldId").asText("").trim();
+            String mode = entry.path("mode").asText("");
+            if (fieldId.isBlank()) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 存在缺少字段 id 的权限配置");
+            }
+            if (!Set.of("HIDDEN", "READONLY", "EDITABLE").contains(mode)) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 字段 " + fieldId + " 的权限模式非法: " + mode);
+            }
+            if (!seen.add(fieldId)) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 字段 " + fieldId + " 重复配置权限");
+            }
+            String type = fieldTypes.get(fieldId);
+            if (type == null) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 字段 " + fieldId + " 不存在于当前表单");
+            }
+            if ("EDITABLE".equals(mode) && EDITABLE_FORBIDDEN_TYPES.contains(type)) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 字段 " + fieldId + "（" + type + "）暂不支持编辑");
+            }
+        }
     }
 
     private String writeJson(Object o) {

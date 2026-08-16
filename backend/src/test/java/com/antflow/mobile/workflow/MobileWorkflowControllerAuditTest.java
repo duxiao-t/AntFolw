@@ -65,7 +65,7 @@ class MobileWorkflowControllerAuditTest {
 
     @Test
     void taskActionAuditsCommentLengthWithoutCommentText() {
-        MobileTaskActionRequest request = new MobileTaskActionRequest("private comment");
+        MobileTaskActionRequest request = new MobileTaskActionRequest("private comment", null);
 
         controller.approve(71L, request);
 
