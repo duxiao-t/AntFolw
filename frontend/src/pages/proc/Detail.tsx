@@ -18,6 +18,7 @@ import { useParams, history, request, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
 import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
 import type { FieldMode } from '../../registry/types';
+import { pickEditableValues } from './fieldPermissions';
 
 const ACTION_LABEL: Record<string, string> = {
   START: '发起',
@@ -195,7 +196,9 @@ export default function DetailPage() {
     try {
       await request(`/api/tasks/${taskId}/approve`, {
         method: 'POST',
-        data: hasEditableFields ? editableValues : {},
+        data: hasEditableFields
+          ? pickEditableValues(editableValues, currentFormModes)
+          : {},
       });
       message.success('已同意');
       qc.invalidateQueries({ queryKey: ['instance', id] });
