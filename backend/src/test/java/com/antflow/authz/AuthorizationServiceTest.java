@@ -13,6 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -106,6 +107,41 @@ class AuthorizationServiceTest {
             Set.of("admin"), Set.of(), Map.of());
 
         assertThat(service.inDataScope(snapshot, "workflow.instance.read", 99L, null)).isTrue();
+    }
+
+    @Test
+    void requireFormUseByCodeAllowsGrantedPublishedForm() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
+            Set.of("user"), Set.of("form.runtime.read"), 1L, 10L, null));
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
+            eq("leave"))).thenReturn(10L);
+
+        assertThatCode(() -> spied.requireFormUseByCode("leave")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void requireFormUseByCodeHidesUngrantedPublishedForm() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
+            Set.of("user"), Set.of("form.runtime.read"), 1L, 10L, null));
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(false).when(spied).hasFormGrant(10L, 7L);
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
+            eq("leave"))).thenReturn(10L);
+
+        assertThatThrownBy(() -> spied.requireFormUseByCode("leave"))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
+    void requireFormUseByCodeHidesUnpublishedOrUnknownForm() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
+            eq("leave"))).thenReturn(null);
+
+        assertThatThrownBy(() -> service.requireFormUseByCode("leave"))
+            .isInstanceOf(HiddenResourceException.class);
     }
 
     private static AuthorizationService.AuthzSnapshot snapshot(

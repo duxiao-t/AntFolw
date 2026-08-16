@@ -2,6 +2,7 @@ package com.antflow.mobile.workflow;
 
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
@@ -117,6 +118,21 @@ class MobileWorkflowServiceTest {
             .isInstanceOf(BizException.class)
             .satisfies(exception -> assertThat(((BizException) exception).getCode()).isEqualTo("DRAFT_VERSION_MISMATCH"))
             .hasMessageContaining("表单已改版");
+    }
+
+    @Test
+    void startRejectsFormWithoutUsageGrant() {
+        JsonNode data = objectMapper.createObjectNode().put("days", 2);
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
+        Mockito.doThrow(new HiddenResourceException("form not found"))
+            .when(authorizationService)
+            .requireFormAction(10L, PermissionCodes.FORM_RUNTIME_READ);
+
+        assertThatThrownBy(() -> service.start(
+            new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of()), 7L))
+            .isInstanceOf(HiddenResourceException.class);
+        Mockito.verify(engine, Mockito.never()).start(Mockito.any(StartCmd.class),
+            Mockito.anyLong());
     }
 
     @Test
@@ -278,6 +294,8 @@ class MobileWorkflowServiceTest {
         assertThat(detail.code()).isEqualTo("leave");
         assertThat(detail.name()).isEqualTo("请假申请");
         assertThat(detail.version()).isEqualTo(3);
+        Mockito.verify(authorizationService).requireFormAction(10L,
+            PermissionCodes.FORM_RUNTIME_READ);
         assertThat(detail.schema().get(0).path("id").asText()).isEqualTo("days");
         assertThat(detail.process().path("children").path("props").path("assignedType").asText())
             .isEqualTo("SELF_SELECT");

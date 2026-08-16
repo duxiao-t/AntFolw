@@ -1,6 +1,8 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.engine.BizException;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
@@ -26,10 +28,13 @@ public class MobileDraftService {
     private final FormDataMapper formDataMapper;
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper objectMapper;
+    private final AuthorizationService authorizationService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(String formCode, JsonNode data, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
+        authorizationService.requireFormAction(formDefinition.getId(),
+            PermissionCodes.FORM_RUNTIME_READ);
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
@@ -44,7 +49,9 @@ public class MobileDraftService {
     @Transactional(rollbackFor = Exception.class)
     public FormData update(long draftId, JsonNode data, long userId) {
         FormData draft = requireOwnedDraft(draftId, userId);
-        requirePublishedForm(draft.getFormDefId());
+        FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
+        authorizationService.requireFormAction(formDefinition.getId(),
+            PermissionCodes.FORM_RUNTIME_READ);
         draft.setData(writeJson(data));
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.updateById(draft);

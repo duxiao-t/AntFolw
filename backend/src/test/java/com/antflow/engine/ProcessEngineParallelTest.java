@@ -88,7 +88,8 @@ class ProcessEngineParallelTest {
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
             historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class),
-            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class)
+            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class),
+            Mockito.mock(com.antflow.authz.AuthorizationService.class)
         );
     }
 

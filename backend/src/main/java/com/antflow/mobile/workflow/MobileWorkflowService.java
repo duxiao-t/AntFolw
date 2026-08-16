@@ -2,6 +2,7 @@ package com.antflow.mobile.workflow;
 
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
@@ -68,6 +69,7 @@ public class MobileWorkflowService {
         if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
+        authorizationService.requireFormAction(form.getId(), PermissionCodes.FORM_RUNTIME_READ);
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         return new MobileFormDto(form.getCode(), form.getName(), form.getVersion(),
             readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"),
@@ -78,6 +80,12 @@ public class MobileWorkflowService {
     @Transactional(rollbackFor = Exception.class)
     public MobileStartResult start(StartMobileInstanceRequest request, long userId) {
         JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
+        FormDefinition currentForm = formDefinitionService.getByCode(request.formCode());
+        if (currentForm == null || !PUBLISHED_STATUS.equals(currentForm.getStatus())) {
+            throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
+        }
+        authorizationService.requireFormAction(currentForm.getId(),
+            PermissionCodes.FORM_RUNTIME_READ);
         if (request.draftId() != null) {
             MobileDraftDto draft = draftService.get(request.draftId(), userId);
             if (!Objects.equals(draft.formCode(), request.formCode())) {
@@ -86,8 +94,7 @@ public class MobileWorkflowService {
             if (draft.readOnly()) {
                 throw new BizException("BAD_DRAFT", "draft is read only");
             }
-            FormDefinition currentForm = formDefinitionService.getByCode(request.formCode());
-            if (currentForm != null && draft.formVersion() != currentForm.getVersion()) {
+            if (draft.formVersion() != currentForm.getVersion()) {
                 throw new BizException("DRAFT_VERSION_MISMATCH",
                     "表单已改版，请基于新版本重新填写");
             }

@@ -2,6 +2,7 @@ package com.antflow.engine;
 
 import com.antflow.automation.WorkflowJob;
 import com.antflow.automation.WorkflowJobMapper;
+import com.antflow.authz.AuthorizationService;
 import com.antflow.common.FormalNumberService;
 import com.antflow.engine.handler.ApprovalHandler;
 import com.antflow.engine.handler.EmptyHandler;
@@ -85,7 +86,8 @@ class ProcessEngineAutomationTest {
             mock(FormDefinitionService.class), formDataMapper,
             mock(ProcessDefinitionService.class), tasks, instances,
             new TaskMapperExt(instances), histories, handlers,
-            mock(NotificationPublisher.class), json, mock(FormalNumberService.class), jobs
+            mock(NotificationPublisher.class), json, mock(FormalNumberService.class), jobs,
+            mock(AuthorizationService.class)
         );
 
         assertThat(engine.completeAutomation(5L)).isTrue();
@@ -123,7 +125,7 @@ class ProcessEngineAutomationTest {
             mock(ProcessDefinitionService.class), mock(TaskMapper.class), instances,
             new TaskMapperExt(instances), histories, List.of(),
             mock(NotificationPublisher.class), new ObjectMapper(),
-            mock(FormalNumberService.class), jobs
+            mock(FormalNumberService.class), jobs, mock(AuthorizationService.class)
         );
 
         assertThat(engine.completeAutomation(6L)).isTrue();

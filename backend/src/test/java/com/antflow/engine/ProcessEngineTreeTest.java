@@ -1,6 +1,9 @@
 package com.antflow.engine;
 
 import com.antflow.engine.condition.ConditionEvaluator;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.common.FormalNumberService;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
@@ -35,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
@@ -63,6 +67,7 @@ class ProcessEngineTreeTest {
     private AssigneeResolver assigneeResolver;
     private ObjectMapper json;
     private FormalNumberService formalNumberService;
+    private AuthorizationService authorizationService;
 
     private final ConditionEvaluator evaluator = new ConditionEvaluator();
 
@@ -83,7 +88,8 @@ class ProcessEngineTreeTest {
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
             historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class),
-            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class)
+            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class),
+            authorizationService
         );
     }
 
@@ -99,6 +105,7 @@ class ProcessEngineTreeTest {
         assigneeResolver = Mockito.mock(AssigneeResolver.class);
         json = new ObjectMapper();
         formalNumberService = Mockito.mock(FormalNumberService.class);
+        authorizationService = Mockito.mock(AuthorizationService.class);
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
 
         // Auto-increment ids for inserts.
@@ -176,6 +183,23 @@ class ProcessEngineTreeTest {
     }
 
     // ---------- 1. single approval ----------
+    @Test
+    void start_rejectsFormWithoutUsageGrant() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"ASSIGN_USER","assignedUser":[42]},
+              "children":null}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.doThrow(new HiddenResourceException("form not found"))
+            .when(authorizationService)
+            .requireFormAction(1L, PermissionCodes.FORM_RUNTIME_READ);
+
+        assertThatThrownBy(() ->
+            engine().start(new StartCmd("F1", Map.of("k", "v"), null), 7L))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
     @Test
     void start_singleApproval_createsOnePendingTaskForAssignee() {
         String processJson = """
@@ -638,21 +662,27 @@ class ProcessEngineTreeTest {
             return fd;
         });
 
-        Mockito.when(taskMapper.selectList(Mockito.argThat(qw -> {
-            QueryWrapper<TaskEntity> query = (QueryWrapper<TaskEntity>) qw;
-            return "a2".equals(query.getParamNameValuePairs().get("node_id"));
-        }))).thenReturn(List.of());
-
         TaskEntity first = taskWithId(1L, "a1", 42L, "APPROVED");
         first.setApprovedAt(OffsetDateTime.parse("2026-07-30T09:00:00+08:00"));
         first.setApprovalMode("AND");
         TaskEntity second = taskWithId(2L, "a1", 43L, "APPROVED");
         second.setApprovedAt(OffsetDateTime.parse("2026-07-30T09:05:00+08:00"));
         second.setApprovalMode("AND");
-        Mockito.when(taskMapper.selectList(Mockito.argThat(qw -> {
-            QueryWrapper<TaskEntity> query = (QueryWrapper<TaskEntity>) qw;
-            return "a1".equals(query.getParamNameValuePairs().get("node_id"));
-        }))).thenReturn(List.of(first, second));
+        Mockito.when(taskMapper.selectList(Mockito.any())).thenAnswer(invocation -> {
+            QueryWrapper<TaskEntity> query = invocation.getArgument(0);
+            if (query == null) {
+                return List.of();
+            }
+            query.getSqlSegment();
+            java.util.Map<String, Object> params = query.getParamNameValuePairs();
+            if (params.containsValue("a2")) {
+                return List.of();
+            }
+            if (params.containsValue("a1")) {
+                return List.of(first, second);
+            }
+            return List.of();
+        });
         Mockito.when(taskMapper.selectOne(any())).thenReturn(second);
 
         engine().reject(new CompleteCmd(9L, "reject", "请重新会签", null), 99L);

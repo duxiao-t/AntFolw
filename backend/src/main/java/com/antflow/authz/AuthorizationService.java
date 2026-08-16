@@ -183,6 +183,21 @@ public class AuthorizationService {
         }
     }
 
+    /**
+     * 发起/填报入口统一使用：表单必须已发布且当前用户具备表单使用授权。
+     * 未授权时返回资源不存在，避免泄露表单是否存在。
+     */
+    public void requireFormUseByCode(String code) {
+        Long formId = jdbcTemplate.query("""
+            SELECT id FROM t_form_definition
+            WHERE code = ? AND status = 'PUBLISHED' AND deleted = 0
+            """, rs -> rs.next() ? rs.getLong(1) : null, code);
+        if (formId == null) {
+            throw new HiddenResourceException("form not found");
+        }
+        requireFormAction(formId, PermissionCodes.FORM_RUNTIME_READ);
+    }
+
     public void requireReadableInstance(long instanceId) {
         PrincipalHolder.Principal principal = principal();
         if (!canReadInstance(instanceId, principal.userId())) {

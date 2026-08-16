@@ -1,6 +1,9 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.engine.BizException;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
@@ -23,13 +26,16 @@ class MobileDraftServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private FormDataMapper formDataMapper;
     private FormDefinitionService formDefinitionService;
+    private AuthorizationService authorizationService;
     private MobileDraftService service;
 
     @BeforeEach
     void setUp() {
         formDataMapper = Mockito.mock(FormDataMapper.class);
         formDefinitionService = Mockito.mock(FormDefinitionService.class);
-        service = new MobileDraftService(formDataMapper, formDefinitionService, objectMapper);
+        authorizationService = Mockito.mock(AuthorizationService.class);
+        service = new MobileDraftService(formDataMapper, formDefinitionService, objectMapper,
+            authorizationService);
         Mockito.doAnswer(invocation -> {
             FormData draft = invocation.getArgument(0);
             draft.setId(100L);
@@ -53,6 +59,20 @@ class MobileDraftServiceTest {
         assertThat(saved.getStatus()).isEqualTo("DRAFT");
         assertThat(saved.getCreatedBy()).isEqualTo(7L);
         assertThat(objectMapper.readTree(saved.getData()).path("days").asInt()).isEqualTo(2);
+        Mockito.verify(authorizationService).requireFormAction(10L,
+            PermissionCodes.FORM_RUNTIME_READ);
+    }
+
+    @Test
+    void createRejectsFormWithoutUsageGrant() {
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
+        Mockito.doThrow(new HiddenResourceException("form not found"))
+            .when(authorizationService).requireFormAction(10L, PermissionCodes.FORM_RUNTIME_READ);
+
+        assertThatThrownBy(() -> service.create("leave",
+            objectMapper.createObjectNode(), 7L))
+            .isInstanceOf(HiddenResourceException.class);
+        Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
     }
 
     @Test
@@ -66,6 +86,8 @@ class MobileDraftServiceTest {
         assertThat(updated.getId()).isEqualTo(101L);
         assertThat(objectMapper.readTree(updated.getData()).path("days").asInt()).isEqualTo(5);
         Mockito.verify(formDataMapper).updateById(updated);
+        Mockito.verify(authorizationService).requireFormAction(10L,
+            PermissionCodes.FORM_RUNTIME_READ);
     }
 
     @Test

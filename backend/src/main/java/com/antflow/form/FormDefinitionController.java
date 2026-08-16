@@ -43,11 +43,11 @@ public class FormDefinitionController {
 
     @GetMapping("/by-code/{code}")
     public FormDefinition byCode(@PathVariable String code) {
-        authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         FormDefinition fd = service.getPublishedByCode(code);
         if (fd == null) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
+        authorizationService.requireFormAction(fd.getId(), PermissionCodes.FORM_RUNTIME_READ);
         return fd;
     }
 

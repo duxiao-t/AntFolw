@@ -3,6 +3,8 @@ package com.antflow.engine;
 import com.antflow.automation.WorkflowJob;
 import com.antflow.automation.WorkflowJobMapper;
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.common.FormalNumberService;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
@@ -68,6 +70,7 @@ public class ProcessEngine {
     private final ObjectMapper json;
     private final FormalNumberService formalNumberService;
     private final WorkflowJobMapper workflowJobMapper;
+    private final AuthorizationService authorizationService;
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
@@ -75,6 +78,8 @@ public class ProcessEngine {
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + cmd.formCode());
         }
+        // 表单使用授权：未获得 t_form_resource_grant 授权的用户不能发起该表单的流程。
+        authorizationService.requireFormAction(fd.getId(), PermissionCodes.FORM_RUNTIME_READ);
         ProcessDefinition pd = processDefinitionService.latestPublishedForForm(fd.getId());
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());
