@@ -82,6 +82,7 @@ public class MobileWorkflowController {
     @PostMapping("/instances")
     public MobileStartResult start(@RequestBody StartMobileInstanceRequest request) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
+        authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         long userId = principal().userId();
         return auditService.execute(() -> workflowService.start(request, userId),
             result -> auditService.success("workflow.instance.start", "PROCESS_INSTANCE",

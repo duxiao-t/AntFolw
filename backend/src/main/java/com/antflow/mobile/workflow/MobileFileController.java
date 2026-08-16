@@ -1,6 +1,8 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -25,24 +27,28 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class MobileFileController {
     private final MobileFileService fileService;
+    private final AuthorizationService authorizationService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public MobileFileDto upload(
         @RequestPart("file") MultipartFile file,
         @RequestParam(name = "watermark", defaultValue = "false") boolean watermark,
         @RequestParam(name = "watermarkText", required = false) String watermarkText) {
+        authorizationService.requirePermission(PermissionCodes.FILE_UPLOAD);
         PrincipalHolder.Principal principal = principal();
         return fileService.upload(file, principal.userId(), watermark, watermarkText);
     }
 
     @GetMapping("/{id}")
     public MobileFileDto metadata(@PathVariable UUID id) {
+        authorizationService.requirePermission(PermissionCodes.FILE_READ);
         PrincipalHolder.Principal principal = principal();
         return fileService.getMetadata(id, principal.userId(), principal.roles());
     }
 
     @GetMapping("/{id}/content")
     public ResponseEntity<Resource> content(@PathVariable UUID id) {
+        authorizationService.requirePermission(PermissionCodes.FILE_READ);
         PrincipalHolder.Principal principal = principal();
         MobileFileContent content = fileService.readContent(id, principal.userId(), principal.roles());
         return ResponseEntity.ok()
@@ -58,6 +64,7 @@ public class MobileFileController {
 
     @DeleteMapping("/{id}")
     public void delete(@PathVariable UUID id) {
+        authorizationService.requirePermission(PermissionCodes.FILE_UPLOAD);
         fileService.delete(id, principal().userId());
     }
 

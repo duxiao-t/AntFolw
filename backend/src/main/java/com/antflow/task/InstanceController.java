@@ -30,6 +30,7 @@ public class InstanceController {
     @PostMapping("/start")
     public Map<String, Object> start(@RequestBody StartCmd cmd) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
+        authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
         return auditService.execute(() -> engine.start(cmd, p.userId()), result ->
             auditService.success("workflow.instance.start", "PROCESS_INSTANCE",
@@ -45,9 +46,13 @@ public class InstanceController {
     public List<ProcessInstance> list(@RequestParam(required = false) String status) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        var q = new QueryWrapper<ProcessInstance>().eq("started_by", p.userId());
+        var q = new QueryWrapper<ProcessInstance>()
+            .orderByDesc("started_at")
+            .orderByDesc("id");
         if (status != null) q.eq("status", status);
-        return instanceMapper.selectList(q);
+        return instanceMapper.selectList(q).stream()
+            .filter(instance -> authorizationService.canReadInstance(instance.getId(), p.userId()))
+            .toList();
     }
 
     @GetMapping("/{id}")

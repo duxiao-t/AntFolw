@@ -1,6 +1,7 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -14,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class MobileFileControllerTest {
     private final MobileFileService fileService = Mockito.mock(MobileFileService.class);
-    private final MobileFileController controller = new MobileFileController(fileService);
+    private final AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
+    private final MobileFileController controller = new MobileFileController(fileService, authorizationService);
 
     @AfterEach
     void clearPrincipal() {
