@@ -40,6 +40,28 @@ public final class ProcessTreeNav {
         return isInsideParallelBranch(root, id, false);
     }
 
+    /** Returns the nearest enclosing parallel branch for a nested node. */
+    public static ParallelParent findParallelParent(JsonNode root, String id) {
+        return findParallelParent(root, id, null);
+    }
+
+    private static ParallelParent findParallelParent(JsonNode node, String id,
+                                                     ParallelParent current) {
+        if (node == null || node.isNull() || !node.has("id")) return null;
+        if (id.equals(node.path("id").asText())) return current;
+        if ("PARALLEL".equals(node.path("type").asText())) {
+            for (JsonNode branch : node.withArray("branchs")) {
+                ParallelParent parent = new ParallelParent(
+                    node.path("id").asText(), branch.path("id").asText());
+                ParallelParent hit = findParallelParent(branch, id, parent);
+                if (hit != null) return hit;
+            }
+        }
+        return findParallelParent(node.get("children"), id, current);
+    }
+
+    public record ParallelParent(String parallelId, String branchId) {}
+
     private static boolean isInsideParallelBranch(JsonNode node, String id,
                                                   boolean insideParallelBranch) {
         if (node == null || node.isNull() || !node.has("id")) return false;

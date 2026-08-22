@@ -32,28 +32,14 @@ export function BranchLanes({
       className={`pt-band${ownerIssue ? ' pt-band--invalid' : ''}`}
       data-node-id={node.id}
     >
-      {!parallel && (
-        <button
-          type="button"
-          className="pt-band__gateway"
-          onClick={() => select(node.id)}
-        >
-          条件分支
-          {ownerIssue && (
-            <Tooltip title={ownerIssue.message}>
-              <ExclamationCircleFilled />
-            </Tooltip>
-          )}
-        </button>
-      )}
       <button
         type="button"
-        className={`pt-band__add${parallel ? ' pt-band__add--parallel' : ''}`}
+        className="pt-band__add pt-band__add--parallel"
         disabled={branches.length >= 8}
         onClick={() => addBranch(node.id)}
       >
         <PlusOutlined /> {parallel ? '添加分支' : '添加条件'}
-        {parallel && ownerIssue && (
+        {ownerIssue && (
           <Tooltip title={ownerIssue.message}>
             <ExclamationCircleFilled />
           </Tooltip>
@@ -114,9 +100,7 @@ function BranchLane({
             {isDefault
               ? '默认分支'
               : parallel
-                ? branch.props?.conditionMode === 'WHEN_MATCHED'
-                  ? '满足条件时执行'
-                  : '始终执行'
+                ? '始终执行'
                 : `优先级 ${index + 1}`}
           </span>
         </button>

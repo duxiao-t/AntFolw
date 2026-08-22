@@ -6,6 +6,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -32,7 +35,7 @@ import java.util.Map;
 @Order(100)
 @Slf4j
 @RequiredArgsConstructor
-public class WebhookNotificationListener implements NotificationListener {
+public class WebhookNotificationListener {
 
     private final ObjectMapper json;
 
@@ -43,17 +46,17 @@ public class WebhookNotificationListener implements NotificationListener {
         "INSTANCE_APPROVED", "INSTANCE_REJECTED", "INSTANCE_WITHDRAWN"
     );
 
-    @Override
     public String name() { return "webhook"; }
 
-    @Override
     public boolean accepts(NotificationEvent e) {
         return onCompleteUrl != null && !onCompleteUrl.isBlank()
             && INSTANCE_FINAL_EVENTS.contains(e.getType());
     }
 
-    @Override
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onEvent(NotificationEvent e) {
+        if (!accepts(e)) return;
         try {
             String body = json.writeValueAsString(Map.of(
                 "type", e.getType(),

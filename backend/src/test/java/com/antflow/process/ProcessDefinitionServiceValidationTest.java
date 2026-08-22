@@ -75,7 +75,7 @@ class ProcessDefinitionServiceValidationTest {
         assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
-    @Test void validate_rejects_async_node_inside_parallel_branch() {
+    @Test void validate_accepts_async_node_inside_parallel_branch() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
               "branchs":[
@@ -85,12 +85,10 @@ class ProcessDefinitionServiceValidationTest {
                   "props":{"assignedType":"SELF"}}}
               ],"children":{"id":"join","type":"EMPTY"}}}
             """;
-        assertThatThrownBy(() -> service.validateProcessTree(tree))
-            .isInstanceOf(BizException.class)
-            .hasMessageContaining("只允许审批/抄送");
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
-    @Test void validate_accepts_conditional_parallel_branch_with_always_fallback() {
+    @Test void validate_rejects_conditional_parallel_branch() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
               "branchs":[
@@ -102,7 +100,9 @@ class ProcessDefinitionServiceValidationTest {
                   "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"SELF"}}}
               ],"children":{"id":"join","type":"EMPTY"}}}
             """;
-        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("执行方式无效");
     }
 
     @Test void validate_accepts_nonempty_array_for_in_condition() {
@@ -119,23 +119,31 @@ class ProcessDefinitionServiceValidationTest {
             .hasMessageContaining("条件表达式配置不完整");
     }
 
-    @Test void validate_rejects_parallel_without_always_branch() {
+    @Test void validate_accepts_parallel_with_always_branches() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
+              "branchs":[
+                {"id":"b1","type":"BRANCH","props":{"conditionMode":"ALWAYS"},
+                  "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF"}}},
+                {"id":"b2","type":"BRANCH","props":{"conditionMode":"ALWAYS"},
+                  "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"SELF"}}}
+              ],"children":{"id":"join","type":"EMPTY"}}}
+            """;
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+    }
+
+    @Test void validate_accepts_legacy_empty_conditional_parallel_branch() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
               "branchs":[
                 {"id":"b1","type":"BRANCH","props":{"conditionMode":"WHEN_MATCHED",
-                  "groups":[{"groupType":"AND","conditions":[
-                    {"field":"amount","operator":">","value":"100"}]}]},
+                  "groups":[{"groupType":"AND","conditions":[]}]},
                   "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF"}}},
-                {"id":"b2","type":"BRANCH","props":{"conditionMode":"WHEN_MATCHED",
-                  "groups":[{"groupType":"AND","conditions":[
-                    {"field":"amount","operator":"<=","value":"100"}]}]},
+                {"id":"b2","type":"BRANCH","props":{"conditionMode":"ALWAYS"},
                   "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"SELF"}}}
               ],"children":{"id":"join","type":"EMPTY"}}}
             """;
-        assertThatThrownBy(() -> service.validateProcessTree(tree))
-            .isInstanceOf(BizException.class)
-            .hasMessageContaining("始终执行");
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
     @Test void validate_accepts_formPerms_for_existing_fields() {

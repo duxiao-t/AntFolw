@@ -94,8 +94,6 @@ export const CONDITION_PROPS = () => ({
 
 export const BRANCH_PROPS = () => ({
   conditionMode: 'ALWAYS' as const,
-  groupsType: 'OR' as const,
-  groups: [{ groupType: 'AND' as const, conditions: [] as ProcessCondition[] }],
 });
 
 export const DELAY_PROPS = () => ({

@@ -45,7 +45,7 @@ public class TaskOperationService {
     @Transactional
     public Long transfer(long taskId, long targetUserId, String comment) {
         var p = PrincipalHolder.current().orElseThrow();
-        TaskEntity parent = taskMapper.selectById(taskId);
+        TaskEntity parent = lockTask(taskId);
         if (parent == null || !"PENDING".equals(parent.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "task not pending");
         }
@@ -55,7 +55,7 @@ public class TaskOperationService {
         // 关父任务
         parent.setStatus("SKIPPED");
         parent.setComment(comment);
-        taskMapper.updateById(parent);
+        updateOrConflict(parent);
         // 建子任务：assignee = targetUserId，parent_task_id = parent.id，delegated_from = 原 assignee
         TaskEntity child = new TaskEntity();
         child.setProcInstId(parent.getProcInstId());
@@ -85,13 +85,15 @@ public class TaskOperationService {
     @Transactional
     public Long delegate(long taskId, long targetUserId, String comment) {
         var p = PrincipalHolder.current().orElseThrow();
-        TaskEntity parent = taskMapper.selectById(taskId);
+        TaskEntity parent = lockTask(taskId);
         if (parent == null || !"PENDING".equals(parent.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "task not pending");
         }
         if (!java.util.Objects.equals(parent.getAssigneeId(), p.userId())) {
             throw new AccessDeniedException("only current assignee can delegate");
         }
+        TaskEntity existing = findPendingChild(parent, targetUserId, false);
+        if (existing != null) return existing.getId();
         TaskEntity child = new TaskEntity();
         child.setProcInstId(parent.getProcInstId());
         child.setNodeId(parent.getNodeId());
@@ -118,13 +120,15 @@ public class TaskOperationService {
     @Transactional
     public Long addAssignee(long taskId, long targetUserId, String comment) {
         var p = PrincipalHolder.current().orElseThrow();
-        TaskEntity parent = taskMapper.selectById(taskId);
+        TaskEntity parent = lockTask(taskId);
         if (parent == null || !"PENDING".equals(parent.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "task not pending");
         }
         if (!java.util.Objects.equals(parent.getAssigneeId(), p.userId())) {
             throw new AccessDeniedException("only current assignee can add reviewer");
         }
+        TaskEntity existing = findPendingChild(parent, targetUserId, true);
+        if (existing != null) return existing.getId();
         TaskEntity child = new TaskEntity();
         child.setProcInstId(parent.getProcInstId());
         child.setNodeId(parent.getNodeId());
@@ -147,7 +151,7 @@ public class TaskOperationService {
     @Transactional
     public void recallChild(long childTaskId, String comment) {
         var p = PrincipalHolder.current().orElseThrow();
-        TaskEntity child = taskMapper.selectById(childTaskId);
+        TaskEntity child = lockTask(childTaskId);
         if (child == null || !"PENDING".equals(child.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "child task not pending");
         }
@@ -156,19 +160,19 @@ public class TaskOperationService {
         }
         child.setStatus("SKIPPED");
         child.setComment(comment);
-        taskMapper.updateById(child);
+        updateOrConflict(child);
 
         // TRANSFER 类型：父任务已被 SKIPPED，恢复父任务
         // DELEGATE/ADD_ASSIGNEE 类型：父任务原状，无须恢复
         TaskEntity parent = child.getParentTaskId() == null
             ? null
-            : taskMapper.selectById(child.getParentTaskId());
+            : lockTask(child.getParentTaskId());
         if (parent != null
             && "SKIPPED".equals(parent.getStatus())
             && java.util.Objects.equals(parent.getNodeId(), child.getNodeId())) {
             parent.setStatus("PENDING");
             parent.setComment(null);
-            taskMapper.updateById(parent);
+            updateOrConflict(parent);
         }
 
 
@@ -218,5 +222,31 @@ public class TaskOperationService {
         h.setOperatorId(op);
         h.setComment(comment);
         return h;
+    }
+
+    private TaskEntity lockTask(long taskId) {
+        TaskEntity initial = taskMapper.selectById(taskId);
+        if (initial == null) throw new BizException("TASK_NOT_PENDING", "task not pending");
+        var instance = instanceMapper.selectForUpdate(initial.getProcInstId());
+        if (instance == null) return initial; // legacy unit-test mocks do not stub the lock query
+        TaskEntity locked = taskMapper.selectForUpdate(taskId);
+        if (locked == null) throw new BizException("TASK_NOT_PENDING", "task not pending");
+        return locked;
+    }
+
+    private TaskEntity findPendingChild(TaskEntity parent, long targetUserId, boolean additional) {
+        List<TaskEntity> rows = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+            .eq("parent_task_id", parent.getId())
+            .eq("assignee_id", targetUserId)
+            .eq("status", "PENDING")
+            .eq("is_additional", additional)
+            .last("LIMIT 1"));
+        return rows == null ? null : rows.stream().findFirst().orElse(null);
+    }
+
+    private void updateOrConflict(TaskEntity task) {
+        if (taskMapper.updateById(task) == 0 && task.getVersion() != null) {
+            throw new BizException("CONCURRENT_CONFLICT", "task changed concurrently");
+        }
     }
 }

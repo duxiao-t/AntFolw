@@ -73,8 +73,11 @@ const branchConditionMode = (node: TreeNode): string =>
 
 const branchConditionReady = (node: TreeNode): boolean => {
   const mode = branchConditionMode(node);
-  if (mode === 'ALWAYS') return true;
-  return mode === 'WHEN_MATCHED' && conditionReady(node);
+  const groups = node.props?.groups;
+  const emptyGroups =
+    Array.isArray(groups) &&
+    groups.every((group: any) => (group.conditions?.length ?? 0) === 0);
+  return mode === 'ALWAYS' || (mode === 'WHEN_MATCHED' && emptyGroups);
 };
 
 const delayReady = (node: TreeNode): boolean => {
@@ -130,25 +133,6 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
   const add = (nodeId: string, message: string) =>
     issues.push({ nodeId, message });
 
-  const walkParallelChain = (node: TreeNode | null | undefined): void => {
-    if (!node) return;
-    if (!['APPROVAL', 'CC'].includes(node.type)) {
-      add(node.id, '并行分支内只允许审批和抄送节点');
-      return;
-    }
-    if (node.type === 'APPROVAL' && !approvalReady(node)) {
-      add(node.id, '请配置审批人');
-    }
-    if (node.type === 'APPROVAL') {
-      const permIssue = formPermsIssue(node);
-      if (permIssue) add(node.id, permIssue);
-    }
-    if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
-      add(node.id, '请配置抄送人');
-    }
-    walkParallelChain(node.children);
-  };
-
   const walk = (node: TreeNode | null | undefined): void => {
     if (!node) return;
     if (node.type === 'APPROVAL' && !approvalReady(node))
@@ -178,17 +162,12 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
     } else if (node.type === 'PARALLEL') {
       const branches = node.branchs ?? [];
       if (branches.length < 2) add(node.id, '并行节点至少需要两个分支');
-      if (
-        !branches.some((branch) => branchConditionMode(branch) === 'ALWAYS')
-      ) {
-        add(node.id, '并行节点至少需要一个始终执行的分支');
-      }
       branches.forEach((branch) => {
         if (!branchConditionReady(branch)) {
-          add(branch.id, '请完整配置分支执行条件');
+          add(branch.id, '并行分支必须始终执行');
         }
         if (!branch.children) add(branch.id, '并行分支不能为空');
-        walkParallelChain(branch.children);
+        walk(branch.children);
       });
     }
     walk(node.children);

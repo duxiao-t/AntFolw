@@ -205,56 +205,60 @@ public class ProcessEngine {
 
         JsonNode formData = readFormData(pi.getFormDataId());
         if (t.getParallelId() != null) {
-            // Advance this branch's remaining single chain before checking the join.
-            landParallelContinuation(root, pi, formData, t, cur);
-            Long stillPending = taskMapper.selectCount(new QueryWrapper<TaskEntity>()
-                .eq("proc_inst_id", pi.getId())
-                .eq("parallel_id", t.getParallelId())
-                .eq("status", "PENDING"));
-            if (stillPending != null && stillPending > 0) {
-                processInstanceMapper.updateById(pi);
-                return;
-            }
-            JsonNode parallelNode = ProcessTreeNav.findById(root, t.getParallelId());
-            if (parallelNode == null) {
-                throw new BizException("BAD_FLOW", "parallel node not found: " + t.getParallelId());
-            }
-            processInstanceMapper.updateById(pi);
-            resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), parallelNode);
+            advanceParallelBranch(root, pi, formData, t.getParallelId(), t.getBranchId(), cur);
             return;
         }
         // 仅首轮 start 时传入过 selfSelected；后续（理论上不会出现）传空 map。
         resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
     }
 
-    private void landParallelContinuation(JsonNode root, ProcessInstance instance,
-                                          JsonNode formData, TaskEntity completedTask,
-                                          JsonNode completedNode) {
+    private void advanceParallelBranch(JsonNode root, ProcessInstance instance,
+                                       JsonNode formData, String parallelId,
+                                       String branchId, JsonNode completedNode) {
         JsonNode node = ProcessTreeNav.childrenOf(completedNode);
         NodeContext context = new NodeContext(
             instance.getStartedBy(), formData, Map.of(), completedNode.path("id").asText(null),
-            completedTask.getParallelId(), completedTask.getBranchId()
+            parallelId, branchId
         );
         while (node != null) {
             String type = node.path("type").asText();
-            if (!"APPROVAL".equals(type) && !"CC".equals(type)) {
-                throw new BizException("BAD_FLOW", "并行分支内只允许审批和抄送节点: " + type);
-            }
             NodeHandler handler = pickHandler(type);
             if (handler == null) {
                 throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);
             }
             JsonNode handled = node;
             NodeOutcome outcome = handler.handle(root, handled, instance, context);
-            if (outcome.type() == NodeOutcome.Type.HALT || outcome.type() == NodeOutcome.Type.END) {
+            if (outcome.type() == NodeOutcome.Type.HALT) {
                 return;
             }
+            if (outcome.type() == NodeOutcome.Type.END) return;
             node = outcome.node();
             context = new NodeContext(
                 instance.getStartedBy(), formData, Map.of(), handled.path("id").asText(null),
-                completedTask.getParallelId(), completedTask.getBranchId()
+                parallelId, branchId
             );
         }
+
+        Long stillPending = taskMapper.selectCount(new QueryWrapper<TaskEntity>()
+            .eq("proc_inst_id", instance.getId())
+            .eq("parallel_id", parallelId)
+            .eq("status", "PENDING"));
+        if (stillPending != null && stillPending > 0) {
+            processInstanceMapper.updateById(instance);
+            return;
+        }
+        JsonNode parallelNode = ProcessTreeNav.findById(root, parallelId);
+        if (parallelNode == null) {
+            throw new BizException("BAD_FLOW", "parallel node not found: " + parallelId);
+        }
+        ProcessTreeNav.ParallelParent parent = ProcessTreeNav.findParallelParent(root, parallelId);
+        if (parent != null) {
+            advanceParallelBranch(root, instance, formData,
+                parent.parallelId(), parent.branchId(), parallelNode);
+            return;
+        }
+        processInstanceMapper.updateById(instance);
+        resolveAndLand(root, instance, formData, instance.getStartedBy(), Map.of(), parallelNode);
     }
 
     @Transactional
@@ -511,10 +515,12 @@ public class ProcessEngine {
      */
     @Transactional
     public boolean completeAutomation(Long jobId) {
+        WorkflowJob initial = workflowJobMapper.selectById(jobId);
+        if (initial == null) initial = workflowJobMapper.selectForUpdate(jobId);
+        if (initial == null) return false;
+        ProcessInstance instance = processInstanceMapper.selectForUpdate(initial.getProcInstId());
         WorkflowJob job = workflowJobMapper.selectForUpdate(jobId);
         if (job == null || !"RUNNING".equals(job.getStatus())) return false;
-
-        ProcessInstance instance = processInstanceMapper.selectForUpdate(job.getProcInstId());
         if (instance == null || (Boolean.TRUE.equals(job.getBlocking())
             && !"RUNNING".equals(instance.getStatus()))) {
             job.setStatus("CANCELLED");
@@ -550,8 +556,15 @@ public class ProcessEngine {
             if (current == null) {
                 throw new BizException("BAD_FLOW", "automation node not found: " + job.getNodeId());
             }
-            resolveAndLand(root, instance, readFormData(instance.getFormDataId()),
-                instance.getStartedBy(), Map.of(), current);
+            JsonNode formData = readFormData(instance.getFormDataId());
+            ProcessTreeNav.ParallelParent parent =
+                ProcessTreeNav.findParallelParent(root, current.path("id").asText());
+            if (parent == null) {
+                resolveAndLand(root, instance, formData, instance.getStartedBy(), Map.of(), current);
+            } else {
+                advanceParallelBranch(root, instance, formData,
+                    parent.parallelId(), parent.branchId(), current);
+            }
         }
         return true;
     }

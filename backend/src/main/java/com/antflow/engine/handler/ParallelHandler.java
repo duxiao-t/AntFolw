@@ -13,11 +13,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * PARALLEL 节点（并行网关）：同时落地始终执行或条件命中的分支，每个分支独立推进；
+ * PARALLEL 节点（并行网关）：同时落地条件命中的分支，每个分支独立推进；
  * 分支内遇到 APPROVAL 建任务后暂停等待，所有分支都完成后汇聚到 children。
  *
- * <p>v1 约束（发布校验保证）：分支内为单链 APPROVAL/CC/EMPTY，
- * 不允许嵌套 CONDITIONS/PARALLEL；汇聚后继 children 必须非空。
+ * <p>分支内复用完整节点处理器链，支持嵌套分支和自动化节点。
  */
 @Component
 @Order(12)
@@ -69,10 +68,23 @@ public class ParallelHandler implements NodeHandler {
 
     private boolean shouldExecute(JsonNode branch, JsonNode formData) {
         JsonNode props = branch.path("props");
+        // Legacy snapshots without a mode (or with explicit ALWAYS) keep their
+        // historical behavior; newly designed branches always persist ALWAYS.
         String mode = props.path("conditionMode").asText("ALWAYS");
         return switch (mode) {
             case "ALWAYS" -> true;
-            case "WHEN_MATCHED" -> conditionEvaluator.matches(props, formData);
+            case "WHEN_MATCHED" -> {
+                JsonNode groups = props.path("groups");
+                boolean emptyGroups = groups.isArray() &&
+                    (!groups.elements().hasNext() ||
+                        java.util.stream.StreamSupport.stream(
+                            java.util.Spliterators.spliteratorUnknownSize(
+                                groups.elements(), 0), false)
+                            .allMatch(group -> group.path("conditions").isArray()
+                                && group.path("conditions").isEmpty()));
+                yield emptyGroups
+                    || conditionEvaluator.matches(props, formData);
+            }
             default -> throw new BizException("BAD_FLOW", "并行分支执行方式无效: " + mode);
         };
     }
@@ -87,9 +99,6 @@ public class ParallelHandler implements NodeHandler {
                 return BranchResult.completed(taskIds);
             }
             String type = node.path("type").asText();
-            if (!"APPROVAL".equals(type) && !"CC".equals(type)) {
-                throw new BizException("BAD_FLOW", "并行分支内只允许审批和抄送节点: " + type);
-            }
             NodeHandler handler = pickHandler(type);
             if (handler == null) {
                 throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);

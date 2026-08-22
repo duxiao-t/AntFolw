@@ -245,7 +245,7 @@ describe('process designer validation', () => {
     expect(validateProcessTree(branch(['BJ', 'SH']))).toEqual([]);
   });
 
-  it('rejects async nodes in parallel branches', () => {
+  it('allows async nodes in parallel branches', () => {
     const tree: TreeNode = {
       id: 'root',
       type: 'ROOT',
@@ -260,7 +260,7 @@ describe('process designer validation', () => {
             children: {
               id: 'delay-a',
               type: 'DELAY',
-              props: { mode: 'DURATION', amount: 1, unit: 'HOURS' },
+            props: { mode: 'DURATION', amount: 1, unit: 'HOURS' },
             },
           },
           {
@@ -269,17 +269,14 @@ describe('process designer validation', () => {
             children: {
               id: 'approval-b',
               type: 'APPROVAL',
-              props: { assignedType: 'SELF', mode: 'OR' },
+            props: { assignedType: 'SELF', mode: 'OR' },
             },
           },
         ],
       },
     };
 
-    expect(validateProcessTree(tree)).toContainEqual({
-      nodeId: 'delay-a',
-      message: '并行分支内只允许审批和抄送节点',
-    });
+    expect(validateProcessTree(tree)).toEqual([]);
   });
 
   it('validates delay limits and webhook signing configuration', () => {
@@ -317,7 +314,7 @@ describe('process designer validation', () => {
     ]);
   });
 
-  it('validates conditional parallel branches and an always branch', () => {
+  it('validates conditional parallel branches', () => {
     const tree: TreeNode = {
       id: 'root',
       type: 'ROOT',
@@ -329,7 +326,7 @@ describe('process designer validation', () => {
           {
             id: 'branch-a',
             type: 'BRANCH',
-            props: { conditionMode: 'WHEN_MATCHED', groups: [] },
+            props: { conditionMode: 'ALWAYS' },
             children: {
               id: 'approval-a',
               type: 'APPROVAL',
@@ -339,7 +336,7 @@ describe('process designer validation', () => {
           {
             id: 'branch-b',
             type: 'BRANCH',
-            props: { conditionMode: 'WHEN_MATCHED', groups: [] },
+            props: { conditionMode: 'ALWAYS' },
             children: {
               id: 'approval-b',
               type: 'APPROVAL',
@@ -350,15 +347,6 @@ describe('process designer validation', () => {
       },
     };
 
-    expect(validateProcessTree(tree)).toEqual(
-      expect.arrayContaining([
-        {
-          nodeId: 'parallel',
-          message: '并行节点至少需要一个始终执行的分支',
-        },
-        { nodeId: 'branch-a', message: '请完整配置分支执行条件' },
-        { nodeId: 'branch-b', message: '请完整配置分支执行条件' },
-      ]),
-    );
+    expect(validateProcessTree(tree)).toEqual([]);
   });
 });

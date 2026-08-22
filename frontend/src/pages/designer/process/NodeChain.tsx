@@ -39,9 +39,7 @@ export function AddButton({
   parallel?: boolean;
 }) {
   const insert = useProcessDesignerStore((state) => state.insertAfter);
-  const items = parallel
-    ? MENU_ITEMS.filter((item) => ['APPROVAL', 'CC'].includes(item.type))
-    : MENU_ITEMS;
+  const items = MENU_ITEMS;
   const menu = (
     <div className="pt-insert-menu">
       {items.map((item) => (

@@ -200,18 +200,31 @@ public class ProcessDefinitionService {
                 if (!branchs.isArray() || branchs.size() < 2) {
                     throw new BizException("BAD_FLOW", "并行网关至少需要 2 个分支");
                 }
-                int alwaysBranchCount = 0;
                 for (com.fasterxml.jackson.databind.JsonNode b : branchs) {
                     if (!"BRANCH".equals(b.path("type").asText())) {
                         throw new BizException("BAD_FLOW", "并行节点包含非法分支类型");
                     }
                     registerId(b, ids);
                     String conditionMode = b.path("props").path("conditionMode")
-                        .asText("ALWAYS");
-                    if ("ALWAYS".equals(conditionMode)) {
-                        alwaysBranchCount++;
+                        .asText(null);
+                    if ("ALWAYS".equals(conditionMode) || conditionMode == null) {
+                        // Unconditional parallel branches are the current format;
+                        // missing mode remains compatible with older snapshots.
                     } else if ("WHEN_MATCHED".equals(conditionMode)) {
-                        validateCondition(b);
+                        // Drafts created by the short-lived conditional-parallel UI
+                        // used WHEN_MATCHED with an empty groups array. Treat that
+                        // shape as the current unconditional branch format.
+                        var groups = b.path("props").path("groups");
+                        boolean emptyGroups = groups.isArray() &&
+                            groups.elements().hasNext() &&
+                            java.util.stream.StreamSupport.stream(
+                                java.util.Spliterators.spliteratorUnknownSize(
+                                    groups.elements(), 0), false)
+                                .allMatch(group -> group.path("conditions").isArray()
+                                    && group.path("conditions").isEmpty());
+                        if (!(groups.isArray() && (groups.isEmpty() || emptyGroups))) {
+                            throw new BizException("BAD_FLOW", "并行分支执行方式无效");
+                        }
                     } else {
                         throw new BizException("BAD_FLOW", "并行分支执行方式无效");
                     }
@@ -221,9 +234,6 @@ public class ProcessDefinitionService {
                     }
                     hasApprovalNode = walkParallelBranch(inner, ids, fieldTypes)
                         || hasApprovalNode;
-                }
-                if (alwaysBranchCount == 0) {
-                    throw new BizException("BAD_FLOW", "并行网关至少需要一个始终执行的分支");
                 }
                 if (n.path("children") == null || n.path("children").isNull()
                         || !n.path("children").has("id")) {
@@ -235,25 +245,10 @@ public class ProcessDefinitionService {
         return walk(n.path("children"), ids, fieldTypes) || hasApprovalNode;
     }
 
-    /** 并行分支内校验：单链 APPROVAL/CC/EMPTY，不允许嵌套 CONDITIONS/PARALLEL。 */
+    /** 并行分支沿完整流程树递归校验，允许嵌套分支和自动化节点。 */
     private boolean walkParallelBranch(com.fasterxml.jackson.databind.JsonNode n,
                                        Set<String> ids, Map<String, String> fieldTypes) {
-        if (n == null || n.isNull() || !n.has("id")) return false;
-        registerId(n, ids);
-        boolean hasApprovalNode = false;
-        String type = n.path("type").asText();
-        switch (type) {
-            case "CC" -> validateCc(n);
-            case "APPROVAL" -> {
-                validateApproval(n, fieldTypes);
-                hasApprovalNode = true;
-            }
-            default -> throw new BizException("BAD_FLOW", "并行分支内只允许审批/抄送/空节点: " + type);
-        }
-        if (n.has("branchs") && n.path("branchs").isArray() && n.path("branchs").size() > 0) {
-            throw new BizException("BAD_FLOW", "并行分支内不允许嵌套分支节点");
-        }
-        return walkParallelBranch(n.path("children"), ids, fieldTypes) || hasApprovalNode;
+        return walk(n, ids, fieldTypes);
     }
 
     private void registerId(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids) {
