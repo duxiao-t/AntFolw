@@ -4,8 +4,12 @@ import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
@@ -14,16 +18,24 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
 @RequiredArgsConstructor
 public class MobileFileService {
     private static final String READY_STATUS = "READY";
+    private static final String PROCESSING_STATUS = "PROCESSING";
+    private static final String FAILED_STATUS = "FAILED";
     private static final String DELETED_STATUS = "DELETED";
     private static final int JPEG_SIGNATURE_SIZE = 3;
 
@@ -33,6 +45,7 @@ public class MobileFileService {
     private final MobileFileProperties properties;
     private final MediaWatermarkProcessor watermarkProcessor;
     private final AuthorizationService authorizationService;
+    private final Executor fileProcessingExecutor;
 
     @Transactional(rollbackFor = Exception.class)
     public MobileFileDto upload(MultipartFile file, long ownerId) {
@@ -42,53 +55,129 @@ public class MobileFileService {
     @Transactional(rollbackFor = Exception.class)
     public MobileFileDto upload(MultipartFile file, long ownerId, boolean watermark, String watermarkText) {
         validateBasic(file);
-        byte[] content = readAllBytes(file);
-        String submittedContentType = normalize(file.getContentType());
-        validateContent(submittedContentType, content);
-        boolean watermarked = false;
-        String watermarkLabel = watermarkText == null ? "" : watermarkText.trim();
-        if (watermark && watermarkProcessor.supports(submittedContentType) && !watermarkLabel.isEmpty()) {
-            content = watermarkProcessor.apply(content, submittedContentType, watermarkLabel);
-            submittedContentType = watermarkProcessor.resultContentType(submittedContentType);
-            watermarked = true;
-        }
-        String sha256 = sha256(content);
-        MobileFile existing = fileMapper.selectOne(new QueryWrapper<MobileFile>()
-            .eq("owner_id", ownerId)
-            .eq("sha256", sha256)
-            .eq("status", READY_STATUS)
-            .isNull("deleted_at"));
-        if (existing != null) {
-            writeStorageObject(existing.getStorageKey(), content, submittedContentType);
-            return toDto(existing);
-        }
+        StagedFile staged = stage(file);
+        try {
+            String submittedContentType = normalize(file.getContentType());
+            validateContent(submittedContentType, readHeader(staged.path()));
+            String watermarkLabel = watermarkText == null ? "" : watermarkText.trim();
+            boolean applyWatermark = watermark && watermarkProcessor.supports(submittedContentType)
+                && !watermarkLabel.isEmpty();
+            boolean asyncVideo = applyWatermark && submittedContentType.startsWith("video/");
 
-        UUID id = UUID.randomUUID();
-        String originalName = sanitizeName(file.getOriginalFilename());
-        if (watermarked && submittedContentType.startsWith("video/")) {
-            originalName = toMp4Name(originalName);
-        }
-        String storageKey = kindPrefix(submittedContentType) + id + "-" + originalName;
-        writeStorageObject(storageKey, content, submittedContentType);
+            if (applyWatermark && !asyncVideo) {
+                byte[] content = applyImageWatermark(readStagedBytes(staged.path()),
+                    submittedContentType, watermarkLabel);
+                submittedContentType = watermarkProcessor.resultContentType(submittedContentType);
+                Files.write(staged.path(), content, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING);
+                staged = new StagedFile(staged.path(), content.length, sha256(content));
+            }
 
-        MobileFile row = new MobileFile();
-        row.setId(id);
-        row.setOwnerId(ownerId);
-        row.setOriginalName(originalName);
-        row.setStorageKey(storageKey);
-        row.setContentType(submittedContentType);
-        row.setSizeBytes((long) content.length);
-        row.setSha256(sha256);
-        row.setStatus(READY_STATUS);
-        fileMapper.insert(row);
-        return toDto(row);
+            if (!asyncVideo) {
+                MobileFile existing = findReadyDuplicate(ownerId, staged.sha256());
+                if (existing != null) {
+                    writeStorageObject(existing.getStorageKey(), staged, submittedContentType);
+                    return toDto(existing);
+                }
+            }
+
+            UUID id = UUID.randomUUID();
+            String originalName = sanitizeName(file.getOriginalFilename());
+            String storageKey = kindPrefix(submittedContentType) + id + "-" + originalName;
+            writeStorageObject(storageKey, staged, submittedContentType);
+
+            MobileFile row = new MobileFile();
+            row.setId(id);
+            row.setOwnerId(ownerId);
+            row.setOriginalName(originalName);
+            row.setStorageKey(storageKey);
+            row.setContentType(submittedContentType);
+            row.setSizeBytes(staged.size());
+            row.setSha256(staged.sha256());
+            row.setStatus(asyncVideo ? PROCESSING_STATUS : READY_STATUS);
+            row.setWatermarkText(asyncVideo ? watermarkLabel : null);
+            fileMapper.insert(row);
+            if (asyncVideo) scheduleVideoProcessing(id);
+            return toDto(row);
+        } catch (IOException exception) {
+            throw new BizException("BAD_FILE", exception.getMessage());
+        } finally {
+            deleteTemp(staged.path());
+        }
     }
 
-    private void writeStorageObject(String storageKey, byte[] content, String contentType) {
-        try {
-            storage.put(storageKey, new ByteArrayInputStream(content), content.length, contentType);
+    private void writeStorageObject(String storageKey, StagedFile staged, String contentType) {
+        try (InputStream content = Files.newInputStream(staged.path())) {
+            storage.put(storageKey, content, staged.size(), contentType);
         } catch (IOException exception) {
             throw new BizException("FILE_STORAGE_FAILED", exception.getMessage());
+        }
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverPendingVideoProcessing() {
+        fileMapper.selectList(new QueryWrapper<MobileFile>().eq("status", PROCESSING_STATUS))
+            .forEach(file -> submitVideoProcessing(file.getId()));
+    }
+
+    void processVideoWatermark(UUID id) {
+        MobileFile file = fileMapper.selectById(id);
+        if (file == null || !PROCESSING_STATUS.equals(file.getStatus())) return;
+        try {
+            byte[] source;
+            try (InputStream input = storage.get(file.getStorageKey()).getInputStream()) {
+                source = input.readAllBytes();
+            }
+            byte[] processed = watermarkProcessor.apply(source, file.getContentType(),
+                file.getWatermarkText());
+            String resultContentType = watermarkProcessor.resultContentType(file.getContentType());
+            storage.put(file.getStorageKey(), new java.io.ByteArrayInputStream(processed),
+                processed.length, resultContentType);
+            file.setOriginalName(toMp4Name(file.getOriginalName()));
+            file.setContentType(resultContentType);
+            file.setSizeBytes((long) processed.length);
+            file.setSha256(sha256(processed));
+            file.setStatus(READY_STATUS);
+            file.setWatermarkText(null);
+            file.setProcessingError(null);
+            fileMapper.updateById(file);
+        } catch (Exception exception) {
+            file.setStatus(FAILED_STATUS);
+            file.setProcessingError(truncate(exception.getMessage(), 512));
+            fileMapper.updateById(file);
+        }
+    }
+
+    private byte[] applyImageWatermark(byte[] content, String contentType, String label) {
+        // ponytail: one image watermark at a time; use a dedicated image pool if throughput matters.
+        synchronized (watermarkProcessor) {
+            return watermarkProcessor.apply(content, contentType, label);
+        }
+    }
+
+    private void scheduleVideoProcessing(UUID id) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    submitVideoProcessing(id);
+                }
+            });
+        } else {
+            submitVideoProcessing(id);
+        }
+    }
+
+    private void submitVideoProcessing(UUID id) {
+        try {
+            fileProcessingExecutor.execute(() -> processVideoWatermark(id));
+        } catch (RejectedExecutionException exception) {
+            MobileFile file = fileMapper.selectById(id);
+            if (file != null && PROCESSING_STATUS.equals(file.getStatus())) {
+                file.setStatus(FAILED_STATUS);
+                file.setProcessingError("file processing queue is full");
+                fileMapper.updateById(file);
+            }
         }
     }
 
@@ -98,6 +187,9 @@ public class MobileFileService {
 
     public MobileFileContent readContent(UUID id, long userId, java.util.Collection<String> roles) {
         MobileFile file = requireReadable(id, userId, roles);
+        if (!READY_STATUS.equals(file.getStatus())) {
+            throw new BizException("FILE_PROCESSING", "file is not ready");
+        }
         return new MobileFileContent(toDto(file), storage.get(file.getStorageKey()));
     }
 
@@ -131,12 +223,43 @@ public class MobileFileService {
         }
     }
 
-    private byte[] readAllBytes(MultipartFile file) {
+    private StagedFile stage(MultipartFile file) {
+        Path path = null;
         try {
-            return file.getInputStream().readAllBytes();
+            path = Files.createTempFile("antflow-upload-", ".bin");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long size;
+            try (InputStream input = new DigestInputStream(file.getInputStream(), digest);
+                 var output = Files.newOutputStream(path)) {
+                size = input.transferTo(output);
+            }
+            return new StagedFile(path, size, HexFormat.of().formatHex(digest.digest()));
+        } catch (IOException | NoSuchAlgorithmException exception) {
+            deleteTemp(path);
+            throw new BizException("BAD_FILE", exception.getMessage());
+        }
+    }
+
+    private static byte[] readHeader(Path path) throws IOException {
+        try (InputStream input = Files.newInputStream(path)) {
+            return input.readNBytes(16);
+        }
+    }
+
+    private static byte[] readStagedBytes(Path path) {
+        try {
+            return Files.readAllBytes(path);
         } catch (IOException exception) {
             throw new BizException("BAD_FILE", exception.getMessage());
         }
+    }
+
+    private MobileFile findReadyDuplicate(long ownerId, String sha256) {
+        return fileMapper.selectOne(new QueryWrapper<MobileFile>()
+            .eq("owner_id", ownerId)
+            .eq("sha256", sha256)
+            .eq("status", READY_STATUS)
+            .isNull("deleted_at"));
     }
 
     private void validateContent(String submittedContentType, byte[] content) {
@@ -264,6 +387,20 @@ public class MobileFileService {
         return name.isBlank() ? "file" : name;
     }
 
+    private static void deleteTemp(Path path) {
+        if (path == null) return;
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // best effort cleanup
+        }
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null) return null;
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
     private MobileFile requireReadable(UUID id, long userId, java.util.Collection<String> roles) {
         MobileFile file = requireExisting(id);
         boolean admin = roles != null && roles.contains("admin");
@@ -290,7 +427,11 @@ public class MobileFileService {
             file.getOriginalName(),
             file.getContentType(),
             file.getSizeBytes(),
-            "/api/mobile/files/" + file.getId() + "/content"
+            "/api/mobile/files/" + file.getId() + "/content",
+            file.getStatus()
         );
+    }
+
+    private record StagedFile(Path path, long size, String sha256) {
     }
 }

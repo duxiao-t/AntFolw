@@ -21,6 +21,8 @@ public class MobileFile {
     private Long sizeBytes;
     private String sha256;
     private String status;
+    private String watermarkText;
+    private String processingError;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
     private OffsetDateTime deletedAt;

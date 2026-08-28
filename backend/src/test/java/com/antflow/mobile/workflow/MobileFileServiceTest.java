@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +30,7 @@ class MobileFileServiceTest {
     private MediaWatermarkProcessor processor;
     private MobileFileService service;
     private AuthorizationService authorizationService;
+    private List<Runnable> backgroundTasks;
 
     @BeforeEach
     void setUp() {
@@ -37,10 +39,11 @@ class MobileFileServiceTest {
         storage = new CapturingStorage();
         processor = Mockito.mock(MediaWatermarkProcessor.class);
         authorizationService = Mockito.mock(AuthorizationService.class);
+        backgroundTasks = new ArrayList<>();
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService);
+            authorizationService, backgroundTasks::add);
     }
 
     @Test
@@ -57,7 +60,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4L);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService);
+            authorizationService, backgroundTasks::add);
         MockMultipartFile file = pngFile("large.png", new byte[] {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D
         });
@@ -129,7 +132,7 @@ class MobileFileServiceTest {
         properties.setMaxBytes(10L * 1024 * 1024);
         properties.setMaxVideoBytes(8L);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService);
+            authorizationService, backgroundTasks::add);
 
         MockMultipartFile file = new MockMultipartFile("file", "clip.mp4", "video/mp4", new byte[9]);
 
@@ -143,7 +146,7 @@ class MobileFileServiceTest {
     void uploadAcceptsMp4Video() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService);
+            authorizationService, backgroundTasks::add);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = mp4Bytes();
@@ -161,7 +164,7 @@ class MobileFileServiceTest {
     void uploadAppliesWatermarkForVideoAndRenamesToMp4() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService);
+            authorizationService, backgroundTasks::add);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
         Mockito.when(processor.apply(Mockito.any(), Mockito.eq("video/quicktime"), Mockito.eq("AntFlow")))
@@ -171,8 +174,18 @@ class MobileFileServiceTest {
         MobileFileDto dto = service.upload(
             new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()), 7L, true, "AntFlow");
 
-        assertThat(dto.contentType()).isEqualTo("video/mp4");
-        assertThat(dto.name()).isEqualTo("clip.mp4");
+        assertThat(dto.status()).isEqualTo("PROCESSING");
+        assertThat(dto.contentType()).isEqualTo("video/quicktime");
+        ArgumentCaptor<MobileFile> captor = ArgumentCaptor.forClass(MobileFile.class);
+        Mockito.verify(fileMapper).insert(captor.capture());
+        MobileFile row = captor.getValue();
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        backgroundTasks.get(0).run();
+
+        assertThat(row.getStatus()).isEqualTo("READY");
+        assertThat(row.getContentType()).isEqualTo("video/mp4");
+        assertThat(row.getOriginalName()).isEqualTo("clip.mp4");
         assertThat(storage.contentBytes).isEqualTo(new byte[] {1, 2, 3});
         assertThat(storage.contentType).isEqualTo("video/mp4");
     }
@@ -357,7 +370,8 @@ class MobileFileServiceTest {
 
         @Override
         public org.springframework.core.io.Resource get(String storageKey) {
-            return new org.springframework.core.io.InputStreamResource(new ByteArrayInputStream(new byte[0]));
+            return new org.springframework.core.io.InputStreamResource(
+                new ByteArrayInputStream(contentBytes));
         }
 
         @Override

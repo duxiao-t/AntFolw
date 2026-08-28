@@ -12,6 +12,8 @@ public class MobileFileProperties {
     private String storage = "minio";
     private long maxBytes = 100L * 1024 * 1024;
     private long maxVideoBytes = 100L * 1024 * 1024;
+    private int processingConcurrency = 2;
+    private int processingQueueCapacity = 20;
     private Minio minio = new Minio();
 
     @Data
