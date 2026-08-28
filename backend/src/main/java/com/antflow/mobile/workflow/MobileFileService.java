@@ -268,10 +268,9 @@ public class MobileFileService {
         MobileFile file = requireExisting(id);
         boolean admin = roles != null && roles.contains("admin");
         boolean owner = Objects.equals(file.getOwnerId(), userId);
-        boolean participant = accessMapper.countReadableProcessLinks(id, userId) > 0;
         boolean linkedInstanceReadable = accessMapper.selectLinkedInstanceIds(id).stream()
-            .anyMatch(instanceId -> authorizationService.canReadInstance(instanceId, userId));
-        if (admin || owner || participant || linkedInstanceReadable) {
+            .anyMatch(instanceId -> authorizationService.canReadFullInstance(instanceId, userId));
+        if (admin || owner || linkedInstanceReadable) {
             return file;
         }
         throw new HiddenResourceException("file not found");

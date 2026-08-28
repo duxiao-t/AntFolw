@@ -1,5 +1,6 @@
 import {
   App,
+  Alert,
   Button,
   Card,
   Descriptions,
@@ -106,6 +107,9 @@ export default function DetailPage() {
   const isAdmin = roles.includes('admin');
   const canOverride = isAdmin || permissions.includes('workflow.instance.override');
   const canRetryAutomation = isAdmin || permissions.includes('workflow.automation.retry');
+  const canApprove = isAdmin || permissions.includes('workflow.task.approve');
+  const canReject = isAdmin || permissions.includes('workflow.task.reject');
+  const canWithdraw = isAdmin || permissions.includes('workflow.instance.withdraw');
 
   const { data, isFetching } = useQuery({
     queryKey: ['instance', id],
@@ -191,6 +195,7 @@ export default function DetailPage() {
   const isRunner = instance.status === 'RUNNING';
   const rejectTargets = snapshotObj ? findApproverNodes(snapshotObj) : [];
   const pendingTask = (tasks ?? []).find((task: any) => task.status === 'PENDING' && task.taskType !== 'REWORK');
+  const fullVisibility = (data as any).visibility !== 'SUMMARY';
 
   async function doApprove(taskId: number) {
     try {
@@ -295,14 +300,17 @@ export default function DetailPage() {
       title={`流程实例 #${instance.id}`}
       extra={
         <Space>
-          {myPending && isRunner && (
+          {myPending && isRunner && fullVisibility && (
             <>
+              {canApprove && (
               <Button
                 type="primary"
                 onClick={() => doApprove(myPending.id)}
               >
                 同意
               </Button>
+              )}
+              {canReject && (
               <Button
                 danger
                 onClick={() =>
@@ -311,12 +319,13 @@ export default function DetailPage() {
               >
                 驳回
               </Button>
+              )}
             </>
           )}
-          {isStarter && isRunner && (
+          {canWithdraw && isStarter && isRunner && fullVisibility && (
             <Button onClick={() => setWithdrawOpen(true)}>撤回流程</Button>
           )}
-          {canOverride && isRunner && pendingTask && (
+          {canOverride && isRunner && pendingTask && fullVisibility && (
             <Button danger icon={<ThunderboltOutlined />} onClick={() => setOverrideOpen(true)}>
               紧急介入
             </Button>
@@ -325,6 +334,15 @@ export default function DetailPage() {
         </Space>
       }
     >
+      {!fullVisibility && (
+        <Alert
+          type="info"
+          showIcon
+          message="当前账号仅可查看流程摘要"
+          description="表单内容、附件、自动化作业和流程操作已隐藏。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Descriptions bordered size="small" column={2}>
         <Descriptions.Item label="ID">{instance.id}</Descriptions.Item>
         <Descriptions.Item label="状态">
@@ -340,7 +358,7 @@ export default function DetailPage() {
         </Descriptions.Item>
       </Descriptions>
 
-      {formSchema.length > 0 && (
+      {fullVisibility && formSchema.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <h3>表单详情</h3>
           <FormRenderer
@@ -434,7 +452,7 @@ export default function DetailPage() {
         }))}
       />
 
-      {(data as any).automationJobs?.length > 0 && (
+      {fullVisibility && (data as any).automationJobs?.length > 0 && (
         <>
           <h3 style={{ marginTop: 24 }}>自动化作业</h3>
           <Table

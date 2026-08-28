@@ -250,14 +250,14 @@ class MobileFileServiceTest {
     }
 
     @Test
-    void processParticipantCanReadLinkedFileMetadata() {
+    void historicalParticipantCannotReadLinkedFileMetadataWithoutFullVisibility() {
         UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
         Mockito.when(fileMapper.selectById(id)).thenReturn(existingFile(id, 7L));
-        Mockito.when(accessMapper.countReadableProcessLinks(id, 8L)).thenReturn(1L);
+        Mockito.when(accessMapper.selectLinkedInstanceIds(id)).thenReturn(List.of(501L));
+        Mockito.when(authorizationService.canReadFullInstance(501L, 8L)).thenReturn(false);
 
-        MobileFileDto dto = service.getMetadata(id, 8L, List.of("user"));
-
-        assertThat(dto.id()).isEqualTo(id);
+        assertThatThrownBy(() -> service.getMetadata(id, 8L, List.of("user")))
+            .isInstanceOf(HiddenResourceException.class);
     }
 
     @Test
