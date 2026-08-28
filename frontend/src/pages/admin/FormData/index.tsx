@@ -1,8 +1,13 @@
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import { ProTable } from '@ant-design/pro-components';
-import { request, useLocation } from '@umijs/max';
-import { Button, Modal, Typography } from 'antd';
+import { PageContainer, ProTable } from '@ant-design/pro-components';
+import { Link, request, useLocation } from '@umijs/max';
+import { Button, Descriptions, Modal, Typography } from 'antd';
 import { useRef, useState } from 'react';
+import {
+  formatFieldSummary,
+  formatFieldValue,
+  type FormDataFieldValue,
+} from './fieldValues';
 
 type FormDataRecord = {
   id: number;
@@ -11,6 +16,8 @@ type FormDataRecord = {
   data?: unknown;
   status: 'DRAFT' | 'SUBMITTED';
   createdBy?: number;
+  createdByUsername?: string;
+  fieldValues?: FormDataFieldValue[];
   createdAt?: string;
 };
 
@@ -57,6 +64,8 @@ export default function AdminFormDataPage() {
       dataIndex: 'createdBy',
       valueType: 'digit',
       width: 100,
+      renderText: (_, record) =>
+        record.createdByUsername ?? (record.createdBy ? `用户 #${record.createdBy}` : '—'),
     },
     {
       title: '提交时间',
@@ -67,11 +76,10 @@ export default function AdminFormDataPage() {
     },
     {
       title: '提交数据',
-      dataIndex: 'data',
+      dataIndex: 'fieldValues',
       search: false,
       ellipsis: true,
-      renderText: (value) =>
-        typeof value === 'string' ? value : JSON.stringify(value ?? {}),
+      renderText: (value) => formatFieldSummary(value as FormDataFieldValue[] | undefined),
     },
     {
       title: '操作',
@@ -86,7 +94,15 @@ export default function AdminFormDataPage() {
   ];
 
   return (
-    <>
+    <PageContainer
+      title={false}
+      breadcrumb={{
+        items: [
+          { title: <Link to="/approval/forms">表单管理</Link> },
+          { title: '提交数据' },
+        ],
+      }}
+    >
       <ProTable
         actionRef={actionRef}
         rowKey="id"
@@ -119,12 +135,21 @@ export default function AdminFormDataPage() {
         onCancel={() => setCurrent(null)}
         width={720}
       >
-        <Typography.Paragraph>
-          <pre style={{ maxHeight: 520, overflow: 'auto' }}>
-            {JSON.stringify(current?.data ?? {}, null, 2)}
-          </pre>
-        </Typography.Paragraph>
+        <Descriptions
+          bordered
+          column={1}
+          size="small"
+          items={(current?.fieldValues ?? []).map((field) => ({
+            key: field.fieldId,
+            label: `${field.fieldName}（${field.fieldId}）`,
+            children: (
+              <Typography.Text style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                {formatFieldValue(field.value)}
+              </Typography.Text>
+            ),
+          }))}
+        />
       </Modal>
-    </>
+    </PageContainer>
   );
 }
