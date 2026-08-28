@@ -6,6 +6,7 @@ import com.antflow.authz.FormGrantService;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.RoleAdminService;
 import com.antflow.engine.BizException;
+import com.antflow.engine.NoAssigneeFoundException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.form.FormProcessPublishService;
@@ -278,6 +279,96 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void concurrentReportingUpdatesCannotCreateCycle() throws Exception {
+        long adminId = userId("admin");
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long departmentId = insertDepartment(companyId, "汇报并发测试部");
+        long firstUserId = insertUser("reporting-a-" + UUID.randomUUID());
+        long secondUserId = insertUser("reporting-b-" + UUID.randomUUID());
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id IN (?, ?)",
+            departmentId, firstUserId, secondUserId);
+
+        try {
+            List<Throwable> outcomes = runConcurrently(adminId,
+                () -> userService.update(firstUserId, Map.of("managerId", secondUserId)),
+                () -> userService.update(secondUserId, Map.of("managerId", firstUserId)));
+
+            assertThat(outcomes.stream().filter(Objects::isNull).count()).isEqualTo(1);
+            assertThat(outcomes.stream().filter(Objects::nonNull).toList())
+                .singleElement()
+                .isInstanceOfSatisfying(BizException.class, exception ->
+                    assertThat(exception.getCode()).isEqualTo("MANAGER_CYCLE"));
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_user
+                WHERE id IN (?, ?) AND manager_id IS NOT NULL
+                """, Long.class, firstUserId, secondUserId)).isEqualTo(1L);
+        } finally {
+            jdbcTemplate.update("UPDATE t_user SET manager_id = NULL WHERE id IN (?, ?)",
+                firstUserId, secondUserId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", firstUserId, secondUserId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", departmentId);
+        }
+    }
+
+    @Test
+    void missingNextReportingManagerRollsBackCurrentApproval() {
+        long adminId = userId("admin");
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long departmentId = insertDepartment(companyId, "审批回滚测试部");
+        long starterId = insertUser("reporting-starter-" + UUID.randomUUID());
+        long firstManagerId = insertUser("reporting-manager-" + UUID.randomUUID());
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id IN (?, ?)",
+            departmentId, starterId, firstManagerId);
+        jdbcTemplate.update("UPDATE t_user SET manager_id = ? WHERE id = ?",
+            firstManagerId, starterId);
+        String flow = reportingManagerFlow(adminId, 2);
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", flow);
+        long formDataId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data,
+                                    status, created_by)
+            VALUES (?, 1, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, starterId);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, process_def_version, process_snapshot,
+                                           form_data_id, status, current_node_id, version,
+                                           started_by)
+            VALUES (?, 1, ?::jsonb, ?, 'RUNNING', 'a1', 0, ?)
+            RETURNING id
+            """, Long.class, processId, flow, formDataId, starterId);
+        long taskId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, approval_mode,
+                               task_type, version)
+            VALUES (?, 'a1', ?, 'PENDING', 'OR', 'APPROVAL', 0)
+            RETURNING id
+            """, Long.class, instanceId, adminId);
+
+        assertThatThrownBy(() -> processEngine.approve(
+            new CompleteCmd(taskId, "APPROVE", "ok", null), adminId))
+            .isInstanceOf(NoAssigneeFoundException.class)
+            .hasMessageContaining("第 2 级直属上级");
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE id = ?", String.class, taskId))
+            .isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_task WHERE proc_inst_id = ? AND node_id = 'a2'
+            """, Long.class, instanceId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_task_history
+            WHERE proc_inst_id = ? AND action = 'APPROVE'
+            """, Long.class, instanceId)).isZero();
+        assertThat(jdbcTemplate.queryForMap("""
+            SELECT status, current_node_id FROM t_process_instance WHERE id = ?
+            """, instanceId)).containsEntry("status", "RUNNING")
+            .containsEntry("current_node_id", "a1");
+    }
+
+    @Test
     void auditInsertFailureRollsBackRealBusinessWrite() {
         String companyName = "rollback-company-" + UUID.randomUUID();
 
@@ -431,6 +522,15 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, Long.class, username, username);
     }
 
+    private long insertDepartment(long companyId, String name) {
+        String path = "test_" + UUID.randomUUID().toString().replace("-", "");
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_department(company_id, path, name)
+            VALUES (?, CAST(? AS ltree), ?)
+            RETURNING id
+            """, Long.class, companyId, path, name);
+    }
+
     private void assignRole(long userId, long roleId) {
         jdbcTemplate.update("INSERT INTO t_user_role(user_id, role_id) VALUES (?, ?)",
             userId, roleId);
@@ -491,6 +591,17 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "assignedType":"ASSIGN_USER","assignedUser":[%d],"mode":"OR"},
               "children":null}}
             """.formatted(assigneeId);
+    }
+
+    private static String reportingManagerFlow(long firstAssignee, int managerLevel) {
+        return """
+            {"id":"root","type":"ROOT","children":{
+              "id":"a1","type":"APPROVAL","props":{
+                "assignedType":"ASSIGN_USER","assignedUser":[%d],"mode":"OR"},
+              "children":{"id":"a2","type":"APPROVAL","props":{
+                "assignedType":"DIRECT_MANAGER","manager":{"level":%d},"mode":"OR",
+                "nobody":{"handler":"TO_PASS"}},"children":null}}}
+            """.formatted(firstAssignee, managerLevel);
     }
 
     @FunctionalInterface

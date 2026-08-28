@@ -36,6 +36,7 @@ public class ApprovalHandler implements NodeHandler {
         try {
             assignees = assigneeResolver.resolve(nodeId, spec);
         } catch (NoAssigneeFoundException e) {
+            if ("DIRECT_MANAGER".equals(spec.type())) throw e;
             String handler = node.path("props").path("nobody").path("handler").asText("TO_PASS");
             if ("TO_PASS".equals(handler)) {
                 historyMapper.insert(historyRow(pi.getId(), ctx.fromNodeId(), nodeId, "AUTO_PASS", ctx.starterId(), null));
