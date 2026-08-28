@@ -34,6 +34,16 @@ public class UserController {
         return userService.listAuthorizedPage(keyword, deptId, includeDescendants, page, size);
     }
 
+    @GetMapping("/manager-candidates")
+    public List<ManagerCandidate> managerCandidates(@RequestParam Long deptId,
+                                                     @RequestParam(required = false) Long excludeUserId,
+                                                     @RequestParam(required = false) String keyword) {
+        return userService.managerCandidates(deptId, excludeUserId, keyword).stream()
+            .map(user -> new ManagerCandidate(user.getId(), user.getDisplayName(),
+                user.getEmployeeNo(), user.getDeptId()))
+            .toList();
+    }
+
     @PostMapping
     public Map<String, Object> create(@RequestBody Map<String, Object> body) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
@@ -150,4 +160,5 @@ public class UserController {
     public record ImportFailure(int row, String message) { }
     public record ImportResult(int successCount, int failedCount, String defaultPassword,
                                List<ImportFailure> failures) { }
+    public record ManagerCandidate(Long id, String displayName, String employeeNo, Long deptId) { }
 }

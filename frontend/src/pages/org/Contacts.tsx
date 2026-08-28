@@ -33,8 +33,10 @@ interface Dept {
 interface UserItem {
   id: number; employeeNo: string; username: string; displayName: string; email: string;
   phone: string; position: string; gender: string; deptId: number;
+  managerId?: number | null; managerDisplayName?: string | null;
 }
 interface UserPage { records?: UserItem[]; total?: number; }
+interface ManagerCandidate { id: number; displayName: string; employeeNo: string; deptId: number; }
 
 export default function ContactsPage() {
   const access = useAccess();
@@ -56,6 +58,7 @@ export default function ContactsPage() {
   const [leaderDeptId, setLeaderDeptId] = useState<number | null>(null);
   const [memberOpen, setMemberOpen] = useState(false);
   const [memberEdit, setMemberEdit] = useState<UserItem | null>(null);
+  const [managerKeyword, setManagerKeyword] = useState('');
   const [passwordTarget, setPasswordTarget] = useState<UserItem | null>(null);
   const [selectedMemberIds, setSelectedMemberIds] = useState<React.Key[]>([]);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -89,6 +92,31 @@ export default function ContactsPage() {
     queryFn: () => request('/api/users/page', { params: { page: 1, size: 100 } }),
     enabled: leaderOpen,
   });
+
+  const managerDepartmentId = memberEdit?.deptId ?? selDeptId;
+  const { data: managerCandidates = [], isFetching: managerCandidatesLoading } = useQuery<ManagerCandidate[]>({
+    queryKey: ['manager-candidates', managerDepartmentId, memberEdit?.id, managerKeyword],
+    queryFn: () => request('/api/users/manager-candidates', { params: {
+      deptId: managerDepartmentId,
+      excludeUserId: memberEdit?.id,
+      keyword: managerKeyword || undefined,
+    } }),
+    enabled: memberOpen && !!managerDepartmentId,
+  });
+
+  const managerOptions = useMemo(() => {
+    const options = managerCandidates.map((candidate) => ({
+      value: candidate.id,
+      label: `${candidate.displayName}（${candidate.employeeNo}）`,
+    }));
+    if (memberEdit?.managerId && !options.some((option) => option.value === memberEdit.managerId)) {
+      options.unshift({
+        value: memberEdit.managerId,
+        label: memberEdit.managerDisplayName ?? `用户 ${memberEdit.managerId}`,
+      });
+    }
+    return options;
+  }, [managerCandidates, memberEdit]);
 
   // --- tree data ---
   const treeData = useMemo(() => {
@@ -469,8 +497,8 @@ export default function ContactsPage() {
               importInputRef={importInputRef}
               onSelectedMemberIdsChange={setSelectedMemberIds}
               onPageChange={setMemberPage}
-              onAdd={() => { setMemberEdit(null); memberForm.resetFields(); setMemberOpen(true); }}
-              onEdit={(member) => { setMemberEdit(member); setMemberOpen(true); memberForm.setFieldsValue({ ...member, gender: normalizeGender(member.gender) }); }}
+              onAdd={() => { setMemberEdit(null); setManagerKeyword(''); memberForm.resetFields(); setMemberOpen(true); }}
+              onEdit={(member) => { setMemberEdit(member); setManagerKeyword(''); setMemberOpen(true); memberForm.setFieldsValue({ ...member, gender: normalizeGender(member.gender) }); }}
               onRemove={(id) => memberRemove.mutate(id)}
               onBulkRemove={handleBulkMemberRemove}
               onExport={handleExportMembers}
@@ -555,6 +583,9 @@ export default function ContactsPage() {
         saving={memberCreate.isPending || memberUpdate.isPending}
         onOk={handleMemberOk}
         onCancel={() => { setMemberOpen(false); setMemberEdit(null); memberForm.resetFields(); }}
+        managerOptions={managerOptions}
+        managerLoading={managerCandidatesLoading}
+        onManagerSearch={setManagerKeyword}
         canResetPassword={!!access.canAdmin}
         onResetPassword={() => {
           if (!memberEdit) return;

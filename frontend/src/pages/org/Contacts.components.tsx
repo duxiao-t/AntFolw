@@ -19,6 +19,8 @@ export interface MemberListItem {
   position: string;
   gender: string;
   deptId: number;
+  managerId?: number | null;
+  managerDisplayName?: string | null;
 }
 
 export function MemberGenderTag({ value }: { value?: string }) {
@@ -149,6 +151,7 @@ export function MembersSection({
           { title: '手机', dataIndex: 'phone' },
           { title: '部门', dataIndex: 'deptId', render: (_, r) => deptNameById[r.deptId] ?? '-' },
           { title: '职务', dataIndex: 'position' },
+          { title: '直属上级', dataIndex: 'managerDisplayName', render: (value) => value || '-' },
           { title: '性别', dataIndex: 'gender', render: (_, r) => <MemberGenderTag value={r.gender} /> },
           { title: '操作', key: 'op', width: 250, render: (_, r) => {
             const canManage = !!canManageUsersByDept?.[r.deptId];
@@ -189,6 +192,9 @@ export function MemberFormModal({
   onCancel,
   canResetPassword,
   onResetPassword,
+  managerOptions,
+  managerLoading,
+  onManagerSearch,
 }: {
   open: boolean;
   editing: MemberListItem | null;
@@ -198,6 +204,9 @@ export function MemberFormModal({
   onCancel: () => void;
   canResetPassword?: boolean;
   onResetPassword?: () => void;
+  managerOptions: Array<{ value: number; label: string }>;
+  managerLoading?: boolean;
+  onManagerSearch: (keyword: string) => void;
 }) {
   return (
     <Modal
@@ -218,6 +227,17 @@ export function MemberFormModal({
           <Form.Item label="手机" name="phone"><Input /></Form.Item>
           <Form.Item label="邮箱" name="email"><Input /></Form.Item>
           <Form.Item label="职务" name="position"><Input /></Form.Item>
+          <Form.Item label="直属上级" name="managerId">
+            <Select
+              allowClear
+              showSearch
+              filterOption={false}
+              loading={managerLoading}
+              options={managerOptions}
+              placeholder="搜索姓名、账号或工号"
+              onSearch={onManagerSearch}
+            />
+          </Form.Item>
           {!editing && (
             <>
               <Form.Item label="初始密码" name="password" rules={[

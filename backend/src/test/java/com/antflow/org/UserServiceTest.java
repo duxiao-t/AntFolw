@@ -29,6 +29,49 @@ import static org.mockito.Mockito.when;
 
 class UserServiceTest {
     @Test
+    void listAddsManagerDisplayNameWithOneBatchLookup() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            Mockito.mock(JdbcTemplate.class), authorizationService);
+        User member = user(1L, 10L, 2L, "ACTIVE");
+        User manager = user(2L, 10L, null, "ACTIVE");
+        manager.setDisplayName("张经理");
+        when(userMapper.selectList(any())).thenReturn(List.of(member));
+        when(userMapper.selectBatchIds(any())).thenReturn(List.of(manager));
+        when(authorizationService.inCurrentDataScope(any(), eq(1L), eq(10L))).thenReturn(true);
+
+        List<User> users = service.listAuthorized(null, null);
+
+        assertEquals("张经理", users.get(0).getManagerDisplayName());
+        verify(userMapper).selectBatchIds(List.of(2L));
+    }
+
+    @Test
+    void managerCandidatesStayInsideTargetCompany() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class),
+            authorizationService);
+        Department target = department(10L, 7L);
+        User candidate = user(2L, 11L, null, "ACTIVE");
+        when(departmentMapper.selectById(10L)).thenReturn(target);
+        when(departmentMapper.selectList(any())).thenReturn(List.of(target, department(11L, 7L)));
+        when(userMapper.selectList(any())).thenReturn(List.of(candidate));
+
+        List<User> candidates = service.managerCandidates(10L, 1L, "经理");
+
+        assertEquals(List.of(candidate), candidates);
+        verify(authorizationService).requireManageableDepartment(
+            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, 10L);
+    }
+
+    @Test
     void updateAcceptsActiveManagerFromSameCompany() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
         DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
@@ -319,9 +362,19 @@ class UserServiceTest {
                                           DepartmentMapper departmentMapper,
                                           DepartmentLeaderMapper leaderMapper,
                                           JdbcTemplate jdbcTemplate) {
+        return newService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper,
+            leaderMapper, jdbcTemplate, Mockito.mock(AuthorizationService.class));
+    }
+
+    private static UserService newService(UserMapper userMapper, UserRoleMapper userRoleMapper,
+                                          RoleMapper roleMapper, PasswordEncoder encoder,
+                                          DepartmentMapper departmentMapper,
+                                          DepartmentLeaderMapper leaderMapper,
+                                          JdbcTemplate jdbcTemplate,
+                                          AuthorizationService authorizationService) {
         return new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper,
             leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class),
-            Mockito.mock(AuthorizationService.class),
+            authorizationService,
             Mockito.mock(AuthSessionService.class), Mockito.mock(AuditService.class));
     }
 

@@ -16,10 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.HashSet;
+import java.util.function.Function;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -255,11 +257,13 @@ public class UserService {
         if (departmentId != null) {
             query.eq("dept_id", departmentId);
         }
-        return userMapper.selectList(query).stream()
+        List<User> users = userMapper.selectList(query).stream()
             .filter(user -> authorizationService.inCurrentDataScope(
                 com.antflow.authz.PermissionCodes.ORG_USER_READ,
                 user.getId(), user.getDeptId()))
             .toList();
+        fillManagerNames(users);
+        return users;
     }
 
     public Page<User> listAuthorizedPage(String keyword, Long departmentId,
@@ -296,7 +300,51 @@ public class UserService {
             });
         }
         query.orderByAsc("display_name").orderByAsc("id");
-        return userMapper.selectPage(Page.of(safePage, safeSize), query);
+        Page<User> result = userMapper.selectPage(Page.of(safePage, safeSize), query);
+        fillManagerNames(result.getRecords());
+        return result;
+    }
+
+    public List<User> managerCandidates(Long departmentId, Long excludedUserId, String keyword) {
+        authorizationService.requireManageableDepartment(
+            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
+        Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);
+        if (department == null) {
+            throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
+        }
+        List<Long> departmentIds = departmentMapper.selectList(new QueryWrapper<Department>()
+            .eq("company_id", department.getCompanyId())).stream()
+            .map(Department::getId)
+            .toList();
+        QueryWrapper<User> query = new QueryWrapper<User>()
+            .eq("status", "ACTIVE")
+            .in("dept_id", departmentIds)
+            .orderByAsc("display_name")
+            .orderByAsc("id")
+            .last("LIMIT 100");
+        if (excludedUserId != null) query.ne("id", excludedUserId);
+        if (keyword != null && !keyword.isBlank()) {
+            String normalized = keyword.trim();
+            query.and(item -> item.like("display_name", normalized)
+                .or().like("username", normalized)
+                .or().like("employee_no", normalized));
+        }
+        return userMapper.selectList(query);
+    }
+
+    private void fillManagerNames(List<User> users) {
+        List<Long> managerIds = users.stream()
+            .map(User::getManagerId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        if (managerIds.isEmpty()) return;
+        Map<Long, User> managers = userMapper.selectBatchIds(managerIds).stream()
+            .collect(Collectors.toMap(User::getId, Function.identity()));
+        for (User user : users) {
+            User manager = managers.get(user.getManagerId());
+            if (manager != null) user.setManagerDisplayName(manager.getDisplayName());
+        }
     }
 
     private void changeStatus(User user, String status) {

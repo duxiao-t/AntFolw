@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useRef, useState, type Key } from 'react';
-import { MemberGenderTag, MembersSection, type MemberListItem } from './Contacts.components';
+import { Form } from 'antd';
+import { MemberFormModal, MemberGenderTag, MembersSection, type MemberListItem } from './Contacts.components';
 
 vi.mock('@ant-design/pro-components', () => ({
   ProTable: ({ columns, dataSource, rowSelection }: any) => (
@@ -24,7 +25,9 @@ vi.mock('@ant-design/pro-components', () => ({
             </td>
             {columns.map((column: any) => (
               <td key={column.key ?? column.dataIndex}>
-                {column.render ? column.render(null, row) : row[column.dataIndex as keyof MemberListItem]}
+                {column.render
+                  ? column.render(row[column.dataIndex as keyof MemberListItem], row)
+                  : row[column.dataIndex as keyof MemberListItem]}
               </td>
             ))}
           </tr>
@@ -58,6 +61,8 @@ describe('Contacts components', () => {
             position: '',
             gender: 'M',
             deptId: 2,
+            managerId: 2,
+            managerDisplayName: '张经理',
           }]}
           total={1}
           currentPage={1}
@@ -78,11 +83,48 @@ describe('Contacts components', () => {
 
     render(<Harness />);
 
+    expect(screen.getByText('张经理')).toBeInTheDocument();
+
     const bulkDelete = screen.getByRole('button', { name: /批量删除/ });
     expect(bulkDelete).toBeDisabled();
 
     fireEvent.click(screen.getByLabelText('select-1'));
 
     expect(screen.getByRole('button', { name: /批量删除/ })).toBeEnabled();
+  });
+
+  it('shows the current reporting manager in the member editor', () => {
+    function Harness() {
+      const [form] = Form.useForm();
+      return (
+        <MemberFormModal
+          open
+          editing={{
+            id: 1,
+            employeeNo: '000001',
+            username: 'bob',
+            displayName: 'Bob',
+            email: '',
+            phone: '',
+            position: '',
+            gender: 'M',
+            deptId: 2,
+            managerId: 2,
+            managerDisplayName: '张经理',
+          }}
+          form={form}
+          saving={false}
+          onOk={vi.fn()}
+          onCancel={vi.fn()}
+          managerOptions={[{ value: 2, label: '张经理（000002）' }]}
+          onManagerSearch={vi.fn()}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    expect(screen.getByText('直属上级')).toBeInTheDocument();
+    expect(screen.getByText('张经理（000002）')).toBeInTheDocument();
   });
 });
