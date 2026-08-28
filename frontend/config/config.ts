@@ -122,7 +122,7 @@ export default defineConfig({
    * @name layout 插件
    * @doc https://umijs.org/docs/max/layout-menu
    */
-  title: 'Ant Design Pro',
+  title: 'AntFlow 审批管理后台',
   layout: {
     locale: true,
     ...defaultSettings,
@@ -159,6 +159,18 @@ export default defineConfig({
       theme: {
         token: {
           fontFamily: 'AlibabaSans, sans-serif',
+          colorPrimary: '#0b57d0',
+          colorInfo: '#0b57d0',
+          colorLink: '#0a4cba',
+          colorBgLayout: '#f5f8fc',
+          colorBgContainer: '#ffffff',
+          colorText: '#0b1d33',
+          colorTextSecondary: '#4d5c6d',
+          colorBorder: '#dfe8f4',
+          colorSplit: '#e6ebf3',
+          colorSuccess: '#0f8a5f',
+          colorWarning: '#f0a020',
+          colorError: '#c0392b',
         },
       },
     },
