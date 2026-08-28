@@ -26,6 +26,7 @@ type UserAssignment = {
 };
 type EffectivePermission = {
   userId: number; roleCodes: string[]; permissions: string[]; departmentId?: number; admin: boolean;
+  permissionScopes: Record<string, { modes: string[]; departmentIds: number[]; all: boolean }>;
 };
 
 function permissionTree(permissions: Permission[], checked: string[]): DataNode[] {
@@ -148,6 +149,20 @@ export default function UserPermissionPage() {
                   <div className="security-permission-panel"><div className="security-permission-panel__title"><span>页面访问</span></div><Tree checkable checkStrictly checkedKeys={effective.permissions} treeData={permissionTree(pagePermissions, effective.permissions)} selectable={false} showLine={{ showLeafIcon: false }} /></div>
                   <div className="security-permission-panel"><div className="security-permission-panel__title"><span>操作权限</span></div><Tree checkable checkStrictly checkedKeys={effective.permissions} treeData={permissionTree(actionPermissions, effective.permissions)} selectable={false} showLine={{ showLeafIcon: false }} /></div>
                 </div>}
+                {effective && (
+                  <div style={{ marginTop: 16 }}>
+                    <Typography.Title level={5}>权限数据范围</Typography.Title>
+                    <Space size={[6, 6]} wrap>
+                      {effective.permissions.map((code) => {
+                        const scope = effective.permissionScopes?.[code];
+                        if (!scope) return null;
+                        const label = scope.all ? '全部部门' : scope.modes.includes('SELF') && !scope.departmentIds.length
+                          ? '本人' : `${scope.modes.join(' / ')}${scope.departmentIds.length ? ` · ${scope.departmentIds.length} 个部门` : ''}`;
+                        return <Tag key={code}>{displayPermissionName(code, code)}：{label}</Tag>;
+                      })}
+                    </Space>
+                  </div>
+                )}
               </section>
             </>
           )}

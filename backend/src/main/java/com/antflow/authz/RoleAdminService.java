@@ -4,7 +4,9 @@ import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.engine.BizException;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -149,8 +151,21 @@ public class RoleAdminService {
             authorizationService.requirePermission(PermissionCodes.SECURITY_EFFECTIVE_READ);
         }
         AuthorizationService.AuthzSnapshot snapshot = authorizationService.snapshot(userId);
+        Map<String, PermissionScopeDto> scopes = new LinkedHashMap<>();
+        Set<Long> adminDepartments = snapshot.admin()
+            ? new LinkedHashSet<>(jdbcTemplate.queryForList(
+                "SELECT id FROM t_department ORDER BY id", Long.class)) : Set.of();
+        snapshot.permissions().stream().sorted().forEach(permission -> {
+            Set<DataScope> modes = snapshot.permissionRoles().getOrDefault(permission, List.of())
+                .stream().map(AuthorizationService.RoleGrant::dataScope)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            scopes.put(permission, new PermissionScopeDto(modes,
+                snapshot.admin() ? adminDepartments
+                    : authorizationService.manageableDepartments(snapshot, permission),
+                snapshot.admin() || modes.contains(DataScope.ALL)));
+        });
         return new EffectivePermissionDto(userId, snapshot.roleCodes(), snapshot.permissions(),
-            snapshot.departmentId(), snapshot.admin());
+            snapshot.departmentId(), snapshot.admin(), scopes);
     }
 
     public List<UserRoleView> userAssignments(String keyword) {
@@ -348,8 +363,11 @@ public class RoleAdminService {
         }
     }
     public record EffectivePermissionDto(long userId, Set<String> roleCodes,
-                                         Set<String> permissions, Long departmentId,
-                                         boolean admin) { }
+                                          Set<String> permissions, Long departmentId,
+                                          boolean admin,
+                                          Map<String, PermissionScopeDto> permissionScopes) { }
+    public record PermissionScopeDto(Set<DataScope> modes, Set<Long> departmentIds,
+                                     boolean all) { }
     public record DepartmentCandidate(long id, String name) { }
     public record UserRoleView(long id, String username, String displayName, String employeeNo,
                                String status, Long departmentId, List<Long> roleIds,
