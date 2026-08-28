@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,6 +28,90 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UserServiceTest {
+    @Test
+    void updateAcceptsActiveManagerFromSameCompany() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
+            Mockito.mock(DepartmentLeaderMapper.class), jdbcTemplate);
+        User member = user(1L, 10L, null, "ACTIVE");
+        User manager = user(2L, 11L, null, "ACTIVE");
+        when(userMapper.selectById(1L)).thenReturn(member);
+        when(userMapper.selectById(2L)).thenReturn(manager);
+        when(departmentMapper.selectById(10L)).thenReturn(department(10L, 7L));
+        when(departmentMapper.selectById(11L)).thenReturn(department(11L, 7L));
+
+        User updated = service.update(1L, Map.of("managerId", 2L));
+
+        assertEquals(2L, updated.getManagerId());
+        verify(userMapper).updateById(member);
+        verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
+            Mockito.<org.springframework.jdbc.core.PreparedStatementSetter>any(),
+            Mockito.<ResultSetExtractor<Void>>any());
+    }
+
+    @Test
+    void updateRejectsReportingCycle() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class));
+        User member = user(1L, 10L, null, "ACTIVE");
+        User manager = user(2L, 10L, 3L, "ACTIVE");
+        User managerManager = user(3L, 10L, 1L, "ACTIVE");
+        when(userMapper.selectById(1L)).thenReturn(member);
+        when(userMapper.selectById(2L)).thenReturn(manager);
+        when(userMapper.selectById(3L)).thenReturn(managerManager);
+        when(departmentMapper.selectById(10L)).thenReturn(department(10L, 7L));
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.update(1L, Map.of("managerId", 2L)));
+
+        assertEquals("MANAGER_CYCLE", error.getCode());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void updateRejectsManagerFromAnotherCompany() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class));
+        when(userMapper.selectById(1L)).thenReturn(user(1L, 10L, null, "ACTIVE"));
+        when(userMapper.selectById(2L)).thenReturn(user(2L, 20L, null, "ACTIVE"));
+        when(departmentMapper.selectById(10L)).thenReturn(department(10L, 7L));
+        when(departmentMapper.selectById(20L)).thenReturn(department(20L, 8L));
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.update(1L, Map.of("managerId", 2L)));
+
+        assertEquals("MANAGER_COMPANY_MISMATCH", error.getCode());
+    }
+
+    @Test
+    void departmentMoveRejectsLeavingDirectReportsInAnotherCompany() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class));
+        User manager = user(1L, 10L, null, "ACTIVE");
+        User report = user(2L, 10L, 1L, "ACTIVE");
+        when(userMapper.selectById(1L)).thenReturn(manager);
+        when(userMapper.selectList(any())).thenReturn(List.of(report));
+        when(departmentMapper.selectById(10L)).thenReturn(department(10L, 7L));
+        when(departmentMapper.selectById(20L)).thenReturn(department(20L, 8L));
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.update(1L, Map.of("deptId", 20L)));
+
+        assertEquals("REPORTING_COMPANY_MISMATCH", error.getCode());
+    }
+
     @Test
     void createRejectsDuplicateUsernameBeforeInsert() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
@@ -238,5 +323,21 @@ class UserServiceTest {
             leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class),
             Mockito.mock(AuthorizationService.class),
             Mockito.mock(AuthSessionService.class), Mockito.mock(AuditService.class));
+    }
+
+    private static User user(long id, Long deptId, Long managerId, String status) {
+        User user = new User();
+        user.setId(id);
+        user.setDeptId(deptId);
+        user.setManagerId(managerId);
+        user.setStatus(status);
+        return user;
+    }
+
+    private static Department department(long id, long companyId) {
+        Department department = new Department();
+        department.setId(id);
+        department.setCompanyId(companyId);
+        return department;
     }
 }

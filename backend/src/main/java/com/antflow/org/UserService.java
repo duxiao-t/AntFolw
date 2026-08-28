@@ -15,8 +15,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -58,6 +60,7 @@ public class UserService {
         validateDepartment(u.getDeptId());
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_USER_WRITE, u.getDeptId());
+        validateManager(null, u.getManagerId(), u.getDeptId());
         validatePassword(rawPassword);
         u.setEmployeeNo(formalNumberService.employeeNo(u.getEmployeeNo(), null));
         u.setUsername(u.getUsername().trim());
@@ -158,6 +161,68 @@ public class UserService {
     void validateDepartment(Long departmentId) {
         if (departmentId != null && departmentMapper.selectById(departmentId) == null) {
             throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
+        }
+    }
+
+    private void validateManager(Long userId, Long managerId, Long departmentId) {
+        if (managerId == null) return;
+        if (departmentId == null) {
+            throw new BizException("MANAGER_DEPARTMENT_REQUIRED", "配置直属上级前请先选择所属部门");
+        }
+        if (Objects.equals(userId, managerId)) {
+            throw new BizException("MANAGER_SELF", "直属上级不能是本人");
+        }
+        Department department = departmentMapper.selectById(departmentId);
+        User current = userMapper.selectById(managerId);
+        if (current == null) {
+            throw new BizException("MANAGER_NOT_FOUND", "直属上级不存在");
+        }
+        if (!"ACTIVE".equals(current.getStatus())) {
+            throw new BizException("MANAGER_INACTIVE", "直属上级已停用");
+        }
+        Set<Long> seen = new HashSet<>();
+        while (current != null) {
+            if (!seen.add(current.getId()) || Objects.equals(userId, current.getId())) {
+                throw new BizException("MANAGER_CYCLE", "直属上级关系不能形成循环");
+            }
+            Department currentDepartment = current.getDeptId() == null
+                ? null : departmentMapper.selectById(current.getDeptId());
+            if (department == null || currentDepartment == null
+                || !Objects.equals(department.getCompanyId(), currentDepartment.getCompanyId())) {
+                throw new BizException("MANAGER_COMPANY_MISMATCH", "直属上级必须与成员属于同一公司");
+            }
+            current = current.getManagerId() == null
+                ? null : userMapper.selectById(current.getManagerId());
+        }
+    }
+
+    private void lockReportingRelations(Long... departmentIds) {
+        Set<Long> companyIds = new java.util.TreeSet<>();
+        for (Long departmentId : departmentIds) {
+            if (departmentId == null) continue;
+            Department department = departmentMapper.selectById(departmentId);
+            if (department != null) companyIds.add(department.getCompanyId());
+        }
+        for (Long companyId : companyIds) {
+            jdbcTemplate.query("SELECT pg_advisory_xact_lock(?)",
+                statement -> statement.setLong(1, 0x414E544600000000L ^ companyId),
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) resultSet -> null);
+        }
+    }
+
+    private void validateDirectReportsCompany(Long userId, Long departmentId) {
+        List<User> directReports = userMapper.selectList(
+            new QueryWrapper<User>().eq("manager_id", userId));
+        if (directReports.isEmpty()) return;
+        Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);
+        for (User report : directReports) {
+            Department reportDepartment = report.getDeptId() == null
+                ? null : departmentMapper.selectById(report.getDeptId());
+            if (department == null || reportDepartment == null
+                || !Objects.equals(department.getCompanyId(), reportDepartment.getCompanyId())) {
+                throw new BizException("REPORTING_COMPANY_MISMATCH",
+                    "该成员仍是其他公司成员的直属上级，请先调整汇报关系");
+            }
         }
     }
 
@@ -267,6 +332,7 @@ public class UserService {
         }
         authorizationService.requireCurrentDataScope(
             com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, user.getDeptId());
+        Long originalDepartmentId = user.getDeptId();
         if (body.containsKey("status") && rolesOf(userId).contains("admin")) {
             lockAdminRole();
             user = userMapper.selectById(userId);
@@ -290,6 +356,10 @@ public class UserService {
                 com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
             user.setDeptId(departmentId);
         }
+        if (body.containsKey("managerId")) {
+            user.setManagerId(body.get("managerId") == null
+                ? null : ((Number) body.get("managerId")).longValue());
+        }
         if (body.containsKey("username")) {
             String username = (String) body.get("username");
             validateUsernameAvailable(username, userId);
@@ -302,6 +372,13 @@ public class UserService {
                 throw new BizException("SELF_USER_PROTECTED", "不能停用当前登录账号");
             }
             changeStatus(user, String.valueOf(body.get("status")));
+        }
+        if (body.containsKey("managerId") || body.containsKey("deptId")) {
+            lockReportingRelations(originalDepartmentId, user.getDeptId());
+            validateManager(userId, user.getManagerId(), user.getDeptId());
+            if (body.containsKey("deptId")) {
+                validateDirectReportsCompany(userId, user.getDeptId());
+            }
         }
         userMapper.updateById(user);
         authorizationChanged(userId);

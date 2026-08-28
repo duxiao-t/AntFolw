@@ -48,7 +48,7 @@ public class UserController {
                 AuditService.RiskLevel.HIGH,
                 Map.of("changedFields", changedFields(body, List.of("employeeNo", "username",
                     "displayName", "email", "phone", "position", "gender", "deptId",
-                    "roleIds", "status"))),
+                    "managerId", "roleIds", "status"))),
                 Map.of("roleCount", roleIds.size())));
         return Map.of("id", id);
     }
@@ -61,7 +61,7 @@ public class UserController {
                 AuditService.RiskLevel.HIGH,
                 Map.of("changedFields", changedFields(body, List.of("employeeNo", "username",
                     "displayName", "email", "phone", "position", "gender", "deptId",
-                    "status"))),
+                    "managerId", "status"))),
                 Map.of("statusChanged", body.containsKey("status"),
                     "departmentChanged", body.containsKey("deptId"))));
     }
@@ -139,6 +139,9 @@ public class UserController {
         user.setGender((String) body.get("gender"));
         if (body.get("deptId") != null) {
             user.setDeptId(((Number) body.get("deptId")).longValue());
+        }
+        if (body.get("managerId") != null) {
+            user.setManagerId(((Number) body.get("managerId")).longValue());
         }
         return user;
     }

@@ -9,6 +9,7 @@ import lombok.Data;
 public class User {
     @TableId(type = IdType.AUTO) private Long id;
     private Long deptId;
+    private Long managerId;
     private String employeeNo;
     private String username;
     @JsonIgnore
