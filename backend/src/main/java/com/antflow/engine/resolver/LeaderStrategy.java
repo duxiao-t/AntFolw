@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** 第 N 级主管：assignedType=LEADER，从发起人所在部门向上走 leaderLevel 级取 leader */
+/** 第 N 级部门主管：assignedType=LEADER，从发起人所在部门向上走指定层级取 leader */
 @Component
 @Order(30)
 @RequiredArgsConstructor
@@ -30,7 +30,7 @@ public class LeaderStrategy implements AssigneeStrategy {
             throw new NoAssigneeFoundException(nodeId, "starter has no dept");
         }
         Department dept = deptMapper.selectById(u.getDeptId());
-        int level = Math.max(1, spec.leaderLevel());
+        int level = Math.max(1, spec.hierarchyLevel());
         for (int i = 1; i < level && dept != null; i++) {
             dept = dept.getParentId() == null ? null : deptMapper.selectById(dept.getParentId());
         }

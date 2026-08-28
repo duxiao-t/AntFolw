@@ -79,6 +79,11 @@ public class ApprovalHandler implements NodeHandler {
                 int level = props.path("leader").path("level").asInt(1);
                 return new AssigneeSpec("LEADER", List.of(), level, ctx.starterId(), List.of());
             }
+            case "DIRECT_MANAGER": {
+                int level = props.path("manager").path("level").asInt(1);
+                return new AssigneeSpec("DIRECT_MANAGER", List.of(), level,
+                    ctx.starterId(), List.of());
+            }
             case "SELF":
                 return new AssigneeSpec("SELF", List.of(), 1, ctx.starterId(), List.of());
             case "SELF_SELECT":

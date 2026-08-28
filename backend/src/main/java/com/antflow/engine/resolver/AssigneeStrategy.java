@@ -20,7 +20,7 @@ public interface AssigneeStrategy {
 
     /**
      * @param nodeId 当前审批节点 id（用于错误信息）
-     * @param spec   审批人参数（ids / leaderLevel / starterId / selfSelected）
+     * @param spec   审批人参数（ids / hierarchyLevel / starterId / selfSelected）
      * @return 用户 id 列表；为空时引擎会按 nobody.handler 处理
      */
     List<Long> resolve(String nodeId, AssigneeSpec spec);

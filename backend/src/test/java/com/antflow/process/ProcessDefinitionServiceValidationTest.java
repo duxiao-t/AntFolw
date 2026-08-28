@@ -132,6 +132,26 @@ class ProcessDefinitionServiceValidationTest {
         assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
+    @Test void validate_accepts_direct_manager_level() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"DIRECT_MANAGER","manager":{"level":3}}}}
+            """;
+
+        assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+    }
+
+    @Test void validate_rejects_direct_manager_level_outside_range() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"DIRECT_MANAGER","manager":{"level":11}}}}
+            """;
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("直属上级层级必须为 1 到 10");
+    }
+
     @Test void validate_accepts_legacy_empty_conditional_parallel_branch() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",

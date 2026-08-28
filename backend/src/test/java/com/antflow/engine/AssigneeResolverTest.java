@@ -3,6 +3,7 @@ package com.antflow.engine;
 import com.antflow.engine.resolver.AssigneeResolver;
 import com.antflow.engine.resolver.AssigneeSpec;
 import com.antflow.engine.resolver.AssignUserStrategy;
+import com.antflow.engine.resolver.DirectManagerStrategy;
 import com.antflow.engine.resolver.LeaderStrategy;
 import com.antflow.engine.resolver.LeaderTopStrategy;
 import com.antflow.engine.resolver.RoleStrategy;
@@ -43,6 +44,7 @@ class AssigneeResolverTest {
             new AssignUserStrategy(userMapper),
             new RoleStrategy(userMapper, userRoleMapper),
             new LeaderStrategy(userMapper, deptMapper),
+            new DirectManagerStrategy(userMapper, deptMapper),
             new LeaderTopStrategy(userMapper, deptMapper),
             new SelfStrategy(),
             new SelfSelectStrategy(userMapper)
@@ -166,6 +168,81 @@ class AssigneeResolverTest {
         assertThat(resolver().resolve("n1", spec)).containsExactly(99L);
     }
 
+    @Test void resolve_directManager_level2_walksReportingChain() {
+        User starter = user(42L, "ACTIVE", 10L);
+        starter.setManagerId(99L);
+        User firstManager = user(99L, "ACTIVE", 10L);
+        firstManager.setManagerId(100L);
+        Mockito.when(userMapper.selectById(42L)).thenReturn(starter);
+        Mockito.when(userMapper.selectById(99L)).thenReturn(firstManager);
+        Mockito.when(userMapper.selectById(100L)).thenReturn(user(100L, "ACTIVE", 11L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(companyDept(10L, 7L));
+        Mockito.when(deptMapper.selectById(11L)).thenReturn(companyDept(11L, 7L));
+
+        var spec = new AssigneeSpec("DIRECT_MANAGER", List.of(), 2, 42L, List.of());
+
+        assertThat(resolver().resolve("n1", spec)).containsExactly(100L);
+    }
+
+    @Test void resolve_directManager_reportsMissingLevel() {
+        User starter = user(42L, "ACTIVE", 10L);
+        starter.setManagerId(99L);
+        Mockito.when(userMapper.selectById(42L)).thenReturn(starter);
+        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 10L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(companyDept(10L, 7L));
+
+        var spec = new AssigneeSpec("DIRECT_MANAGER", List.of(), 2, 42L, List.of());
+
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(NoAssigneeFoundException.class)
+            .hasMessageContaining("第 2 级直属上级");
+    }
+
+    @Test void resolve_directManager_rejectsInactiveManager() {
+        User starter = user(42L, "ACTIVE", 10L);
+        starter.setManagerId(99L);
+        Mockito.when(userMapper.selectById(42L)).thenReturn(starter);
+        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "DISABLED", 10L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(companyDept(10L, 7L));
+
+        var spec = new AssigneeSpec("DIRECT_MANAGER", List.of(), 1, 42L, List.of());
+
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(NoAssigneeFoundException.class)
+            .hasMessageContaining("已停用");
+    }
+
+    @Test void resolve_directManager_rejectsCycle() {
+        User starter = user(42L, "ACTIVE", 10L);
+        starter.setManagerId(99L);
+        User manager = user(99L, "ACTIVE", 10L);
+        manager.setManagerId(42L);
+        Mockito.when(userMapper.selectById(42L)).thenReturn(starter);
+        Mockito.when(userMapper.selectById(99L)).thenReturn(manager);
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(companyDept(10L, 7L));
+
+        var spec = new AssigneeSpec("DIRECT_MANAGER", List.of(), 2, 42L, List.of());
+
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(NoAssigneeFoundException.class)
+            .hasMessageContaining("循环");
+    }
+
+    @Test void resolve_directManager_rejectsManagerFromAnotherCompany() {
+        User starter = user(42L, "ACTIVE", 10L);
+        starter.setManagerId(99L);
+        Mockito.when(userMapper.selectById(42L)).thenReturn(starter);
+        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 20L));
+        Mockito.when(deptMapper.selectById(10L)).thenReturn(companyDept(10L, 7L));
+        Mockito.when(deptMapper.selectById(20L)).thenReturn(companyDept(20L, 8L));
+
+        var spec = new AssigneeSpec("DIRECT_MANAGER", List.of(), 1, 42L, List.of());
+
+        assertThatThrownBy(() -> resolver().resolve("n1", spec))
+            .isInstanceOf(NoAssigneeFoundException.class)
+            .hasMessageContaining("不属于同一公司");
+    }
+
     // ---------- Sprint 3 LEADER_TOP ----------
     @Test void resolve_leaderTop_level3_walksAllAncestors() {
         // starter 42 -> dept 10 (leader 99) -> dept 11 (leader 100) -> dept 12 (leader 101)
@@ -186,5 +263,11 @@ class AssigneeResolverTest {
         Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 10L));
         var spec = new AssigneeSpec("LEADER_TOP", List.of(), 1, 42L, List.of());
         assertThat(resolver().resolve("n1", spec)).containsExactly(99L);
+    }
+
+    private Department companyDept(long id, long companyId) {
+        Department department = dept(id, null, null);
+        department.setCompanyId(companyId);
+        return department;
     }
 }

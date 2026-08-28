@@ -374,10 +374,17 @@ public class ProcessDefinitionService {
         boolean empty = switch (at) {
             case "ASSIGN_USER" -> p.path("assignedUser").size() == 0;
             case "ROLE" -> p.path("role").size() == 0;
-            case "LEADER", "SELF", "SELF_SELECT" -> false;
+            case "LEADER", "DIRECT_MANAGER", "SELF", "SELF_SELECT" -> false;
             default -> true;
         };
         if (empty) throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText() + " 未配置审批人");
+        if ("DIRECT_MANAGER".equals(at)) {
+            int level = p.path("manager").path("level").asInt(0);
+            if (level < 1 || level > 10) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 的直属上级层级必须为 1 到 10");
+            }
+        }
         validateFormPerms(n, fieldTypes);
     }
 

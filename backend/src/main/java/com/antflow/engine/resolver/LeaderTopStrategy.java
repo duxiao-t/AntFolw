@@ -40,7 +40,7 @@ public class LeaderTopStrategy implements AssigneeStrategy {
         if (starter == null || starter.getDeptId() == null) {
             throw new NoAssigneeFoundException(nodeId, "starter has no dept");
         }
-        int level = Math.max(1, spec.leaderLevel());
+        int level = Math.max(1, spec.hierarchyLevel());
         var bag = new ArrayList<Long>();
         Department dept = deptMapper.selectById(starter.getDeptId());
         for (int i = 0; i < level && dept != null; i++) {
