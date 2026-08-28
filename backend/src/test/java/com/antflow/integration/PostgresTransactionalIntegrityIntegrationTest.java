@@ -2,11 +2,19 @@ package com.antflow.integration;
 
 import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.FormGrantService;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.RoleAdminService;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.form.FormProcessPublishService;
+import com.antflow.form.FormDefinitionMapper;
+import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.org.UserService;
+import com.antflow.task.ProcessInstanceMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +73,12 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private UserService userService;
     @Autowired private AuditService auditService;
     @Autowired private FormProcessPublishService publishService;
+    @Autowired private ProcessInstanceMapper processInstanceMapper;
+    @Autowired private FormGrantService formGrantService;
+    @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
+    @Autowired private AuthorizationService authorizationService;
+    @Autowired private RoleAdminService roleAdminService;
+    @Autowired private FormDefinitionMapper formDefinitionMapper;
 
     @Test
     void performanceIndexesExist() {
@@ -80,6 +94,109 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "idx_process_instance_started_by_started_at",
                 "idx_process_instance_status_started_at",
                 "idx_role_permission_permission_role");
+    }
+
+    @Test
+    void optimizedAdminListsExecuteAgainstPostgres() {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThat(roleAdminService.roles()).isNotEmpty();
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20).getRecords())
+                .isNotEmpty();
+            assertThat(formDefinitionMapper.selectSummaryPage(Page.of(1, 20), null, null,
+                adminId, true).getRecords())
+                .extracting(FormDefinitionMapper.Summary::id).contains(formId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void workplaceAuthorizationQueriesExecuteAgainstPostgres() {
+        long adminId = userId("admin");
+        assertThat(processInstanceMapper.selectWorkplaceRecent(adminId, true, true, 8))
+            .isNotNull();
+        OffsetDateTime now = OffsetDateTime.now();
+        assertThat(processInstanceMapper.selectWorkplaceStatusCounts(adminId, true, true,
+            now.minusDays(1), now.plusDays(1))).isNotNull();
+    }
+
+    @Test
+    void formGrantCandidatesArePagedAndSelectedSubjectsHaveLabels() {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        jdbcTemplate.update("""
+            INSERT INTO t_department(company_id, path, name) VALUES (?, 'grant_test', '授权测试部')
+            """, companyId);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+            VALUES (?, 'USER', ?, ?)
+            """, formId, adminId, adminId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            FormGrantService.GrantUserPage page = formGrantService.userCandidates(
+                formId, 1, 20, "admin", null);
+            assertThat(page.items()).extracting(FormGrantService.GrantUser::username)
+                .contains("admin");
+            assertThat(page.total()).isPositive();
+
+            FormGrantService.FormGrantDto grant = formGrantService.get(formId);
+            assertThat(grant.userIds()).contains(adminId);
+            assertThat(grant.users()).extracting(FormGrantService.GrantUser::displayName)
+                .isNotEmpty();
+            assertThat(formGrantService.candidates(formId).departments()).isNotEmpty();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void unreadCcMovesFromPendingToDoneAfterReadTimestamp() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED",
+            "{\"id\":\"root\",\"type\":\"ROOT\",\"children\":null}");
+        long formDataId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data,
+                                    status, created_by)
+            VALUES (?, 1, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, adminId);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, process_def_version, process_snapshot,
+                                           form_data_id, status, current_node_id, version,
+                                           started_by)
+            VALUES (?, 1, '{"id":"root","type":"ROOT"}'::jsonb, ?,
+                    'APPROVED', 'cc1', 0, ?)
+            RETURNING id
+            """, Long.class, processId, formDataId, adminId);
+        long taskId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, approval_mode,
+                               task_type, version)
+            VALUES (?, 'cc1', ?, 'CC', 'OR', 'APPROVAL', 0)
+            RETURNING id
+            """, Long.class, instanceId, bobId);
+
+        assertThat(authorizationService.instanceVisibility(instanceId, bobId))
+            .isEqualTo(AuthorizationService.InstanceVisibility.FULL);
+
+        assertThat(mobileWorkflowMapper.selectTaskPage(bobId, "pending", null, null, 20, 0))
+            .extracting(MobileWorkflowMapper.TaskRow::id).contains(taskId);
+        assertThat(mobileWorkflowMapper.selectTaskPage(bobId, "done", null, null, 20, 0))
+            .extracting(MobileWorkflowMapper.TaskRow::id).doesNotContain(taskId);
+
+        jdbcTemplate.update("UPDATE t_task SET read_at = now() WHERE id = ?", taskId);
+
+        assertThat(mobileWorkflowMapper.selectTaskPage(bobId, "pending", null, null, 20, 0))
+            .extracting(MobileWorkflowMapper.TaskRow::id).doesNotContain(taskId);
+        assertThat(mobileWorkflowMapper.selectTaskPage(bobId, "done", null, null, 20, 0))
+            .extracting(MobileWorkflowMapper.TaskRow::id).contains(taskId);
     }
 
     @Test
