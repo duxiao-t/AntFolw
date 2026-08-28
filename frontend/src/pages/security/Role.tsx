@@ -27,6 +27,10 @@ import { request, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
 import './Security.less';
 import { displayPermissionName } from './permissionLabels';
+import {
+  mergePermissionTreeSelection,
+  resolvePermissionSelection,
+} from './permissionDependencies';
 
 type Permission = {
   code: string;
@@ -111,6 +115,7 @@ export default function RolePage() {
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(new Set());
+  const [autoAddedPermissions, setAutoAddedPermissions] = useState<Set<string>>(new Set());
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
   const canWrite = isAdmin || (currentUser?.permissions ?? []).includes('security.role.write');
@@ -149,23 +154,26 @@ export default function RolePage() {
     };
     form.setFieldsValue(values);
     setSelectedPermissions(new Set(values.permissionCodes));
+    setAutoAddedPermissions(new Set());
   };
 
-  const updatePermissionSelection = (checked: React.Key[]) => {
-    const next = new Set(checked.map(String).filter((key) => !key.startsWith('group:')));
+  const updatePermissionSelection = (checked: React.Key[], activePermissions: Permission[]) => {
     const all = [...pagePermissions, ...actionPermissions];
-    for (const permission of all) {
-      if (next.has(permission.code)) {
-        permission.requiredPermissionCodes.forEach((required) => { next.add(required); });
-      }
+    const merged = mergePermissionTreeSelection(checked.map(String), selectedPermissions,
+      new Set(activePermissions.map((permission) => permission.code)));
+    const result = resolvePermissionSelection(merged, selectedPermissions,
+      autoAddedPermissions, all);
+    if (result.cascaded) {
+      message.info('已同步取消依赖该权限的页面或操作');
     }
-    setSelectedPermissions(next);
-    form.setFieldValue('permissionCodes', [...next]);
+    setAutoAddedPermissions(result.autoAdded);
+    setSelectedPermissions(result.selected);
+    form.setFieldValue('permissionCodes', [...result.selected]);
   };
 
-  const onTreeCheck = (checked: React.Key[] | { checked: React.Key[] }) => {
+  const checkedTreeKeys = (checked: React.Key[] | { checked: React.Key[] }) => {
     const keys = Array.isArray(checked) ? checked : checked.checked;
-    updatePermissionSelection(keys as React.Key[]);
+    return keys as React.Key[];
   };
 
   const save = async () => {
@@ -206,7 +214,10 @@ export default function RolePage() {
     await load();
   };
 
-  const checkedKeys = [...selectedPermissions];
+  const pageCheckedKeys = pagePermissions.filter((permission) => selectedPermissions.has(permission.code))
+    .map((permission) => permission.code);
+  const actionCheckedKeys = actionPermissions.filter((permission) => selectedPermissions.has(permission.code))
+    .map((permission) => permission.code);
   const pageTree = buildPermissionTree(pagePermissions, disabledEditor);
   const actionTree = buildPermissionTree(actionPermissions, disabledEditor);
 
@@ -309,11 +320,15 @@ export default function RolePage() {
                 <div className="security-permission-grid">
                   <section className="security-permission-panel">
                     <div className="security-permission-panel__title"><span>页面访问</span><Typography.Text type="secondary">菜单与路由</Typography.Text></div>
-                    <Tree checkable checkedKeys={checkedKeys} treeData={pageTree} onCheck={onTreeCheck} showLine={{ showLeafIcon: false }} />
+                    <Tree checkable checkedKeys={pageCheckedKeys} treeData={pageTree}
+                      onCheck={(checked) => updatePermissionSelection(checkedTreeKeys(checked), pagePermissions)}
+                      showLine={{ showLeafIcon: false }} />
                   </section>
                   <section className="security-permission-panel">
                     <div className="security-permission-panel__title"><span>操作权限</span><Typography.Text type="secondary">按钮与接口</Typography.Text></div>
-                    <Tree checkable checkedKeys={checkedKeys} treeData={actionTree} onCheck={onTreeCheck} showLine={{ showLeafIcon: false }} />
+                    <Tree checkable checkedKeys={actionCheckedKeys} treeData={actionTree}
+                      onCheck={(checked) => updatePermissionSelection(checkedTreeKeys(checked), actionPermissions)}
+                      showLine={{ showLeafIcon: false }} />
                   </section>
                 </div>
                 {editing?.builtin && (

@@ -27,6 +27,7 @@ export const permissionLabels: Record<string, string> = {
   'workflow.instance.withdraw': '撤回本人审批',
   'workflow.instance.override': '紧急干预审批',
   'workflow.task.approve': '审批任务',
+  'workflow.task.read': '查看本人任务',
   'workflow.task.reject': '驳回任务',
   'workflow.task.transfer': '转交任务',
   'workflow.task.delegate': '委托任务',

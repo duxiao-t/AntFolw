@@ -108,7 +108,7 @@ export default [
   { path: '/tasks/inbox', component: './tasks/Inbox', hideInMenu: true, access: 'canUseTasks' },
   { path: '/tasks/done', component: './tasks/Done', hideInMenu: true, access: 'canUseTasks' },
   { path: '/proc', component: './proc/Sent', hideInMenu: true, access: 'canUseProcesses' },
-  { path: '/proc/:id', component: './proc/Detail', hideInMenu: true, access: 'canUseProcesses' },
+  { path: '/proc/:id', component: './proc/Detail', hideInMenu: true, access: 'canUseProcessDetail' },
   { path: '/account/settings', component: './account/settings', hideInMenu: true },
   { path: '/account/center', component: './account/center', hideInMenu: true },
 

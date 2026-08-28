@@ -26,6 +26,7 @@ public class TaskController {
 
     @GetMapping
     public List<TaskEntity> myInbox(@RequestParam(defaultValue = "PENDING") String status) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         var p = PrincipalHolder.current().orElseThrow();
         return ops.listMyInbox(p.userId(), status);
     }
@@ -131,6 +132,7 @@ public class TaskController {
     /** 列出某父任务的所有子任务（用于详情页展开转交/加签链路）。 */
     @GetMapping("/{id}/children")
     public List<TaskEntity> children(@PathVariable Long id) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         authorizationService.requireReadableTask(id);
         return ops.listChildren(id);
     }

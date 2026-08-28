@@ -64,11 +64,15 @@ export default function access(
     canUseRuntime:
       page('page.workplace') && can('form.runtime.read'),
     canUseTasks:
-      page('page.workplace') &&
-      (can('workflow.instance.read') || can('workflow.task.approve') ||
-        can('workflow.task.reject')),
+      page('page.workplace') && can('workflow.task.read'),
     canUseProcesses:
       page('page.workplace') && can('workflow.instance.read'),
+    canUseProcessDetail:
+      page('page.workplace') &&
+      (can('workflow.task.read') || can('workflow.instance.read')),
+    canApproveTask: can('workflow.task.approve'),
+    canRejectTask: can('workflow.task.reject'),
+    canWithdrawInstance: can('workflow.instance.withdraw'),
     canOverrideWorkflow: can('workflow.instance.override'),
     canRetryAutomation: can('workflow.automation.retry'),
   };

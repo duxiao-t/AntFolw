@@ -25,7 +25,27 @@ public final class PagePermissionPolicy {
         Map.entry(PermissionCodes.PAGE_REPORT_DASHBOARD,
             List.of(PermissionCodes.FORM_DATA_READ)),
         Map.entry(PermissionCodes.PAGE_SETTINGS_COMPANY,
-            List.of(PermissionCodes.ORG_COMPANY_MANAGE))
+            List.of(PermissionCodes.ORG_COMPANY_MANAGE)),
+        Map.entry(PermissionCodes.PAGE_WORKPLACE,
+            List.of(PermissionCodes.WORKFLOW_TASK_READ)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_READ,
+            List.of(PermissionCodes.PAGE_WORKPLACE)),
+        Map.entry(PermissionCodes.FORM_RUNTIME_READ,
+            List.of(PermissionCodes.PAGE_WORKPLACE)),
+        Map.entry(PermissionCodes.WORKFLOW_INSTANCE_START,
+            List.of(PermissionCodes.PAGE_WORKPLACE)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_APPROVE,
+            List.of(PermissionCodes.PAGE_WORKPLACE, PermissionCodes.WORKFLOW_TASK_READ)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_REJECT,
+            List.of(PermissionCodes.PAGE_WORKPLACE, PermissionCodes.WORKFLOW_TASK_READ)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_TRANSFER,
+            List.of(PermissionCodes.PAGE_WORKPLACE, PermissionCodes.WORKFLOW_TASK_READ)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_DELEGATE,
+            List.of(PermissionCodes.PAGE_WORKPLACE, PermissionCodes.WORKFLOW_TASK_READ)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_ADD_ASSIGNEE,
+            List.of(PermissionCodes.PAGE_WORKPLACE, PermissionCodes.WORKFLOW_TASK_READ)),
+        Map.entry(PermissionCodes.WORKFLOW_TASK_RECALL,
+            List.of(PermissionCodes.PAGE_WORKPLACE, PermissionCodes.WORKFLOW_TASK_READ))
     );
 
     private static final Set<String> ADMIN_ONLY = Set.of(

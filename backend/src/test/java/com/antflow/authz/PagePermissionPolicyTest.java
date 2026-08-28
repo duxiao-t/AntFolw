@@ -18,6 +18,11 @@ class PagePermissionPolicyTest {
         assertThat(PagePermissionPolicy.dependencies(PermissionCodes.PAGE_REPORT_EXPORT))
             .containsExactlyInAnyOrder(PermissionCodes.FORM_DATA_READ,
                 PermissionCodes.FORM_DATA_EXPORT);
+        assertThat(PagePermissionPolicy.dependencies(PermissionCodes.PAGE_WORKPLACE))
+            .containsExactly(PermissionCodes.WORKFLOW_TASK_READ);
+        assertThat(PagePermissionPolicy.dependencies(PermissionCodes.WORKFLOW_TASK_REJECT))
+            .containsExactlyInAnyOrder(PermissionCodes.PAGE_WORKPLACE,
+                PermissionCodes.WORKFLOW_TASK_READ);
     }
 
     @Test

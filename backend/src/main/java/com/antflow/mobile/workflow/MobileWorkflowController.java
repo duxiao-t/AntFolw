@@ -131,11 +131,13 @@ public class MobileWorkflowController {
                                               @RequestParam(defaultValue = "20") int size,
                                               @RequestParam(required = false) String keyword,
                                               @RequestParam(required = false) String status) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         return workflowService.listTasks(view, principal().userId(), page, size, keyword, status);
     }
 
     @GetMapping("/tasks/{id}")
     public MobileTaskDetailDto task(@PathVariable Long id) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         PrincipalHolder.Principal principal = principal();
         MobileTaskDetailDto detail = workflowService.getTaskDetail(
             id, principal.userId(), principal.roles());

@@ -62,6 +62,28 @@ describe('access', () => {
     expect(result.canAssignRoles).toBe(false);
   });
 
+  it('allows an approver to open task detail without record-query permission', () => {
+    const result = access({
+      currentUser: {
+        userid: '5',
+        name: 'Approver',
+        avatar: '',
+        roles: ['approver'],
+        permissions: [
+          'page.workplace',
+          'workflow.task.read',
+          'workflow.task.approve',
+        ],
+      },
+    });
+
+    expect(result.canUseTasks).toBe(true);
+    expect(result.canUseProcessDetail).toBe(true);
+    expect(result.canUseProcesses).toBe(false);
+    expect(result.canApproveTask).toBe(true);
+    expect(result.canRejectTask).toBe(false);
+  });
+
   it('should return canAdmin false when user roles are empty', () => {
     const initialState = {
       currentUser: {
