@@ -4,7 +4,9 @@ import com.antflow.common.FormalNumberService;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
+import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
+import com.antflow.org.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,6 +27,8 @@ public class FormDataService {
     private final ObjectMapper json;
     private final FormalNumberService formalNumberService;
     private final AuthorizationService authorizationService;
+    private final UserMapper userMapper;
+    private final FormDefinitionMapper formDefinitionMapper;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -69,7 +76,7 @@ public class FormDataService {
         if (status != null && !status.isBlank()) q.eq("status", status);
         if (createdBy != null) q.eq("created_by", createdBy);
         q.orderByDesc("created_at").orderByDesc("id");
-        return mapper.selectPage(Page.of(safePage, safeSize), q);
+        return enrichAdminPage(mapper.selectPage(Page.of(safePage, safeSize), q));
     }
 
     public Page<FormData> authorizedPage(long page, long size, Long formDefId,
@@ -92,7 +99,7 @@ public class FormDataService {
         int to = (int) Math.min(from + safeSize, readable.size());
         Page<FormData> result = Page.of(safePage, safeSize, readable.size());
         result.setRecords(readable.subList(from, to));
-        return result;
+        return enrichAdminPage(result);
     }
 
     public FormData getById(Long id) {
@@ -108,5 +115,47 @@ public class FormDataService {
         catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new BizException("BAD_JSON", e.getMessage());
         }
+    }
+
+    private Page<FormData> enrichAdminPage(Page<FormData> page) {
+        var records = page.getRecords();
+        if (records.isEmpty()) return page;
+        var users = userMapper.selectBatchIds(records.stream().map(FormData::getCreatedBy)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toSet())).stream()
+            .collect(Collectors.toMap(com.antflow.org.User::getId, Function.identity()));
+        Map<Long, FormDefinition> definitions = formDefinitionMapper.selectBatchIds(records.stream()
+                .map(FormData::getFormDefId).collect(Collectors.toSet())).stream()
+            .collect(Collectors.toMap(FormDefinition::getId, Function.identity()));
+        records.forEach(record -> {
+            var user = users.get(record.getCreatedBy());
+            record.setCreatedByUsername(user == null ? null : user.getUsername());
+            record.setFieldValues(fieldValues(record.getData(), definitions.get(record.getFormDefId())));
+        });
+        return page;
+    }
+
+    private List<FormData.FieldValue> fieldValues(String data, FormDefinition definition) {
+        try {
+            var labels = new java.util.HashMap<String, String>();
+            if (definition != null) collectLabels(json.readTree(definition.getSchema()), labels);
+            var values = json.readTree(data);
+            if (values == null || !values.isObject()) return List.of();
+            var fields = new java.util.ArrayList<FormData.FieldValue>();
+            values.fields().forEachRemaining(entry -> fields.add(new FormData.FieldValue(
+                entry.getKey(), labels.getOrDefault(entry.getKey(), entry.getKey()),
+                json.convertValue(entry.getValue(), Object.class))));
+            return fields;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+            return List.of();
+        }
+    }
+
+    private void collectLabels(com.fasterxml.jackson.databind.JsonNode nodes, Map<String, String> labels) {
+        if (nodes == null || !nodes.isArray()) return;
+        nodes.forEach(node -> {
+            String id = node.path("id").asText();
+            if (!id.isBlank()) labels.put(id, node.path("label").asText(id));
+            collectLabels(node.path("children"), labels);
+        });
     }
 }
