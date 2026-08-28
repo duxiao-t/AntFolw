@@ -35,7 +35,8 @@ export function ApprovalNodeConfig({
           options={[
             { value: 'ASSIGN_USER', label: '指定成员' },
             { value: 'ROLE', label: '角色' },
-            { value: 'LEADER', label: '主管' },
+            { value: 'LEADER', label: '部门主管' },
+            { value: 'DIRECT_MANAGER', label: '制单人直属上级' },
             { value: 'SELF', label: '发起人自己' },
             { value: 'SELF_SELECT', label: '发起人自选' },
           ]}
@@ -61,12 +62,22 @@ export function ApprovalNodeConfig({
         </Form.Item>
       )}
       {p.assignedType === 'LEADER' && (
-        <Form.Item label="第几级主管（1=直接主管）">
+        <Form.Item label="第几级部门主管（1=当前部门）">
           <InputNumber
             min={1}
             max={10}
             value={(p.leader as { level?: number })?.level ?? 1}
             onChange={(v) => set({ leader: { level: v ?? 1 } })}
+          />
+        </Form.Item>
+      )}
+      {p.assignedType === 'DIRECT_MANAGER' && (
+        <Form.Item label="第几级直属上级">
+          <InputNumber
+            min={1}
+            max={10}
+            value={(p.manager as { level?: number })?.level ?? 1}
+            onChange={(v) => set({ manager: { level: v ?? 1 } })}
           />
         </Form.Item>
       )}
@@ -98,18 +109,20 @@ export function ApprovalNodeConfig({
           ]}
         />
       </Form.Item>
-      <Form.Item label="审批人为空时">
-        <Radio.Group
-          value={
-            ((p.nobody as { handler?: string })?.handler ?? 'TO_PASS') as string
-          }
-          onChange={(e) => set({ nobody: { handler: e.target.value } })}
-          options={[
-            { value: 'TO_PASS', label: '自动通过' },
-            { value: 'TO_REFUSE', label: '自动驳回' },
-          ]}
-        />
-      </Form.Item>
+      {p.assignedType !== 'DIRECT_MANAGER' && (
+        <Form.Item label="审批人为空时">
+          <Radio.Group
+            value={
+              ((p.nobody as { handler?: string })?.handler ?? 'TO_PASS') as string
+            }
+            onChange={(e) => set({ nobody: { handler: e.target.value } })}
+            options={[
+              { value: 'TO_PASS', label: '自动通过' },
+              { value: 'TO_REFUSE', label: '自动驳回' },
+            ]}
+          />
+        </Form.Item>
+      )}
       <Divider />
       <Form.Item label="字段权限">
         <FieldPermissionEditor

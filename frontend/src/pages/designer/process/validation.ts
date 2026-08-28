@@ -20,6 +20,10 @@ const approvalReady = (node: TreeNode): boolean => {
     return (props.assignedUser?.length ?? 0) > 0;
   }
   if (props.assignedType === 'ROLE') return (props.role?.length ?? 0) > 0;
+  if (props.assignedType === 'DIRECT_MANAGER') {
+    const level = Number(props.manager?.level);
+    return Number.isInteger(level) && level >= 1 && level <= 10;
+  }
   return ['LEADER', 'SELF', 'SELF_SELECT'].includes(props.assignedType);
 };
 

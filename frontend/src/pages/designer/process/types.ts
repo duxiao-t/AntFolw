@@ -77,6 +77,7 @@ export const APPROVAL_PROPS = () => ({
   assignedUser: [] as number[],
   role: [] as number[],
   leader: { level: 1 },
+  manager: { level: 1 },
   selfSelect: { multiple: false },
   nobody: { handler: 'TO_PASS' },
 });

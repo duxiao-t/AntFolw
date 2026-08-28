@@ -314,6 +314,24 @@ describe('process designer validation', () => {
     ]);
   });
 
+  it('validates the reporting manager level range', () => {
+    const tree = (level: number): TreeNode => ({
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: { assignedType: 'DIRECT_MANAGER', manager: { level }, mode: 'OR' },
+      },
+    });
+
+    expect(validateProcessTree(tree(2))).toEqual([]);
+    expect(validateProcessTree(tree(11))).toContainEqual({
+      nodeId: 'approval',
+      message: '请配置审批人',
+    });
+  });
+
   it('validates conditional parallel branches', () => {
     const tree: TreeNode = {
       id: 'root',
