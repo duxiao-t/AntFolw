@@ -25,9 +25,10 @@ public interface MobileWorkflowMapper {
         <choose>
           <when test="view == 'done'">
             AND t.status != 'PENDING'
+            AND (t.status != 'CC' OR t.read_at IS NOT NULL)
           </when>
           <otherwise>
-            AND t.status = 'PENDING'
+            AND (t.status = 'PENDING' OR (t.status = 'CC' AND t.read_at IS NULL))
           </otherwise>
         </choose>
         <if test="status != null and status != ''">

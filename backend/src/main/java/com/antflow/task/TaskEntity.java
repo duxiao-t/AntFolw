@@ -27,5 +27,7 @@ public class TaskEntity {
     private Long delegatedFrom;
     /** 是否加签任务（与原任务 OR/AND 合并决签） */
     private Boolean isAdditional;
+    /** 抄送任务首次查看时间；普通审批任务保持 null。 */
+    private java.time.OffsetDateTime readAt;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }

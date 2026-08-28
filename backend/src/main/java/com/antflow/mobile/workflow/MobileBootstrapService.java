@@ -27,7 +27,8 @@ public class MobileBootstrapService {
         if (user == null) throw new AccessDeniedException("authenticated user no longer exists");
         Long pendingCount = taskMapper.selectCount(new QueryWrapper<TaskEntity>()
             .eq("assignee_id", userId)
-            .eq("status", "PENDING"));
+            .and(query -> query.eq("status", "PENDING")
+                .or(cc -> cc.eq("status", "CC").isNull("read_at"))));
         return new MobileBootstrapDto(
             new MobileUserDto(user.getId(), user.getUsername(), user.getDisplayName(),
                 List.copyOf(roles)),

@@ -76,6 +76,15 @@ class MobileWorkflowControllerAuditTest {
         assertThat(metadata.getValue().toString()).doesNotContain("private comment");
     }
 
+    @Test
+    void copiedTaskAcknowledgementIsAudited() {
+        controller.markTaskRead(72L);
+
+        verify(workflowService).markTaskRead(72L, 7L);
+        verify(auditService).success(eq("workflow.task.acknowledge"), eq("TASK"), eq(72L),
+            eq(AuditService.RiskLevel.NORMAL), any(), any());
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static ArgumentCaptor<Map<String, ?>> mapCaptor() {
         return (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);

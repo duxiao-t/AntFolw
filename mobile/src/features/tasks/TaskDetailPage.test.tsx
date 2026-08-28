@@ -107,7 +107,8 @@ function setupFetch(options: {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/mobile/tasks/401') && !url.includes('/approve') && !url.includes('/reject')) {
+      if (url.includes('/api/mobile/tasks/401') && !url.includes('/approve')
+        && !url.includes('/reject') && !url.includes('/read')) {
         return jsonResponse(detail);
       }
       if (url.includes('/api/mobile/files/d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60/content')) {
@@ -268,6 +269,41 @@ describe('TaskDetailPage', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '确认同意' }));
 
     expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
+  });
+
+  it('shows an agree button for copied tasks and marks them read on confirmation', async () => {
+    const ccDetail: MobileTaskDetail = {
+      ...TASK_DETAIL,
+      task: {
+        ...TASK_DETAIL.task,
+        nodeId: 'cc1',
+        nodeName: '抄送人',
+        taskStatus: 'CC',
+        instanceStatus: 'APPROVED',
+        readAt: null,
+      },
+      allowedActions: ['ACKNOWLEDGE'],
+      approvalRecords: [
+        TASK_DETAIL.approvalRecords[0]!,
+        {
+          id: 'task-401', taskId: 401, nodeId: 'cc1', nodeName: '抄送人',
+          status: 'PROCESSING', operatorName: 'test2', comment: '等待确认抄送内容。',
+          receivedAt: '2026-08-24T15:22:00+08:00', completedAt: null,
+        },
+      ],
+    };
+    setupFetch({ detail: ccDetail as typeof TASK_DETAIL });
+    const user = userEvent.setup();
+    renderDetail('/tasks/401?returnView=pending');
+
+    expect(await screen.findByText('抄送详情')).toBeInTheDocument();
+    expect(screen.getByText('等待确认抄送内容。')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '同意' }));
+
+    await waitFor(() => expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(
+      ([input, init]) => String(input).includes('/api/mobile/tasks/401/read')
+        && init?.method === 'POST',
+    )).toBe(true));
   });
 
   it('renders editable fields and submits their values on approve', async () => {

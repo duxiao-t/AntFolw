@@ -1,7 +1,7 @@
 import type { TaskView } from "./tasks.api";
 
 const FILTERS: Record<TaskView, Array<{ value: string; label: string }>> = {
-  pending: [{ value: "", label: "全部" }, { value: "RUNNING", label: "进行中" }, { value: "APPROVED", label: "已通过" }, { value: "PENDING", label: "我审批" }, { value: "URGENT", label: "紧急" }],
+  pending: [{ value: "", label: "全部" }, { value: "RUNNING", label: "进行中" }, { value: "APPROVED", label: "已通过" }, { value: "PENDING", label: "我审批" }, { value: "CC", label: "抄送" }, { value: "URGENT", label: "紧急" }],
   process: [{ value: "", label: "全部" }, { value: "RUNNING", label: "审批中" }, { value: "APPROVED", label: "通过" }, { value: "REJECTED", label: "驳回" }, { value: "WITHDRAWN", label: "已撤回" }],
   done: [{ value: "", label: "全部" }, { value: "APPROVED", label: "通过" }, { value: "REJECTED", label: "驳回" }, { value: "SKIPPED", label: "跳过" }, { value: "CC", label: "抄送" }],
 };

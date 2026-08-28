@@ -6,12 +6,14 @@ export function TaskCard({ item, returnSearch }: { item: TaskCenterItem; returnS
 }
 
 function ApprovalTaskCard({ task, returnSearch }: { task: TaskListItem; returnSearch: string }) {
-  const success = task.taskStatus === "APPROVED" || task.instanceStatus === "APPROVED";
+  const unreadCc = task.taskStatus === "CC" && !task.readAt;
+  const success = task.taskStatus === "APPROVED" || (task.instanceStatus === "APPROVED" && !unreadCc);
   const rework = task.taskType === "REWORK";
   const danger = rework || task.taskStatus === "REJECTED" || task.instanceStatus === "REJECTED";
   const tone = success ? " task-card--success" : danger ? " task-card--danger" : task.instanceStatus === "RUNNING" ? " task-card--info" : " task-card--muted";
   const chipTone = success ? " chip--success-soft" : danger ? " chip--danger-soft" : " chip--soft";
-  const status = rework ? "待修改" : task.taskStatus === "PENDING" ? "待审批" : taskStatusLabel(task.taskStatus);
+  const status = rework ? "待修改" : task.taskStatus === "PENDING" ? "待审批"
+    : unreadCc ? "待查阅" : taskStatusLabel(task.taskStatus);
   const target = rework
     ? `/forms/${encodeURIComponent(task.formCode)}?reworkTaskId=${task.id}`
     : `/tasks/${task.id}?${returnSearch}`;

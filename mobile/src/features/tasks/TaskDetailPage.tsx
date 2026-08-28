@@ -15,7 +15,7 @@ import type {
 import { ApproveSheet } from "./ApproveSheet";
 import { ApprovalRecords, approvalSummaryLabel } from "./ApprovalRecords";
 import { RejectSheet } from "./RejectSheet";
-import { fetchTaskDetail, runTaskAction, type TaskActionPayload } from "./tasks.api";
+import { fetchTaskDetail, markTaskRead, runTaskAction, type TaskActionPayload } from "./tasks.api";
 
 export function TaskDetailPage() {
   const { taskId = "" } = useParams();
@@ -32,6 +32,17 @@ export function TaskDetailPage() {
     mutationFn: ({ action, payload, idempotencyKey }: { action: "approve" | "reject"; payload: TaskActionPayload; idempotencyKey: string }) => runTaskAction(numericTaskId, action, payload, idempotencyKey),
     async onSuccess() { setActionError(""); setStatusNotice(""); setApproveOpen(false); setRejectOpen(false); await invalidateTaskCaches(queryClient, numericTaskId, detailQuery.data?.task.instanceId); navigate(returnPath(searchParams), { replace: true }); },
     async onError(error) { if (isApiError(error) && error.status === 409) { setApproveOpen(false); setRejectOpen(false); setActionError(""); setStatusNotice("任务状态已更新"); await detailQuery.refetch(); return; } setActionError(error instanceof Error ? error.message : "操作失败"); },
+  });
+  const acknowledgeMutation = useMutation({
+    mutationFn: () => markTaskRead(numericTaskId),
+    async onSuccess() {
+      setActionError("");
+      await invalidateTaskCaches(queryClient, numericTaskId, detailQuery.data?.task.instanceId);
+      navigate(returnPath(searchParams), { replace: true });
+    },
+    onError(error) {
+      setActionError(error instanceof Error ? error.message : "操作失败");
+    },
   });
   const schema = useMemo(() => normalizeSchema(detailQuery.data?.schema), [detailQuery.data?.schema]);
   const values = useMemo(() => normalizeValues(detailQuery.data?.formData), [detailQuery.data?.formData]);
@@ -73,20 +84,22 @@ export function TaskDetailPage() {
   const approvalSummary = detail.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   const canApprove = detail.allowedActions.includes("APPROVE");
   const canReject = detail.allowedActions.includes("REJECT");
-  const showActions = canApprove || canReject;
+  const canAcknowledge = detail.allowedActions.includes("ACKNOWLEDGE");
+  const showActions = canApprove || canReject || canAcknowledge;
+  const isCc = task.taskStatus === "CC";
 
   return (
     <AppPage
-      title="审批详情"
+      title={isCc ? "抄送详情" : "审批详情"}
       contentClassName="approval-detail-page"
       action={<button type="button" className="app-bar__action" aria-label="分享" onClick={() => shareTask(task.formName)}><ShareIcon /></button>}
-      bottomBar={showActions ? <div className="action-bar approval-action-bar">{canReject ? <button type="button" className="btn btn--ghost btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setRejectOpen(true); }}>驳回</button> : <span />}{canApprove ? <button type="button" className="btn btn--success btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setApproveOpen(true); }}>同意</button> : null}</div> : null}
+      bottomBar={showActions ? <div className="action-bar approval-action-bar">{canReject ? <button type="button" className="btn btn--ghost btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setRejectOpen(true); }}>驳回</button> : <span />}{canApprove ? <button type="button" className="btn btn--success btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setApproveOpen(true); }}>同意</button> : null}{canAcknowledge ? <button type="button" className="btn btn--success btn--lg" disabled={acknowledgeMutation.isPending} onClick={() => acknowledgeMutation.mutate()}>同意</button> : null}</div> : null}
     >
       <section className="approval-hero detail-hero--bleed">
         <div className="approval-hero__title-block"><span className="approval-hero__label">表单名称</span><h1>{task.formName}</h1></div>
         <div className="approval-hero__applicant"><div className="approval-hero__avatar">{task.applicantName.slice(0, 1)}</div><div><span>申请人</span><strong>{task.applicantName}</strong></div></div>
         <dl className="approval-hero__meta"><div><dt>工号</dt><dd>{task.applicantEmployeeNo || "未分配"}</dd></div><div><dt>部门</dt><dd>{task.applicantDepartment || "未填写"}</dd></div><div className="approval-hero__meta-wide"><dt>提交时间</dt><dd>{formatDateTime(approvalRecords[0]?.receivedAt || task.createdAt)}</dd></div></dl>
-        <div className="approval-hero__current"><span className="approval-hero__current-dot" /><span>当前审批节点</span><strong>{task.nodeName}</strong></div>
+        <div className="approval-hero__current"><span className="approval-hero__current-dot" /><span>{isCc ? "抄送节点" : "当前审批节点"}</span><strong>{task.nodeName}</strong></div>
       </section>
 
       {statusNotice ? <p className="status-notice" role="status">{statusNotice}</p> : null}

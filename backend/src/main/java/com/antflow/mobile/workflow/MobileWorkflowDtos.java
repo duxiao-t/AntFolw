@@ -31,7 +31,8 @@ record MobileDraftRequest(String formCode, JsonNode data) {
 record MobileTaskDto(Long id, Long instanceId, String nodeId, String formCode, String formName,
                      String businessNo, String applicantName, String applicantEmployeeNo,
                      String applicantDepartment, String nodeName, String taskType,
-                     String taskStatus, String instanceStatus, OffsetDateTime createdAt) {
+                     String taskStatus, String instanceStatus, OffsetDateTime createdAt,
+                     OffsetDateTime readAt) {
 }
 
 record MobilePageDto<T>(List<T> items, boolean hasMore) {

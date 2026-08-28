@@ -28,6 +28,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -211,6 +212,17 @@ public class MobileWorkflowService {
             records
         );
     }
+    @Transactional(rollbackFor = Exception.class)
+    public void markTaskRead(Long taskId, long userId) {
+        TaskEntity task = requireExistingTask(taskId);
+        if (!Objects.equals(task.getAssigneeId(), userId)) {
+            throw new AccessDeniedException("not your task");
+        }
+        if (!"CC".equals(task.getStatus()) || task.getReadAt() != null) return;
+        task.setReadAt(OffsetDateTime.now());
+        taskMapper.updateById(task);
+    }
+
 
     @Transactional(rollbackFor = Exception.class)
     public void approve(Long taskId, MobileTaskActionRequest request, long userId) {
@@ -420,7 +432,8 @@ public class MobileWorkflowService {
             task.getTaskType() == null ? "APPROVAL" : task.getTaskType(),
             task.getStatus(),
             instance.getStatus(),
-            task.getCreatedAt()
+            task.getCreatedAt(),
+            task.getReadAt()
         );
     }
 
@@ -513,6 +526,10 @@ public class MobileWorkflowService {
     }
 
     private List<String> allowedActions(TaskEntity task, long userId) {
+        if ("CC".equals(task.getStatus()) && task.getReadAt() == null
+            && Objects.equals(task.getAssigneeId(), userId)) {
+            return List.of("ACKNOWLEDGE");
+        }
         if (!PENDING_STATUS.equals(task.getStatus())
             || "REWORK".equals(task.getTaskType())
             || !Objects.equals(task.getAssigneeId(), userId)

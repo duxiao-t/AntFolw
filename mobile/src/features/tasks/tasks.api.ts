@@ -17,6 +17,7 @@ export type TaskListItem = {
   taskStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SKIPPED' | 'CC' | string;
   instanceStatus: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
   createdAt: string;
+  readAt?: string | null;
 };
 
 export type StartedProcessItem = {
@@ -154,6 +155,10 @@ export type TaskActionPayload = {
 
 export async function fetchTaskDetail(taskId: number): Promise<MobileTaskDetail> {
   return apiRequest<MobileTaskDetail>(`/api/mobile/tasks/${taskId}`);
+}
+
+export async function markTaskRead(taskId: number): Promise<void> {
+  await apiRequest<void>(`/api/mobile/tasks/${taskId}/read`, { method: 'POST' });
 }
 
 export async function runTaskAction(

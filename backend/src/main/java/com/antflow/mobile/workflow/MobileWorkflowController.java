@@ -146,6 +146,15 @@ public class MobileWorkflowController {
         return detail;
     }
 
+    @PostMapping("/tasks/{id}/read")
+    public void markTaskRead(@PathVariable Long id) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
+        auditService.execute(() -> workflowService.markTaskRead(id, principal().userId()),
+            () -> auditService.success("workflow.task.acknowledge", "TASK", id,
+                AuditService.RiskLevel.NORMAL,
+                Map.of("changedFields", List.of("readAt")), Map.of("client", "mobile")));
+    }
+
     @PostMapping("/tasks/{id}/approve")
     public void approve(@PathVariable Long id,
                         @RequestBody(required = false) MobileTaskActionRequest request) {
