@@ -16,6 +16,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:Tao@1234}
     driver-class-name: org.postgresql.Driver
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: validate
     properties:
@@ -82,7 +83,7 @@ antflow:
     request-timeout: 10s
     stale-lock-timeout: 2m
     max-attempts: 8
-    poll-interval-ms: ${ANTFLOW_JOB_POLL_INTERVAL_MS:1000}
+    poll-interval-ms: ${ANTFLOW_JOB_POLL_INTERVAL_MS:5000}
     recovery-interval-ms: ${ANTFLOW_JOB_RECOVERY_INTERVAL_MS:60000}
 
 mybatis-plus:
@@ -106,4 +107,4 @@ management:
 logging:
   level:
     root: INFO
-    com.antflow: DEBUG
+    com.antflow: INFO

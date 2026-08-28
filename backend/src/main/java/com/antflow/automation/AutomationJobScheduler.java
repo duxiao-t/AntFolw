@@ -25,7 +25,7 @@ public class AutomationJobScheduler {
         if (recovered > 0) log.info("Recovered {} stale workflow jobs", recovered);
     }
 
-    @Scheduled(fixedDelayString = "${antflow.automation.poll-interval-ms:1000}")
+    @Scheduled(fixedDelayString = "${antflow.automation.poll-interval-ms:5000}")
     public void poll() {
         for (int i = 0; i < 10; i++) {
             WorkflowJob job = jobs.claimDue(workerId);
