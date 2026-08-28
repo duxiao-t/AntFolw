@@ -3178,6 +3178,9 @@ body {
 .af-form-renderer__item + .af-form-renderer__item > .af-field {
   border-top: 1px solid var(--af-color-line);
 }
+.af-form-renderer__item:has(> .af-field--span-layout) + .af-form-renderer__item > .af-field {
+  border-top: 0;
+}
 .af-card--form {
   padding: 4px 14px;
   border: 1px solid #e1eaf4;

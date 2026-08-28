@@ -70,6 +70,23 @@ describe('FormRenderer', () => {
     expect(fieldFrame?.querySelector('.form-renderer__designer-card')).toBeTruthy();
   });
 
+  it('uses the configured span divider color outside the designer card', () => {
+    const schema: SchemaNode[] = [{
+      id: 'row',
+      type: 'span_layout',
+      label: '基本信息',
+      props: { dividerColor: '#123456' },
+      children: [],
+    }];
+
+    const { container } = render(
+      <FormRenderer schema={schema} mode="runtime-readonly" value={{}} />,
+    );
+
+    expect(container.querySelector('[data-field-id="row"]'))
+      .toHaveStyle({ borderBottom: '1px solid #123456' });
+  });
+
   it('applies per-field mode overrides and hides hidden fields', () => {
     const schema: SchemaNode[] = [
       { id: 'edit', type: 'text', label: '可编辑' },

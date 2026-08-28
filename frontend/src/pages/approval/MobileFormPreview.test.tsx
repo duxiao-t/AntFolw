@@ -10,6 +10,7 @@ const schema: SchemaNode[] = [
     id: 'row',
     type: 'span_layout',
     label: '基本信息',
+    props: { dividerColor: '#123456' },
     children: [
       {
         id: 'name',
@@ -58,6 +59,8 @@ describe('MobileFormPreview', () => {
     expect(screen.getByText('姓名')).toBeInTheDocument();
     expect(screen.getByText('事由')).toBeInTheDocument();
     expect(screen.getByText('请填写事由')).toBeInTheDocument();
+    expect(container.querySelector('.preview-span-layout'))
+      .toHaveStyle({ borderBottom: '1px solid #123456' });
 
     fireEvent.change(screen.getByPlaceholderText('请输入姓名'), {
       target: { value: '张三' },

@@ -2,6 +2,7 @@ import {
   Button,
   Checkbox,
   Collapse,
+  ColorPicker,
   Divider,
   Empty,
   Input,
@@ -1062,8 +1063,16 @@ function renderComponentSettings(
             checked={props.showBorder !== false}
             onChange={(event) => updateProps({ showBorder: event.target.checked })}
           >
-            显示边框
+            显示分割线
           </Checkbox>
+          <PanelField label="分割线颜色">
+            <ColorPicker
+              disabled={props.showBorder === false}
+              disabledAlpha
+              value={props.dividerColor ?? '#d9d9d9'}
+              onChangeComplete={(color) => updateProps({ dividerColor: color.toHexString() })}
+            />
+          </PanelField>
           <Checkbox
             checked={props.mobileSingleColumn !== false}
             onChange={(event) =>

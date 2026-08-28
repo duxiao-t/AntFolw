@@ -158,7 +158,15 @@ function PreviewField({
   if (node.type === 'span_layout') {
     return (
       <FieldShell node={node} label={label} error={error} description={description} help={help}>
-        <div className="preview-span-layout">
+        <div
+          className="preview-span-layout"
+          style={{
+            borderBottom: node.props?.showBorder === false
+              ? undefined
+              : `1px solid ${node.props?.dividerColor ?? '#d9d9d9'}`,
+            paddingBottom: node.props?.showBorder === false ? undefined : 12,
+          }}
+        >
           <PreviewNodeList
             nodes={node.children ?? []}
             values={values}
@@ -237,7 +245,7 @@ function FieldShell({
 }) {
   return (
     <section
-      className={`af-field${error ? ' af-field--error' : ''}`}
+      className={`af-field af-field--${node.type.replaceAll('_', '-')}${error ? ' af-field--error' : ''}`}
       data-field-id={node.id}
     >
       <div className="af-field__head">

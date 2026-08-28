@@ -665,7 +665,7 @@ describe('advanced mobile fields', () => {
           {
             id: 'layout',
             type: 'span_layout',
-            props: { span: 2 },
+            props: { span: 2, dividerColor: '#123456' },
             children: [
               { id: 'a', type: 'text', label: 'A' },
               { id: 'b', type: 'text', label: 'B' },
@@ -676,7 +676,10 @@ describe('advanced mobile fields', () => {
       />,
     );
 
-    expect(screen.getByTestId('span-layout')).toHaveStyle({ gridTemplateColumns: '1fr' });
+    expect(screen.getByTestId('span-layout')).toHaveStyle({
+      gridTemplateColumns: '1fr',
+      borderBottom: '1px solid #123456',
+    });
   });
 
   it('renders table-list validation errors in the field UI', () => {

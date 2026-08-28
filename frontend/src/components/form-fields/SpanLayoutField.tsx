@@ -10,21 +10,29 @@ export const SpanLayoutField: FieldType = {
     columns: 2,
     gutter: 12,
     showBorder: true,
+    dividerColor: '#d9d9d9',
     mobileSingleColumn: true,
   },
   Component: ({ node, mode, value, onChange, fieldModes }) => {
     const cols = node.props?.columns ?? 2;
     const span = Math.floor(24 / cols);
     return (
-      <fieldset
+      <section
         data-field-id={node.id}
         style={{
-          border: node.props?.showBorder === false ? 0 : '1px dashed #bbb',
-          padding: node.props?.showBorder === false ? 0 : 12,
+          border: 0,
+          borderBottom:
+            mode === 'designer-preview' || node.props?.showBorder === false
+              ? 0
+              : `1px solid ${node.props?.dividerColor ?? '#d9d9d9'}`,
+          paddingBottom:
+            mode === 'designer-preview' || node.props?.showBorder === false ? 0 : 12,
           margin: '8px 0',
         }}
       >
-        <legend>{node.label ?? '分栏'}</legend>
+        {mode !== 'designer-preview' && node.props?.showTitle !== false && (
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>{node.label ?? '分栏'}</div>
+        )}
         <Row gutter={node.props?.gutter ?? 12}>
           {(node.children ?? []).map((child) => (
             <Col
@@ -42,7 +50,7 @@ export const SpanLayoutField: FieldType = {
             </Col>
           ))}
         </Row>
-      </fieldset>
+      </section>
     );
   },
   ConfigPanel: ({ node, onChange }) => (

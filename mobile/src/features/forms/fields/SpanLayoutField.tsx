@@ -13,13 +13,25 @@ export function SpanLayoutField(props: MobileFieldProps) {
   }, []);
 
   return (
-    <FieldShell node={props.node} label={fieldLabel(props.node)}>
+    <FieldShell
+      node={props.node}
+      label={fieldLabel(props.node)}
+      className="af-field--span-layout"
+    >
       <section
         data-testid="span-layout"
         style={{
           display: 'grid',
           gap: 8,
-          gridTemplateColumns: narrow ? '1fr' : `repeat(${Math.max(1, numberValue(props.node.props?.span, props.node.children?.length ?? 1))}, minmax(0, 1fr))`,
+          gridTemplateColumns:
+            narrow && props.node.props?.mobileSingleColumn !== false
+              ? '1fr'
+              : `repeat(${Math.max(1, numberValue(props.node.props?.columns ?? props.node.props?.span, props.node.children?.length ?? 1))}, minmax(0, 1fr))`,
+          borderBottom:
+            props.node.props?.showBorder === false
+              ? undefined
+              : `1px solid ${stringValue(props.node.props?.dividerColor, '#d9d9d9')}`,
+          paddingBottom: props.node.props?.showBorder === false ? undefined : 12,
         }}
       >
         {props.renderChildren?.(props.node.children ?? [])}
@@ -34,4 +46,8 @@ function isNarrow() {
 
 function numberValue(value: unknown, fallback: number) {
   return typeof value === 'number' && value > 0 ? value : fallback;
+}
+
+function stringValue(value: unknown, fallback: string) {
+  return typeof value === 'string' && value ? value : fallback;
 }

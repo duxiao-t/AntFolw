@@ -1,8 +1,12 @@
+export type SchemaNodeProps = Record<string, any> & {
+  dividerColor?: string;
+};
+
 export type SchemaNode = {
   id: string;
   type: string;
   label?: string;
-  props?: Record<string, any>;
+  props?: SchemaNodeProps;
   children?: SchemaNode[];
 };
 
