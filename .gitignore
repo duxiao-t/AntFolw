@@ -61,6 +61,10 @@ backend/data/
 frontend/frontend/
 
 # Local dev server logs (running processes hold these files)
+_perf/
+/frontend-run.err
+/frontend/preview-*.err
+/frontend/preview-*.out
 backend/run*.log
 backend/server*.log
 frontend/dev*.log
