@@ -99,25 +99,56 @@ export function fieldHelp(node: MobileSchemaNode) {
   return typeof text === 'string' && text.trim() ? text : null;
 }
 
-export function isVisibleNode(node: MobileSchemaNode, values: MobileFormValues) {
-  return node.props?.hidden !== true && matchesDisplayCondition(node.props?.displayCondition, values);
+export function isVisibleNode(
+  node: MobileSchemaNode,
+  values: MobileFormValues,
+  visibleIds?: ReadonlySet<string>,
+) {
+  const sourceId = displayConditionSourceId(node);
+  return node.props?.hidden !== true
+    && (!sourceId || !visibleIds || visibleIds.has(sourceId))
+    && matchesDisplayCondition(node.props?.displayCondition, values);
+}
+
+export function visibleNodeIds(nodes: MobileSchemaNode[], values: MobileFormValues) {
+  const allIds = new Set(flattenNodes(nodes).map((node) => node.id));
+  const visibleIds = new Set<string>();
+  const visit = (items: MobileSchemaNode[], parentVisible: boolean) => {
+    items.forEach((node) => {
+      const sourceId = displayConditionSourceId(node);
+      const sourceVisible = !sourceId || !allIds.has(sourceId) || visibleIds.has(sourceId);
+      const visible = parentVisible && sourceVisible && isVisibleNode(node, values);
+      if (visible) visibleIds.add(node.id);
+      visit(node.children ?? [], visible);
+    });
+  };
+  visit(nodes, true);
+  return visibleIds;
 }
 
 export function visibleSchemaNodes(nodes: MobileSchemaNode[], values: MobileFormValues): MobileSchemaNode[] {
+  const visibleIds = visibleNodeIds(nodes, values);
+  return visibleSchemaNodesFromIds(nodes, visibleIds);
+}
+
+function visibleSchemaNodesFromIds(
+  nodes: MobileSchemaNode[],
+  visibleIds: ReadonlySet<string>,
+): MobileSchemaNode[] {
   return nodes.flatMap((node) => {
-    if (!isVisibleNode(node, values)) {
+    if (!visibleIds.has(node.id)) {
       return [];
     }
     return [{
       ...node,
-      children: node.children ? visibleSchemaNodes(node.children, values) : undefined,
+      children: node.children ? visibleSchemaNodesFromIds(node.children, visibleIds) : undefined,
     }];
   });
 }
 
 export function collectVisibleValues(nodes: MobileSchemaNode[], values: MobileFormValues): MobileFormValues {
   const next: MobileFormValues = {};
-  collectVisibleValueNodes(nodes, values, next);
+  collectVisibleValueNodes(nodes, values, next, visibleNodeIds(nodes, values));
   return next;
 }
 
@@ -134,9 +165,10 @@ function collectVisibleValueNodes(
   nodes: MobileSchemaNode[],
   values: MobileFormValues,
   output: MobileFormValues,
+  visibleIds: ReadonlySet<string>,
 ) {
   for (const node of nodes) {
-    if (!isVisibleNode(node, values)) {
+    if (!visibleIds.has(node.id)) {
       continue;
     }
     if (node.type === 'table_list') {
@@ -144,13 +176,25 @@ function collectVisibleValueNodes(
       continue;
     }
     if (node.children?.length) {
-      collectVisibleValueNodes(node.children, values, output);
+      collectVisibleValueNodes(node.children, values, output, visibleIds);
       continue;
     }
     if (Object.hasOwn(values, node.id)) {
       output[node.id] = values[node.id];
     }
   }
+}
+
+function displayConditionSourceId(node: MobileSchemaNode) {
+  const condition = node.props?.displayCondition;
+  if (typeof condition !== 'object' || condition == null || Array.isArray(condition)) return null;
+  const sourceId = (condition as Record<string, unknown>).fieldId
+    ?? (condition as Record<string, unknown>).field;
+  return typeof sourceId === 'string' && sourceId ? sourceId : null;
+}
+
+function flattenNodes(nodes: MobileSchemaNode[]): MobileSchemaNode[] {
+  return nodes.flatMap((node) => [node, ...flattenNodes(node.children ?? [])]);
 }
 
 function collectVisibleTableRows(node: MobileSchemaNode, value: unknown) {
@@ -177,6 +221,9 @@ function matchesDisplayCondition(condition: unknown, values: MobileFormValues) {
   const sourceValue = values[fieldId];
   const targetValue = rule.value;
   switch (String(rule.operator ?? 'eq')) {
+    case 'in':
+      return Array.isArray(targetValue)
+        && targetValue.some((item) => String(item) === String(sourceValue ?? ''));
     case 'ne':
     case '!=':
     case '!==':

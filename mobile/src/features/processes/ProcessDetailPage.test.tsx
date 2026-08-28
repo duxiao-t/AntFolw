@@ -147,7 +147,7 @@ describe('ProcessDetailPage', () => {
     setupFetch({
       detail: {
         ...INSTANCE_DETAIL,
-        schema: [...INSTANCE_DETAIL.schema, { id: 'quote', type: 'file_upload', label: '报价单' }],
+        schema: [...(INSTANCE_DETAIL.schema ?? []), { id: 'quote', type: 'file_upload', label: '报价单' }],
         formData: {
           ...INSTANCE_DETAIL.formData,
           quote: [
@@ -175,7 +175,7 @@ describe('ProcessDetailPage', () => {
       detail: {
         ...INSTANCE_DETAIL,
         schema: [
-          ...INSTANCE_DETAIL.schema,
+          ...(INSTANCE_DETAIL.schema ?? []),
           { id: 'photo', type: 'image_upload', label: '图片' },
           { id: 'quote', type: 'file_upload', label: '报价单' },
         ],

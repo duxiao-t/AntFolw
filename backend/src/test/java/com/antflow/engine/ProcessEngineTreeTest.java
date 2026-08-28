@@ -34,6 +34,7 @@ import java.util.Arrays;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -96,6 +97,8 @@ class ProcessEngineTreeTest {
 
     @BeforeEach void setup() {
         formDefinitionService = Mockito.mock(FormDefinitionService.class);
+        Mockito.when(formDefinitionService.filterVisibleSubmission(Mockito.anyString(), Mockito.any()))
+            .thenAnswer(invocation -> invocation.getArgument(1));
         formDataMapper = Mockito.mock(FormDataMapper.class);
         processDefinitionService = Mockito.mock(ProcessDefinitionService.class);
         taskMapper = Mockito.mock(TaskMapper.class);
@@ -335,6 +338,10 @@ class ProcessEngineTreeTest {
         Mockito.verify(formDataMapper).updateById(formDataCaptor.capture());
         String merged = formDataCaptor.getValue().getData();
         assertThat(merged).contains("\"amount\":5").contains("\"name\":\"x\"");
+        ArgumentCaptor<Object> validationData = ArgumentCaptor.forClass(Object.class);
+        Mockito.verify(formDefinitionService).validateSubmission(
+            Mockito.eq(editableForm.getSchema()), validationData.capture(), Mockito.eq(Set.of("amount")));
+        assertThat(validationData.getValue().toString()).contains("\"name\":\"x\"");
     }
 
     @Test

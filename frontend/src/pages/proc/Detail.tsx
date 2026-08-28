@@ -202,7 +202,7 @@ export default function DetailPage() {
       await request(`/api/tasks/${taskId}/approve`, {
         method: 'POST',
         data: hasEditableFields
-          ? pickEditableValues(editableValues, currentFormModes)
+          ? pickEditableValues(editableValues, currentFormModes, formSchema)
           : {},
       });
       message.success('已同意');

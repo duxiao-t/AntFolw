@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
+import { visibleNodeIds } from '../../registry/displayConditions';
 import type { SchemaNode } from '../../registry/types';
 import { validateMatrixValue } from '../../components/form-fields/matrixFill';
 import './MobileFormPreview.less';
@@ -43,6 +44,7 @@ export function MobileFormPreview({
   onSaveDraft,
   onSubmit,
 }: MobileFormPreviewProps) {
+  const visibleIds = visibleNodeIds(schema, values);
   return (
     <div className="approval-mobile-preview" data-testid="mobile-form-preview">
       <header className="app-bar">
@@ -71,6 +73,7 @@ export function MobileFormPreview({
             nodes={schema}
             values={values}
             errors={errors}
+            visibleIds={visibleIds}
             onValueChange={onValueChange}
           />
         </div>
@@ -103,7 +106,7 @@ export function collectPreviewFieldErrors(
   values: PreviewValues,
 ): PreviewErrors {
   const errors: PreviewErrors = {};
-  collectNodeErrors(nodes, values, errors);
+  collectNodeErrors(nodes, values, errors, visibleNodeIds(nodes, values));
   return errors;
 }
 
@@ -111,14 +114,16 @@ function PreviewNodeList({
   nodes,
   values,
   errors,
+  visibleIds,
   onValueChange,
 }: {
   nodes: SchemaNode[];
   values: PreviewValues;
   errors: PreviewErrors;
+  visibleIds: ReadonlySet<string>;
   onValueChange(fieldId: string, value: any): void;
 }) {
-  const visibleNodes = visibleDescendantNodes(nodes, values);
+  const visibleNodes = visibleDescendantNodes(nodes, visibleIds);
   return (
     <div className="af-form-renderer">
       {visibleNodes.map((node) => (
@@ -127,6 +132,7 @@ function PreviewNodeList({
             node={node}
             values={values}
             errors={errors}
+            visibleIds={visibleIds}
             error={errors[node.id]}
             onValueChange={onValueChange}
           />
@@ -140,12 +146,14 @@ function PreviewField({
   node,
   values,
   errors,
+  visibleIds,
   error,
   onValueChange,
 }: {
   node: SchemaNode;
   values: PreviewValues;
   errors: PreviewErrors;
+  visibleIds: ReadonlySet<string>;
   error?: string;
   onValueChange(fieldId: string, value: any): void;
 }) {
@@ -171,6 +179,7 @@ function PreviewField({
             nodes={node.children ?? []}
             values={values}
             errors={errors}
+            visibleIds={visibleIds}
             onValueChange={onValueChange}
           />
         </div>
@@ -222,6 +231,7 @@ function PreviewField({
         node,
         value,
         values,
+        visibleIds,
         onValueChange,
       })}
     </FieldShell>
@@ -268,11 +278,13 @@ function renderControl({
   node,
   value,
   values,
+  visibleIds,
   onValueChange,
 }: {
   node: SchemaNode;
   value: any;
   values: PreviewValues;
+  visibleIds: ReadonlySet<string>;
   onValueChange(fieldId: string, value: any): void;
 }) {
   const placeholder = String(node.props?.placeholder ?? '请输入');
@@ -435,6 +447,7 @@ function renderControl({
             nodes={node.children}
             values={values}
             errors={{}}
+            visibleIds={visibleIds}
             onValueChange={onValueChange}
           />
         );
@@ -541,11 +554,12 @@ function collectNodeErrors(
   nodes: SchemaNode[],
   values: PreviewValues,
   errors: PreviewErrors,
+  visibleIds: ReadonlySet<string>,
 ) {
   for (const node of nodes) {
-    if (!isVisibleNode(node, values)) continue;
+    if (!visibleIds.has(node.id)) continue;
     if (node.type === 'span_layout') {
-      collectNodeErrors(node.children ?? [], values, errors);
+      collectNodeErrors(node.children ?? [], values, errors, visibleIds);
       continue;
     }
     const value = values[node.id] ?? node.props?.defaultValue;
@@ -556,7 +570,7 @@ function collectNodeErrors(
       errors[node.id] = error;
     }
     if (node.children && node.type !== 'table_list') {
-      collectNodeErrors(node.children, values, errors);
+      collectNodeErrors(node.children, values, errors, visibleIds);
     }
   }
 }
@@ -597,56 +611,19 @@ function validateCommonRules(node: SchemaNode, value: any) {
   return null;
 }
 
-function visibleDescendantNodes(nodes: SchemaNode[], values: PreviewValues): SchemaNode[] {
+function visibleDescendantNodes(
+  nodes: SchemaNode[],
+  visibleIds: ReadonlySet<string>,
+): SchemaNode[] {
   return nodes.flatMap((node) => {
-    if (!isVisibleNode(node, values)) {
+    if (!visibleIds.has(node.id)) {
       return [];
     }
     return [{
       ...node,
-      children: node.children ? visibleDescendantNodes(node.children, values) : undefined,
+      children: node.children ? visibleDescendantNodes(node.children, visibleIds) : undefined,
     }];
   });
-}
-
-function isVisibleNode(node: SchemaNode, values: PreviewValues) {
-  return node.props?.hidden !== true && matchesDisplayCondition(node.props?.displayCondition, values);
-}
-
-function matchesDisplayCondition(condition: any, values: PreviewValues) {
-  if (!condition || typeof condition !== 'object') return true;
-  const fieldId = condition.fieldId ?? condition.field;
-  if (typeof fieldId !== 'string' || !fieldId) return true;
-  const sourceValue = values[fieldId];
-  const targetValue = condition.value;
-  switch (String(condition.operator ?? 'eq')) {
-    case 'ne':
-    case '!=':
-    case '!==':
-      return String(sourceValue ?? '') !== String(targetValue ?? '');
-    case 'contains':
-      return Array.isArray(sourceValue)
-        ? sourceValue.map(String).includes(String(targetValue ?? ''))
-        : String(sourceValue ?? '').includes(String(targetValue ?? ''));
-    case 'empty':
-      return isEmptyValue(sourceValue);
-    case 'notEmpty':
-      return !isEmptyValue(sourceValue);
-    case 'gt':
-    case '>':
-      return numberCompare(sourceValue, targetValue, (left, right) => left > right);
-    case 'gte':
-    case '>=':
-      return numberCompare(sourceValue, targetValue, (left, right) => left >= right);
-    case 'lt':
-    case '<':
-      return numberCompare(sourceValue, targetValue, (left, right) => left < right);
-    case 'lte':
-    case '<=':
-      return numberCompare(sourceValue, targetValue, (left, right) => left <= right);
-    default:
-      return String(sourceValue ?? '') === String(targetValue ?? '');
-  }
 }
 
 
@@ -716,16 +693,6 @@ function isEmptyValue(value: any) {
 function numericRule(node: SchemaNode, key: string) {
   const value = node.props?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function numberCompare(
-  sourceValue: any,
-  targetValue: any,
-  compare: (left: number, right: number) => boolean,
-) {
-  const left = Number(sourceValue);
-  const right = Number(targetValue);
-  return Number.isFinite(left) && Number.isFinite(right) && compare(left, right);
 }
 
 function rowTitle(row: any, children: SchemaNode[], index: number) {

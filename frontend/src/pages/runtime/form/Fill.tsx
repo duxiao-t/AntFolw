@@ -5,6 +5,11 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { request } from '@umijs/max';
 import { FormRenderer } from '../../../components/FormRenderer/FormRenderer';
 import { AssigneePicker } from '../../../components/AssigneePicker';
+import {
+  collectVisibleValues,
+  firstVisibleValidationError,
+} from '../../../registry/displayConditions';
+import type { SchemaNode } from '../../../registry/types';
 
 type TreeNode = {
   id: string;
@@ -67,6 +72,7 @@ export default function Fill() {
   const [pendingSelfSelect, setPendingSelfSelect] = useState<SelfSelectNode[]>(
     [],
   );
+  const [pendingSubmissionData, setPendingSubmissionData] = useState<Record<string, any>>({});
 
   const { data: fd, isFetching } = useQuery<any>({
     queryKey: ['form-def', code],
@@ -74,10 +80,10 @@ export default function Fill() {
   });
 
   const startInstance = useMutation({
-    mutationFn: (payload: { selfSelected: Record<string, number[]> }) =>
+    mutationFn: (payload: { selfSelected: Record<string, number[]>; data: Record<string, any> }) =>
       request('/api/instances/start', {
         method: 'POST',
-        data: { formCode: code, data: val, selfSelected: payload.selfSelected },
+        data: { formCode: code, data: payload.data, selfSelected: payload.selfSelected },
       }),
     onSuccess: () => {
       message.success('提交成功');
@@ -86,10 +92,10 @@ export default function Fill() {
   });
 
   const submitFormData = useMutation({
-    mutationFn: () =>
+    mutationFn: (data: Record<string, any>) =>
       request('/api/forms/data', {
         method: 'POST',
-        data: { formCode: code, status: 'SUBMITTED', data: val },
+        data: { formCode: code, status: 'SUBMITTED', data },
       }),
     onSuccess: () => {
       message.success('提交成功');
@@ -97,17 +103,24 @@ export default function Fill() {
     },
   });
 
-  const doStart = (sel: Record<string, number[]>) => {
-    startInstance.mutate({ selfSelected: sel });
+  const doStart = (sel: Record<string, number[]>, data = pendingSubmissionData) => {
+    startInstance.mutate({ selfSelected: sel, data });
   };
 
   const handleSubmit = async () => {
+    const schema = parseJsonValue<SchemaNode[]>(fd?.schema, []);
+    const error = firstVisibleValidationError(schema, val);
+    if (error) {
+      message.error(error);
+      return;
+    }
+    const submissionData = collectVisibleValues(schema, val);
     const workflowEnabled = !!parseJsonValue<Record<string, any>>(
       fd?.settings,
       {},
     ).workflowEnabled;
     if (!workflowEnabled) {
-      submitFormData.mutate();
+      submitFormData.mutate(submissionData);
       return;
     }
     const formDefId = fd?.id;
@@ -123,9 +136,10 @@ export default function Fill() {
       const nodes: SelfSelectNode[] = [];
       if (tree) collectSelfSelectNodes(tree, nodes);
       if (nodes.length === 0) {
-        doStart({});
+        doStart({}, submissionData);
         return;
       }
+      setPendingSubmissionData(submissionData);
       setPendingSelfSelect(nodes);
       setSelfSelected({});
       setPickerOpen(true);

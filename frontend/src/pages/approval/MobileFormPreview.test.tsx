@@ -110,4 +110,18 @@ describe('MobileFormPreview', () => {
     expect(collectPreviewFieldErrors(matrixSchema, {}).matrix)
       .toBe('请填写“设备 / 结果”');
   });
+
+  it('skips hidden required fields for in conditions', () => {
+    const conditional: SchemaNode[] = [{
+      id: 'detail',
+      type: 'text',
+      label: '详情',
+      props: {
+        required: true,
+        displayCondition: { fieldId: 'kind', operator: 'in', value: ['a', 'b'] },
+      },
+    }];
+    expect(collectPreviewFieldErrors(conditional, { kind: 'c' })).toEqual({});
+    expect(collectPreviewFieldErrors(conditional, { kind: 'b' })).toEqual({ detail: '请填写详情' });
+  });
 });

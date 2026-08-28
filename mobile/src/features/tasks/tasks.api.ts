@@ -1,4 +1,5 @@
 import { apiRequest } from '../../shared/api/http';
+import type { MobileSchemaNode } from '../forms/schema/types';
 
 export type TaskView = 'pending' | 'done' | 'process';
 
@@ -137,7 +138,7 @@ export type MobileTaskFile = {
 
 export type MobileTaskDetail = {
   task: TaskListItem;
-  schema: unknown;
+  schema: MobileSchemaNode[];
   formData: Record<string, unknown> | null;
   processSnapshot: unknown;
   history: MobileHistoryItem[];

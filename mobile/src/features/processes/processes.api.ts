@@ -1,4 +1,5 @@
 import { apiRequest } from '../../shared/api/http';
+import type { MobileSchemaNode } from '../forms/schema/types';
 import type { ApprovalRecord, ApprovalSummary } from '../tasks/tasks.api';
 
 export type MobileHistoryItem = {
@@ -30,7 +31,7 @@ export type MobileInstanceDetail = {
   applicantDepartment?: string | null;
   startedAt?: string;
   currentNodeName?: string | null;
-  schema?: unknown;
+  schema?: MobileSchemaNode[];
   formData?: Record<string, unknown> | null;
   processSnapshot?: unknown;
   history?: MobileHistoryItem[];

@@ -27,7 +27,7 @@ import { TableListField } from '../fields/TableListField';
 import { MatrixFillField } from '../fields/MatrixFillField';
 import { TimeField } from '../fields/TimeField';
 import { UserPickerField } from '../fields/UserPickerField';
-import { isVisibleNode, summarizeValue, validateCommonRules } from './validators';
+import { summarizeValue, validateCommonRules, visibleNodeIds } from './validators';
 import { summarizeMatrix, validateMatrixValue } from './matrixFill';
 import type {
   FieldValidationErrors,
@@ -199,14 +199,20 @@ export function getFieldDefinition(type: string): MobileFieldDefinition {
 export function validateSchemaValues(schema: MobileSchemaNode[],
                                      values: MobileFormValues): FieldValidationErrors {
   const errors: FieldValidationErrors = {};
+  const visibleIds = visibleNodeIds(schema, values);
   for (const node of schema) {
-    validateNodeInValues(node, values, errors);
+    validateNodeInValues(node, values, errors, visibleIds);
   }
   return errors;
 }
 
-function validateNodeInValues(node: MobileSchemaNode, values: MobileFormValues, errors: FieldValidationErrors) {
-  if (!isVisibleNode(node, values)) {
+function validateNodeInValues(
+  node: MobileSchemaNode,
+  values: MobileFormValues,
+  errors: FieldValidationErrors,
+  visibleIds: ReadonlySet<string>,
+) {
+  if (!visibleIds.has(node.id)) {
     return;
   }
   if (node.type === 'table_list') {
@@ -222,7 +228,7 @@ function validateNodeInValues(node: MobileSchemaNode, values: MobileFormValues, 
     errors[node.id] = error;
   }
   for (const child of node.children ?? []) {
-    validateNodeInValues(child, values, errors);
+    validateNodeInValues(child, values, errors, visibleIds);
   }
 }
 
@@ -371,9 +377,11 @@ function validateTableList(node: MobileSchemaNode, value: unknown) {
     if (typeof row !== 'object' || row == null) {
       return `第${index + 1}行: 请填写${node.label ?? node.id}`;
     }
+    const rowValues = row as MobileFormValues;
+    const visibleIds = visibleNodeIds(children, rowValues);
     for (const child of children) {
       const rowErrors: FieldValidationErrors = {};
-      validateNodeInValues(child, row as MobileFormValues, rowErrors);
+      validateNodeInValues(child, rowValues, rowErrors, visibleIds);
       const error = Object.values(rowErrors)[0];
       if (error) {
         return `第${index + 1}行: ${error}`;

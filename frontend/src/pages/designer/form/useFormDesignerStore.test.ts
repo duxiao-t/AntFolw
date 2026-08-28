@@ -101,4 +101,67 @@ describe('useFormDesignerStore', () => {
     useFormDesignerStore.getState().undo();
     expect(useFormDesignerStore.getState().schema).toHaveLength(2);
   });
+
+  it('updates display rules atomically and cleans deleted option references', () => {
+    useFormDesignerStore.getState().loadSchema([
+      { id: 'source', type: 'select', props: { options: [{ label: '甲', value: 'a' }, { label: '乙', value: 'b' }] } },
+      node('target'),
+    ]);
+    useFormDesignerStore.getState().updateDisplayRules('source', [{ targetId: 'target', values: ['a', 'b'] }]);
+    expect(useFormDesignerStore.getState().schema[1].props?.displayCondition).toEqual({
+      fieldId: 'source', operator: 'in', value: ['a', 'b'],
+    });
+    expect(useFormDesignerStore.getState().history.past).toHaveLength(1);
+
+    useFormDesignerStore.getState().updateNode('source', {
+      props: { options: [{ label: '乙', value: 'b' }] },
+    });
+    expect(useFormDesignerStore.getState().schema[1].props?.displayCondition).toEqual({
+      fieldId: 'source', operator: 'eq', value: 'b',
+    });
+  });
+
+  it('removes conditions whose source field is deleted', () => {
+    useFormDesignerStore.getState().loadSchema([
+      { id: 'source', type: 'select', props: { options: [{ label: '甲', value: 'a' }] } },
+      { id: 'target', type: 'text', props: { displayCondition: { fieldId: 'source', operator: 'eq', value: 'a' } } },
+    ]);
+    useFormDesignerStore.getState().removeNode('source');
+    expect(useFormDesignerStore.getState().schema[0].props?.displayCondition).toBeUndefined();
+  });
+
+  it('rejects preceding and conflicting display-rule targets', () => {
+    useFormDesignerStore.getState().loadSchema([
+      node('before'),
+      { id: 'source', type: 'select', props: { options: [{ label: '甲', value: 'a' }] } },
+      { id: 'conflict', type: 'text', props: { displayCondition: { fieldId: 'other', operator: 'eq', value: 'x' } } },
+    ]);
+    useFormDesignerStore.getState().updateDisplayRules('source', [
+      { targetId: 'before', values: ['a'] },
+      { targetId: 'conflict', values: ['a'] },
+    ]);
+    expect(useFormDesignerStore.getState().schema[0].props?.displayCondition).toBeUndefined();
+    expect(useFormDesignerStore.getState().schema[2].props?.displayCondition?.fieldId).toBe('other');
+  });
+
+  it('rejects a display rule that would close a dependency cycle', () => {
+    useFormDesignerStore.getState().loadSchema([
+      {
+        id: 'source',
+        type: 'select',
+        props: {
+          options: [{ label: '甲', value: 'a' }],
+          displayCondition: { fieldId: 'target', operator: 'eq', value: 'x' },
+        },
+      },
+      { id: 'target', type: 'select', props: { options: [{ label: '乙', value: 'x' }] } },
+    ]);
+
+    useFormDesignerStore.getState().updateDisplayRules('source', [
+      { targetId: 'target', values: ['a'] },
+    ]);
+
+    expect(useFormDesignerStore.getState().schema[1].props?.displayCondition).toBeUndefined();
+    expect(useFormDesignerStore.getState().history.past).toHaveLength(0);
+  });
 });

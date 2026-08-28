@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getFieldDefinition, registeredFields, validateSchemaValues } from './fieldRegistry';
 import type { MobileSchemaNode } from './types';
+import { collectVisibleValues } from './validators';
 
 describe('mobile field registry', () => {
   it('registers exactly the supported mobile field types once', () => {
@@ -173,6 +174,41 @@ describe('mobile field registry', () => {
     expect(validateSchemaValues(bounded, { count: 11 })).toEqual({ count: '数量不能大于10' });
     expect(validateSchemaValues(unbounded, { count: -1_000_000 })).toEqual({});
     expect(validateSchemaValues(unbounded, { count: 10_000_000 })).toEqual({});
+  });
+
+  it('validates required fields only when an in condition matches', () => {
+    const schema: MobileSchemaNode[] = [{
+      id: 'detail',
+      type: 'text',
+      label: '详情',
+      props: {
+        required: true,
+        displayCondition: { fieldId: 'kind', operator: 'in', value: ['a', 'b'] },
+      },
+    }];
+    expect(validateSchemaValues(schema, { kind: 'c', detail: '' })).toEqual({});
+    expect(validateSchemaValues(schema, { kind: 'a', detail: '' })).toEqual({ detail: '请填写详情' });
+    expect(collectVisibleValues(schema, { kind: 'c', detail: '保留值' })).toEqual({});
+  });
+
+  it('hides a nested target when its conditional source is hidden', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'level1', type: 'select' },
+      {
+        id: 'level2',
+        type: 'select',
+        props: { displayCondition: { fieldId: 'level1', operator: 'eq', value: 'show' } },
+      },
+      {
+        id: 'level3',
+        type: 'text',
+        props: { displayCondition: { fieldId: 'level2', operator: 'eq', value: 'show' } },
+      },
+    ];
+
+    expect(collectVisibleValues(schema, {
+      level1: 'hide', level2: 'show', level3: '保留值',
+    })).toEqual({ level1: 'hide' });
   });
 
 });

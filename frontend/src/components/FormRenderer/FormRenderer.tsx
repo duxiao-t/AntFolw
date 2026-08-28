@@ -5,6 +5,7 @@ import { Checkbox, type CheckboxProps } from 'antd';
 import { useLayoutEffect, useRef } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
 import type { FieldMode, SchemaNode } from '../../registry/types';
+import { visibleNodeIds } from '../../registry/displayConditions';
 import './FormRenderer.less';
 
 type Props = {
@@ -18,6 +19,7 @@ type Props = {
   onDesignerNodeChange?(node: SchemaNode): void;
   onDesignerNodeDuplicate?(id: string): void;
   onDesignerNodeRemove?(id: string): void;
+  visibleIds?: ReadonlySet<string>;
 };
 
 function useDesignerListFlip(isEnabled: boolean, deps: unknown[]) {
@@ -63,46 +65,13 @@ function useDesignerListFlip(isEnabled: boolean, deps: unknown[]) {
 }
 
 
-function isEmptyValue(value: any) {
-  return (
-    value == null ||
-    value === '' ||
-    (Array.isArray(value) && value.length === 0)
-  );
-}
-
-function matchesDisplayCondition(
-  condition: Record<string, any> | undefined,
-  formValue: Record<string, any>,
-) {
-  if (!condition?.fieldId) return true;
-  const sourceValue = formValue?.[condition.fieldId];
-  const targetValue = condition.value;
-
-  switch (condition.operator ?? 'eq') {
-    case 'ne':
-      return String(sourceValue ?? '') !== String(targetValue ?? '');
-    case 'contains':
-      return Array.isArray(sourceValue)
-        ? sourceValue.map(String).includes(String(targetValue ?? ''))
-        : String(sourceValue ?? '').includes(String(targetValue ?? ''));
-    case 'empty':
-      return isEmptyValue(sourceValue);
-    case 'notEmpty':
-      return !isEmptyValue(sourceValue);
-    default:
-      return String(sourceValue ?? '') === String(targetValue ?? '');
-  }
-}
-
 function shouldRenderNode(
   node: SchemaNode,
   mode: FieldMode,
-  formValue: Record<string, any>,
+  visibleIds: ReadonlySet<string>,
 ) {
   if (mode === 'designer-preview') return true;
-  if (node.props?.hidden) return false;
-  return matchesDisplayCondition(node.props?.displayCondition, formValue);
+  return visibleIds.has(node.id);
 }
 
 function canRequireNode(type: string) {
@@ -348,8 +317,10 @@ export function FormRenderer({
   onDesignerNodeRemove,
   sortableIds,
   placeholderId,
+  visibleIds: inheritedVisibleIds,
 }: Props) {
   const isDesigner = mode === 'designer-preview';
+  const visibleIds = inheritedVisibleIds ?? visibleNodeIds(schema, value ?? {});
   const listRef = useDesignerListFlip(isDesigner, [isDesigner, schema, sortableIds]);
   const renderIds =
     isDesigner && sortableIds ? sortableIds : schema.map((node) => node.id);
@@ -365,7 +336,7 @@ export function FormRenderer({
         if (!ft) return null;
         const effectiveMode = fieldModes?.[node.id] ?? mode;
         if (effectiveMode === 'hidden') return null;
-        if (!shouldRenderNode(node, effectiveMode, value ?? {})) return null;
+        if (!shouldRenderNode(node, effectiveMode, visibleIds)) return null;
         const flatContainer = isFlatContainerNode(node.type);
         const nodeValue = flatContainer
           ? value ?? {}
@@ -386,6 +357,7 @@ export function FormRenderer({
             mode={effectiveMode}
             value={nodeValue}
             fieldModes={fieldModes}
+            visibleIds={visibleIds}
             onChange={(v: any) => {
               if (flatContainer) {
                 onChange?.(v);

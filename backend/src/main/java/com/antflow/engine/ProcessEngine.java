@@ -86,12 +86,14 @@ public class ProcessEngine {
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());
         }
+        formDefinitionService.validateSubmission(fd.getSchema(), cmd.data());
+        var visibleData = formDefinitionService.filterVisibleSubmission(fd.getSchema(), cmd.data());
 
         FormData fd2 = new FormData();
         fd2.setFormDefId(fd.getId());
         fd2.setFormDefVersion(fd.getVersion());
         fd2.setBusinessNo(formalNumberService.businessNo());
-        fd2.setData(writeJson(cmd.data()));
+        fd2.setData(writeJson(visibleData));
         fd2.setStatus("SUBMITTED");
         fd2.setCreatedBy(userId);
         formDataMapper.insert(fd2);
@@ -637,10 +639,10 @@ public class ProcessEngine {
         if (fd == null) {
             throw new BizException("NOT_FOUND", "form definition not found");
         }
-        formDefinitionService.validateSubmission(fd.getSchema(), edits, editable);
         var merged = (com.fasterxml.jackson.databind.node.ObjectNode)
             readTreeOrEmpty(formData.getData()).deepCopy();
         edits.forEach((key, value) -> merged.set((String) key, json.valueToTree(value)));
+        formDefinitionService.validateSubmission(fd.getSchema(), merged, editable);
         formData.setData(writeJson(merged));
         formDataMapper.updateById(formData);
     }

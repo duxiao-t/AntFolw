@@ -12,6 +12,7 @@ import type {
   MobileFormValues,
   MobileSchemaNode,
 } from "../forms/schema/types";
+import { collectVisibleValues } from "../forms/schema/validators";
 import { ApproveSheet } from "./ApproveSheet";
 import { ApprovalRecords, approvalSummaryLabel } from "./ApprovalRecords";
 import { RejectSheet } from "./RejectSheet";
@@ -49,9 +50,7 @@ export function TaskDetailPage() {
   const [editableValues, setEditableValues] = useState<MobileFormValues>({});
   useEffect(() => {
     setEditableValues(values);
-    // 任务切换时以服务端表单数据为准重新初始化。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detailQuery.data?.task.id]);
+  }, [values]);
   const fieldModes = useMemo(() => {
     const modes: Record<string, FieldMode> = {};
     const rawSnapshot = detailQuery.data?.processSnapshot;
@@ -70,7 +69,8 @@ export function TaskDetailPage() {
   }, [detailQuery.data]);
   const hasEditableFields = Object.values(fieldModes).includes("fill");
   const editablePayload = Object.fromEntries(
-    Object.entries(editableValues).filter(([fieldId]) => fieldModes[fieldId] === "fill"),
+    Object.entries(collectVisibleValues(schema, editableValues))
+      .filter(([fieldId]) => fieldModes[fieldId] === "fill"),
   );
 
   if (!Number.isSafeInteger(numericTaskId) || numericTaskId <= 0) return <PageError title="任务不存在" message="请返回任务中心重新打开。" />;

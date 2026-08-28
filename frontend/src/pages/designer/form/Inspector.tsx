@@ -16,9 +16,10 @@ import {
 import { DeleteOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import { findById, formRegistry } from '../../../registry/formRegistry';
-import type { SchemaNode } from '../../../registry/types';
+import type { DisplayCondition, SchemaNode } from '../../../registry/types';
 import { SelectOptionsEditor } from './SelectOptionsEditor';
 import { MatrixAxisEditor } from './MatrixAxisEditor';
+import { DisplayRulesEditor } from './DisplayRulesEditor';
 import { normalizeMatrixProps } from '../../../components/form-fields/matrixFill';
 import { useFormDesignerStore } from './useFormDesignerStore';
 
@@ -190,21 +191,6 @@ function InspectorHeader({
   );
 }
 
-function collectFieldOptions(nodes: SchemaNode[], currentId: string) {
-  return nodes
-    .flatMap((node): Array<{ label: string; value: string }> => [
-      ...(node.id !== currentId
-        ? [
-            {
-              label: node.label || formRegistry[node.type]?.label || node.type,
-              value: node.id,
-            },
-          ]
-        : []),
-      ...collectFieldOptions(node.children ?? [], currentId),
-    ]);
-}
-
 export function Inspector() {
   const selectedId = useFormDesignerStore((s) => s.selectedId);
   const schema = useFormDesignerStore((s) => s.schema);
@@ -226,8 +212,7 @@ export function Inspector() {
   if (!fieldType) return null;
 
   const props = node.props ?? {};
-  const condition = props.displayCondition ?? {};
-  const fieldOptions = collectFieldOptions(schema, node.id);
+  const condition: Partial<DisplayCondition> = props.displayCondition ?? {};
   const update = (patch: Partial<SchemaNode>) =>
     updateNode(node.id, { ...node, ...patch });
   const updateProps = (patch: Record<string, any>) =>
@@ -238,7 +223,7 @@ export function Inspector() {
       },
     });
 
-  const componentSettings = renderComponentSettings(node, updateProps);
+  const componentSettings = renderComponentSettings(node, schema, updateProps);
 
   return (
     <div>
@@ -406,58 +391,10 @@ export function Inspector() {
                 >
                   隐藏组件
                 </Checkbox>
-                <PanelField label="条件字段">
-                  <Select
-                    allowClear
-                    value={condition.fieldId}
-                    placeholder="选择字段后启用条件显示"
-                    options={fieldOptions}
-                    onChange={(fieldId) =>
-                      updateProps({
-                        displayCondition: {
-                          ...condition,
-                          fieldId,
-                        },
-                      })
-                    }
-                  />
-                </PanelField>
-                <PanelField label="条件关系">
-                  <Select
-                    value={condition.operator ?? 'eq'}
-                    disabled={!condition.fieldId}
-                    options={[
-                      { label: '等于', value: 'eq' },
-                      { label: '不等于', value: 'ne' },
-                      { label: '包含', value: 'contains' },
-                      { label: '为空', value: 'empty' },
-                      { label: '不为空', value: 'notEmpty' },
-                    ]}
-                    onChange={(operator) =>
-                      updateProps({
-                        displayCondition: {
-                          ...condition,
-                          operator,
-                        },
-                      })
-                    }
-                  />
-                </PanelField>
-                {!['empty', 'notEmpty'].includes(condition.operator) && (
-                  <PanelField label="条件值">
-                    <Input
-                      value={condition.value ?? ''}
-                      disabled={!condition.fieldId}
-                      onChange={(event) =>
-                        updateProps({
-                          displayCondition: {
-                            ...condition,
-                            value: event.target.value,
-                          },
-                        })
-                      }
-                    />
-                  </PanelField>
+                {condition.fieldId && (
+                  <Typography.Text type="secondary">
+                    当前由「{findById(schema, condition.fieldId)?.label ?? condition.fieldId}」的字段显示规则控制。
+                  </Typography.Text>
                 )}
               </Space>
             ),
@@ -475,6 +412,7 @@ export function Inspector() {
 
 function renderComponentSettings(
   node: SchemaNode,
+  schema: SchemaNode[],
   updateProps: (patch: Record<string, any>) => void,
 ) {
   const props = node.props ?? {};
@@ -680,6 +618,12 @@ function renderComponentSettings(
                 onChange={(value) => updateProps({ maxCount: value })}
               />
             </PanelField>
+          )}
+          {node.type === 'select' && (
+            <>
+              <Divider style={{ margin: '4px 0' }} />
+              <DisplayRulesEditor key={node.id} source={node} schema={schema} />
+            </>
           )}
         </Space>
       );

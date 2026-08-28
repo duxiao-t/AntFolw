@@ -34,14 +34,17 @@ public class FormDataService {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
         }
         formDefinitionService.validateSubmission(fd.getSchema(), data);
+        String normalizedStatus = status == null ? "SUBMITTED" : status;
+        Object storedData = "DRAFT".equals(normalizedStatus)
+            ? data
+            : formDefinitionService.filterVisibleSubmission(fd.getSchema(), data);
         var fd2 = new FormData();
         fd2.setFormDefId(fd.getId());
         fd2.setFormDefVersion(fd.getVersion());
-        String normalizedStatus = status == null ? "SUBMITTED" : status;
         if (!"DRAFT".equals(normalizedStatus)) {
             fd2.setBusinessNo(formalNumberService.businessNo());
         }
-        fd2.setData(writeJson(data));
+        fd2.setData(writeJson(storedData));
         fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
         mapper.insert(fd2);

@@ -280,6 +280,56 @@ class FormDefinitionServiceSchemaTest {
             .doesNotThrowAnyException();
     }
 
+    @Test void displayConditionsSupportInAndSkipHiddenRequiredFields() {
+        String schema = """
+            [{"id":"kind","type":"select","props":{"options":[
+               {"label":"甲","value":"a"},{"label":"乙","value":"b"}]}},
+             {"id":"detail","type":"text","label":"详情","props":{"required":true,
+               "displayCondition":{"fieldId":"kind","operator":"in","value":["a","b"]}}}]
+            """;
+
+        assertThatCode(() -> service.validateSubmission(schema, Map.of("kind", "c")))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateSubmission(schema, Map.of("kind", "b")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("详情");
+    }
+
+    @Test void publishRejectsMalformedInConditions() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setSchema("[{\"id\":\"detail\",\"type\":\"text\",\"props\":{\"displayCondition\":{\"fieldId\":\"kind\",\"operator\":\"in\",\"value\":\"a\"}}}]");
+        when(mapper.selectById(1L)).thenReturn(fd);
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("non-empty array");
+    }
+
+    @Test void filterVisibleSubmissionUsesCompleteValuesAndDropsHiddenFields() {
+        String schema = """
+            [{"id":"kind","type":"select","props":{"options":[{"label":"甲","value":"a"}]}},
+             {"id":"detail","type":"text","props":{"displayCondition":
+               {"fieldId":"kind","operator":"eq","value":"a"}}}]
+            """;
+        var values = Map.of("kind", "x", "detail", "保留值");
+        assertThat(service.filterVisibleSubmission(schema, values)).containsExactly(Map.entry("kind", "x"));
+        assertThat(values).containsEntry("detail", "保留值");
+    }
+
+    @Test void hiddenConditionalSourcesAlsoHideNestedTargets() {
+        String schema = """
+            [{"id":"level1","type":"select","props":{"options":[{"label":"显示","value":"show"}]}},
+             {"id":"level2","type":"select","props":{"options":[{"label":"显示","value":"show"}],
+               "displayCondition":{"fieldId":"level1","operator":"eq","value":"show"}}},
+             {"id":"level3","type":"text","props":{"displayCondition":
+               {"fieldId":"level2","operator":"eq","value":"show"}}}]
+            """;
+        assertThat(service.filterVisibleSubmission(schema, Map.of(
+            "level1", "hide", "level2", "show", "level3", "保留值")))
+            .containsExactly(Map.entry("level1", "hide"));
+    }
+
     private String matrixSchema(String cellType, String extraProps) {
         return """
             [{"id":"matrix","type":"matrix_fill","label":"矩阵","props":{

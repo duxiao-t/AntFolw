@@ -1,6 +1,6 @@
 import { getFieldDefinition } from '../schema/fieldRegistry';
 import type { MobileFormValues, MobileSchemaNode } from '../schema/types';
-import { isVisibleNode } from '../schema/validators';
+import { visibleNodeIds } from '../schema/validators';
 
 export type SummaryRow = {
   id: string;
@@ -36,13 +36,18 @@ export function ConfirmSummaryList({
 }
 
 export function summarizeSchemaRows(schema: MobileSchemaNode[], values: MobileFormValues): SummaryRow[] {
-  return schema.flatMap((node) => summarizeNode(node, values));
+  const visibleIds = visibleNodeIds(schema, values);
+  return schema.flatMap((node) => summarizeNode(node, values, visibleIds));
 }
 
-function summarizeNode(node: MobileSchemaNode, values: MobileFormValues): SummaryRow[] {
-  if (!isVisibleNode(node, values) || node.type === 'description') return [];
+function summarizeNode(
+  node: MobileSchemaNode,
+  values: MobileFormValues,
+  visibleIds: ReadonlySet<string>,
+): SummaryRow[] {
+  if (!visibleIds.has(node.id) || node.type === 'description') return [];
   if (node.children && node.type !== 'table_list') {
-    return node.children.flatMap((child) => summarizeNode(child, values));
+    return node.children.flatMap((child) => summarizeNode(child, values, visibleIds));
   }
   return [{
     id: node.id,

@@ -80,7 +80,7 @@ describe('FormRenderer', () => {
     }];
 
     const { container } = render(
-      <FormRenderer schema={schema} mode="runtime-readonly" value={{}} />,
+      <FormRenderer schema={schema} mode="readonly" value={{}} />,
     );
 
     expect(container.querySelector('[data-field-id="row"]'))
@@ -110,5 +110,23 @@ describe('FormRenderer', () => {
     expect(inputs[1]).toHaveValue('b');
     expect(inputs[1]).toBeDisabled();
     expect(screen.queryByDisplayValue('c')).not.toBeInTheDocument();
+  });
+
+  it('shows an in-conditioned field for any configured source option', () => {
+    const schema: SchemaNode[] = [
+      { id: 'source', type: 'select', label: '类型' },
+      {
+        id: 'target',
+        type: 'text',
+        label: '补充说明',
+        props: { displayCondition: { fieldId: 'source', operator: 'in', value: ['a', 'b'] } },
+      },
+    ];
+    const { rerender } = render(
+      <FormRenderer schema={schema} mode="runtime-fill" value={{ source: 'b' }} />,
+    );
+    expect(screen.getByText('补充说明')).toBeInTheDocument();
+    rerender(<FormRenderer schema={schema} mode="runtime-fill" value={{ source: 'c' }} />);
+    expect(screen.queryByText('补充说明')).not.toBeInTheDocument();
   });
 });

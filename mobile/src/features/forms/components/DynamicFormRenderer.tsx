@@ -1,5 +1,5 @@
 import { getFieldDefinition } from '../schema/fieldRegistry';
-import { isVisibleNode } from '../schema/validators';
+import { visibleNodeIds } from '../schema/validators';
 import type {
   FieldMode,
   FieldValidationErrors,
@@ -24,13 +24,14 @@ export function DynamicFormRenderer({
   errors = {},
   onValueChange,
 }: DynamicFormRendererProps) {
+  const visibleIds = visibleNodeIds(schema, values);
   function renderNodes(nodes: MobileSchemaNode[]) {
     return nodes.flatMap((node) => {
       const effectiveMode = modeOverride[node.id] ?? mode;
       if (effectiveMode === 'hidden') {
         return [];
       }
-      if (!isVisibleNode(node, values)) {
+      if (!visibleIds.has(node.id)) {
         return [];
       }
       const definition = getFieldDefinition(node.type);

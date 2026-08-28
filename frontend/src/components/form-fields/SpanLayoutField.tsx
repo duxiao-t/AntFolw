@@ -13,7 +13,7 @@ export const SpanLayoutField: FieldType = {
     dividerColor: '#d9d9d9',
     mobileSingleColumn: true,
   },
-  Component: ({ node, mode, value, onChange, fieldModes }) => {
+  Component: ({ node, mode, value, onChange, fieldModes, visibleIds }) => {
     const cols = node.props?.columns ?? 2;
     const span = Math.floor(24 / cols);
     return (
@@ -34,21 +34,24 @@ export const SpanLayoutField: FieldType = {
           <div style={{ marginBottom: 8, fontWeight: 600 }}>{node.label ?? '分栏'}</div>
         )}
         <Row gutter={node.props?.gutter ?? 12}>
-          {(node.children ?? []).map((child) => (
-            <Col
-              xs={node.props?.mobileSingleColumn === false ? span : 24}
-              sm={span}
-              key={child.id}
-            >
-              <FormRenderer
-                schema={[child]}
-                value={value ?? {}}
-                onChange={(nextValue: any) => onChange?.(nextValue)}
-                mode={mode}
-                fieldModes={fieldModes}
-              />
-            </Col>
-          ))}
+          {(node.children ?? [])
+            .filter((child) => mode === 'designer-preview' || !visibleIds || visibleIds.has(child.id))
+            .map((child) => (
+              <Col
+                xs={node.props?.mobileSingleColumn === false ? span : 24}
+                sm={span}
+                key={child.id}
+              >
+                <FormRenderer
+                  schema={[child]}
+                  value={value ?? {}}
+                  onChange={(nextValue: any) => onChange?.(nextValue)}
+                  mode={mode}
+                  fieldModes={fieldModes}
+                  visibleIds={visibleIds}
+                />
+              </Col>
+            ))}
         </Row>
       </section>
     );

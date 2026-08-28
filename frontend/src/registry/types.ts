@@ -1,4 +1,11 @@
+export type DisplayCondition = {
+  fieldId: string;
+  operator: 'eq' | 'in' | 'ne' | 'contains' | 'empty' | 'notEmpty' | string;
+  value?: string | number | Array<string | number>;
+};
+
 export type SchemaNodeProps = Record<string, any> & {
+  displayCondition?: DisplayCondition;
   dividerColor?: string;
 };
 
@@ -18,6 +25,7 @@ export type FieldComponentProps<_TProps = any, TValue = any> = {
   value?: TValue;
   onChange?(value: TValue): void;
   fieldModes?: Record<string, FieldMode>;
+  visibleIds?: ReadonlySet<string>;
 };
 
 export type FieldType<TProps = any, TValue = any> = {

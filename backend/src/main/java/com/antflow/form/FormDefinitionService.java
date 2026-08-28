@@ -165,19 +165,32 @@ public class FormDefinitionService {
 
     public void validateSubmission(String schema, Object data) {
         var root = parseSchema(schema);
-        Map<?, ?> values = data instanceof Map<?, ?> map ? map : Map.of();
+        Map<?, ?> values = valueMap(data);
+        Set<String> visibleIds = visibleNodeIds(root, values);
         for (var node : root) {
-            validateNodeValue(node, values);
+            validateNodeValue(node, values, visibleIds);
         }
     }
 
     /** 只校验指定字段集合（节点级字段权限用）：容器递归，其余字段跳过。 */
     public void validateSubmission(String schema, Object data, Set<String> fieldIds) {
         var root = parseSchema(schema);
-        Map<?, ?> values = data instanceof Map<?, ?> map ? map : Map.of();
+        Map<?, ?> values = valueMap(data);
+        Set<String> visibleIds = visibleNodeIds(root, values);
         for (var node : root) {
-            validateNodeValue(node, values, fieldIds);
+            validateNodeValue(node, values, fieldIds, visibleIds);
         }
+    }
+
+    public Map<String, Object> filterVisibleSubmission(String schema, Object data) {
+        var values = valueMap(data);
+        var root = parseSchema(schema);
+        Set<String> visibleIds = visibleNodeIds(root, values);
+        var output = new java.util.LinkedHashMap<String, Object>();
+        for (var node : root) {
+            collectVisibleValues(node, values, output, visibleIds);
+        }
+        return output;
     }
 
     /** 返回可配置字段权限的叶子字段 id（排除分栏/明细表/说明等展示型节点，含嵌套子字段）。 */
@@ -211,20 +224,39 @@ public class FormDefinitionService {
         types.put(node.path("id").asText(), type);
     }
 
+    private void collectVisibleValues(com.fasterxml.jackson.databind.JsonNode node,
+                                      Map<?, ?> values, Map<String, Object> output,
+                                      Set<String> visibleIds) {
+        if (!visibleIds.contains(node.path("id").asText())) return;
+        String type = node.path("type").asText("");
+        if (CONTAINER_TYPES.contains(type)) {
+            node.path("children").forEach(child -> collectVisibleValues(child, values, output, visibleIds));
+            return;
+        }
+        String id = node.path("id").asText();
+        if (!"description".equals(type) && values.containsKey(id)) {
+            output.put(id, values.get(id));
+        }
+    }
+
     private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node,
-                                   Map<?, ?> values, Set<String> fieldIds) {
+                                   Map<?, ?> values, Set<String> fieldIds,
+                                   Set<String> visibleIds) {
+        if (!visibleIds.contains(node.path("id").asText())) {
+            return;
+        }
         String type = node.path("type").asText("");
         if (CONTAINER_TYPES.contains(type) || "table_list".equals(type)) {
             var containerChildren = node.path("children");
             if (containerChildren.isArray()) {
-                containerChildren.forEach(child -> validateNodeValue(child, values, fieldIds));
+                containerChildren.forEach(child -> validateNodeValue(child, values, fieldIds, visibleIds));
             }
             return;
         }
         if (!fieldIds.contains(node.path("id").asText())) {
             return;
         }
-        validateNodeValue(node, values);
+        validateNodeValue(node, values, visibleIds);
     }
 
     private String writeJson(Object o) {
@@ -286,11 +318,15 @@ public class FormDefinitionService {
         }
     }
 
-    private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node, Map<?, ?> values) {
+    private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node, Map<?, ?> values,
+                                   Set<String> visibleIds) {
+        if (!visibleIds.contains(node.path("id").asText())) {
+            return;
+        }
         if (CONTAINER_TYPES.contains(node.path("type").asText(""))) {
             var containerChildren = node.path("children");
             if (containerChildren.isArray()) {
-                containerChildren.forEach(child -> validateNodeValue(child, values));
+                containerChildren.forEach(child -> validateNodeValue(child, values, visibleIds));
             }
             return;
         }
@@ -321,7 +357,7 @@ public class FormDefinitionService {
         }
         var children = node.path("children");
         if (children.isArray()) {
-            children.forEach(child -> validateNodeValue(child, values));
+            children.forEach(child -> validateNodeValue(child, values, visibleIds));
         }
         if (Set.of("number", "money").contains(node.path("type").asText()) && !isEmpty(value)) {
             java.math.BigDecimal number;
@@ -549,7 +585,111 @@ public class FormDefinitionService {
         if (Set.of("select", "multi_select").contains(type)) {
             validateSelectOptions(node);
         }
+        validateDisplayCondition(node.path("props").path("displayCondition"));
         node.path("children").forEach(this::validatePublishingNode);
+    }
+
+    private void validateDisplayCondition(com.fasterxml.jackson.databind.JsonNode displayCondition) {
+        if ("in".equals(displayCondition.path("operator").asText())) {
+            var value = displayCondition.path("value");
+            if (!value.isArray() || value.isEmpty()) {
+                throw new BizException("BAD_SCHEMA", "displayCondition.in value must be a non-empty array");
+            }
+            value.forEach(item -> {
+                if (!item.isTextual() && !item.isNumber()) {
+                    throw new BizException("BAD_SCHEMA", "displayCondition.in values must be strings or numbers");
+                }
+            });
+        }
+    }
+
+    private Map<?, ?> valueMap(Object data) {
+        if (data instanceof Map<?, ?> map) return map;
+        if (data instanceof com.fasterxml.jackson.databind.JsonNode node && node.isObject()) {
+            return json.convertValue(node, Map.class);
+        }
+        return Map.of();
+    }
+
+    private Set<String> visibleNodeIds(List<com.fasterxml.jackson.databind.JsonNode> roots,
+                                       Map<?, ?> values) {
+        var nodes = new java.util.LinkedHashMap<String, com.fasterxml.jackson.databind.JsonNode>();
+        var parents = new java.util.HashMap<String, String>();
+        roots.forEach(node -> collectNodes(node, null, nodes, parents));
+        var visible = new java.util.LinkedHashSet<String>();
+        var memo = new java.util.HashMap<String, Boolean>();
+        nodes.keySet().forEach(id -> {
+            if (resolveVisible(id, values, nodes, parents, memo, new java.util.HashSet<>())) {
+                visible.add(id);
+            }
+        });
+        return visible;
+    }
+
+    private void collectNodes(com.fasterxml.jackson.databind.JsonNode node, String parentId,
+                              Map<String, com.fasterxml.jackson.databind.JsonNode> nodes,
+                              Map<String, String> parents) {
+        String id = node.path("id").asText();
+        nodes.put(id, node);
+        if (parentId != null) parents.put(id, parentId);
+        node.path("children").forEach(child -> collectNodes(child, id, nodes, parents));
+    }
+
+    private boolean resolveVisible(String id, Map<?, ?> values,
+                                   Map<String, com.fasterxml.jackson.databind.JsonNode> nodes,
+                                   Map<String, String> parents, Map<String, Boolean> memo,
+                                   Set<String> visiting) {
+        if (memo.containsKey(id)) return memo.get(id);
+        if (!visiting.add(id)) return false;
+        var node = nodes.get(id);
+        String sourceId = node.path("props").path("displayCondition").path("fieldId")
+            .asText(node.path("props").path("displayCondition").path("field").asText(""));
+        boolean visible = (parents.get(id) == null
+            || resolveVisible(parents.get(id), values, nodes, parents, memo, visiting))
+            && (!nodes.containsKey(sourceId)
+                || resolveVisible(sourceId, values, nodes, parents, memo, visiting))
+            && isVisible(node, values);
+        visiting.remove(id);
+        memo.put(id, visible);
+        return visible;
+    }
+
+    private boolean isVisible(com.fasterxml.jackson.databind.JsonNode node, Map<?, ?> values) {
+        var props = node.path("props");
+        if (props.path("hidden").asBoolean(false)) return false;
+        var condition = props.path("displayCondition");
+        String fieldId = condition.path("fieldId").asText(condition.path("field").asText(""));
+        if (fieldId.isBlank()) return true;
+        Object source = values.get(fieldId);
+        var target = condition.path("value");
+        return switch (condition.path("operator").asText("eq")) {
+            case "in" -> target.isArray() && java.util.stream.StreamSupport.stream(target.spliterator(), false)
+                .anyMatch(item -> sameValue(source, json.convertValue(item, Object.class)));
+            case "ne", "!=", "!==" -> !sameValue(source, json.convertValue(target, Object.class));
+            case "contains" -> source instanceof List<?> list
+                ? list.stream().anyMatch(item -> sameValue(item, json.convertValue(target, Object.class)))
+                : String.valueOf(source == null ? "" : source).contains(target.asText(""));
+            case "empty" -> isEmpty(source);
+            case "notEmpty" -> !isEmpty(source);
+            case "gt", ">" -> compareNumbers(source, target, result -> result > 0);
+            case "gte", ">=" -> compareNumbers(source, target, result -> result >= 0);
+            case "lt", "<" -> compareNumbers(source, target, result -> result < 0);
+            case "lte", "<=" -> compareNumbers(source, target, result -> result <= 0);
+            default -> sameValue(source, json.convertValue(target, Object.class));
+        };
+    }
+
+    private boolean sameValue(Object left, Object right) {
+        return String.valueOf(left == null ? "" : left).equals(String.valueOf(right == null ? "" : right));
+    }
+
+    private boolean compareNumbers(Object source, com.fasterxml.jackson.databind.JsonNode target,
+                                   java.util.function.IntPredicate predicate) {
+        try {
+            return predicate.test(new java.math.BigDecimal(String.valueOf(source)).compareTo(target.decimalValue()));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private boolean isEmpty(Object value) {
