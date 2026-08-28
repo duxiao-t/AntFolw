@@ -270,7 +270,7 @@ describe('advanced mobile fields', () => {
     expect(screen.getByText('hello.pdf')).toBeInTheDocument();
     expect(screen.getByText('上传中 0%')).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
       expect.objectContaining({
         id: 'remote-hello.pdf',
@@ -372,7 +372,7 @@ describe('advanced mobile fields', () => {
     const { container } = render(<StatefulUpload />);
 
     await user.upload(screen.getByLabelText('附件'), new File(['%PDF-hello'], 'hello.pdf', { type: 'application/pdf' }));
-    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     expect(container.querySelector('.af-upload-list__progress')).toHaveClass(
       'af-upload-list__progress--success',
     );
@@ -432,12 +432,12 @@ describe('advanced mobile fields', () => {
         size: 10,
       });
     });
-    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
 
     await act(async () => {
       request?.emitProgress(8);
     });
-    expect(screen.getByText('已完成 100%')).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
     expect(screen.queryByText('上传中 8%')).not.toBeInTheDocument();
   });
 
@@ -476,13 +476,13 @@ describe('advanced mobile fields', () => {
         size: 5,
       });
     });
-    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     await act(async () => {
       await Promise.resolve();
     });
 
     expect(screen.getByText('proof.png')).toBeInTheDocument();
-    expect(screen.getByText('已完成 100%')).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
     expect(onValueChange).toHaveBeenLastCalledWith('attachments', [
       expect.objectContaining({ id: 'remote-proof.png' }),
     ]);
@@ -554,7 +554,7 @@ describe('advanced mobile fields', () => {
 
     await user.upload(screen.getByLabelText('图片'), new File(['image'], 'broken-preview.png', { type: 'image/png' }));
 
-    await waitFor(() => expect(screen.getByText('已完成 100%')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '预览 broken-preview.png' })).not.toBeInTheDocument();
     expect(screen.queryByText('上传中 0%')).not.toBeInTheDocument();
   });

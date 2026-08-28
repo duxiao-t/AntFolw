@@ -43,12 +43,14 @@ export async function uploadMobileFile(
     }
   }
   if (onProgress && typeof XMLHttpRequest !== 'undefined') {
-    return uploadMobileFileWithProgress(endpoint, formData, onProgress);
+    const uploaded = await uploadMobileFileWithProgress(endpoint, formData, onProgress);
+    return waitForProcessedFile(uploaded, onProgress);
   }
-  return apiRequest<MobileFileDto>(endpoint, {
+  const uploaded = await apiRequest<MobileFileDto>(endpoint, {
     method: 'POST',
     body: formData,
   });
+  return waitForProcessedFile(uploaded, onProgress);
 }
 
 export async function deleteMobileFile(fileId: string): Promise<void> {
@@ -81,6 +83,7 @@ function uploadMobileFileWithProgress(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let settled = false;
+    let fallbackTimer: ReturnType<typeof setInterval> | undefined;
     xhr.open('POST', endpoint);
     xhr.withCredentials = true;
     xhr.setRequestHeader('Accept', 'application/json');
@@ -124,6 +127,7 @@ function uploadMobileFileWithProgress(
         return;
       }
       settled = true;
+      clearFallback();
       if (xhr.status === 401 && !retry && !controller.isAuthEndpoint(endpoint)) {
         void controller.refresh()
           .then(() => uploadMobileFileWithProgress(endpoint, formData, onProgress, true, progressState))
@@ -133,7 +137,6 @@ function uploadMobileFileWithProgress(
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const metadata = JSON.parse(xhr.responseText || '{}') as MobileFileDto;
-          emitProgress(onProgress, progressState, { phase: 'done', progress: 100 });
           resolve(metadata);
         } catch {
           reject(new Error('文件上传响应解析失败'));
@@ -147,13 +150,52 @@ function uploadMobileFileWithProgress(
         return;
       }
       settled = true;
+      clearFallback();
       reject(error);
+    }
+    function clearFallback() {
+      if (fallbackTimer !== undefined) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = undefined;
+      }
+    }
+    function startFallback() {
+      // ponytail: bounded synthetic progress for WebViews that omit upload byte events;
+      // replace with streaming transport progress if the platform exposes it reliably.
+      fallbackTimer = setInterval(() => {
+        if (settled || progressState.phase !== 'uploading' || progressState.progress >= 90) return;
+        emitProgress(onProgress, progressState, {
+          phase: 'uploading',
+          progress: Math.min(90, Math.max(1, progressState.progress + 3)),
+        });
+      }, 500);
     }
     if (!retry) {
       emitProgress(onProgress, progressState, { phase: 'uploading', progress: 0 });
     }
+    startFallback();
     xhr.send(formData);
   });
+}
+
+async function waitForProcessedFile(file: MobileFileDto, onProgress?: UploadProgressHandler) {
+  if (file.status !== 'PROCESSING') {
+    onProgress?.({ phase: 'done', progress: 100 });
+    return file;
+  }
+  onProgress?.({ phase: 'processing', progress: 97 });
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    const current = await apiRequest<MobileFileDto>(
+      `/api/mobile/files/${encodeURIComponent(file.id)}`,
+    );
+    if (current.status === 'FAILED') throw new Error('视频处理失败，请重新上传');
+    if (current.status !== 'PROCESSING') {
+      onProgress?.({ phase: 'done', progress: 100 });
+      return current;
+    }
+  }
+  throw new Error('视频处理超时，请稍后重试');
 }
 
 async function fetchMobileFileBlobWithAuth(contentUrl: string, retry = false): Promise<Blob> {

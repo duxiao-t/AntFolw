@@ -12,6 +12,7 @@ class MockXMLHttpRequest {
   static completionMode: 'load' | 'readystatechange' | 'loadend' = 'load';
   static loaded = 50;
   static statuses = [200];
+  static autoRespond = true;
 
   readonly upload: {
     onprogress: ((event: ProgressEvent) => void) | null;
@@ -55,6 +56,7 @@ class MockXMLHttpRequest {
     this.body = body;
     MockXMLHttpRequest.latest = this;
     MockXMLHttpRequest.requests.push(this);
+    if (!MockXMLHttpRequest.autoRespond) return;
     const requestIndex = MockXMLHttpRequest.requests.length - 1;
     const status = MockXMLHttpRequest.statuses[Math.min(requestIndex, MockXMLHttpRequest.statuses.length - 1)] ?? 200;
     queueMicrotask(() => {
@@ -64,25 +66,29 @@ class MockXMLHttpRequest {
         total: 100,
       }));
       this.upload.onload?.(new ProgressEvent('load'));
-      this.status = status;
-      this.responseText = status >= 200 && status < 300
-        ? JSON.stringify({
-          id: 'file-1',
-          name: 'proof.pdf',
-          contentUrl: '/api/mobile/files/file-1/content',
-          contentType: 'application/pdf',
-          size: 10,
-        })
-        : JSON.stringify({ code: 'TOKEN_EXPIRED', message: 'expired' });
-      this.readyState = 4;
-      if (MockXMLHttpRequest.completionMode === 'readystatechange') {
-        this.onreadystatechange?.();
-      } else if (MockXMLHttpRequest.completionMode === 'loadend') {
-        this.onloadend?.();
-      } else {
-        this.onload?.();
-      }
+      this.respond(status);
     });
+  }
+
+  respond(status = 200) {
+    this.status = status;
+    this.responseText = status >= 200 && status < 300
+      ? JSON.stringify({
+        id: 'file-1',
+        name: 'proof.pdf',
+        contentUrl: '/api/mobile/files/file-1/content',
+        contentType: 'application/pdf',
+        size: 10,
+      })
+      : JSON.stringify({ code: 'TOKEN_EXPIRED', message: 'expired' });
+    this.readyState = 4;
+    if (MockXMLHttpRequest.completionMode === 'readystatechange') {
+      this.onreadystatechange?.();
+    } else if (MockXMLHttpRequest.completionMode === 'loadend') {
+      this.onloadend?.();
+    } else {
+      this.onload?.();
+    }
   }
 }
 
@@ -95,6 +101,8 @@ describe('mobile file api', () => {
     MockXMLHttpRequest.completionMode = 'load';
     MockXMLHttpRequest.loaded = 50;
     MockXMLHttpRequest.statuses = [200];
+    MockXMLHttpRequest.autoRespond = true;
+    vi.useRealTimers();
   });
 
   it('uploads files with XHR progress and shared auth headers', async () => {
@@ -126,6 +134,33 @@ describe('mobile file api', () => {
     expect(request?.withCredentials).toBe(true);
     expect(request?.getRequestHeader('Accept')).toBe('application/json');
     expect(request?.getRequestHeader('Authorization')).toBe('Bearer mobile-token');
+  });
+
+  it('advances bounded fallback progress when a WebView omits byte progress events', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest);
+    MockXMLHttpRequest.autoRespond = false;
+    setAuthController({
+      authorizationHeader: () => ({}),
+      refresh: noop,
+      isAuthEndpoint: () => false,
+    });
+    const progress: UploadProgressEvent[] = [];
+
+    const upload = uploadMobileFile(
+      '/api/mobile/files',
+      new File(['%PDF-proof'], 'proof.pdf', { type: 'application/pdf' }),
+      (event) => progress.push(event),
+    );
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(progress).toEqual([
+      { phase: 'uploading', progress: 0 },
+      { phase: 'uploading', progress: 3 },
+      { phase: 'uploading', progress: 6 },
+    ]);
+    MockXMLHttpRequest.latest?.respond(200);
+    await expect(upload).resolves.toMatchObject({ id: 'file-1' });
   });
 
   it('settles uploads that only report completion through readyState changes', async () => {

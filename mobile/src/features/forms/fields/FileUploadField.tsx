@@ -498,7 +498,7 @@ function statusLabel(item: UploadItem) {
     return '上传失败';
   }
   if (item.status === 'ready') {
-    return '已完成 100%';
+    return '已完成';
   }
   if (item.status === 'processing') {
     return `处理中 ${progressPercent(item)}%`;
