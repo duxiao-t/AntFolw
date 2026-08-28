@@ -8,6 +8,8 @@ import proxy from './proxy';
 import routes from './routes';
 
 const { UMI_ENV = 'dev' } = process.env;
+const production = process.env.NODE_ENV === 'production';
+const recordRequests = process.env.REQUEST_RECORD === 'true';
 
 // Compute commit hash: env vars take precedence, fall back to git at build time
 const commitHash =
@@ -198,9 +200,7 @@ export default defineConfig({
    * @description 使用 GA4 (gtag.js) 进行站点分析
    * @doc https://umijs.org/docs/max/analytics
    */
-  analytics: {
-    ga_v2: 'G-59NF1VHHPF',
-  },
+  analytics: production ? { ga_v2: 'G-59NF1VHHPF' } : false,
   /**
    * @name <head> 中额外的 script
    * @description 配置 <head> 中额外的 script
@@ -211,7 +211,7 @@ export default defineConfig({
   ],
 
   //================ pro 插件配置 =================
-  plugins: ['@umijs/max-plugin-openapi', '@umijs/request-record'],
+  plugins: ['@umijs/max-plugin-openapi', ...(recordRequests ? ['@umijs/request-record'] : [])],
 
   /**
    * @name openAPI 插件的配置
@@ -244,7 +244,7 @@ export default defineConfig({
       },
     },
   },
-  requestRecord: {},
+  ...(recordRequests ? { requestRecord: {} } : {}),
   exportStatic: {},
   define: {
     'process.env.CI': process.env.CI,
