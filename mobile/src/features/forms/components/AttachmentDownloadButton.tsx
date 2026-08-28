@@ -5,8 +5,8 @@ import { fetchMobileFileBlob } from '../files.api';
 const DOWNLOAD_OBJECT_URL_REVOKE_DELAY_MS = 60_000;
 
 export type DownloadableAttachment = {
-  id: string;
-  name: string;
+  id?: string;
+  name?: string;
   contentUrl: string;
   url?: string;
 };

@@ -1,6 +1,6 @@
 import { ImageViewer } from 'antd-mobile';
 import { FileOutline, PlayOutline } from 'antd-mobile-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isApiError } from '../../../shared/api/errors';
 import { fetchMobileFileBlob } from '../files.api';
 import { AttachmentDownloadButton } from './AttachmentDownloadButton';
@@ -33,7 +33,7 @@ export function formatFileSize(size?: number) {
 
 /** 审批只读态：所有附件统一以「缩略图/图标 + 文件名 + 大小 + 下载」行展示。 */
 export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
-  const imageFiles = files.filter(isImageFile);
+  const imageFiles = useMemo(() => files.filter(isImageFile), [files]);
   const [imageUrls, setImageUrls] = useState<Array<string | null>>(() => imageFiles.map(() => null));
   const [thumbUrls, setThumbUrls] = useState<Array<string | null>>(() => imageFiles.map(() => null));
   const [imageFailed, setImageFailed] = useState<boolean[]>(() => imageFiles.map(() => false));
@@ -81,11 +81,14 @@ export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
     });
     return () => {
       alive = false;
-      objectUrls.forEach((objectUrl) => objectUrl && revokeUrl(objectUrl));
-      thumbRefs.forEach((thumbUrl) => thumbUrl && revokeUrl(thumbUrl));
+      objectUrls.forEach((objectUrl) => {
+        if (objectUrl) revokeUrl(objectUrl);
+      });
+      thumbRefs.forEach((thumbUrl) => {
+        if (thumbUrl) revokeUrl(thumbUrl);
+      });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageFiles.map((file) => file.contentUrl).join('|')]);
+  }, [imageFiles]);
 
   const readyUrls = imageUrls.filter((url): url is string => url != null);
   return (
@@ -97,7 +100,6 @@ export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
           <AttachmentRow
             key={file.id ?? `${file.contentUrl}-${index}`}
             file={file}
-            imageUrl={isImage ? imageUrls[imageIndex] ?? null : null}
             thumbUrl={isImage ? thumbUrls[imageIndex] ?? null : null}
             imageFailed={isImage ? imageFailed[imageIndex] ?? false : false}
             onOpenImage={
@@ -126,13 +128,11 @@ export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
 
 function AttachmentRow({
   file,
-  imageUrl,
   thumbUrl,
   imageFailed,
   onOpenImage,
 }: {
   file: MediaFile;
-  imageUrl: string | null;
   thumbUrl: string | null;
   imageFailed: boolean;
   onOpenImage?: () => void;
@@ -193,10 +193,8 @@ function AttachmentRow({
 function VideoAttachmentRow({ file }: { file: MediaFile }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
-  const [captureFailed, setCaptureFailed] = useState(false);
   const videoUrlRef = useRef<string | null>(null);
   const thumbUrlRef = useRef<string | null>(null);
 
@@ -207,7 +205,6 @@ function VideoAttachmentRow({ file }: { file: MediaFile }) {
         if (!alive) return;
         const objectUrl = URL.createObjectURL(blob);
         videoUrlRef.current = objectUrl;
-        setVideoUrl(objectUrl);
         const coverUrl = await createVideoThumbUrl(blob);
         if (!alive) {
           if (coverUrl) revokeUrl(coverUrl);
@@ -216,8 +213,6 @@ function VideoAttachmentRow({ file }: { file: MediaFile }) {
         if (coverUrl) {
           thumbUrlRef.current = coverUrl;
           setThumbUrl(coverUrl);
-        } else {
-          setCaptureFailed(true);
         }
       })
       .catch(() => {
@@ -243,7 +238,6 @@ function VideoAttachmentRow({ file }: { file: MediaFile }) {
       if (!videoUrlRef.current) {
         const blob = await fetchMobileFileBlob(file.contentUrl);
         videoUrlRef.current = URL.createObjectURL(blob);
-        setVideoUrl(videoUrlRef.current);
       }
       setPlayingUrl(videoUrlRef.current);
     } catch (videoError) {
@@ -307,13 +301,17 @@ function MediaVideoPlayer({
   onClose(): void;
 }) {
   return (
-    <div className="af-media-viewer" role="dialog" aria-label={name} onClick={onClose}>
+    <div
+      className="af-media-viewer"
+      role="dialog"
+      aria-label={name}
+    >
+      {/* biome-ignore lint/a11y/useMediaCaption: uploaded videos do not provide caption tracks. */}
       <video
         src={url}
         controls
         autoPlay
         playsInline
-        onClick={(event) => event.stopPropagation()}
       />
       <button type="button" className="af-media-viewer__close" onClick={onClose}>
         关闭
