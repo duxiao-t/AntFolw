@@ -31,10 +31,11 @@ export function createDefaultSelectOptions(): SelectOption[] {
 
 export function createSelectOption(index: number, color?: string): SelectOption {
   const suffix = Math.max(index, 1);
+  const id = `option_${Date.now()}_${suffix}`;
   return {
-    id: `option_${Date.now()}_${suffix}`,
+    id,
     label: `选项${suffix}`,
-    value: `option_${suffix}`,
+    value: id,
     color,
   };
 }
@@ -49,7 +50,7 @@ export function normalizeSelectOptions(value: unknown): SelectOption[] {
       typeof rawValue === 'string' || typeof rawValue === 'number'
         ? rawValue
         : `option_${index + 1}`;
-    const label = String(source.label ?? value).trim() || String(value);
+    const label = source.label == null ? String(value) : String(source.label);
     const isOther = source.isOther === true;
     return [
       {
@@ -111,17 +112,15 @@ export function parseBulkSelectOptions(text: string): SelectOption[] {
     .filter(Boolean)
     .map((line, index) => {
       const cleanedLine = cleanOptionText(line);
-      if (cleanedLine.includes('\t')) {
-        const [label, value] = cleanedLine.split('\t').map((item) => item.trim());
+      const tabParts = cleanedLine.split('\t');
+      if (tabParts.length === 2) {
+        const [label, value] = tabParts.map((item) => item.trim());
         return { label: cleanOptionText(label ?? ''), value: cleanOptionText(value || label || ''), id: `bulk_${index}` };
       }
-      if (cleanedLine.includes('|')) {
-        const [value, label] = cleanedLine.split('|').map((item) => item.trim());
+      const pipeParts = cleanedLine.split('|');
+      if (pipeParts.length === 2) {
+        const [value, label] = pipeParts.map((item) => item.trim());
         return { label: cleanOptionText(label || value || ''), value: cleanOptionText(value || label || ''), id: `bulk_${index}` };
-      }
-      if (cleanedLine.includes(',') || cleanedLine.includes('，')) {
-        const [label, value] = cleanedLine.split(/[，,]/).map((item) => item.trim());
-        return { label: cleanOptionText(label ?? ''), value: cleanOptionText(value || label || ''), id: `bulk_${index}` };
       }
       return { label: cleanedLine, value: cleanedLine, id: `bulk_${index}` };
     })

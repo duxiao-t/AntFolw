@@ -46,5 +46,34 @@ describe('SelectOptionsEditor', () => {
       expect.objectContaining({ color: '#12B76A' }),
     ]);
   });
-});
 
+  it('allows clearing and retyping a label without changing its technical value', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SelectOptionsEditor
+        value={[{ id: 'a', label: '旧名称', value: 'stable' }]}
+        onChange={onChange}
+        onDefaultChange={vi.fn()}
+        onEnableColorsChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: '选项旧名称' }), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ label: '', value: 'stable' }),
+    ]);
+
+    rerender(
+      <SelectOptionsEditor
+        value={[{ id: 'a', label: '', value: 'stable' }]}
+        onChange={onChange}
+        onDefaultChange={vi.fn()}
+        onEnableColorsChange={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: '选项' }), { target: { value: '新名称' } });
+    expect(onChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ label: '新名称', value: 'stable' }),
+    ]);
+  });
+});

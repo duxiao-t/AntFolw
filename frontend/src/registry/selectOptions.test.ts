@@ -30,13 +30,24 @@ describe('select option schema helpers', () => {
     expect(visibleSelectOptions([{ label: '隐藏', value: 'hidden', hidden: true }])).toEqual([]);
   });
 
-  it('parses pasted lines and removes duplicate values', () => {
+  it('parses only pipes and tabs as explicit values and keeps commas in labels', () => {
     const options = parseBulkSelectOptions('1. 北京\nsh|上海\n广州,gz\n上海,sh');
     expect(options.map(({ label, value }) => ({ label, value }))).toEqual([
       { label: '北京', value: '北京' },
       { label: '上海', value: 'sh' },
-      { label: '广州', value: 'gz' },
+      { label: '广州,gz', value: '广州,gz' },
+      { label: '上海,sh', value: '上海,sh' },
     ]);
+  });
+
+  it('preserves an empty draft label without changing its technical value', () => {
+    expect(normalizeSelectOptions([{ id: 'a', label: '', value: 'stable' }]))
+      .toEqual([{ id: 'a', label: '', value: 'stable', hidden: false, disabled: false, color: undefined, isOther: false }]);
+  });
+
+  it('treats extra pipe or tab columns as option text', () => {
+    expect(parseBulkSelectOptions('a|b|c\n甲\t乙\t丙').map((option) => option.label))
+      .toEqual(['a|b|c', '甲\t乙\t丙']);
   });
 
   it('removes hidden and other entries from defaults', () => {

@@ -236,7 +236,7 @@ public class FormDefinitionService {
     }
 
     private void validateSchema(String s) {
-        parseSchema(s);
+        parseSchema(s).forEach(this::validatePublishingNode);
     }
 
     private List<com.fasterxml.jackson.databind.JsonNode> parseSchema(String s) {
@@ -513,6 +513,28 @@ public class FormDefinitionService {
     }
 
     private record MatrixAxisItem(String id, String label) {}
+
+    private void validateSelectOptions(com.fasterxml.jackson.databind.JsonNode node) {
+        var options = node.path("props").path("options");
+        if (!options.isArray() || options.isEmpty()) {
+            throw new BizException("BAD_SCHEMA", node.path("label").asText(node.path("id").asText()) + " requires options");
+        }
+        options.forEach(option -> {
+            if (!option.isObject() || !option.path("label").isTextual()
+                || option.path("label").asText().isBlank()
+                || (!option.path("value").isTextual() && !option.path("value").isNumber())) {
+                throw new BizException("BAD_SCHEMA", node.path("label").asText(node.path("id").asText()) + " has an incomplete option");
+            }
+        });
+    }
+
+    private void validatePublishingNode(com.fasterxml.jackson.databind.JsonNode node) {
+        String type = node.path("type").asText("");
+        if (Set.of("select", "multi_select").contains(type)) {
+            validateSelectOptions(node);
+        }
+        node.path("children").forEach(this::validatePublishingNode);
+    }
 
     private boolean isEmpty(Object value) {
         return value == null

@@ -262,11 +262,7 @@ export function SelectOptionsEditor({
     if (!current) return;
     const next = options.map((option, itemIndex) => {
       if (itemIndex !== index) return option;
-      const nextOption = { ...option, ...patch };
-      if (patch.label !== undefined && option.value === option.label) {
-        nextOption.value = patch.label.trim() || option.value;
-      }
-      return nextOption;
+      return { ...option, ...patch };
     });
     commit(next);
   };
@@ -422,11 +418,11 @@ export function SelectOptionsEditor({
           <Input.TextArea
             rows={8}
             value={bulkText}
-            placeholder={'北京\n上海\n广州\n\n或：bj|北京\n或：北京,bj\n或从 Excel 复制两列'}
+            placeholder={'北京\n上海\n广州，深圳\n苏州,Hangzhou\n\n或：bj|北京\n或从 Excel 复制两列'}
             onChange={(event) => setBulkText(event.target.value)}
           />
           <Typography.Text type="secondary">
-            支持每行一个选项、value|label、label,value、Excel 两列复制。
+            支持每行一个选项、value|label 或 Excel 两列复制；逗号作为选项正文保留。
           </Typography.Text>
         </Space>
       </Modal>

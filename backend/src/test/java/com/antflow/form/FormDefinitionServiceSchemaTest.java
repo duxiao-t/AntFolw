@@ -261,6 +261,17 @@ class FormDefinitionServiceSchemaTest {
             .hasMessageContaining("required");
     }
 
+    @Test void publishRejectsEmptyOptions() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setSchema("[{\"id\":\"kind\",\"type\":\"select\",\"props\":{\"options\":[{\"label\":\"\",\"value\":\"a\"}]}}]");
+        when(mapper.selectById(1L)).thenReturn(fd);
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("incomplete option");
+    }
+
     private String matrixSchema(String cellType, String extraProps) {
         return """
             [{"id":"matrix","type":"matrix_fill","label":"矩阵","props":{
