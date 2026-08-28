@@ -67,6 +67,22 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private FormProcessPublishService publishService;
 
     @Test
+    void performanceIndexesExist() {
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT indexname FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname IN (
+              'idx_task_history_instance_created',
+              'idx_process_instance_started_by_started_at',
+              'idx_process_instance_status_started_at',
+              'idx_role_permission_permission_role')
+            """, String.class)).containsExactlyInAnyOrder(
+                "idx_task_history_instance_created",
+                "idx_process_instance_started_by_started_at",
+                "idx_process_instance_status_started_at",
+                "idx_role_permission_permission_role");
+    }
+
+    @Test
     void concurrentParallelApprovalsCreateOneJoinTask() throws Exception {
         long adminId = userId("admin");
         long bobId = userId("bob");
