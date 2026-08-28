@@ -31,6 +31,10 @@ import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
 import MobileFormPreview, {
   collectPreviewFieldErrors,
 } from './MobileFormPreview';
+import FormGrantUserPicker, {
+  type GrantDepartment,
+  type GrantUser,
+} from './FormGrantUserPicker';
 
 type FormDefinition = {
   id: number;
@@ -60,10 +64,16 @@ type PublishCheckItem = {
   description: string;
 };
 
-type FormGrant = { version: number; userIds: number[]; roleIds: number[] };
-type FormGrantCandidates = {
-  users: { id: number; username: string; displayName: string; employeeNo: string }[];
+type FormGrant = {
+  version: number;
+  userIds: number[];
+  roleIds: number[];
+  users: GrantUser[];
   roles: { id: number; code: string; name: string }[];
+};
+type FormGrantCandidates = {
+  roles: { id: number; code: string; name: string }[];
+  departments: GrantDepartment[];
 };
 
 const allSteps = [
@@ -158,7 +168,8 @@ export default function FormManagementWizard() {
   const isNew = !id || id === 'new';
   const formId = isNew ? null : Number(id);
   const currentUser = initialState?.currentUser as any;
-  const canManageGrants = (currentUser?.roles ?? []).includes('admin')
+  const isAdmin = (currentUser?.roles ?? []).includes('admin');
+  const canManageGrants = isAdmin
     || (currentUser?.permissions ?? []).includes('form.authorization.manage');
 
   const { data: definition } = useQuery<FormDefinition>({
@@ -199,6 +210,13 @@ export default function FormManagementWizard() {
     ),
     enabled: canManageGrants,
   });
+  const initialGrantUsers: GrantUser[] = formGrant?.users ?? (currentUser?.id ? [{
+    id: currentUser.id,
+    username: currentUser.username ?? '',
+    displayName: currentUser.displayName ?? currentUser.name ?? currentUser.username,
+    employeeNo: currentUser.employeeNo,
+    departmentId: currentUser.departmentId,
+  }] : []);
 
   const schema = useMemo(
     () => parseJsonValue<SchemaNode[]>(definition?.schema, []),
@@ -299,7 +317,7 @@ export default function FormManagementWizard() {
     if (canManageGrants && formGrant) {
       form.setFieldsValue({
         userIds: formGrant.userIds,
-        roleIds: formGrant.roleIds,
+        roleIds: isAdmin ? formGrant.roleIds : [],
       });
     } else if (canManageGrants && isNew && form.getFieldValue('userIds') === undefined) {
       form.setFieldsValue({
@@ -307,7 +325,7 @@ export default function FormManagementWizard() {
         roleIds: [],
       });
     }
-  }, [canManageGrants, currentUser?.id, definition, form, formGrant, isNew]);
+  }, [canManageGrants, currentUser?.id, definition, form, formGrant, isAdmin, isNew]);
 
   const goStep = (key: string, nextId = formId) => {
     if (!nextId) return;
@@ -534,25 +552,26 @@ export default function FormManagementWizard() {
               }}
             >
               <Form.Item label="用户管理员" name="userIds" style={{ marginBottom: 0 }}>
-                <Select
-                  mode="multiple"
-                  showSearch={{ optionFilterProp: 'label' }}
-                  options={(grantCandidates?.users ?? []).map((user) => ({
-                    value: user.id,
-                    label: `${user.displayName} · ${user.employeeNo || user.username}`,
-                  }))}
+                <FormGrantUserPicker
+                  users={initialGrantUsers}
+                  departments={grantCandidates?.departments ?? []}
+                  endpoint={formId
+                    ? `/api/forms/${formId}/grants/user-candidates`
+                    : '/api/forms/grant-user-candidates'}
                 />
               </Form.Item>
-              <Form.Item label="角色管理员" name="roleIds" style={{ marginBottom: 0 }}>
-                <Select
-                  mode="multiple"
-                  showSearch={{ optionFilterProp: 'label' }}
-                  options={(grantCandidates?.roles ?? []).map((role) => ({
-                    value: role.id,
-                    label: `${role.name} · ${role.code}`,
-                  }))}
-                />
-              </Form.Item>
+              {isAdmin && (
+                <Form.Item label="角色管理员" name="roleIds" style={{ marginBottom: 0 }}>
+                  <Select
+                    mode="multiple"
+                    showSearch={{ optionFilterProp: 'label' }}
+                    options={(grantCandidates?.roles ?? []).map((role) => ({
+                      value: role.id,
+                      label: `${role.name} · ${role.code}`,
+                    }))}
+                  />
+                </Form.Item>
+              )}
             </div>
           </div>
         )}

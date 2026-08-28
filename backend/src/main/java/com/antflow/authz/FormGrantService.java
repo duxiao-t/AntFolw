@@ -4,7 +4,9 @@ import com.antflow.auth.PrincipalHolder;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,21 +21,24 @@ public class FormGrantService {
     private final AuditService auditService;
 
     public FormGrantDto get(long formId) {
-        authorizationService.requireFormAction(formId, PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        authorizationService.requireFormManagementScope(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         Integer version = version(formId);
-        return new FormGrantDto(version,
-            jdbcTemplate.queryForList("""
+        List<Long> userIds = jdbcTemplate.queryForList("""
                 SELECT subject_id FROM t_form_resource_grant
                 WHERE form_def_id = ? AND subject_type = 'USER' ORDER BY subject_id
-                """, Long.class, formId),
-            jdbcTemplate.queryForList("""
+                """, Long.class, formId);
+        List<Long> roleIds = jdbcTemplate.queryForList("""
                 SELECT subject_id FROM t_form_resource_grant
                 WHERE form_def_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
-                """, Long.class, formId));
+                """, Long.class, formId);
+        return new FormGrantDto(version, userIds, roleIds,
+            selectedUsers(formId), selectedRoles(formId));
     }
 
     public FormGrantCandidates candidates(long formId) {
-        authorizationService.requireFormAction(formId, PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        authorizationService.requireFormManagementScope(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         return loadCandidates();
     }
 
@@ -43,25 +48,49 @@ public class FormGrantService {
     }
 
     private FormGrantCandidates loadCandidates() {
-        List<GrantUser> users = jdbcTemplate.query("""
-            SELECT id, username, display_name, employee_no
-            FROM t_user WHERE status = 'ACTIVE' ORDER BY display_name, id
-            """, (rs, row) -> new GrantUser(rs.getLong("id"), rs.getString("username"),
-                rs.getString("display_name"), rs.getString("employee_no")));
-        List<GrantRole> roles = jdbcTemplate.query("""
+        AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
+        List<GrantRole> roles = snapshot.admin() ? jdbcTemplate.query("""
             SELECT id, code, name FROM t_role WHERE enabled = true ORDER BY builtin DESC, id
             """, (rs, row) -> new GrantRole(rs.getLong("id"), rs.getString("code"),
-                rs.getString("name")));
-        return new FormGrantCandidates(users, roles);
+                rs.getString("name"))) : List.of();
+        return new FormGrantCandidates(roles, grantDepartments(snapshot));
+    }
+
+    public GrantUserPage userCandidates(Long formId, int page, int size, String keyword,
+                                        Long departmentId) {
+        if (formId == null) {
+            authorizationService.requirePermission(PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        } else {
+            authorizationService.requireFormManagementScope(formId,
+                PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        }
+        AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
+        int normalizedPage = Math.max(page, 1);
+        int normalizedSize = Math.min(Math.max(size, 1), 100);
+        CandidateQuery query = candidateQuery(snapshot, keyword, departmentId);
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) " + query.fromWhere(),
+            Long.class, query.args().toArray());
+        List<Object> pageArgs = new ArrayList<>(query.args());
+        pageArgs.add(normalizedSize);
+        pageArgs.add((normalizedPage - 1) * normalizedSize);
+        List<GrantUser> items = jdbcTemplate.query("""
+            SELECT user_row.id, user_row.username, user_row.display_name,
+                   user_row.employee_no, user_row.dept_id, department.name AS department_name
+            """ + query.fromWhere() + """
+            ORDER BY user_row.display_name, user_row.id LIMIT ? OFFSET ?
+            """, (rs, row) -> grantUser(rs), pageArgs.toArray());
+        return new GrantUserPage(items, total == null ? 0 : total, normalizedPage, normalizedSize);
     }
 
     @Transactional
     public FormGrantDto replace(long formId, FormGrantWriteRequest request) {
-        authorizationService.requireFormAction(formId, PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        authorizationService.requireFormManagementScope(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         if (request == null || request.version() == null) {
             throw new BizException("FORM_GRANT_VERSION_REQUIRED", "grant version is required");
         }
         validateSubjects(request.userIds(), request.roleIds());
+        boolean admin = authorizationService.isAdmin();
         int updated = jdbcTemplate.update("""
             UPDATE t_form_definition SET authz_version = authz_version + 1
             WHERE id = ? AND authz_version = ?
@@ -70,24 +99,34 @@ public class FormGrantService {
             throw new BizException("FORM_GRANT_VERSION_CONFLICT",
                 "form administrators were changed by another user");
         }
-        jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+        jdbcTemplate.update(admin
+            ? "DELETE FROM t_form_resource_grant WHERE form_def_id = ?"
+            : "DELETE FROM t_form_resource_grant WHERE form_def_id = ? AND subject_type = 'USER'",
+            formId);
         Long actorId = PrincipalHolder.current().orElseThrow().userId();
         request.userIds().forEach(userId -> jdbcTemplate.update("""
             INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
             VALUES (?, 'USER', ?, ?)
             """, formId, userId, actorId));
-        request.roleIds().forEach(roleId -> jdbcTemplate.update("""
-            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
-            VALUES (?, 'ROLE', ?, ?)
-            """, formId, roleId, actorId));
+        if (admin) {
+            request.roleIds().forEach(roleId -> jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'ROLE', ?, ?)
+                """, formId, roleId, actorId));
+        }
+        List<Long> effectiveRoleIds = admin ? request.roleIds().stream().sorted().toList()
+            : jdbcTemplate.queryForList("""
+                SELECT subject_id FROM t_form_resource_grant
+                WHERE form_def_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
+                """, Long.class, formId);
         auditService.success("form.authorization.update", "FORM", formId,
             AuditService.RiskLevel.HIGH,
             java.util.Map.of("changedFields", List.of("userIds", "roleIds")),
             java.util.Map.of("userCount", request.userIds().size(),
-                "roleCount", request.roleIds().size()));
+                "roleCount", effectiveRoleIds.size()));
         return new FormGrantDto(request.version() + 1,
             request.userIds().stream().sorted().toList(),
-            request.roleIds().stream().sorted().toList());
+            effectiveRoleIds, selectedUsers(formId), selectedRoles(formId));
     }
 
     @Transactional
@@ -100,11 +139,25 @@ public class FormGrantService {
     }
 
     private void validateSubjects(Set<Long> userIds, Set<Long> roleIds) {
+        AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
+        if (!snapshot.admin() && !roleIds.isEmpty()) {
+            throw new AuthorizationFailureException("MISSING_PERMISSION",
+                "only administrators can grant forms to roles");
+        }
         for (Long userId : userIds) {
-            Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_user WHERE id = ?",
-                Long.class, userId);
-            if (count == null || count == 0) {
+            CandidateUser user = jdbcTemplate.query("""
+                SELECT id, username, display_name, employee_no, dept_id
+                FROM t_user WHERE id = ? AND status = 'ACTIVE'
+                """, rs -> rs.next() ? new CandidateUser(rs.getLong("id"),
+                    rs.getString("username"), rs.getString("display_name"),
+                    rs.getString("employee_no"), nullableLong(rs, "dept_id")) : null, userId);
+            if (user == null) {
                 throw new BizException("USER_NOT_FOUND", "grant user not found");
+            }
+            if (!snapshot.admin() && !authorizationService.inDataScope(snapshot,
+                PermissionCodes.FORM_AUTHORIZATION_MANAGE, user.id(), user.departmentId())) {
+                throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
+                    "grant user is outside the permitted data scope");
             }
         }
         for (Long roleId : roleIds) {
@@ -126,10 +179,136 @@ public class FormGrantService {
         return version;
     }
 
-    public record FormGrantDto(int version, List<Long> userIds, List<Long> roleIds) { }
-    public record FormGrantCandidates(List<GrantUser> users, List<GrantRole> roles) { }
-    public record GrantUser(long id, String username, String displayName, String employeeNo) { }
+    private CandidateQuery candidateQuery(AuthorizationService.AuthzSnapshot snapshot,
+                                          String keyword, Long departmentId) {
+        StringBuilder sql = new StringBuilder("""
+            FROM t_user user_row
+            LEFT JOIN t_department department ON department.id = user_row.dept_id
+            WHERE user_row.status = 'ACTIVE'
+            """);
+        List<Object> args = new ArrayList<>();
+        if (!snapshot.admin()) {
+            List<AuthorizationService.RoleGrant> grants = snapshot.permissionRoles()
+                .getOrDefault(PermissionCodes.FORM_AUTHORIZATION_MANAGE, List.of());
+            boolean self = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.SELF);
+            Set<Long> departments = authorizationService.manageableDepartments(snapshot,
+                PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+            if (!self && departments.isEmpty()) {
+                sql.append(" AND false");
+            } else {
+                sql.append(" AND (");
+                if (self) {
+                    sql.append("user_row.id = ?");
+                    args.add(snapshot.userId());
+                }
+                if (!departments.isEmpty()) {
+                    if (self) sql.append(" OR ");
+                    sql.append("user_row.dept_id IN (")
+                        .append(placeholders(departments.size())).append(')');
+                    args.addAll(departments);
+                }
+                sql.append(')');
+            }
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String search = "%" + keyword.trim() + "%";
+            sql.append("""
+                 AND (user_row.display_name ILIKE ? OR user_row.username ILIKE ?
+                   OR user_row.employee_no ILIKE ?)
+                """);
+            args.add(search);
+            args.add(search);
+            args.add(search);
+        }
+        if (departmentId != null) {
+            sql.append("""
+                 AND EXISTS (
+                   SELECT 1 FROM t_department selected_department
+                   WHERE selected_department.id = ?
+                     AND department.path <@ selected_department.path
+                 )
+                """);
+            args.add(departmentId);
+        }
+        return new CandidateQuery(sql.toString(), args);
+    }
+
+    private List<GrantDepartment> grantDepartments(AuthorizationService.AuthzSnapshot snapshot) {
+        if (snapshot.admin()) {
+            return jdbcTemplate.query("""
+                SELECT id, parent_id, name FROM t_department ORDER BY path, sort_order, id
+                """, (rs, row) -> new GrantDepartment(rs.getLong("id"),
+                    nullableLong(rs, "parent_id"), rs.getString("name")));
+        }
+        Set<Long> visible = authorizationService.manageableDepartments(snapshot,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        boolean self = snapshot.permissionRoles()
+            .getOrDefault(PermissionCodes.FORM_AUTHORIZATION_MANAGE, List.of()).stream()
+            .anyMatch(grant -> grant.dataScope() == DataScope.SELF);
+        if (self && snapshot.departmentId() != null) visible.add(snapshot.departmentId());
+        if (visible.isEmpty()) return List.of();
+        String placeholders = placeholders(visible.size());
+        List<Object> args = new ArrayList<>(visible);
+        args.addAll(visible);
+        String sql = "SELECT DISTINCT department.id, department.parent_id, department.name, "
+            + "department.path FROM t_department department WHERE department.id IN ("
+            + placeholders + ") OR EXISTS (SELECT 1 FROM t_department target WHERE target.id IN ("
+            + placeholders + ") AND target.path <@ department.path) ORDER BY department.path";
+        return jdbcTemplate.query(sql, (rs, row) -> new GrantDepartment(rs.getLong("id"),
+                nullableLong(rs, "parent_id"), rs.getString("name")), args.toArray());
+    }
+
+    private List<GrantUser> selectedUsers(long formId) {
+        return jdbcTemplate.query("""
+            SELECT user_row.id, user_row.username, user_row.display_name,
+                   user_row.employee_no, user_row.dept_id, department.name AS department_name
+            FROM t_form_resource_grant form_grant
+            JOIN t_user user_row ON user_row.id = form_grant.subject_id
+            LEFT JOIN t_department department ON department.id = user_row.dept_id
+            WHERE form_grant.form_def_id = ? AND form_grant.subject_type = 'USER'
+            ORDER BY user_row.display_name, user_row.id
+            """, (rs, row) -> grantUser(rs), formId);
+    }
+
+    private List<GrantRole> selectedRoles(long formId) {
+        return jdbcTemplate.query("""
+            SELECT role.id, role.code, role.name
+            FROM t_form_resource_grant form_grant
+            JOIN t_role role ON role.id = form_grant.subject_id
+            WHERE form_grant.form_def_id = ? AND form_grant.subject_type = 'ROLE'
+            ORDER BY role.name, role.id
+            """, (rs, row) -> new GrantRole(rs.getLong("id"), rs.getString("code"),
+                rs.getString("name")), formId);
+    }
+
+    private static GrantUser grantUser(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new GrantUser(rs.getLong("id"), rs.getString("username"),
+            rs.getString("display_name"), rs.getString("employee_no"),
+            nullableLong(rs, "dept_id"), rs.getString("department_name"));
+    }
+
+    private static String placeholders(int count) {
+        return String.join(",", java.util.Collections.nCopies(count, "?"));
+    }
+
+    private static Long nullableLong(java.sql.ResultSet resultSet, String column)
+            throws java.sql.SQLException {
+        long value = resultSet.getLong(column);
+        return resultSet.wasNull() ? null : value;
+    }
+
+    public record FormGrantDto(int version, List<Long> userIds, List<Long> roleIds,
+                               List<GrantUser> users, List<GrantRole> roles) { }
+    public record FormGrantCandidates(List<GrantRole> roles,
+                                      List<GrantDepartment> departments) { }
+    public record GrantUser(long id, String username, String displayName, String employeeNo,
+                            Long departmentId, String departmentName) { }
     public record GrantRole(long id, String code, String name) { }
+    public record GrantDepartment(long id, Long parentId, String name) { }
+    public record GrantUserPage(List<GrantUser> items, long total, int page, int size) { }
+    private record CandidateUser(long id, String username, String displayName,
+                                 String employeeNo, Long departmentId) { }
+    private record CandidateQuery(String fromWhere, List<Object> args) { }
     public record FormGrantWriteRequest(Integer version, Set<Long> userIds, Set<Long> roleIds) {
         public FormGrantWriteRequest {
             userIds = userIds == null ? Set.of() : new LinkedHashSet<>(userIds);

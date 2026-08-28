@@ -185,6 +185,23 @@ public class AuthorizationService {
         }
     }
 
+    public void requireFormManagementScope(long formId, String permission) {
+        requireFormAction(formId, permission);
+        if (isAdmin()) return;
+        FormManagementAccess resource = jdbcTemplate.query("""
+            SELECT form.created_by, creator.dept_id
+            FROM t_form_definition form
+            LEFT JOIN t_user creator ON creator.id = form.created_by
+            WHERE form.id = ? AND form.deleted = 0
+            """, rs -> rs.next() ? new FormManagementAccess(
+                nullableLong(rs, "created_by"), nullableLong(rs, "dept_id")) : null, formId);
+        if (resource == null) throw new HiddenResourceException("form not found");
+        if (!inCurrentDataScope(permission, resource.createdBy(), resource.departmentId())) {
+            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
+                "form is outside the permitted data scope");
+        }
+    }
+
     /**
      * 发起/填报入口统一使用：表单必须已发布且当前用户具备表单使用授权。
      * 未授权时返回资源不存在，避免泄露表单是否存在。
@@ -467,6 +484,7 @@ public class AuthorizationService {
                              long authzVersion, Long departmentId) { }
     private record InstanceAccess(Long startedBy, Long startedDepartmentId, Long formDefId) { }
     private record FormDataAccess(Long createdBy, Long formDefId, Long startedDepartmentId) { }
+    private record FormManagementAccess(Long createdBy, Long departmentId) { }
 
     public record RoleGrant(long roleId, String code, DataScope dataScope,
                             Set<Long> customDepartmentIds) { }
