@@ -85,6 +85,8 @@ antflow:
     max-attempts: 8
     poll-interval-ms: ${ANTFLOW_JOB_POLL_INTERVAL_MS:5000}
     recovery-interval-ms: ${ANTFLOW_JOB_RECOVERY_INTERVAL_MS:60000}
+  web:
+    slow-request-threshold-ms: ${ANTFLOW_SLOW_REQUEST_THRESHOLD_MS:500}
 
 mybatis-plus:
   configuration:
