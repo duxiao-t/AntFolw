@@ -1,16 +1,17 @@
 import { ApiError } from '../../shared/api/errors';
 import { apiRequest } from '../../shared/api/http';
-import type { MobileUser } from '../../shared/api/types';
+import type { MobileBootstrap, MobileUser } from '../../shared/api/types';
 
 export interface SessionPayload {
   accessToken: string;
   user: MobileUser;
+  mobileBootstrap?: MobileBootstrap;
 }
 
 export const authApi = {
   async login(username: string, password: string): Promise<SessionPayload> {
     return apiRequest<SessionPayload>(
-      '/api/auth/login',
+      '/api/auth/login?includeMobileBootstrap=true',
       {
         method: 'POST',
         body: JSON.stringify({ username, password }),
@@ -21,7 +22,7 @@ export const authApi = {
   async refresh(): Promise<SessionPayload | null> {
     try {
       return await apiRequest<SessionPayload>(
-        '/api/auth/refresh',
+        '/api/auth/refresh?includeMobileBootstrap=true',
         { method: 'POST' },
         { csrf: true },
       );

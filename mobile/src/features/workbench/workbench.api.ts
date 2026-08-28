@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '../../shared/api/http';
 import { queryKeys } from '../../shared/api/queryKeys';
 import type { MobileBootstrap, MobileApp, RecentProcess } from '../../shared/api/types';
+import { useAuthStore } from '../auth/auth.store';
 
 export type { MobileBootstrap, MobileApp, RecentProcess };
 
@@ -13,12 +14,14 @@ export async function fetchMobileBootstrap(): Promise<MobileBootstrap> {
 }
 
 export function useMobileBootstrap() {
+  const initialData = useAuthStore((state) => state.mobileBootstrap);
   return useQuery({
     queryKey: queryKeys.bootstrap,
     queryFn: fetchMobileBootstrap,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     retry: 0,
+    initialData: initialData ?? undefined,
   });
 }
 

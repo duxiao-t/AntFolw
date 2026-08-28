@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { ApiError, isApiError } from '../../shared/api/errors';
-import type { MobileUser } from '../../shared/api/types';
+import type { MobileBootstrap, MobileUser } from '../../shared/api/types';
 import { authApi, type SessionPayload } from './auth.api';
 
 export type AuthStatus = 'unknown' | 'authenticated' | 'anonymous';
@@ -9,6 +9,7 @@ export interface AuthState {
   status: AuthStatus;
   accessToken: string | null;
   user: MobileUser | null;
+  mobileBootstrap: MobileBootstrap | null;
   /**
    * Restore session on app boot. Calls the cookie-bound refresh endpoint and
    * resolves to either an authenticated or anonymous state. Anonymous resolves
@@ -23,11 +24,12 @@ export interface AuthState {
 }
 
 function applySession(set: (partial: Partial<AuthState>) => void, payload: SessionPayload): void {
-  set({ status: 'authenticated', accessToken: payload.accessToken, user: payload.user });
+  set({ status: 'authenticated', accessToken: payload.accessToken, user: payload.user,
+    mobileBootstrap: payload.mobileBootstrap ?? null });
 }
 
 function applyAnonymous(set: (partial: Partial<AuthState>) => void): void {
-  set({ status: 'anonymous', accessToken: null, user: null });
+  set({ status: 'anonymous', accessToken: null, user: null, mobileBootstrap: null });
 }
 
 let refreshRequest: Promise<SessionPayload | null> | null = null;
@@ -46,6 +48,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'unknown',
   accessToken: null,
   user: null,
+  mobileBootstrap: null,
   async restore() {
     try {
       const payload = await requestSessionRefresh();

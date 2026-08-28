@@ -2,6 +2,7 @@ package com.antflow.auth;
 
 import com.antflow.authz.AuthorizationService;
 import com.antflow.audit.AuditService;
+import com.antflow.mobile.workflow.MobileBootstrapService;
 import lombok.RequiredArgsConstructor;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,9 +24,12 @@ public class LoginController {
     private final AuthSessionService sessionService;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
+    private final MobileBootstrapService mobileBootstrapService;
 
     @PostMapping("/login")
-    public Map<String, Object> login(@RequestBody LoginReq body, HttpServletRequest request,
+    public Map<String, Object> login(@RequestBody LoginReq body,
+                                     @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
+                                     HttpServletRequest request,
                                      HttpServletResponse response) {
         var candidate = authService.authenticate(body.username(), body.password());
         if (candidate.isEmpty()) {
@@ -39,7 +43,7 @@ public class LoginController {
             result -> auditService.successAs(auditPrincipal(result), "auth.login", "USER",
                 result.user().getId(), AuditService.RiskLevel.NORMAL, Map.of(),
                 Map.of("username", result.user().getUsername())));
-        return payload(authenticated);
+        return payload(authenticated, includeMobileBootstrap);
     }
 
     @PostMapping("/refresh")
@@ -47,12 +51,13 @@ public class LoginController {
             @CookieValue(name = AuthSessionService.REFRESH_COOKIE, required = false) String refreshToken,
             @CookieValue(name = AuthSessionService.CSRF_COOKIE, required = false) String csrfCookie,
             @RequestHeader(name = "X-CSRF-Token", required = false) String csrfHeader,
+            @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
             HttpServletRequest request, HttpServletResponse response) {
         var authenticated = auditService.execute(
             () -> sessionService.refresh(refreshToken, csrfCookie, csrfHeader, request, response),
             result -> auditService.successAs(auditPrincipal(result), "auth.refresh", "USER",
                 result.user().getId(), AuditService.RiskLevel.NORMAL, Map.of(), Map.of()));
-        return payload(authenticated);
+        return payload(authenticated, includeMobileBootstrap);
     }
 
     @PostMapping("/logout")
@@ -83,22 +88,26 @@ public class LoginController {
         return ResponseEntity.noContent().build();
     }
 
-    private Map<String, Object> payload(AuthService.Authenticated auth) {
+    private Map<String, Object> payload(AuthService.Authenticated auth,
+                                        boolean includeMobileBootstrap) {
         var snapshot = authorizationService.snapshot(auth.user().getId());
-        return Map.of(
-            "accessToken", auth.accessToken(),
-            "user", Map.of(
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("accessToken", auth.accessToken());
+        result.put("user", Map.of(
                 "id", auth.user().getId(),
                 "username", auth.user().getUsername(),
                 "displayName", auth.user().getDisplayName(),
                 "email", auth.user().getEmail() == null ? "" : auth.user().getEmail(),
                 "roles", auth.roles(),
                 "permissions", snapshot.permissions(),
-                "authzVersion", auth.user().getAuthzVersion()
-            ),
-            "permissions", snapshot.permissions(),
-            "authzVersion", auth.user().getAuthzVersion()
-        );
+                "authzVersion", auth.user().getAuthzVersion()));
+        result.put("permissions", snapshot.permissions());
+        result.put("authzVersion", auth.user().getAuthzVersion());
+        if (includeMobileBootstrap) {
+            result.put("mobileBootstrap", mobileBootstrapService.bootstrap(
+                auth.user().getId(), auth.roles()));
+        }
+        return result;
     }
 
     private PrincipalHolder.Principal auditPrincipal(AuthService.Authenticated auth) {

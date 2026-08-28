@@ -30,11 +30,13 @@ class MobileBootstrapControllerTest {
     private MobileWorkflowMapper workflowMapper;
 
     private MobileBootstrapController controller;
+    private MobileBootstrapService service;
 
     @BeforeEach
     void setUp() {
-        controller = new MobileBootstrapController(userMapper, taskMapper, mobileAppService,
+        service = new MobileBootstrapService(userMapper, taskMapper, mobileAppService,
             workflowMapper);
+        controller = new MobileBootstrapController(service);
         PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("user", "admin")));
     }
 

@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore, safeReturnUrl } from './auth.store';
-import type { MobileUser } from '../../shared/api/types';
+import type { MobileBootstrap, MobileUser } from '../../shared/api/types';
 
 const SAMPLE_USER: MobileUser = {
   id: 7,
   username: 'admin',
   displayName: '管理员',
   roles: ['admin'],
+};
+const SAMPLE_BOOTSTRAP: MobileBootstrap = {
+  user: SAMPLE_USER,
+  pendingCount: 2,
+  favoriteApps: [],
+  recentProcesses: [],
+  brandingVersion: 'test',
 };
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -53,13 +60,17 @@ describe('useAuthStore', () => {
 
   it('keeps accessToken in memory only', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
-      jsonResponse(200, { accessToken: 'mem-token', user: SAMPLE_USER }),
+      jsonResponse(200, {
+        accessToken: 'mem-token', user: SAMPLE_USER, mobileBootstrap: SAMPLE_BOOTSTRAP,
+      }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
     await useAuthStore.getState().restore();
     expect(useAuthStore.getState().status).toBe('authenticated');
     expect(useAuthStore.getState().accessToken).toBe('mem-token');
+    expect(useAuthStore.getState().mobileBootstrap?.pendingCount).toBe(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/refresh?includeMobileBootstrap=true');
 
     expect(localStorage.getItem('accessToken')).toBeNull();
     expect(sessionStorage.getItem('accessToken')).toBeNull();
