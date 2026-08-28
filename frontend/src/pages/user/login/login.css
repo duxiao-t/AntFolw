@@ -1,0 +1,216 @@
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.92fr) minmax(440px, 1.08fr);
+  background: var(--af-color-bg);
+  color: var(--af-color-text);
+}
+
+.login-brand {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(44px, 7vw, 96px) clamp(32px, 7vw, 104px);
+  background: var(--af-color-primary);
+  color: #ffffff;
+}
+
+.login-brand::before,
+.login-brand::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  transform: rotate(-28deg);
+}
+
+.login-brand::before {
+  width: 430px;
+  height: 430px;
+  right: -210px;
+  bottom: -250px;
+}
+
+.login-brand::after {
+  width: 250px;
+  height: 250px;
+  right: -70px;
+  bottom: -130px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  margin-bottom: 42px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.brand-mark img {
+  width: 37px;
+  height: 37px;
+}
+
+.brand-kicker,
+.login-eyebrow {
+  margin: 0 0 14px;
+  color: #d5e5ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.login-brand h1 {
+  max-width: 520px;
+  margin: 0;
+  font-size: 48px;
+  line-height: 1.14;
+  font-weight: 650;
+}
+
+.brand-description {
+  max-width: 400px;
+  margin: 22px 0 58px;
+  color: #dce8fb;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.capability-list {
+  display: grid;
+  gap: 22px;
+  max-width: 430px;
+}
+
+.capability {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.capability-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  color: #ffffff;
+}
+
+.capability strong,
+.capability small {
+  display: block;
+}
+
+.capability strong {
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.capability small {
+  color: #d5e5ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.brand-stamp {
+  position: absolute;
+  right: 32px;
+  bottom: 26px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.login-panel {
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  padding: 48px;
+}
+
+.login-card {
+  width: min(100%, 430px);
+  padding: clamp(28px, 5vw, 52px);
+  border: 1px solid var(--af-color-border);
+  border-radius: 10px;
+  background: var(--af-color-surface);
+  box-shadow: 0 20px 60px rgba(13, 28, 51, 0.1);
+}
+
+.login-heading {
+  margin-bottom: 30px;
+}
+
+.login-heading .login-eyebrow {
+  color: var(--af-color-primary);
+}
+
+.login-heading h2 {
+  margin: 0 0 9px;
+  color: var(--af-color-text);
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+.login-heading p:last-child {
+  margin: 0;
+  color: var(--af-color-text-secondary);
+  font-size: 14px;
+}
+
+.login-footnote {
+  margin: 24px 0 0;
+  color: var(--af-color-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .login-page {
+    display: block;
+  }
+
+  .login-brand {
+    min-height: 230px;
+    padding: 32px 24px 38px;
+  }
+
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 22px;
+    border-radius: 10px;
+  }
+
+  .brand-mark img {
+    width: 31px;
+    height: 31px;
+  }
+
+  .login-brand h1 {
+    font-size: 28px;
+  }
+
+  .brand-description,
+  .capability-list,
+  .brand-stamp {
+    display: none;
+  }
+
+  .login-panel {
+    display: block;
+    padding: 20px 16px 38px;
+  }
+
+  .login-card {
+    width: 100%;
+    padding: 28px 22px;
+  }
+}
