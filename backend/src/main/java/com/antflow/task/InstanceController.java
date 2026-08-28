@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestController
@@ -55,28 +56,37 @@ public class InstanceController {
             .orderByDesc("id");
         if (status != null) q.eq("status", status);
         return instanceMapper.selectList(q).stream()
-            .filter(instance -> authorizationService.canReadInstance(instance.getId(), p.userId()))
+            .filter(instance -> authorizationService.canReadFullInstance(instance.getId(), p.userId()))
             .toList();
     }
 
     @GetMapping("/{id}")
     public Map<String, Object> detail(@PathVariable Long id) {
-        authorizationService.requireReadableInstance(id);
+        var principal = PrincipalHolder.current().orElseThrow();
+        var visibility = authorizationService.instanceVisibility(id, principal.userId());
+        if (visibility == AuthorizationService.InstanceVisibility.NONE) {
+            throw new com.antflow.authz.HiddenResourceException("instance not found");
+        }
         var pi = instanceMapper.selectById(id);
         if (pi == null) throw new BizException("NOT_FOUND", "instance not found");
         var tasks = taskMapper.selectList(new QueryWrapper<TaskEntity>().eq("proc_inst_id", id));
         var history = historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
             .eq("proc_inst_id", id).orderByAsc("created_at"));
-        var formData = formDataMapper.selectById(pi.getFormDataId());
-        var form = formData == null ? null : formDefinitionService.getById(formData.getFormDefId());
-        Map<String, Object> result = Map.of(
-            "instance", pi,
-            "tasks", tasks,
-            "history", history,
-            "automationJobs", workflowJobService.listViews(id),
-            "schema", form == null ? null : form.getSchema(),
-            "formData", formData == null ? null : formData.getData()
-        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("visibility", visibility.name());
+        result.put("history", history);
+        if (visibility == AuthorizationService.InstanceVisibility.SUMMARY) {
+            result.put("instance", summaryInstance(pi));
+            result.put("tasks", tasks.stream().map(InstanceController::summaryTask).toList());
+        } else {
+            var formData = formDataMapper.selectById(pi.getFormDataId());
+            var form = formData == null ? null : formDefinitionService.getById(formData.getFormDefId());
+            result.put("instance", pi);
+            result.put("tasks", tasks);
+            result.put("automationJobs", workflowJobService.listViews(id));
+            result.put("schema", form == null ? null : form.getSchema());
+            result.put("formData", formData == null ? null : formData.getData());
+        }
         auditService.success("workflow.instance.detail.read", "PROCESS_INSTANCE", id,
             AuditService.RiskLevel.HIGH, Map.of(), Map.of());
         return result;
@@ -112,5 +122,27 @@ public class InstanceController {
 
     private static int fieldCount(Object data) {
         return data instanceof Map<?, ?> map ? map.size() : 0;
+    }
+
+    private static Map<String, Object> summaryInstance(ProcessInstance instance) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", instance.getId());
+        result.put("status", instance.getStatus());
+        result.put("currentNodeId", instance.getCurrentNodeId());
+        result.put("startedBy", instance.getStartedBy());
+        result.put("startedAt", instance.getStartedAt());
+        result.put("finishedAt", instance.getFinishedAt());
+        return result;
+    }
+
+    private static Map<String, Object> summaryTask(TaskEntity task) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", task.getId());
+        result.put("nodeId", task.getNodeId());
+        result.put("assigneeId", task.getAssigneeId());
+        result.put("approvedBy", task.getApprovedBy());
+        result.put("status", task.getStatus());
+        result.put("approvedAt", task.getApprovedAt());
+        return result;
     }
 }

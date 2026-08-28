@@ -65,11 +65,11 @@ record MobileTaskDetailDto(MobileTaskDto task, JsonNode schema,
 }
 
 record MobileInstanceDto(Long id, String status, String formName, String businessNo,
-                         String currentNodeName,
-                         OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+                          String currentNodeName,
+                          OffsetDateTime startedAt, OffsetDateTime finishedAt) {
 }
 
-record MobileInstanceDetailDto(Long id, String status, String formName,
+record MobileInstanceDetailDto(String visibility, Long id, String status, String formName,
                                String businessNo, String applicantName,
                                String applicantEmployeeNo, String applicantDepartment,
                                OffsetDateTime startedAt, String currentNodeName,

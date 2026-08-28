@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
@@ -73,10 +75,18 @@ class MobileWorkflowServiceTest {
         authorizationService = Mockito.mock(AuthorizationService.class);
         Mockito.when(authorizationService.canReadInstance(Mockito.anyLong(), Mockito.anyLong()))
             .thenReturn(true);
+        Mockito.when(authorizationService.canReadFullInstance(Mockito.anyLong(), Mockito.anyLong()))
+            .thenReturn(true);
+        Mockito.when(authorizationService.instanceVisibility(Mockito.anyLong(), Mockito.anyLong()))
+            .thenReturn(AuthorizationService.InstanceVisibility.FULL);
+        Mockito.when(authorizationService.snapshot(Mockito.anyLong())).thenReturn(
+            new AuthorizationService.AuthzSnapshot(8L, 20L, false, Set.of("user"),
+                Set.of(PermissionCodes.WORKFLOW_TASK_APPROVE,
+                    PermissionCodes.WORKFLOW_TASK_REJECT), Map.of()));
+        Mockito.when(workflowMapper.selectApprovalTasks(Mockito.anyLong())).thenReturn(List.of());
         service = new MobileWorkflowService(engine, draftService, workflowMapper,
             formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
-            taskMapper, historyMapper, fileMapper, userMapper, departmentMapper, objectMapper,
-            authorizationService);
+            taskMapper, historyMapper, fileMapper, objectMapper, authorizationService);
     }
 
     @Test
@@ -140,7 +150,10 @@ class MobileWorkflowServiceTest {
 
 
 
-        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
+        ProcessInstance instance = instance(501L, 7L, "RUNNING");
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
+        Mockito.when(workflowMapper.selectInstanceDetail(501L))
+            .thenReturn(instanceDetailRow(instance));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class)))
@@ -167,6 +180,8 @@ class MobileWorkflowServiceTest {
         ProcessInstance reworkInstance = instance(501L, 7L, "RUNNING");
         reworkInstance.setCurrentNodeId("__rework__");
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(reworkInstance);
+        Mockito.when(workflowMapper.selectInstanceDetail(501L))
+            .thenReturn(instanceDetailRow(reworkInstance));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
@@ -182,12 +197,7 @@ class MobileWorkflowServiceTest {
     void pendingTaskQueryOnlyReturnsCurrentAssignee() {
         Mockito.when(workflowMapper.selectTaskPage(Mockito.eq(8L), Mockito.eq("pending"),
                 Mockito.eq("请假"), Mockito.eq("PENDING"), Mockito.eq(21), Mockito.eq(20)))
-            .thenReturn(List.of(task(401L, 501L, "a1", 8L, "PENDING")));
-        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
-        Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
-        Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
+            .thenReturn(List.of(taskRow(401L, 501L, "a1", "PENDING")));
 
         MobilePageDto<MobileTaskDto> tasks = service.listTasks("pending", 8L, 2, 20,
             " 请假 ", "PENDING");
@@ -197,11 +207,15 @@ class MobileWorkflowServiceTest {
         assertThat(tasks.hasMore()).isFalse();
         Mockito.verify(workflowMapper).selectTaskPage(8L, "pending", "请假", "PENDING",
             21, 20);
+        Mockito.verifyNoInteractions(instanceMapper, formDataMapper, userMapper, departmentMapper);
     }
 
     @Test
     void processDetailReturnsCanWithdrawFromServerRules() {
-        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
+        ProcessInstance instance = instance(501L, 7L, "RUNNING");
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
+        Mockito.when(workflowMapper.selectInstanceDetail(501L))
+            .thenReturn(instanceDetailRow(instance));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
@@ -217,22 +231,23 @@ class MobileWorkflowServiceTest {
     void startedInstanceQueryAppliesPagingKeywordAndStatus() {
         Mockito.when(workflowMapper.selectInstancePage(Mockito.eq(7L), Mockito.eq("采购"),
                 Mockito.eq("RUNNING"), Mockito.eq(21), Mockito.eq(0)))
-            .thenReturn(List.of(instance(501L, 7L, "RUNNING")));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
+            .thenReturn(List.of(instanceRow(501L, "RUNNING")));
 
         MobilePageDto<MobileInstanceDto> instances = service.listInstances(7L, 1, 20,
             " 采购 ", "RUNNING");
 
         assertThat(instances.items()).hasSize(1);
         Mockito.verify(workflowMapper).selectInstancePage(7L, "采购", "RUNNING", 21, 0);
+        Mockito.verifyNoInteractions(formDataMapper, formDefinitionService);
     }
 
     @Test
     void taskDetailReturnsAllowedActionsAndLegalRejectTargets() {
-        Mockito.when(taskMapper.selectById(401L))
-            .thenReturn(task(401L, 501L, "a2", 8L, "PENDING"));
-        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instanceWithTwoApprovals());
+        TaskEntity task = task(401L, 501L, "a2", 8L, "PENDING");
+        ProcessInstance instance = instanceWithTwoApprovals();
+        Mockito.when(taskMapper.selectById(401L)).thenReturn(task);
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
+        Mockito.when(workflowMapper.selectTaskDetail(401L)).thenReturn(taskDetailRow(task, instance));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
@@ -249,13 +264,56 @@ class MobileWorkflowServiceTest {
 
     @Test
     void taskDetailRejectsUnrelatedUser() {
-        Mockito.when(taskMapper.selectById(401L))
-            .thenReturn(task(401L, 501L, "a1", 8L, "PENDING"));
-        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance(501L, 7L, "RUNNING"));
-        Mockito.when(authorizationService.canReadInstance(501L, 9L)).thenReturn(false);
+        TaskEntity task = task(401L, 501L, "a1", 8L, "PENDING");
+        Mockito.when(taskMapper.selectById(401L)).thenReturn(task);
+        ProcessInstance instance = instance(501L, 7L, "RUNNING");
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
+        Mockito.when(workflowMapper.selectTaskDetail(401L)).thenReturn(taskDetailRow(task, instance));
+        Mockito.when(authorizationService.canReadFullInstance(501L, 9L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.getTaskDetail(401L, 9L, List.of("user")))
             .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
+    void markTaskReadCompletesUnreadCcTaskForItsRecipient() {
+        TaskEntity cc = task(402L, 501L, "cc1", 8L, "CC");
+        Mockito.when(taskMapper.selectById(402L)).thenReturn(cc);
+
+        service.markTaskRead(402L, 8L);
+
+        assertThat(cc.getReadAt()).isNotNull();
+        Mockito.verify(taskMapper).updateById(cc);
+    }
+
+    @Test
+    void unreadCcDetailOffersAcknowledgeAndAppearsInApprovalRecords() {
+        TaskEntity cc = task(402L, 501L, "cc1", 8L, "CC");
+        ProcessInstance instance = instance(501L, 7L, "APPROVED");
+        instance.setProcessSnapshot("""
+            {"id":"root","type":"ROOT","children":{"id":"cc1","name":"抄送人","type":"CC"}}
+            """);
+        Mockito.when(taskMapper.selectById(402L)).thenReturn(cc);
+        Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
+        Mockito.when(workflowMapper.selectTaskDetail(402L)).thenReturn(taskDetailRow(cc, instance));
+        Mockito.when(workflowMapper.selectApprovalTasks(501L))
+            .thenReturn(List.of(approvalRow(cc, "李四")));
+        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
+        Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(cc));
+        Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
+        Mockito.when(userMapper.selectById(8L)).thenReturn(user(8L, "李四", 20L));
+        Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
+
+        MobileTaskDetailDto detail = service.getTaskDetail(402L, 8L, List.of("user"));
+
+        assertThat(detail.allowedActions()).containsExactly("ACKNOWLEDGE");
+        assertThat(detail.approvalRecords()).extracting(ApprovalRecordDto::nodeName,
+            ApprovalRecordDto::status, ApprovalRecordDto::operatorName,
+            ApprovalRecordDto::comment)
+            .contains(tuple("抄送人", "PROCESSING", "李四", "等待确认抄送内容。"));
     }
 
     @Test
@@ -389,6 +447,50 @@ class MobileWorkflowServiceTest {
         task.setStatus(status);
         task.setCreatedAt(OffsetDateTime.parse("2026-07-20T09:05:00+08:00"));
         return task;
+    }
+
+    private static MobileWorkflowMapper.TaskRow taskRow(Long id, Long instanceId,
+                                                        String nodeId, String status) {
+        return new MobileWorkflowMapper.TaskRow(id, instanceId, nodeId, "leave", "请假申请",
+            "000000000301", "张三", "E0007", "研发部",
+            instance(instanceId, 7L, "RUNNING").getProcessSnapshot(), "APPROVAL", status,
+            "RUNNING", OffsetDateTime.parse("2026-07-20T09:05:00+08:00"), null);
+    }
+
+    private static MobileWorkflowMapper.InstanceRow instanceRow(Long id, String status) {
+        ProcessInstance instance = instance(id, 7L, status);
+        return new MobileWorkflowMapper.InstanceRow(id, status, "请假申请", "000000000301",
+            instance.getCurrentNodeId(), instance.getProcessSnapshot(), instance.getStartedAt(),
+            instance.getFinishedAt());
+    }
+
+    private static MobileWorkflowMapper.InstanceDetailRow instanceDetailRow(
+            ProcessInstance instance) {
+        return new MobileWorkflowMapper.InstanceDetailRow(instance.getId(), instance.getStatus(),
+            instance.getCurrentNodeId(), instance.getProcessSnapshot(), instance.getStartedBy(),
+            instance.getStartedAt(), instance.getFinishedAt(), instance.getFormDataId(),
+            "000000000301", "{\"days\":2}", "leave", "请假申请",
+            "[{\"id\":\"days\",\"type\":\"number\",\"label\":\"请假天数\"}]",
+            "张三", "E0007", "研发部");
+    }
+
+    private static MobileWorkflowMapper.TaskDetailRow taskDetailRow(
+            TaskEntity task, ProcessInstance instance) {
+        return new MobileWorkflowMapper.TaskDetailRow(task.getId(), instance.getId(),
+            task.getNodeId(), task.getAssigneeId(),
+            task.getTaskType() == null ? "APPROVAL" : task.getTaskType(), task.getStatus(),
+            task.getCreatedAt(), task.getReadAt(), instance.getStatus(), instance.getCurrentNodeId(),
+            instance.getProcessSnapshot(), instance.getStartedBy(), instance.getStartedAt(),
+            instance.getFinishedAt(), instance.getFormDataId(), "000000000301", "{\"days\":2}",
+            "leave", "请假申请",
+            "[{\"id\":\"days\",\"type\":\"number\",\"label\":\"请假天数\"}]",
+            "张三", "E0007", "研发部");
+    }
+
+    private static MobileWorkflowMapper.ApprovalRow approvalRow(TaskEntity task, String name) {
+        return new MobileWorkflowMapper.ApprovalRow(task.getId(), task.getNodeId(),
+            task.getTaskType(), task.getStatus(), name, "E0008", "研发部", task.getComment(),
+            task.getCreatedAt(), task.getApprovedAt(), task.getReadAt());
     }
 
     private static TaskHistoryEntity history(String action, String from, String to) {

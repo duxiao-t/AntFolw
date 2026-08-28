@@ -219,32 +219,46 @@ public class AuthorizationService {
 
     public void requireReadableInstance(long instanceId) {
         PrincipalHolder.Principal principal = principal();
-        if (!canReadInstance(instanceId, principal.userId())) {
+        if (instanceVisibility(instanceId, principal.userId()) == InstanceVisibility.NONE) {
             throw new HiddenResourceException("instance not found");
         }
     }
 
     public boolean canReadInstance(long instanceId, long userId) {
+        return instanceVisibility(instanceId, userId) != InstanceVisibility.NONE;
+    }
+
+    public boolean canReadFullInstance(long instanceId, long userId) {
+        return instanceVisibility(instanceId, userId) == InstanceVisibility.FULL;
+    }
+
+    public InstanceVisibility instanceVisibility(long instanceId, long userId) {
         InstanceAccess resource = instanceAccess(instanceId);
         if (resource == null) {
-            return false;
+            return InstanceVisibility.NONE;
         }
         AuthzSnapshot snapshot = snapshot(userId);
-        if (snapshot.admin()
-            || Objects.equals(resource.startedBy(), userId)
-            || isParticipant(instanceId, userId)) {
-            return true;
+        if (snapshot.admin() || Objects.equals(resource.startedBy(), userId)) {
+            return InstanceVisibility.FULL;
         }
-        return snapshot.permissions().contains(PermissionCodes.WORKFLOW_INSTANCE_READ)
+        if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_TASK_READ)
+            && isReadableTaskAssignee(instanceId, userId)) {
+            return InstanceVisibility.FULL;
+        }
+        if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_INSTANCE_READ)
             && hasFormGrant(resource.formDefId(), userId)
             && inDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
-                resource.startedBy(), resource.startedDepartmentId());
+                resource.startedBy(), resource.startedDepartmentId())) {
+            return InstanceVisibility.FULL;
+        }
+        return isParticipant(instanceId, userId)
+            ? InstanceVisibility.SUMMARY : InstanceVisibility.NONE;
     }
 
     public void requireReadableTask(long taskId) {
         Long instanceId = jdbcTemplate.query("SELECT proc_inst_id FROM t_task WHERE id = ?",
             rs -> rs.next() ? rs.getLong(1) : null, taskId);
-        if (instanceId == null || !canReadInstance(instanceId, principal().userId())) {
+        if (instanceId == null || !canReadFullInstance(instanceId, principal().userId())) {
             throw new HiddenResourceException("task not found");
         }
     }
@@ -376,6 +390,14 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
+    private boolean isReadableTaskAssignee(long instanceId, long userId) {
+        Long count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_task
+            WHERE proc_inst_id = ? AND assignee_id = ? AND status IN ('PENDING', 'CC')
+            """, Long.class, instanceId, userId);
+        return count != null && count > 0;
+    }
+
     private InstanceAccess instanceAccess(long instanceId) {
         return jdbcTemplate.query("""
             SELECT pi.started_by, pi.started_dept_id, data.form_def_id
@@ -492,4 +514,6 @@ public class AuthorizationService {
     public record AuthzSnapshot(long userId, Long departmentId, boolean admin,
                                 Set<String> roleCodes, Set<String> permissions,
                                 Map<String, List<RoleGrant>> permissionRoles) { }
+
+    public enum InstanceVisibility { NONE, SUMMARY, FULL }
 }
