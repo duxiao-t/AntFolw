@@ -3200,6 +3200,7 @@ body {
 .af-field__desc,
 .af-field__help,
 .af-field__error { margin: 0; color: var(--af-color-muted); font-size: 11px; }
+.af-field__desc { white-space: pre-wrap; overflow-wrap: anywhere; }
 .af-field__error { color: var(--af-color-danger); }
 .af-field__summary { min-height: 30px; color: var(--af-color-text-secondary); font-size: 13px; }
 
