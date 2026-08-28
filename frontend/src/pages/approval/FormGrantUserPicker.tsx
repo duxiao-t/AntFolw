@@ -44,7 +44,9 @@ export default function FormGrantUserPicker({
   useEffect(() => {
     setKnownUsers((current) => {
       const next = new Map(current);
-      users.forEach((user) => next.set(user.id, user));
+      users.forEach((user) => {
+        next.set(user.id, user);
+      });
       return next;
     });
   }, [users]);
@@ -61,7 +63,9 @@ export default function FormGrantUserPicker({
     if (!data?.items) return;
     setKnownUsers((current) => {
       const next = new Map(current);
-      data.items.forEach((user) => next.set(user.id, user));
+      data.items.forEach((user) => {
+        next.set(user.id, user);
+      });
       return next;
     });
   }, [data?.items]);

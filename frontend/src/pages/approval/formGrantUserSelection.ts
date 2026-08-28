@@ -11,7 +11,9 @@ export function buildGrantDepartmentTree(
   rows: GrantSelectionDepartment[],
 ): GrantDepartmentNode[] {
   const children = new Map<number | undefined, GrantSelectionDepartment[]>();
-  rows.forEach((row) => children.set(row.parentId, [...(children.get(row.parentId) ?? []), row]));
+  rows.forEach((row) => {
+    children.set(row.parentId, [...(children.get(row.parentId) ?? []), row]);
+  });
   const ids = new Set(rows.map((row) => row.id));
   const roots = rows.filter((row) => !row.parentId || !ids.has(row.parentId));
   const node = (row: GrantSelectionDepartment): GrantDepartmentNode => ({
