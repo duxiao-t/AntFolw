@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Enterprise mobile bundle budget gate.
- * - Initial entry JS (gzip) <= 250 KiB
+ * - Initial entry JS (gzip) <= 160 KiB
  * - Each lazy/async JS chunk (gzip) <= 180 KiB
  */
 import { createGzip } from 'node:zlib';
@@ -15,7 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const mobileRoot = resolve(__dirname, '..');
 const distDir = resolve(mobileRoot, 'dist');
 
-const ENTRY_BUDGET_KIB = 250;
+const ENTRY_BUDGET_KIB = 160;
 const LAZY_BUDGET_KIB = 180;
 const KIB = 1024;
 

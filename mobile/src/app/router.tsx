@@ -1,18 +1,6 @@
 import { createBrowserRouter, createMemoryRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { LoginPage } from '../features/auth/LoginPage';
 import { WorkbenchPage } from '../features/workbench/WorkbenchPage';
-import { TaskCenterPage } from '../features/tasks/TaskCenterPage';
-import { TaskDetailPage } from '../features/tasks/TaskDetailPage';
-import { ProfilePage } from '../features/profile/ProfilePage';
-import { SecurityPage } from '../features/profile/SecurityPage';
-import { AppCatalogPage } from '../features/workbench/AppCatalogPage';
-import { FavoriteAppsPage } from '../features/workbench/FavoriteAppsPage';
-import { FormFillPage } from '../features/forms/FormFillPage';
-import { DraftListPage } from '../features/forms/DraftListPage';
-import { SelfSelectPage } from '../features/forms/SelfSelectPage';
-import { SubmitConfirmPage } from '../features/forms/SubmitConfirmPage';
-import { SubmitSuccessPage } from '../features/forms/SubmitSuccessPage';
-import { ProcessDetailPage } from '../features/processes/ProcessDetailPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { AuthenticatedRoute } from '../features/auth/AuthenticatedRoute';
 import { MobileShell } from './MobileShell';
@@ -43,64 +31,64 @@ const routes: RouteObject[] = [
           },
           {
             path: '/tasks',
-            Component: TaskCenterPage,
+            lazy: () => import('../features/tasks/TaskCenterPage').then(({ TaskCenterPage }) => ({ Component: TaskCenterPage })),
             HydrateFallback: NoHydrate,
           },
           {
             path: '/profile',
-            Component: ProfilePage,
+            lazy: () => import('../features/profile/ProfilePage').then(({ ProfilePage }) => ({ Component: ProfilePage })),
             HydrateFallback: NoHydrate,
           },
         ],
       },
       {
         path: '/tasks/:taskId',
-        Component: TaskDetailPage,
+        lazy: () => import('../features/tasks/TaskDetailPage').then(({ TaskDetailPage }) => ({ Component: TaskDetailPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/apps',
-        Component: AppCatalogPage,
+        lazy: () => import('../features/workbench/AppCatalogPage').then(({ AppCatalogPage }) => ({ Component: AppCatalogPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/apps/favorites',
-        Component: FavoriteAppsPage,
+        lazy: () => import('../features/workbench/FavoriteAppsPage').then(({ FavoriteAppsPage }) => ({ Component: FavoriteAppsPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/forms/drafts',
-        Component: DraftListPage,
+        lazy: () => import('../features/forms/DraftListPage').then(({ DraftListPage }) => ({ Component: DraftListPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/forms/:code',
-        Component: FormFillPage,
+        lazy: () => import('../features/forms/FormFillPage').then(({ FormFillPage }) => ({ Component: FormFillPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/forms/:code/self-select',
-        Component: SelfSelectPage,
+        lazy: () => import('../features/forms/SelfSelectPage').then(({ SelfSelectPage }) => ({ Component: SelfSelectPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/forms/:code/confirm',
-        Component: SubmitConfirmPage,
+        lazy: () => import('../features/forms/SubmitConfirmPage').then(({ SubmitConfirmPage }) => ({ Component: SubmitConfirmPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/forms/:code/success/:instanceId',
-        Component: SubmitSuccessPage,
+        lazy: () => import('../features/forms/SubmitSuccessPage').then(({ SubmitSuccessPage }) => ({ Component: SubmitSuccessPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/processes/:instanceId',
-        Component: ProcessDetailPage,
+        lazy: () => import('../features/processes/ProcessDetailPage').then(({ ProcessDetailPage }) => ({ Component: ProcessDetailPage })),
         HydrateFallback: NoHydrate,
       },
       {
         path: '/profile/security',
-        Component: SecurityPage,
+        lazy: () => import('../features/profile/SecurityPage').then(({ SecurityPage }) => ({ Component: SecurityPage })),
         HydrateFallback: NoHydrate,
       },
     ],
