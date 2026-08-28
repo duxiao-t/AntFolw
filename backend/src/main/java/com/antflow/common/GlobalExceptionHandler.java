@@ -2,6 +2,7 @@ package com.antflow.common;
 
 import com.antflow.engine.BizException;
 import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.AuthorizationFailureException;
 import com.antflow.audit.AuditService;
 import lombok.RequiredArgsConstructor;
 import com.antflow.engine.NoAssigneeFoundException;
@@ -86,8 +87,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException e) {
+        String code = e instanceof AuthorizationFailureException failure
+            ? failure.code() : accessDeniedCode(e.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
-            .body(envelope("ACCESS_DENIED", e.getMessage()));
+            .body(envelope(code, e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -143,5 +146,16 @@ public class GlobalExceptionHandler {
         body.put("message", message);
         body.put("traceId", UUID.randomUUID().toString());
         return body;
+    }
+
+    private static String accessDeniedCode(String message) {
+        if (message == null) return "MISSING_PERMISSION";
+        if (message.contains("not your task") || message.contains("current assignee")) {
+            return "NOT_TASK_ASSIGNEE";
+        }
+        if (message.contains("scope") || message.contains("department")) {
+            return "OUTSIDE_DATA_SCOPE";
+        }
+        return "MISSING_PERMISSION";
     }
 }

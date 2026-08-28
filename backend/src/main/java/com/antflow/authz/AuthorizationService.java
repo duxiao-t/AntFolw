@@ -70,7 +70,8 @@ public class AuthorizationService {
     public void requirePermission(String permission) {
         PrincipalHolder.Principal principal = principal();
         if (!principal.isAdmin() && !principal.permissions().contains(permission)) {
-            throw new AccessDeniedException("missing permission: " + permission);
+            throw new AuthorizationFailureException("MISSING_PERMISSION",
+                "missing permission: " + permission);
         }
     }
 
@@ -109,7 +110,8 @@ public class AuthorizationService {
 
     public void requireCurrentDataScope(String permission, Long ownerId, Long departmentId) {
         if (!inCurrentDataScope(permission, ownerId, departmentId)) {
-            throw new AccessDeniedException("resource is outside the permitted data scope");
+            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
+                "resource is outside the permitted data scope");
         }
     }
 

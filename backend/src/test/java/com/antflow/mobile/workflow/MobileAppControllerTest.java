@@ -65,6 +65,6 @@ class MobileAppControllerTest {
     void rejectsRequestsWithoutAnAuthenticatedUser() throws Exception {
         mockMvc.perform(get("/api/mobile/apps"))
             .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+            .andExpect(jsonPath("$.code").value("MISSING_PERMISSION"));
     }
 }
