@@ -38,8 +38,27 @@ public class RoleAdminService {
 
     public List<RoleDto> roles() {
         authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_READ);
-        return jdbcTemplate.queryForList("SELECT id FROM t_role ORDER BY builtin DESC, id",
-            Long.class).stream().map(this::requiredRole).toList();
+        return jdbcTemplate.query("""
+            SELECT role.id, role.code, role.name, role.description, role.data_scope,
+                   role.enabled, role.builtin, role.version,
+                   COALESCE((SELECT array_agg(permission.permission_code
+                       ORDER BY permission.permission_code)
+                     FROM t_role_permission permission WHERE permission.role_id = role.id),
+                     '{}') AS permission_codes,
+                   COALESCE((SELECT array_agg(department.department_id
+                       ORDER BY department.department_id)
+                     FROM t_role_department department WHERE department.role_id = role.id),
+                     '{}') AS department_ids,
+                   (SELECT COUNT(*) FROM t_user_role user_role
+                     WHERE user_role.role_id = role.id) AS user_count
+            FROM t_role role
+            ORDER BY role.builtin DESC, role.id
+            """, (rs, row) -> new RoleDto(rs.getLong("id"), rs.getString("code"),
+                rs.getString("name"), rs.getString("description"),
+                rs.getString("data_scope"), rs.getBoolean("enabled"),
+                rs.getBoolean("builtin"), rs.getInt("version"),
+                stringArray(rs.getArray("permission_codes")),
+                longArray(rs.getArray("department_ids")), rs.getLong("user_count")));
     }
 
     public RoleDto role(long id) {
@@ -341,6 +360,16 @@ public class RoleAdminService {
         if (raw instanceof Long[] values) return List.of(values);
         if (raw instanceof Object[] values) {
             return java.util.Arrays.stream(values).map(value -> ((Number) value).longValue()).toList();
+        }
+        return List.of();
+    }
+
+    private static List<String> stringArray(java.sql.Array array) throws java.sql.SQLException {
+        if (array == null) return List.of();
+        Object raw = array.getArray();
+        if (raw instanceof String[] values) return List.of(values);
+        if (raw instanceof Object[] values) {
+            return java.util.Arrays.stream(values).map(String::valueOf).toList();
         }
         return List.of();
     }
