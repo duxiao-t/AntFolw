@@ -1,6 +1,6 @@
 import { PageContainer, ProTable, type ActionType } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Space, Tag } from 'antd';
-import { ApartmentOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { history, request, useModel } from '@umijs/max';
 import { useRef } from 'react';
 
@@ -11,7 +11,6 @@ type FormDefinition = {
   description?: string;
   status: 'DRAFT' | 'PUBLISHED' | 'DEPRECATED';
   version: number;
-  settings?: Record<string, any> | string;
   updatedAt?: string;
 };
 
@@ -25,19 +24,6 @@ const statusMap = {
   PUBLISHED: { color: 'green', text: '已发布' },
   DEPRECATED: { color: 'red', text: '已停用' },
 };
-
-function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
-  if (typeof value !== 'string') return value ?? fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-
-function isWorkflowEnabled(settings: FormDefinition['settings']) {
-  return !!parseJsonValue<Record<string, any>>(settings, {}).workflowEnabled;
-}
 
 export default function FormManagementList() {
   const actionRef = useRef<ActionType | undefined>(undefined);
@@ -84,17 +70,6 @@ export default function FormManagementList() {
               const status = statusMap[record.status] ?? { color: 'default', text: record.status };
               return <Tag color={status.color}>{status.text}</Tag>;
             },
-          },
-          {
-            title: '流程',
-            dataIndex: 'settings',
-            width: 120,
-            render: (_, record) =>
-              isWorkflowEnabled(record.settings) ? (
-                <Tag color="blue" icon={<ApartmentOutlined />}>有流程</Tag>
-              ) : (
-                <Tag icon={<MinusCircleOutlined />}>无流程</Tag>
-              ),
           },
           {
             title: '操作',

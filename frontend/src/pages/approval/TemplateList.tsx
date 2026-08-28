@@ -14,9 +14,12 @@ export default function TemplateListPage() {
           { title: '状态', dataIndex: 'status', key: 'status', valueEnum: { DRAFT: '草稿', PUBLISHED: '已发布', DEPRECATED: '已弃用' } },
           { title: '版本', dataIndex: 'version', key: 'version', width: 80 },
         ]}
-        request={async () => {
-          const list = await request('/api/forms/definitions');
-          return { data: list, success: true, total: list?.length ?? 0 };
+        request={async (params) => {
+          const result = await request<{ records?: unknown[]; total?: number }>(
+            '/api/forms/definitions',
+            { params: { page: params.current, size: params.pageSize } },
+          );
+          return { data: result.records ?? [], success: true, total: result.total ?? 0 };
         }}
         search={false}
         onRow={(record: any) => ({

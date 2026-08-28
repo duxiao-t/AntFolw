@@ -23,10 +23,11 @@ public class FormDefinitionController {
     private final FormProcessPublishService formProcessPublishService;
 
     @GetMapping
-    public Page<FormDefinition> list(@RequestParam(defaultValue = "1") long page,
-                                     @RequestParam(defaultValue = "20") long size,
-                                     @RequestParam(required = false) String keyword,
-                                     @RequestParam(required = false) String status) {
+    public Page<FormDefinitionMapper.Summary> list(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status) {
         authorizationService.requirePermission(PermissionCodes.FORM_DEFINITION_READ);
         var principal = PrincipalHolder.current().orElseThrow();
         return service.list(page, size, keyword, status,

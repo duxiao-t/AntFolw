@@ -32,31 +32,20 @@ public class FormDefinitionService {
     );
     private static final Set<String> CONTAINER_TYPES = Set.of("span_layout");
 
-    public Page<FormDefinition> list(long page, long size, String keyword, String status) {
+    public Page<FormDefinitionMapper.Summary> list(long page, long size, String keyword,
+                                                   String status) {
         return list(page, size, keyword, status, null, true);
     }
 
-    public Page<FormDefinition> list(long page, long size, String keyword, String status,
-                                     Long userId, boolean admin) {
+    public Page<FormDefinitionMapper.Summary> list(long page, long size, String keyword,
+                                                   String status, Long userId, boolean admin) {
         long safePage = Math.max(page, 1);
         long safeSize = Math.min(Math.max(size, 1), 100);
-        var q = new QueryWrapper<FormDefinition>();
-        if (keyword != null && !keyword.isBlank()) {
-            q.and(w -> w.like("name", keyword).or().like("code", keyword));
-        }
         if (status != null && !status.isBlank()) {
             validateStatus(status);
-            q.eq("status", status);
         }
-        if (!admin && userId != null) {
-            q.inSql("id", "SELECT grant_row.form_def_id FROM t_form_resource_grant grant_row "
-                + "WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = " + userId + ") "
-                + "OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN "
-                + "(SELECT ur.role_id FROM t_user_role ur JOIN t_role role ON role.id = ur.role_id "
-                + "WHERE ur.user_id = " + userId + " AND role.enabled = true))");
-        }
-        q.orderByDesc("updated_at").orderByDesc("id");
-        return mapper.selectPage(Page.of(safePage, safeSize), q);
+        return mapper.selectSummaryPage(Page.of(safePage, safeSize), normalized(keyword),
+            normalized(status), userId, admin);
     }
 
     public FormDefinition getByCode(String code) {
@@ -69,6 +58,10 @@ public class FormDefinitionService {
             .eq("status", "PUBLISHED"));
     }
     public FormDefinition getById(Long id) { return mapper.selectById(id); }
+
+    private static String normalized(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
 
     @Transactional
     public FormDefinition saveDraft(Long id, String code, String name,
