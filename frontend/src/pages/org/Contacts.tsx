@@ -14,7 +14,6 @@ import type { DataNode } from 'antd/es/tree';
 import './Contacts.less';
 import {
   buildMembersCsv,
-  collectDepartmentIds,
   collectTreeKeys,
   normalizeGender,
   parseMembersCsv,
@@ -35,11 +34,13 @@ interface UserItem {
   id: number; employeeNo: string; username: string; displayName: string; email: string;
   phone: string; position: string; gender: string; deptId: number;
 }
+interface UserPage { records?: UserItem[]; total?: number; }
 
 export default function ContactsPage() {
   const access = useAccess();
   const [selDeptId, setSelDeptId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [memberPage, setMemberPage] = useState(1);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const qc = useQueryClient();
   const { message: msg, modal } = App.useApp();
@@ -75,9 +76,18 @@ export default function ContactsPage() {
     enabled: !!selDeptId,
   });
 
-  const { data: allUsers = [] } = useQuery({
-    queryKey: ['all-users'],
-    queryFn: () => request('/api/users'),
+  const { data: memberResult } = useQuery<UserPage>({
+    queryKey: ['users-page', selDeptId, memberPage],
+    queryFn: () => request('/api/users/page', { params: {
+      page: memberPage, size: 15, deptId: selDeptId, includeDescendants: true,
+    } }),
+    enabled: !!selDeptId,
+  });
+
+  const { data: leaderResult } = useQuery<UserPage>({
+    queryKey: ['leader-users'],
+    queryFn: () => request('/api/users/page', { params: { page: 1, size: 100 } }),
+    enabled: leaderOpen,
   });
 
   // --- tree data ---
@@ -117,15 +127,9 @@ export default function ContactsPage() {
     [deptList, selDeptId],
   );
 
-  const selectedDeptIds = useMemo(
-    () => collectDepartmentIds(deptList as Dept[], selDeptId),
-    [deptList, selDeptId],
-  );
+  const members = memberResult?.records ?? [];
 
-  const members = useMemo(() => {
-    const idSet = new Set(selectedDeptIds);
-    return (allUsers as UserItem[]).filter((u) => idSet.has(u.deptId));
-  }, [allUsers, selectedDeptIds]);
+  useEffect(() => setMemberPage(1), [selDeptId]);
 
   useEffect(() => {
     const visibleIds = new Set(members.map((m) => m.id));
@@ -200,15 +204,15 @@ export default function ContactsPage() {
   // --- member CRUD ---
   const memberCreate = useMutation({
     mutationFn: (body: any) => request('/api/users', { method: 'POST', data: body }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('添加成功'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['users-page'] }); msg.success('添加成功'); },
   });
   const memberUpdate = useMutation({
     mutationFn: ({ id, ...body }: any) => request(`/api/users/${id}`, { method: 'PUT', data: body }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已更新'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['users-page'] }); msg.success('已更新'); },
   });
   const memberRemove = useMutation({
     mutationFn: (id: number) => request(`/api/users/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['all-users'] }); msg.success('已删除'); },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['users-page'] }); msg.success('已删除'); },
   });
   const memberPasswordReset = useMutation({
     mutationFn: ({ id, newPassword }: { id: number; newPassword: string }) =>
@@ -355,7 +359,7 @@ export default function ContactsPage() {
     const { successCount, failedCount } = summarizeSettledResults(results);
     if (successCount) {
       setSelectedMemberIds([]);
-      qc.invalidateQueries({ queryKey: ['all-users'] });
+      qc.invalidateQueries({ queryKey: ['users-page'] });
     }
     if (failedCount) msg.error(`批量删除完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
     else msg.success(`已删除 ${successCount} 名成员`);
@@ -393,7 +397,7 @@ export default function ContactsPage() {
         successCount: number; failedCount: number; defaultPassword: string;
       }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
       const { successCount, failedCount } = imported;
-      if (successCount) qc.invalidateQueries({ queryKey: ['all-users'] });
+      if (successCount) qc.invalidateQueries({ queryKey: ['users-page'] });
       if (failedCount) msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
       else msg.success(`已导入 ${successCount} 名成员，初始密码为 ${imported.defaultPassword}`);
     } catch (_error) {
@@ -458,10 +462,13 @@ export default function ContactsPage() {
             <MembersSection
               breadcrumb={breadcrumb}
               members={members}
+              total={memberResult?.total ?? 0}
+              currentPage={memberPage}
               selectedMemberIds={selectedMemberIds}
               deptNameById={deptNameById}
               importInputRef={importInputRef}
               onSelectedMemberIdsChange={setSelectedMemberIds}
+              onPageChange={setMemberPage}
               onAdd={() => { setMemberEdit(null); memberForm.resetFields(); setMemberOpen(true); }}
               onEdit={(member) => { setMemberEdit(member); setMemberOpen(true); memberForm.setFieldsValue({ ...member, gender: normalizeGender(member.gender) }); }}
               onRemove={(id) => memberRemove.mutate(id)}
@@ -530,7 +537,7 @@ export default function ContactsPage() {
         destroyOnHidden
       >
         <LeaderPicker
-          users={(allUsers as UserItem[]).map(u => ({ id: u.id, name: u.displayName || u.username }))}
+          users={(leaderResult?.records ?? []).map(u => ({ id: u.id, name: u.displayName || u.username }))}
           currentLeaderIds={(deptList as Dept[]).find(d => d.id === leaderDeptId)?.leaderIds
             ?? ((deptList as Dept[]).find(d => d.id === leaderDeptId)?.leaderId
               ? [(deptList as Dept[]).find(d => d.id === leaderDeptId)?.leaderId as number]

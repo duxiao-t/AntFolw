@@ -18,4 +18,13 @@ public interface DepartmentMapper extends BaseMapper<Department> {
     long countUsers(@Param("departmentId") Long departmentId);
     @Select("SELECT * FROM t_department WHERE path <@ CAST(#{path} AS ltree) ORDER BY path")
     List<Department> subtree(@Param("path") String path);
+
+    @Select("""
+        SELECT child.id
+        FROM t_department child
+        JOIN t_department parent ON parent.id = #{departmentId}
+        WHERE child.path <@ parent.path
+        ORDER BY child.path, child.id
+        """)
+    List<Long> subtreeIds(@Param("departmentId") Long departmentId);
 }

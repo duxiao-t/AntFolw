@@ -84,10 +84,13 @@ export function LeaderPicker({ users, currentLeaderIds, onOk, onCancel, saving }
 export function MembersSection({
   breadcrumb,
   members,
+  total,
+  currentPage,
   selectedMemberIds,
   deptNameById,
   importInputRef,
   onSelectedMemberIdsChange,
+  onPageChange,
   onAdd,
   onEdit,
   onRemove,
@@ -101,10 +104,13 @@ export function MembersSection({
 }: {
   breadcrumb: string;
   members: MemberListItem[];
+  total: number;
+  currentPage: number;
   selectedMemberIds: Key[];
   deptNameById: Record<number, string>;
   importInputRef: RefObject<HTMLInputElement | null>;
   onSelectedMemberIdsChange: (keys: Key[]) => void;
+  onPageChange: (page: number) => void;
   onAdd: () => void;
   onEdit: (member: MemberListItem) => void;
   onRemove: (id: number) => void;
@@ -119,7 +125,7 @@ export function MembersSection({
   return (
     <>
       <div className="ct-right-header">
-        <h2>{breadcrumb} · {members.length}人</h2>
+        <h2>{breadcrumb} · {total}人</h2>
         <Space>
           <Button icon={<UserAddOutlined />} type="primary" onClick={onAdd} disabled={!canAdd}>添加成员</Button>
           <Popconfirm
@@ -167,7 +173,8 @@ export function MembersSection({
         }}
         search={false}
         options={false}
-        pagination={{ pageSize: 15 }}
+        pagination={{ current: currentPage, pageSize: 15, total, showSizeChanger: false,
+          onChange: onPageChange }}
       />
     </>
   );

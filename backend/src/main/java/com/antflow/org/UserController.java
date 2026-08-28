@@ -3,6 +3,7 @@ package com.antflow.org;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,6 +23,15 @@ public class UserController {
     public List<User> list(@RequestParam(required = false) String keyword,
                            @RequestParam(required = false) Long deptId) {
         return userService.listAuthorized(keyword, deptId);
+    }
+
+    @GetMapping("/page")
+    public Page<User> page(@RequestParam(defaultValue = "1") long page,
+                           @RequestParam(defaultValue = "20") long size,
+                           @RequestParam(required = false) String keyword,
+                           @RequestParam(required = false) Long deptId,
+                           @RequestParam(defaultValue = "false") boolean includeDescendants) {
+        return userService.listAuthorizedPage(keyword, deptId, includeDescendants, page, size);
     }
 
     @PostMapping

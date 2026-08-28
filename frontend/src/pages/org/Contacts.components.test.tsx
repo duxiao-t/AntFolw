@@ -59,10 +59,13 @@ describe('Contacts components', () => {
             gender: 'M',
             deptId: 2,
           }]}
+          total={1}
+          currentPage={1}
           selectedMemberIds={selectedKeys}
           deptNameById={{ 2: 'Tech' }}
           importInputRef={inputRef}
           onSelectedMemberIdsChange={setSelectedKeys}
+          onPageChange={vi.fn()}
           onAdd={vi.fn()}
           onEdit={vi.fn()}
           onRemove={vi.fn()}

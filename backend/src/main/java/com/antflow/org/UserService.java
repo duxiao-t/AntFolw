@@ -7,6 +7,7 @@ import com.antflow.common.FormalNumberService;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -193,6 +195,43 @@ public class UserService {
                 com.antflow.authz.PermissionCodes.ORG_USER_READ,
                 user.getId(), user.getDeptId()))
             .toList();
+    }
+
+    public Page<User> listAuthorizedPage(String keyword, Long departmentId,
+                                         boolean includeDescendants, long page, long size) {
+        String permission = com.antflow.authz.PermissionCodes.ORG_USER_READ;
+        authorizationService.requirePermission(permission);
+        long safePage = Math.max(page, 1);
+        long safeSize = Math.min(Math.max(size, 1), 100);
+        QueryWrapper<User> query = new QueryWrapper<>();
+        if (keyword != null && !keyword.isBlank()) {
+            String normalized = keyword.trim();
+            query.and(wrapper -> wrapper.like("username", normalized)
+                .or().like("display_name", normalized)
+                .or().like("employee_no", normalized));
+        }
+        if (departmentId != null) {
+            List<Long> requested = includeDescendants
+                ? departmentMapper.subtreeIds(departmentId) : List.of(departmentId);
+            if (requested.isEmpty()) return Page.of(safePage, safeSize, 0);
+            query.in("dept_id", requested);
+        }
+        AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
+        if (!snapshot.admin()) {
+            Set<Long> departments = authorizationService.manageableDepartments(snapshot, permission);
+            boolean self = snapshot.permissionRoles().getOrDefault(permission, List.of()).stream()
+                .anyMatch(grant -> grant.dataScope() == com.antflow.authz.DataScope.SELF);
+            if (departments.isEmpty() && !self) return Page.of(safePage, safeSize, 0);
+            query.and(scope -> {
+                if (!departments.isEmpty()) scope.in("dept_id", departments);
+                if (self) {
+                    if (!departments.isEmpty()) scope.or();
+                    scope.eq("id", snapshot.userId());
+                }
+            });
+        }
+        query.orderByAsc("display_name").orderByAsc("id");
+        return userMapper.selectPage(Page.of(safePage, safeSize), query);
     }
 
     private void changeStatus(User user, String status) {
