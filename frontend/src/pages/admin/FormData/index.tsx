@@ -64,7 +64,7 @@ export default function AdminFormDataPage() {
       dataIndex: 'createdBy',
       valueType: 'digit',
       width: 100,
-      renderText: (_, record) =>
+      render: (_, record) =>
         record.createdByUsername ?? (record.createdBy ? `用户 #${record.createdBy}` : '—'),
     },
     {
