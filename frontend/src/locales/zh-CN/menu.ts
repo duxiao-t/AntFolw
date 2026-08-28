@@ -3,7 +3,7 @@ export default {
   'menu.login': '登录',
 
   // 工作台
-  'menu.workplace': '工作台',
+  'menu.workplace': '审批运营中心',
 
   // 组织架构
   'menu.org': '组织架构',

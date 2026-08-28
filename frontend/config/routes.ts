@@ -18,7 +18,7 @@ export default [
     path: '/workplace',
     name: 'workplace',
     icon: 'home',
-    component: './Welcome',
+    component: './dashboard/workplace',
     access: 'canAccessWorkplace',
   },
 

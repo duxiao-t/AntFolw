@@ -1,4 +1,30 @@
 module.exports = {
+  'POST /api/auth/login': {
+    accessToken: 'test-access-token',
+    user: {
+      id: 1,
+      username: 'admin',
+      displayName: '系统管理员',
+      roles: ['admin'],
+      permissions: ['page.workplace', 'workflow.instance.read', 'workflow.task.approve', 'workflow.task.reject'],
+    },
+  },
+  'GET /api/auth/me': {
+    id: 1,
+    username: 'admin',
+    displayName: '系统管理员',
+    roles: ['admin'],
+    permissions: ['page.workplace', 'workflow.instance.read', 'workflow.task.approve', 'workflow.task.reject'],
+  },
+  'GET /api/workplace/overview': {
+    pendingTasks: 0,
+    runningInstances: 0,
+    completedToday: 0,
+    rejectedToday: 0,
+    pendingTaskItems: [],
+    recentInstanceItems: [],
+    statusBreakdown: { RUNNING: 0, APPROVED: 0, REJECTED: 0, WITHDRAWN: 0 },
+  },
   'GET /api/currentUser': {
     data: {
       name: 'Serati Ma',
