@@ -80,4 +80,25 @@ describe('useFormDesignerStore', () => {
     expect(schema).toHaveLength(3);
     expect(schema.map((n) => n.type)).toEqual(['text', 'text', 'table_list']);
   });
+
+  it('deep-copies a node after its source and remaps internal conditions', () => {
+    useFormDesignerStore.getState().loadSchema([{
+      id: 'layout',
+      type: 'span_layout',
+      children: [
+        { id: 'source', type: 'select', props: { options: [{ label: '是', value: 'yes' }] } },
+        { id: 'target', type: 'text', props: { displayCondition: { fieldId: 'source', operator: 'eq', value: 'yes' } } },
+      ],
+    }, node('after')]);
+
+    const copyId = useFormDesignerStore.getState().duplicateNode('layout');
+    const state = useFormDesignerStore.getState();
+    const copy = state.schema[1];
+    expect(copy.id).toBe(copyId);
+    expect(copy.children?.map((child) => child.id)).not.toEqual(['source', 'target']);
+    expect(copy.children?.[1]?.props?.displayCondition?.fieldId).toBe(copy.children?.[0]?.id);
+    expect(state.selectedId).toBe(copyId);
+    useFormDesignerStore.getState().undo();
+    expect(useFormDesignerStore.getState().schema).toHaveLength(2);
+  });
 });

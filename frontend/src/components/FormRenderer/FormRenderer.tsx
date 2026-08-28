@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { EyeInvisibleOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { Checkbox, type CheckboxProps } from 'antd';
 import { useLayoutEffect, useRef } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
@@ -16,6 +16,8 @@ type Props = {
   sortableIds?: string[];
   placeholderId?: string | null;
   onDesignerNodeChange?(node: SchemaNode): void;
+  onDesignerNodeDuplicate?(id: string): void;
+  onDesignerNodeRemove?(id: string): void;
 };
 
 function useDesignerListFlip(isEnabled: boolean, deps: unknown[]) {
@@ -159,11 +161,15 @@ function DesignerFieldFrame({
   children,
   node,
   onNodeChange,
+  onDuplicate,
+  onRemove,
   bare = false,
 }: {
   children: React.ReactNode;
   node: SchemaNode;
   onNodeChange?(node: SchemaNode): void;
+  onDuplicate?(id: string): void;
+  onRemove?(id: string): void;
   bare?: boolean;
 }) {
   const {
@@ -254,6 +260,17 @@ function DesignerFieldFrame({
         {hidden && (
           <EyeInvisibleOutlined className="form-renderer__designer-hidden-icon" />
         )}
+        <div
+          className="form-renderer__designer-actions"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" aria-label={`复制${fieldName}`} onClick={() => onDuplicate?.(node.id)}>
+            <CopyOutlined />
+          </button>
+          <button type="button" aria-label={`删除${fieldName}`} onClick={() => onRemove?.(node.id)}>
+            <DeleteOutlined />
+          </button>
+        </div>
         {showTitle && (
           <div className="form-renderer__designer-title">
             {node.props?.required && (
@@ -327,6 +344,8 @@ export function FormRenderer({
   value,
   onChange,
   onDesignerNodeChange,
+  onDesignerNodeDuplicate,
+  onDesignerNodeRemove,
   sortableIds,
   placeholderId,
 }: Props) {
@@ -382,6 +401,8 @@ export function FormRenderer({
               key={node.id}
               node={node}
               onNodeChange={onDesignerNodeChange}
+              onDuplicate={onDesignerNodeDuplicate}
+              onRemove={onDesignerNodeRemove}
               bare={false}
             >
               {field}

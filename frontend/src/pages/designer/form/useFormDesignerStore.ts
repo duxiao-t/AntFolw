@@ -18,6 +18,7 @@ type State = {
     index: number,
   ): string;
   moveNode(id: string, index: number): void;
+  duplicateNode(id: string): string | null;
   updateNode(id: string, patch: Partial<SchemaNode>): void;
   removeNode(id: string): void;
   select(id: string | null): void;
@@ -149,6 +150,27 @@ export const useFormDesignerStore = create<State>((set) => ({
       };
     }),
 
+  duplicateNode: (id) => {
+    let duplicatedId: string | null = null;
+    set((s) => {
+      const source = findNodeById(s.schema, id);
+      if (!source) return s;
+      const idMap = new Map<string, string>();
+      collectNodeIds(source).forEach((nodeId) => {
+        idMap.set(nodeId, nanoid(8));
+      });
+      const copy = cloneNode(source, idMap);
+      duplicatedId = copy.id;
+      return {
+        ...s,
+        schema: insertAfter(s.schema, id, copy),
+        selectedId: copy.id,
+        history: pushPast(s),
+      };
+    });
+    return duplicatedId;
+  },
+
   updateNode: (id, patch) =>
     set((s) => {
       const current = findNodeById(s.schema, id);
@@ -221,4 +243,36 @@ function findNodeById(nodes: SchemaNode[], id: string): SchemaNode | null {
     if (child) return child;
   }
   return null;
+}
+
+function collectNodeIds(node: SchemaNode): string[] {
+  return [node.id, ...(node.children ?? []).flatMap(collectNodeIds)];
+}
+
+function cloneNode(node: SchemaNode, idMap: Map<string, string>): SchemaNode {
+  const copy = structuredClone(node);
+  copy.id = idMap.get(node.id) ?? nanoid(8);
+  const displayCondition = copy.props?.displayCondition;
+  const fieldId = displayCondition?.fieldId;
+  const mappedFieldId = fieldId ? idMap.get(fieldId) : undefined;
+  if (mappedFieldId) {
+    copy.props = {
+      ...copy.props,
+      displayCondition: {
+        ...displayCondition,
+        fieldId: mappedFieldId,
+        operator: displayCondition?.operator ?? 'eq',
+      },
+    };
+  }
+  copy.children = node.children?.map((child) => cloneNode(child, idMap));
+  return copy;
+}
+
+function insertAfter(nodes: SchemaNode[], id: string, copy: SchemaNode): SchemaNode[] {
+  const index = nodes.findIndex((node) => node.id === id);
+  if (index >= 0) return [...nodes.slice(0, index + 1), copy, ...nodes.slice(index + 1)];
+  return nodes.map((node) => node.children
+    ? { ...node, children: insertAfter(node.children, id, copy) }
+    : node);
 }

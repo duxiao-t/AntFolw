@@ -135,6 +135,54 @@
   min-height: 40px;
 }
 
+.form-renderer__designer-actions {
+  position: absolute;
+  top: 50%;
+  right: -38px;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--form-designer-border);
+  border-radius: 6px;
+  background: var(--form-designer-surface);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 140ms ease;
+}
+
+.form-renderer__field--designer:hover .form-renderer__designer-actions,
+.form-renderer__field--designer:focus-within .form-renderer__designer-actions {
+  opacity: 1;
+}
+
+.form-renderer__designer-actions button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--form-designer-text-secondary);
+  cursor: pointer;
+}
+
+.form-renderer__designer-actions button + button {
+  border-top: 1px solid var(--form-designer-border);
+}
+
+.form-renderer__designer-actions button:hover,
+.form-renderer__designer-actions button:focus-visible {
+  background: var(--form-designer-primary-bg);
+  color: var(--form-designer-primary);
+  outline: 0;
+}
+
+.form-renderer__designer-actions button:last-child:hover,
+.form-renderer__designer-actions button:last-child:focus-visible {
+  color: var(--form-designer-danger);
+}
+
 .form-renderer__designer-control [data-field-id] > div:first-child {
   display: none;
 }

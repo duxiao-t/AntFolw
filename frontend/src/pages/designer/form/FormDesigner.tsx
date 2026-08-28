@@ -161,12 +161,16 @@ function CanvasDrop({
   placeholderId,
   isDragActive,
   onDesignerNodeChange,
+  onDesignerNodeDuplicate,
+  onDesignerNodeRemove,
 }: {
   schema: SchemaNode[];
   sortableIds: string[];
   placeholderId: string | null;
   isDragActive: boolean;
   onDesignerNodeChange(node: SchemaNode): void;
+  onDesignerNodeDuplicate(id: string): void;
+  onDesignerNodeRemove(id: string): void;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: 'canvas' });
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -212,6 +216,8 @@ function CanvasDrop({
           sortableIds={sortableIds}
           placeholderId={placeholderId}
           onDesignerNodeChange={onDesignerNodeChange}
+          onDesignerNodeDuplicate={onDesignerNodeDuplicate}
+          onDesignerNodeRemove={onDesignerNodeRemove}
         />
       </SortableContext>
       {schema.length === 0 && !placeholderId && (
@@ -253,7 +259,17 @@ export function FormDesignerSurface({
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { token } = theme.useToken();
-  const { schema, loadSchema, resetSchema, addNode, insertNode, updateNode, undo } =
+  const {
+    schema,
+    loadSchema,
+    resetSchema,
+    addNode,
+    insertNode,
+    duplicateNode,
+    updateNode,
+    removeNode,
+    undo,
+  } =
     useFormDesignerStore();
   const [definition, setDefinition] = useState<FormDefinition | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
@@ -494,6 +510,8 @@ export function FormDesignerSurface({
               placeholderId={placeholderId}
               isDragActive={!!activeDrag}
               onDesignerNodeChange={(node) => updateNode(node.id, node)}
+              onDesignerNodeDuplicate={duplicateNode}
+              onDesignerNodeRemove={removeNode}
             />
           </main>
           <aside className="form-designer__inspector">
