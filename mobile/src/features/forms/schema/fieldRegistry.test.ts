@@ -154,4 +154,25 @@ describe('mobile field registry', () => {
     expect(field.type).toBe('unsupported');
     expect(field.summarize({ id: 'x', type: 'legacy_field' }, 'abc')).toBe('不支持的字段');
   });
+
+  it('enforces only configured number boundaries', () => {
+    const bounded: MobileSchemaNode[] = [{
+      id: 'count',
+      type: 'number',
+      label: '数量',
+      props: { min: 1, max: 10 },
+    }];
+    const unbounded: MobileSchemaNode[] = [{
+      id: 'count',
+      type: 'number',
+      label: '数量',
+      props: {},
+    }];
+
+    expect(validateSchemaValues(bounded, { count: 0 })).toEqual({ count: '数量不能小于1' });
+    expect(validateSchemaValues(bounded, { count: 11 })).toEqual({ count: '数量不能大于10' });
+    expect(validateSchemaValues(unbounded, { count: -1_000_000 })).toEqual({});
+    expect(validateSchemaValues(unbounded, { count: 10_000_000 })).toEqual({});
+  });
+
 });

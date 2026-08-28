@@ -544,15 +544,17 @@ function renderComponentSettings(
           <PanelField label="最小值">
             <InputNumber
               style={{ width: '100%' }}
-              value={props.min ?? 0}
-              onChange={(value) => updateProps({ min: value ?? 0 })}
+              value={props.min}
+              placeholder="不限制"
+              onChange={(value) => updateProps({ min: value ?? undefined })}
             />
           </PanelField>
           <PanelField label="最大值">
             <InputNumber
               style={{ width: '100%' }}
-              value={props.max ?? 1000000}
-              onChange={(value) => updateProps({ max: value ?? 1000000 })}
+              value={props.max}
+              placeholder="不限制"
+              onChange={(value) => updateProps({ max: value ?? undefined })}
             />
           </PanelField>
           <PanelField label="小数位">

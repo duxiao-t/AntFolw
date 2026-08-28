@@ -18,10 +18,16 @@ export function NumberField(props: MobileFieldProps) {
         className="af-control"
         inputMode="decimal"
         type="number"
+        min={numberProp(props.node.props?.min)}
+        max={numberProp(props.node.props?.max)}
         placeholder={String(props.node.props?.placeholder ?? '请输入')}
         value={stringValue(props.value)}
         onChange={(value) => props.onValueChange(props.node.id, value)}
       />
     </FieldShell>
   );
+}
+
+function numberProp(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

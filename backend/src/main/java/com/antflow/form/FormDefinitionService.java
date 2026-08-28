@@ -323,6 +323,22 @@ public class FormDefinitionService {
         if (children.isArray()) {
             children.forEach(child -> validateNodeValue(child, values));
         }
+        if (Set.of("number", "money").contains(node.path("type").asText()) && !isEmpty(value)) {
+            java.math.BigDecimal number;
+            try {
+                number = new java.math.BigDecimal(String.valueOf(value));
+            } catch (NumberFormatException error) {
+                throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " must be a number");
+            }
+            var min = props.path("min");
+            var max = props.path("max");
+            if (min.isNumber() && number.compareTo(min.decimalValue()) < 0) {
+                throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " is below min");
+            }
+            if (max.isNumber() && number.compareTo(max.decimalValue()) > 0) {
+                throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " exceeds max");
+            }
+        }
     }
 
     private void validateMatrixSchema(com.fasterxml.jackson.databind.JsonNode node) {

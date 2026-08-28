@@ -272,6 +272,14 @@ class FormDefinitionServiceSchemaTest {
             .hasMessageContaining("incomplete option");
     }
 
+    @Test void clearedNumberBoundsAreUnlimited() {
+        String schema = "[{\"id\":\"count\",\"type\":\"number\",\"props\":{}}]";
+        assertThatCode(() -> service.validateSubmission(schema, Map.of("count", -1000000)))
+            .doesNotThrowAnyException();
+        assertThatCode(() -> service.validateSubmission(schema, Map.of("count", 10000000)))
+            .doesNotThrowAnyException();
+    }
+
     private String matrixSchema(String cellType, String extraProps) {
         return """
             [{"id":"matrix","type":"matrix_fill","label":"矩阵","props":{

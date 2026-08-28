@@ -30,10 +30,10 @@ export const NumberField: FieldType = {
       <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
       <div>最小值</div>
-      <input type="number" value={node.props?.min ?? 0} onChange={(e) => onChange({ ...node, props: { ...node.props, min: Number(e.target.value) } })}
+      <input type="number" value={node.props?.min ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, min: e.target.value === '' ? undefined : Number(e.target.value) } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
       <div>最大值</div>
-      <input type="number" value={node.props?.max ?? 1000000} onChange={(e) => onChange({ ...node, props: { ...node.props, max: Number(e.target.value) } })}
+      <input type="number" value={node.props?.max ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, max: e.target.value === '' ? undefined : Number(e.target.value) } })}
         style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
       <div>小数位</div>
       <input type="number" value={node.props?.precision ?? 0} onChange={(e) => onChange({ ...node, props: { ...node.props, precision: Number(e.target.value) } })}

@@ -30,6 +30,15 @@ export function validateCommonRules(node: MobileSchemaNode, value: unknown) {
   const maxChecked = numericRule(node, 'maxChecked') ?? numericRule(node, 'maxSelected');
   const maxSelected = numericRule(node, 'maxSelected');
 
+  if (node.type === 'number' || node.type === 'money') {
+    const number = Number(value);
+    const min = numericRule(node, 'min');
+    const max = numericRule(node, 'max');
+    if (!Number.isFinite(number)) return `${label}必须是数字`;
+    if (min != null && number < min) return `${label}不能小于${min}`;
+    if (max != null && number > max) return `${label}不能大于${max}`;
+  }
+
   if (minLength != null && String(value).length < minLength) {
     return `${label}不能少于${minLength}个字符`;
   }
