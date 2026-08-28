@@ -3,7 +3,7 @@ import type { RequestConfig } from '@@/plugin-request/request';
 import { LinkOutlined } from '@ant-design/icons';
 import type { Settings as LayoutSettings } from '@ant-design/pro-components';
 import { SettingDrawer } from '@ant-design/pro-components';
-import { history, Link } from '@umijs/max';
+import { history, Link, useModel } from '@umijs/max';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import React from 'react';
@@ -27,6 +27,31 @@ import { errorConfig } from './requestErrorConfig';
 
 const isDev = process.env.NODE_ENV === 'development' || process.env.UMI_ENV === 'dev';
 const loginPath = '/user/login';
+
+function AuthzRefresh() {
+  const { initialState, setInitialState } = useModel('@@initialState');
+  const refreshing = React.useRef<Promise<void> | null>(null);
+  const refresh = React.useCallback(() => {
+    if (!initialState?.currentUser || !initialState.fetchUserInfo) return;
+    if (!refreshing.current) {
+      refreshing.current = initialState.fetchUserInfo().then((currentUser: API.CurrentUser | undefined) => {
+        if (currentUser && (currentUser as any).authzVersion !==
+          (initialState.currentUser as any).authzVersion) {
+          setInitialState((state: any) => ({ ...state, currentUser }));
+        }
+      }).finally(() => { refreshing.current = null; });
+    }
+  }, [initialState, setInitialState]);
+  React.useEffect(() => {
+    window.addEventListener('focus', refresh);
+    window.addEventListener('antflow:refresh-authz', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('antflow:refresh-authz', refresh);
+    };
+  }, [refresh]);
+  return null;
+}
 
 /**
  * @see https://umijs.org/docs/api/runtime-config#getinitialstate
@@ -147,6 +172,7 @@ export const layout: RunTimeLayoutConfig = ({
       // if (initialState?.loading) return <PageLoading />;
       return (
         <>
+          <AuthzRefresh />
           {children}
           <SettingDrawer
             disableUrlParams

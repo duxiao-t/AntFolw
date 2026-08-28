@@ -211,6 +211,24 @@ describe('requestErrorConfig', () => {
 
       expect(message.error).toHaveBeenCalledWith('账号已存在');
     });
+
+    it('should explain scoped authorization failures and request an auth refresh', () => {
+      const refresh = vi.fn();
+      window.addEventListener('antflow:refresh-authz', refresh);
+      const error: any = new Error('Forbidden');
+      error.response = {
+        status: 403,
+        data: { code: 'OUTSIDE_DATA_SCOPE' },
+      };
+
+      try {
+        errorHandler(error, {});
+        expect(message.error).toHaveBeenCalledWith('当前资源超出你的数据范围');
+        expect(refresh).toHaveBeenCalledOnce();
+      } finally {
+        window.removeEventListener('antflow:refresh-authz', refresh);
+      }
+    });
     it('should handle offline error', () => {
       const error: any = new Error('Network error');
       error.request = {};

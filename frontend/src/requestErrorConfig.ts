@@ -82,7 +82,18 @@ export const errorConfig: RequestConfig = {
           return;
         }
         if (status === 403) {
-          message.error('无权限');
+          const code = error.response.data?.code;
+          const messages: Record<string, string> = {
+            MISSING_PERMISSION: '缺少操作权限，请联系管理员',
+            OUTSIDE_DATA_SCOPE: '当前资源超出你的数据范围',
+            NOT_TASK_ASSIGNEE: '该任务不属于当前账号或已转交',
+          };
+          message.error(messages[code] ?? '无权限');
+          window.dispatchEvent(new Event('antflow:refresh-authz'));
+          return;
+        }
+        if (status === 404 && error.response.data?.code === 'NOT_FOUND') {
+          message.error('资源不存在或无权查看');
           return;
         }
         const backendMessage = error.response.data?.message;
