@@ -4,6 +4,7 @@ import com.antflow.engine.BizException;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.authz.AuthorizationFailureException;
 import com.antflow.audit.AuditService;
+import com.antflow.audit.RequestIdFilter;
 import lombok.RequiredArgsConstructor;
 import com.antflow.engine.NoAssigneeFoundException;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,8 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -144,8 +147,16 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = new HashMap<>();
         body.put("code", code);
         body.put("message", message);
-        body.put("traceId", UUID.randomUUID().toString());
+        body.put("traceId", traceId());
         return body;
+    }
+
+    private static String traceId() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
+            Object requestId = attrs.getRequest().getAttribute(RequestIdFilter.ATTRIBUTE);
+            if (requestId != null) return requestId.toString();
+        }
+        return UUID.randomUUID().toString();
     }
 
     private static String accessDeniedCode(String message) {
