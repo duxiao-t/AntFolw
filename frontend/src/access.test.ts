@@ -84,6 +84,20 @@ describe('access', () => {
     expect(result.canRejectTask).toBe(false);
   });
 
+  it('requires company management permission for WeCom settings', () => {
+    const pageOnly = access({ currentUser: {
+      userid: '6', name: 'Viewer', avatar: '', roles: ['viewer'],
+      permissions: ['page.settings.wecom'],
+    } });
+    const manager = access({ currentUser: {
+      userid: '7', name: 'Manager', avatar: '', roles: ['manager'],
+      permissions: ['page.settings.wecom', 'org.company.manage'],
+    } });
+
+    expect(pageOnly.canManageWecom).toBe(false);
+    expect(manager.canManageWecom).toBe(true);
+  });
+
   it('should return canAdmin false when user roles are empty', () => {
     const initialState = {
       currentUser: {

@@ -85,6 +85,12 @@ antflow:
     max-attempts: 8
     poll-interval-ms: ${ANTFLOW_JOB_POLL_INTERVAL_MS:5000}
     recovery-interval-ms: ${ANTFLOW_JOB_RECOVERY_INTERVAL_MS:60000}
+  wecom:
+    base-url: ${ANTFLOW_WECOM_BASE_URL:https://qyapi.weixin.qq.com}
+    encryption-key: ${ANTFLOW_INTEGRATION_ENCRYPTION_KEY:antflow-dev-integration-key-change-me}
+    connect-timeout: 5s
+    request-timeout: 15s
+    queue-capacity: ${ANTFLOW_WECOM_QUEUE_CAPACITY:20}
   web:
     slow-request-threshold-ms: ${ANTFLOW_SLOW_REQUEST_THRESHOLD_MS:500}
 

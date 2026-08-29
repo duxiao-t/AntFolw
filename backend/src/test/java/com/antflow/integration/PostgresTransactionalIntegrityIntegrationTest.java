@@ -11,6 +11,7 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.form.FormProcessPublishService;
 import com.antflow.form.FormDefinitionMapper;
+import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
@@ -80,6 +81,34 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private AuthorizationService authorizationService;
     @Autowired private RoleAdminService roleAdminService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
+    @Autowired private WecomService wecomService;
+
+    @Test
+    void wecomActiveJobConstraintAndRestartRecoveryWorkOnPostgres() {
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long adminId = userId("admin");
+        long firstId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_wecom_sync_job(company_id, initiated_by) VALUES (?, ?) RETURNING id
+            """, Long.class, companyId, adminId);
+        List<Long> duplicate = jdbcTemplate.queryForList("""
+            INSERT INTO t_wecom_sync_job(company_id, initiated_by) VALUES (?, ?)
+            ON CONFLICT (company_id) WHERE status IN ('PENDING', 'RUNNING') DO NOTHING
+            RETURNING id
+            """, Long.class, companyId, adminId);
+
+        assertThat(duplicate).isEmpty();
+        wecomService.failInterruptedJobs();
+        assertThat(jdbcTemplate.queryForMap("""
+            SELECT status, message FROM t_wecom_sync_job WHERE id = ?
+            """, firstId)).containsEntry("status", "FAILED")
+            .containsEntry("message", "服务已重启，请重新同步");
+
+        long nextId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_wecom_sync_job(company_id, initiated_by) VALUES (?, ?) RETURNING id
+            """, Long.class, companyId, adminId);
+        jdbcTemplate.update("DELETE FROM t_wecom_sync_job WHERE id IN (?, ?)", firstId, nextId);
+    }
 
     @Test
     void performanceIndexesExist() {

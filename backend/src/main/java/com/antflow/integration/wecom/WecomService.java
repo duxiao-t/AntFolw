@@ -1,0 +1,642 @@
+package com.antflow.integration.wecom;
+
+import com.antflow.audit.AuditService;
+import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
+import com.antflow.common.FormalNumberService;
+import com.antflow.engine.BizException;
+import com.antflow.integration.wecom.WecomClient.WecomDepartment;
+import com.antflow.integration.wecom.WecomClient.WecomUser;
+import com.antflow.integration.wecom.WecomClient.WecomUserRef;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+@Service
+public class WecomService {
+    private static final int MAX_ERROR_SUMMARIES = 10;
+    private final JdbcTemplate jdbc;
+    private final WecomSecretCipher cipher;
+    private final WecomClient client;
+    private final AuthorizationService authorization;
+    private final AuditService audit;
+    private final ObjectMapper json;
+    private final FormalNumberService formalNumbers;
+    private final PasswordEncoder passwords;
+    private final TransactionTemplate transactions;
+    private final Executor executor;
+
+    public WecomService(JdbcTemplate jdbc, WecomSecretCipher cipher, WecomClient client,
+                        AuthorizationService authorization, AuditService audit, ObjectMapper json,
+                        FormalNumberService formalNumbers, PasswordEncoder passwords,
+                        TransactionTemplate transactions,
+                        @Qualifier("wecomSyncExecutor") Executor executor) {
+        this.jdbc = jdbc;
+        this.cipher = cipher;
+        this.client = client;
+        this.authorization = authorization;
+        this.audit = audit;
+        this.json = json;
+        this.formalNumbers = formalNumbers;
+        this.passwords = passwords;
+        this.transactions = transactions;
+        this.executor = executor;
+    }
+
+    public SettingsDto settings(long companyId) {
+        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        requireCompany(companyId);
+        Config config = config(companyId);
+        return new SettingsDto(companyId, config == null ? "" : config.corpId(),
+            config != null && !config.encryptedSecret().isBlank(), latestJob(companyId));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SettingsDto saveSettings(long companyId, String corpId, String secret) {
+        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        requireCompany(companyId);
+        String normalizedCorpId = corpId == null ? "" : corpId.trim();
+        if (normalizedCorpId.isBlank() || normalizedCorpId.length() > 128) {
+            throw new BizException("WECOM_CORP_ID_REQUIRED", "请输入有效的 CorpID");
+        }
+        Config current = config(companyId);
+        String encrypted = secret == null || secret.isBlank()
+            ? current == null ? null : current.encryptedSecret()
+            : cipher.encrypt(secret.trim(), companyId);
+        if (encrypted == null) {
+            throw new BizException("WECOM_SECRET_REQUIRED", "首次配置时请输入通讯录同步 Secret");
+        }
+        long actorId = authorization.currentUserId();
+        jdbc.update("""
+            INSERT INTO t_wecom_config(company_id, corp_id, secret_encrypted, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (company_id) DO UPDATE SET
+                corp_id = EXCLUDED.corp_id,
+                secret_encrypted = EXCLUDED.secret_encrypted,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = now()
+            """, companyId, normalizedCorpId, encrypted, actorId, actorId);
+        audit.success("integration.wecom.settings.update", "COMPANY", companyId,
+            AuditService.RiskLevel.HIGH,
+            Map.of("changedFields", List.of("corpId", "secretConfigured")), Map.of());
+        return new SettingsDto(companyId, normalizedCorpId, true, latestJob(companyId));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public JobDto start(long companyId) {
+        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_WRITE);
+        authorization.requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
+        requireCompany(companyId);
+        if (config(companyId) == null) {
+            throw new BizException("WECOM_NOT_CONFIGURED", "请先保存企业微信连接配置");
+        }
+        PrincipalHolder.Principal actor = PrincipalHolder.current().orElseThrow();
+        Long id = jdbc.query("""
+            INSERT INTO t_wecom_sync_job(company_id, initiated_by, message)
+            VALUES (?, ?, '任务已排队')
+            ON CONFLICT (company_id) WHERE status IN ('PENDING', 'RUNNING') DO NOTHING
+            RETURNING id
+            """, statement -> {
+                statement.setLong(1, companyId);
+                statement.setLong(2, actor.userId());
+            }, result -> result.next() ? result.getLong(1) : null);
+        if (id == null) return activeJob(companyId);
+
+        audit.success("integration.wecom.sync.start", "WECOM_SYNC_JOB", id,
+            AuditService.RiskLevel.HIGH, Map.of(), Map.of("companyId", companyId));
+        long jobId = id;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                submit(jobId, actor);
+            }
+        });
+        return job(jobId, false);
+    }
+
+    public JobDto job(long id) {
+        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        return job(id, true);
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void failInterruptedJobs() {
+        List<Long> ids = jdbc.queryForList("""
+            UPDATE t_wecom_sync_job
+            SET status = 'FAILED', phase = 'COMPLETED', message = '服务已重启，请重新同步',
+                error_summary = '["服务重启中断了同步任务"]'::jsonb,
+                finished_at = now(), updated_at = now()
+            WHERE status IN ('PENDING', 'RUNNING')
+            RETURNING id
+            """, Long.class);
+        ids.forEach(id -> {
+            try {
+                audit.success("integration.wecom.sync.recovered", "WECOM_SYNC_JOB", id,
+                    AuditService.RiskLevel.HIGH, Map.of("status", "FAILED"),
+                    Map.of("reason", "application_restart"));
+            } catch (RuntimeException ignored) {
+                // Recovery must release the active-job constraint even if audit storage is down.
+            }
+        });
+    }
+
+    private void submit(long jobId, PrincipalHolder.Principal actor) {
+        try {
+            executor.execute(() -> run(jobId, actor));
+        } catch (RejectedExecutionException exception) {
+            fail(jobId, "同步队列已满，请稍后重试", List.of("同步队列已满"));
+            auditResult(jobId, actor);
+        }
+    }
+
+    private void run(long jobId, PrincipalHolder.Principal actor) {
+        try {
+            JobDto initial = job(jobId, false);
+            Config config = config(initial.companyId());
+            if (config == null) throw new WecomClient.WecomApiException("企业微信配置不存在");
+            stage(jobId, "CONNECTING", 5, "正在连接企业微信");
+            WecomClient.Session session = client.connect(config.corpId(),
+                cipher.decrypt(config.encryptedSecret(), initial.companyId()));
+
+            stage(jobId, "DEPARTMENTS", 12, "正在同步部门树");
+            List<WecomDepartment> departments = orderDepartments(client.departments(session));
+            Map<Long, Long> departmentMappings = syncDepartments(initial.companyId(), departments);
+            stage(jobId, "DEPARTMENTS", 25, "部门同步完成");
+
+            stage(jobId, "FETCHING_USERS", 30, "正在获取成员列表");
+            List<WecomUserRef> references = client.userIds(session);
+            jdbc.update("UPDATE t_wecom_sync_job SET total_users = ?, updated_at = now() WHERE id = ?",
+                references.size(), jobId);
+
+            List<String> errors = new ArrayList<>();
+            Map<String, WecomUser> synchronizedUsers = new LinkedHashMap<>();
+            int created = 0;
+            int updated = 0;
+            int failed = 0;
+            for (int index = 0; index < references.size(); index++) {
+                WecomUserRef reference = references.get(index);
+                try {
+                    WecomUser user = client.user(session, reference);
+                    boolean wasCreated = Boolean.TRUE.equals(transactions.execute(status ->
+                        syncUser(initial.companyId(), user, departmentMappings)));
+                    synchronizedUsers.put(user.userId(), user);
+                    if (wasCreated) created++; else updated++;
+                } catch (RuntimeException exception) {
+                    failed++;
+                    addError(errors, "成员 " + mask(reference.userId()) + " 同步失败："
+                        + userError(exception));
+                }
+                int processed = index + 1;
+                int percent = references.isEmpty() ? 85
+                    : 35 + (int) Math.floor(processed * 50.0 / references.size());
+                progress(jobId, percent, references.size(), processed, created, updated, failed,
+                    "正在同步成员 " + processed + "/" + references.size(), errors);
+            }
+
+            stage(jobId, "RELATIONS", 90, "正在同步直属上级和部门负责人");
+            syncRelations(initial.companyId(), synchronizedUsers, departments, errors);
+            finish(jobId, failed == 0 && errors.isEmpty() ? "SUCCESS" : "PARTIAL",
+                failed == 0 && errors.isEmpty() ? "通讯录同步完成" : "通讯录同步完成，部分数据未能同步",
+                errors);
+        } catch (RuntimeException exception) {
+            fail(jobId, fatalError(exception), List.of(fatalError(exception)));
+        } finally {
+            auditResult(jobId, actor);
+        }
+    }
+
+    private Map<Long, Long> syncDepartments(long companyId, List<WecomDepartment> departments) {
+        Map<Long, Long> mappings = new HashMap<>();
+        for (WecomDepartment department : departments) {
+            Long localId = transactions.execute(status -> {
+                Long parentId = department.parentId() == 0 ? null : mappings.get(department.parentId());
+                if (department.parentId() != 0 && parentId == null) {
+                    throw new WecomClient.WecomApiException("企业微信部门树缺少父部门");
+                }
+                Long existing = mappedDepartment(companyId, department.id());
+                String parentPath = parentId == null ? null : jdbc.queryForObject(
+                    "SELECT path::text FROM t_department WHERE id = ?", String.class, parentId);
+                String path = (parentPath == null ? "" : parentPath + ".")
+                    + "wc" + companyId + "d" + department.id();
+                String name = department.name() == null ? "" : department.name().trim();
+                if (name.isBlank()) throw new WecomClient.WecomApiException("企业微信部门名称为空");
+                if (existing == null) {
+                    Long created = jdbc.queryForObject("""
+                        INSERT INTO t_department(company_id, parent_id, path, name, sort_order)
+                        VALUES (?, ?, CAST(? AS ltree), ?, ?) RETURNING id
+                        """, Long.class, companyId, parentId, path, name, department.order());
+                    jdbc.update("""
+                        INSERT INTO t_wecom_department_mapping(
+                            company_id, wecom_department_id, department_id)
+                        VALUES (?, ?, ?)
+                        """, companyId, department.id(), created);
+                    return created;
+                }
+                DepartmentState current = jdbc.query("""
+                    SELECT company_id, path::text FROM t_department WHERE id = ?
+                    """, rs -> rs.next() ? new DepartmentState(rs.getLong(1), rs.getString(2)) : null,
+                    existing);
+                if (current == null || current.companyId() != companyId) {
+                    throw new WecomClient.WecomApiException("企业微信部门绑定无效");
+                }
+                if (!Objects.equals(current.path(), path)) {
+                    jdbc.update("""
+                        UPDATE t_department
+                        SET path = CAST(? AS ltree) || subpath(path, nlevel(CAST(? AS ltree)))
+                        WHERE path <@ CAST(? AS ltree) AND path <> CAST(? AS ltree)
+                        """, path, current.path(), current.path(), current.path());
+                }
+                jdbc.update("""
+                    UPDATE t_department
+                    SET parent_id = ?, path = CAST(? AS ltree), name = ?, sort_order = ?
+                    WHERE id = ?
+                    """, parentId, path, name, department.order(), existing);
+                return existing;
+            });
+            mappings.put(department.id(), localId);
+        }
+        return mappings;
+    }
+
+    private boolean syncUser(long companyId, WecomUser external,
+                             Map<Long, Long> departmentMappings) {
+        Long departmentId = departmentMappings.get(primaryDepartment(external));
+        if (departmentId == null) throw new SyncUserException("主部门未绑定");
+        Long localId = mappedUser(companyId, external.userId());
+        boolean created = false;
+        if (localId == null) localId = matchUser(companyId, external.phone(), external.email());
+        if (localId == null) {
+            String username = deterministicUsername(companyId, external.userId());
+            Long usernameCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM t_user WHERE username = ?", Long.class, username);
+            if (usernameCount != null && usernameCount > 0) {
+                throw new SyncUserException("自动生成的账号已存在");
+            }
+            String employeeNo = formalNumbers.employeeNo(null, null);
+            String password = passwords.encode(UUID.randomUUID() + ":" + UUID.randomUUID());
+            localId = jdbc.queryForObject("""
+                INSERT INTO t_user(dept_id, employee_no, username, password_hash, display_name,
+                                   email, phone, position, gender, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                """, Long.class, departmentId, employeeNo, username, password,
+                displayName(external), blankToNull(external.email()), blankToNull(external.phone()),
+                blankToNull(external.position()), gender(external.gender()),
+                external.status() == 1 ? "ACTIVE" : "DISABLED");
+            Long roleId = jdbc.queryForObject(
+                "SELECT id FROM t_role WHERE code = 'user' AND enabled = true", Long.class);
+            if (roleId == null) throw new SyncUserException("内置 user 角色不存在");
+            jdbc.update("INSERT INTO t_user_role(user_id, role_id) VALUES (?, ?)", localId, roleId);
+            created = true;
+        } else {
+            jdbc.update("""
+                UPDATE t_user SET
+                    dept_id = ?, display_name = ?,
+                    phone = COALESCE(NULLIF(?, ''), phone),
+                    email = COALESCE(NULLIF(?, ''), email),
+                    position = ?, gender = ?
+                WHERE id = ?
+                """, departmentId, displayName(external), trim(external.phone()),
+                trim(external.email()), blankToNull(external.position()), gender(external.gender()),
+                localId);
+        }
+        jdbc.update("""
+            INSERT INTO t_wecom_user_mapping(company_id, wecom_user_id, user_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT (company_id, wecom_user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            """, companyId, external.userId(), localId);
+        return created;
+    }
+
+    private void syncRelations(long companyId, Map<String, WecomUser> users,
+                               List<WecomDepartment> departments, List<String> errors) {
+        for (WecomUser user : users.values()) {
+            try {
+                transactions.executeWithoutResult(status -> {
+                    Long userId = mappedUser(companyId, user.userId());
+                    Long managerId = user.directLeaders().isEmpty() ? null
+                        : mappedUser(companyId, user.directLeaders().get(0));
+                    if (Objects.equals(userId, managerId)) managerId = null;
+                    if (userId != null) jdbc.update("UPDATE t_user SET manager_id = ? WHERE id = ?",
+                        managerId, userId);
+                });
+            } catch (RuntimeException exception) {
+                addError(errors, "成员 " + mask(user.userId()) + " 的直属上级同步失败");
+            }
+        }
+        for (WecomDepartment department : departments) {
+            try {
+                transactions.executeWithoutResult(status -> {
+                    Long departmentId = mappedDepartment(companyId, department.id());
+                    if (departmentId == null) return;
+                    jdbc.update("DELETE FROM t_department_leader WHERE department_id = ?", departmentId);
+                    for (String leader : new LinkedHashSet<>(department.leaderUserIds())) {
+                        Long userId = mappedUser(companyId, leader);
+                        if (userId != null) jdbc.update("""
+                            INSERT INTO t_department_leader(department_id, user_id)
+                            VALUES (?, ?) ON CONFLICT DO NOTHING
+                            """, departmentId, userId);
+                    }
+                    Long first = department.leaderUserIds().stream()
+                        .map(leader -> mappedUser(companyId, leader))
+                        .filter(Objects::nonNull).findFirst().orElse(null);
+                    jdbc.update("UPDATE t_department SET leader_id = ? WHERE id = ?", first, departmentId);
+                });
+            } catch (RuntimeException exception) {
+                addError(errors, "部门 " + department.id() + " 的负责人同步失败");
+            }
+        }
+    }
+
+    private Long matchUser(long companyId, String phone, String email) {
+        List<Long> phoneMatches = blankToNull(phone) == null ? List.of() : jdbc.queryForList("""
+            SELECT u.id FROM t_user u
+            JOIN t_department d ON d.id = u.dept_id
+            WHERE d.company_id = ? AND u.phone = ? ORDER BY u.id
+            """, Long.class, companyId, phone.trim());
+        List<Long> emailMatches = blankToNull(email) == null ? List.of() : jdbc.queryForList("""
+            SELECT u.id FROM t_user u
+            JOIN t_department d ON d.id = u.dept_id
+            WHERE d.company_id = ? AND lower(u.email) = lower(?) ORDER BY u.id
+            """, Long.class, companyId, email.trim());
+        return resolveMatch(phoneMatches, emailMatches);
+    }
+
+    static Long resolveMatch(List<Long> phoneMatches, List<Long> emailMatches) {
+        if (phoneMatches.size() > 1 || emailMatches.size() > 1) {
+            throw new SyncUserException("手机号或邮箱存在重复，无法自动绑定");
+        }
+        Set<Long> matches = new LinkedHashSet<>();
+        matches.addAll(phoneMatches);
+        matches.addAll(emailMatches);
+        if (matches.size() > 1) {
+            throw new SyncUserException("手机号和邮箱指向不同成员，无法自动绑定");
+        }
+        return matches.stream().findFirst().orElse(null);
+    }
+
+    static long primaryDepartment(WecomUser user) {
+        if (user.mainDepartment() > 0 && user.departmentIds().contains(user.mainDepartment())) {
+            return user.mainDepartment();
+        }
+        if (!user.departmentIds().isEmpty()) return user.departmentIds().get(0);
+        throw new SyncUserException("成员没有所属部门");
+    }
+
+    static String deterministicUsername(long companyId, String userId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                (companyId + "\0" + userId).getBytes(StandardCharsets.UTF_8));
+            return "wx_" + Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+                .substring(0, 32).toLowerCase();
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    static List<WecomDepartment> orderDepartments(List<WecomDepartment> input) {
+        Map<Long, WecomDepartment> byId = new LinkedHashMap<>();
+        input.forEach(department -> {
+            if (department.id() <= 0 || byId.put(department.id(), department) != null) {
+                throw new WecomClient.WecomApiException("企业微信部门树包含重复部门");
+            }
+        });
+        List<WecomDepartment> result = new ArrayList<>();
+        Set<Long> visiting = new HashSet<>();
+        Set<Long> visited = new HashSet<>();
+        for (WecomDepartment department : input) {
+            visitDepartment(department, byId, visiting, visited, result);
+        }
+        return result;
+    }
+
+    private static void visitDepartment(WecomDepartment department,
+                                        Map<Long, WecomDepartment> byId, Set<Long> visiting,
+                                        Set<Long> visited, List<WecomDepartment> result) {
+        if (visited.contains(department.id())) return;
+        if (!visiting.add(department.id())) {
+            throw new WecomClient.WecomApiException("企业微信部门树存在循环");
+        }
+        if (department.parentId() != 0) {
+            WecomDepartment parent = byId.get(department.parentId());
+            if (parent == null) throw new WecomClient.WecomApiException("企业微信部门树缺少父部门");
+            visitDepartment(parent, byId, visiting, visited, result);
+        }
+        visiting.remove(department.id());
+        visited.add(department.id());
+        result.add(department);
+    }
+
+    private void stage(long jobId, String phase, int percent, String message) {
+        jdbc.update("""
+            UPDATE t_wecom_sync_job SET status = 'RUNNING', phase = ?, percent = ?, message = ?,
+                started_at = COALESCE(started_at, now()), updated_at = now()
+            WHERE id = ? AND status IN ('PENDING', 'RUNNING')
+            """, phase, percent, message, jobId);
+    }
+
+    private void progress(long jobId, int percent, int total, int processed, int created,
+                          int updated, int failed, String message, List<String> errors) {
+        jdbc.update("""
+            UPDATE t_wecom_sync_job SET phase = 'USERS', percent = ?, total_users = ?,
+                processed_users = ?, created_users = ?, updated_users = ?, failed_users = ?,
+                message = ?, error_summary = CAST(? AS jsonb), updated_at = now()
+            WHERE id = ?
+            """, percent, total, processed, created, updated, failed, message, errorJson(errors), jobId);
+    }
+
+    private void finish(long jobId, String status, String message, List<String> errors) {
+        jdbc.update("""
+            UPDATE t_wecom_sync_job SET status = ?, phase = 'COMPLETED', percent = 100,
+                message = ?, error_summary = CAST(? AS jsonb), finished_at = now(), updated_at = now()
+            WHERE id = ?
+            """, status, message, errorJson(errors), jobId);
+    }
+
+    private void fail(long jobId, String message, List<String> errors) {
+        jdbc.update("""
+            UPDATE t_wecom_sync_job SET status = 'FAILED', phase = 'COMPLETED',
+                message = ?, error_summary = CAST(? AS jsonb), finished_at = now(), updated_at = now()
+            WHERE id = ?
+            """, message, errorJson(errors), jobId);
+    }
+
+    private void auditResult(long jobId, PrincipalHolder.Principal actor) {
+        try {
+            JobDto result = job(jobId, false);
+            audit.successAs(actor, "integration.wecom.sync.finish", "WECOM_SYNC_JOB", jobId,
+                AuditService.RiskLevel.HIGH, Map.of("status", result.status()),
+                Map.of("companyId", result.companyId(), "totalUsers", result.totalUsers(),
+                    "createdUsers", result.createdUsers(), "updatedUsers", result.updatedUsers(),
+                    "failedUsers", result.failedUsers()));
+        } catch (RuntimeException ignored) {
+            // The persisted job result remains authoritative if audit storage is unavailable.
+        }
+    }
+
+    private Config config(long companyId) {
+        return jdbc.query("""
+            SELECT corp_id, secret_encrypted FROM t_wecom_config WHERE company_id = ?
+            """, rs -> rs.next() ? new Config(rs.getString(1), rs.getString(2)) : null, companyId);
+    }
+
+    private Long mappedDepartment(long companyId, long externalId) {
+        return jdbc.query("""
+            SELECT department_id FROM t_wecom_department_mapping
+            WHERE company_id = ? AND wecom_department_id = ?
+            """, rs -> rs.next() ? rs.getLong(1) : null, companyId, externalId);
+    }
+
+    private Long mappedUser(long companyId, String externalId) {
+        return jdbc.query("""
+            SELECT user_id FROM t_wecom_user_mapping
+            WHERE company_id = ? AND wecom_user_id = ?
+            """, rs -> rs.next() ? rs.getLong(1) : null, companyId, externalId);
+    }
+
+    private JobDto latestJob(long companyId) {
+        return jdbc.query("""
+            SELECT * FROM t_wecom_sync_job WHERE company_id = ?
+            ORDER BY created_at DESC, id DESC LIMIT 1
+            """, rs -> rs.next() ? mapJob(rs) : null, companyId);
+    }
+
+    private JobDto activeJob(long companyId) {
+        JobDto result = jdbc.query("""
+            SELECT * FROM t_wecom_sync_job
+            WHERE company_id = ? AND status IN ('PENDING', 'RUNNING')
+            ORDER BY created_at DESC, id DESC LIMIT 1
+            """, rs -> rs.next() ? mapJob(rs) : null, companyId);
+        if (result == null) throw new BizException("WECOM_JOB_CONFLICT", "同步任务状态已变化，请重试");
+        return result;
+    }
+
+    private JobDto job(long id, boolean failIfMissing) {
+        JobDto result = jdbc.query("SELECT * FROM t_wecom_sync_job WHERE id = ?",
+            rs -> rs.next() ? mapJob(rs) : null, id);
+        if (result == null && failIfMissing) {
+            throw new com.antflow.authz.HiddenResourceException("sync job not found");
+        }
+        return result;
+    }
+
+    private JobDto mapJob(ResultSet rs) throws SQLException {
+        return new JobDto(rs.getLong("id"), rs.getLong("company_id"), rs.getString("status"),
+            rs.getString("phase"), rs.getInt("percent"), rs.getInt("total_users"),
+            rs.getInt("processed_users"), rs.getInt("created_users"),
+            rs.getInt("updated_users"), rs.getInt("failed_users"), rs.getString("message"),
+            errorList(rs.getString("error_summary")), rs.getObject("started_at", OffsetDateTime.class),
+            rs.getObject("finished_at", OffsetDateTime.class));
+    }
+
+    private void requireCompany(long companyId) {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM t_company WHERE id = ?",
+            Long.class, companyId);
+        if (count == null || count == 0) throw new BizException("COMPANY_NOT_FOUND", "企业不存在");
+    }
+
+    private String errorJson(List<String> errors) {
+        try {
+            return json.writeValueAsString(errors.stream().limit(MAX_ERROR_SUMMARIES).toList());
+        } catch (Exception exception) {
+            return "[]";
+        }
+    }
+
+    private List<String> errorList(String value) {
+        try {
+            return json.readValue(value == null ? "[]" : value, new TypeReference<>() { });
+        } catch (Exception exception) {
+            return List.of();
+        }
+    }
+
+    private static void addError(List<String> errors, String value) {
+        if (errors.size() < MAX_ERROR_SUMMARIES) errors.add(value.length() > 160
+            ? value.substring(0, 160) : value);
+    }
+
+    private static String fatalError(RuntimeException exception) {
+        if (exception instanceof WecomClient.WecomApiException
+            || exception instanceof SyncUserException) return exception.getMessage();
+        return "同步任务执行失败，请检查配置后重试";
+    }
+
+    private static String userError(RuntimeException exception) {
+        return exception instanceof SyncUserException ? exception.getMessage()
+            : exception instanceof WecomClient.WecomApiException ? exception.getMessage()
+            : "本地成员数据写入失败";
+    }
+
+    private static String displayName(WecomUser user) {
+        String name = trim(user.name());
+        return name.isBlank() ? user.userId() : name.substring(0, Math.min(128, name.length()));
+    }
+
+    private static String gender(String value) {
+        return switch (trim(value)) {
+            case "1" -> "男";
+            case "2" -> "女";
+            default -> null;
+        };
+    }
+
+    private static String blankToNull(String value) {
+        String normalized = trim(value);
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private static String trim(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String mask(String value) {
+        if (value == null || value.isBlank()) return "***";
+        if (value.length() < 3) return value.charAt(0) + "***";
+        return value.charAt(0) + "***" + value.charAt(value.length() - 1);
+    }
+
+    private record Config(String corpId, String encryptedSecret) { }
+    private record DepartmentState(long companyId, String path) { }
+
+    static class SyncUserException extends RuntimeException {
+        SyncUserException(String message) {
+            super(message);
+        }
+    }
+
+    public record SettingsDto(long companyId, String corpId, boolean secretConfigured,
+                              JobDto latestJob) { }
+    public record JobDto(long id, long companyId, String status, String phase, int percent,
+                         int totalUsers, int processedUsers, int createdUsers, int updatedUsers,
+                         int failedUsers, String message, List<String> errorSummary,
+                         OffsetDateTime startedAt, OffsetDateTime finishedAt) { }
+}

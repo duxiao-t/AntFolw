@@ -59,7 +59,8 @@ export default function access(
     canManageCompany:
       page('page.settings.company') && can('org.company.manage'),
     canManageS3: page('page.settings.s3'),
-    canManageWecom: page('page.settings.wecom'),
+    canManageWecom:
+      page('page.settings.wecom') && can('org.company.manage'),
     canManageBilling: page('page.settings.billing'),
     canUseRuntime:
       page('page.workplace') && can('form.runtime.read'),
