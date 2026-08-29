@@ -53,7 +53,8 @@ function formatRecordTime(value: string, received: boolean) {
   const day = String(date.getDate()).padStart(2, "0");
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
-  return received ? `${hour}:${minute} 接收` : `${month}-${day} ${hour}:${minute}`;
+  const dateTime = `${month}-${day} ${hour}:${minute}`;
+  return received ? `${dateTime} 接收` : dateTime;
 }
 
 function formatDateTime(value: string) {

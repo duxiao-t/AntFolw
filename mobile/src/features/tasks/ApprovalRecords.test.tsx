@@ -24,4 +24,15 @@ describe('ApprovalRecords', () => {
     expect(approvalSummaryLabel({ flowedCount: 3, completedCount: 2, processingCount: 1, complete: false })).toBe('2 已完成 · 1 处理中');
     expect(approvalSummaryLabel({ flowedCount: 3, completedCount: 3, processingCount: 0, complete: true })).toBe('已完成');
   });
+
+  it('shows the date and time for every approval node', () => {
+    const { container } = render(<ApprovalRecords records={records} />);
+    const times = container.querySelectorAll('time');
+
+    expect(times).toHaveLength(records.length);
+    for (const time of times) {
+      expect(time).toHaveTextContent(/^\d{2}-\d{2} \d{2}:\d{2}/);
+    }
+    expect(times[2]).toHaveTextContent(/ 接收$/);
+  });
 });
