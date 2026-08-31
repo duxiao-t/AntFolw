@@ -59,6 +59,7 @@ export default [
       { name: 'templates', icon: 'fileText', path: '/approval/templates', component: './approval/TemplateList', hideInMenu: true },
       { name: 'designer', icon: 'partition', path: '/approval/designer', component: './approval/DesignerEntry', hideInMenu: true },
       { name: 'records', icon: 'search', path: '/approval/records', component: './approval/RecordList', access: 'canReadInstances' },
+      { name: 'monitor', icon: 'dashboard', path: '/approval/monitor', component: './approval/WorkflowMonitor', access: 'canOverrideWorkflow' },
     ],
   },
 

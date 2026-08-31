@@ -60,6 +60,7 @@ export default {
   'menu.approval.templates': 'Templates',
   'menu.approval.designer': 'Designer',
   'menu.approval.records': 'Records',
+  'menu.approval.monitor': 'Workflow Monitor',
   'menu.editor': 'Graphic Editor',
   'menu.editor.flow': 'Flow Editor',
   'menu.editor.mind': 'Mind Editor',

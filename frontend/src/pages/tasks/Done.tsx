@@ -10,8 +10,7 @@ export default function DonePage() {
       Promise.all([
         request<any[]>('/api/tasks?status=APPROVED').then((r: any) => r ?? []),
         request<any[]>('/api/tasks?status=REJECTED').then((r: any) => r ?? []),
-        request<any[]>('/api/tasks?status=SKIPPED').then((r: any) => r ?? []),
-      ]).then(([a, b, c]) => [...a, ...b, ...c]),
+      ]).then(([a, b]) => [...a, ...b]),
   });
   return (
     <ProTable
@@ -23,7 +22,7 @@ export default function DonePage() {
         { title: '节点', dataIndex: 'nodeId' },
         { title: '流程', dataIndex: 'procInstId' },
         { title: '状态', dataIndex: 'status',
-          valueEnum: { APPROVED: { text: '同意' }, REJECTED: { text: '驳回' }, SKIPPED: { text: '跳过' } } },
+          valueEnum: { APPROVED: { text: '同意' }, REJECTED: { text: '驳回' } } },
         { title: '审批时间', dataIndex: 'approvedAt' },
         { title: '意见', dataIndex: 'comment' },
       ]}

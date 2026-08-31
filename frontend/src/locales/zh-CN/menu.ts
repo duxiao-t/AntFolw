@@ -22,6 +22,7 @@ export default {
   'menu.approval.templates': '审批模板库',
   'menu.approval.designer': '流程设计器',
   'menu.approval.records': '审批记录查询',
+  'menu.approval.monitor': '流程运行监控',
 
   // 数据与报表
   'menu.report': '数据与报表',

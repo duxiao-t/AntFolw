@@ -17,6 +17,7 @@ describe('access', () => {
 
     expect(result.canAdmin).toBe(true);
     expect(result.canDesigner).toBe(true);
+    expect(result.canOverrideWorkflow).toBe(true);
   });
 
   it('should return canAdmin false when user has non-admin role', () => {

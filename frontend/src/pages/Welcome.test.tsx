@@ -19,7 +19,7 @@ vi.mock('@umijs/max', () => ({
       currentUser: {
         displayName: '运营员',
         roles: ['operator'],
-        permissions: ['page.workplace', 'workflow.instance.read', 'workflow.task.approve', 'page.approval.records'],
+        permissions: ['page.workplace', 'workflow.instance.read', 'workflow.task.approve', 'workflow.task.reject', 'page.approval.records'],
       },
     },
   }),
@@ -101,5 +101,17 @@ describe('Workplace', () => {
 
     expect(await screen.findByText('当前没有待处理审批')).toBeInTheDocument();
     expect(screen.getByText('授权范围内暂无流程实例')).toBeInTheDocument();
+  });
+
+  it('disables reject for a parallel pending task', async () => {
+    requestMock.mockResolvedValue({
+      ...overview,
+      pendingTaskItems: [{ ...overview.pendingTaskItems[0], parallelId: 'parallel' }],
+    });
+    renderPage();
+
+    const reject = await screen.findByRole('button', { name: '驳回' });
+    expect(reject).toBeDisabled();
+    expect(reject).toHaveAttribute('title', '并行审批节点不允许驳回');
   });
 });

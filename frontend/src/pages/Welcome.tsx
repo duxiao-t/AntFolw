@@ -1,5 +1,6 @@
 import {
   AuditOutlined,
+  AlertOutlined,
   BarChartOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -31,6 +32,7 @@ type PendingTaskItem = {
   applicantName: string;
   nodeId: string;
   status: string;
+  parallelId?: string | null;
   createdAt?: string;
 };
 
@@ -67,6 +69,7 @@ const statusMeta: Record<string, { label: string; color: string; icon: ReactNode
 const managementLinks = [
   { href: '/approval/forms', label: '表单管理', detail: '维护表单与流程配置', icon: <FileTextOutlined />, permission: 'page.approval.forms' },
   { href: '/approval/records', label: '审批记录', detail: '查询实例与审批轨迹', icon: <AuditOutlined />, permission: 'page.approval.records' },
+  { href: '/approval/monitor', label: '流程监控', detail: '定位卡死、超时和消息积压', icon: <AlertOutlined />, permission: 'workflow.instance.override' },
   { href: '/org/contacts', label: '组织架构', detail: '管理部门与人员信息', icon: <TeamOutlined />, permission: 'page.org.contacts' },
   { href: '/security/roles', label: '权限与安全', detail: '角色、权限与审计入口', icon: <SafetyCertificateOutlined />, permission: 'page.security.roles' },
   { href: '/report/center', label: '报表中心', detail: '查看业务数据报表', icon: <BarChartOutlined />, permission: 'page.report.center' },
@@ -179,7 +182,7 @@ export default function Workplace() {
                 { title: '申请人', dataIndex: 'applicantName', width: 112 },
                 { title: '当前节点', dataIndex: 'nodeId', width: 118, ellipsis: true },
                 { title: '到达时间', dataIndex: 'createdAt', width: 124, render: (value: string) => formatDate(value) },
-                { title: '操作', key: 'action', width: 170, fixed: 'right', render: (_, item) => <Space size={2}><Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/proc/${item.instanceId}`)}>查看</Button>{canApprove && <Button type="link" size="small" onClick={() => { setAction({ taskId: item.taskId, type: 'approve', formName: item.formName }); setComment(''); }}>审批</Button>}{canReject && <Button type="link" size="small" danger onClick={() => { setAction({ taskId: item.taskId, type: 'reject', formName: item.formName }); setComment(''); }}>驳回</Button>}</Space> },
+                { title: '操作', key: 'action', width: 170, fixed: 'right', render: (_, item) => <Space size={2}><Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/proc/${item.instanceId}`)}>查看</Button>{canApprove && <Button type="link" size="small" onClick={() => { setAction({ taskId: item.taskId, type: 'approve', formName: item.formName }); setComment(''); }}>审批</Button>}{canReject && <Button type="link" size="small" danger disabled={!!item.parallelId} title={item.parallelId ? '并行审批节点不允许驳回' : undefined} onClick={() => { setAction({ taskId: item.taskId, type: 'reject', formName: item.formName }); setComment(''); }}>驳回</Button>}</Space> },
               ]}
               scroll={{ x: 700 }}
             />

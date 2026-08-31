@@ -27,7 +27,6 @@ const ACTION_LABEL: Record<string, string> = {
   APPROVE: '同意',
   REJECT: '驳回',
   REJECT_TO_NODE: '驳回到节点',
-  SKIP: '跳过',
   WITHDRAW: '撤回',
   COMPLETE: '完成',
   CC: '抄送',
@@ -51,8 +50,6 @@ function statusTagColor(status: string): string {
       return 'green';
     case 'REJECTED':
       return 'red';
-    case 'SKIPPED':
-      return 'gray';
     case 'CC':
       return 'cyan';
     case 'PENDING':
@@ -161,6 +158,7 @@ export default function DetailPage() {
   const myPending = (data as any)?.tasks?.find(
     (t: any) =>
       t.status === 'PENDING' &&
+      t.taskType !== 'REWORK' &&
       currentUserId != null &&
       t.assigneeId === currentUserId,
   );
@@ -193,6 +191,7 @@ export default function DetailPage() {
   const isStarter =
     currentUserId != null && instance.startedBy === currentUserId;
   const isRunner = instance.status === 'RUNNING';
+  const isRework = instance.currentNodeId === '__rework__';
   const rejectTargets = snapshotObj ? findApproverNodes(snapshotObj) : [];
   const pendingTask = (tasks ?? []).find((task: any) => task.status === 'PENDING' && task.taskType !== 'REWORK');
   const fullVisibility = (data as any).visibility !== 'SUMMARY';
@@ -240,7 +239,7 @@ export default function DetailPage() {
   async function doWithdraw() {
     try {
       await request(`/api/instances/${id}/withdraw`, { method: 'POST' });
-      message.success('已撤回');
+      message.success('已撤回，流程已进入待修改');
       setWithdrawOpen(false);
       qc.invalidateQueries({ queryKey: ['instance', id] });
     } catch (e: any) {
@@ -313,6 +312,8 @@ export default function DetailPage() {
               {canReject && (
               <Button
                 danger
+                disabled={!!myPending.parallelId}
+                title={myPending.parallelId ? '并行审批节点不允许驳回' : undefined}
                 onClick={() =>
                   setRejectFor({ taskId: myPending.id, targetNodeId: null })
                 }
@@ -322,7 +323,7 @@ export default function DetailPage() {
               )}
             </>
           )}
-          {canWithdraw && isStarter && isRunner && fullVisibility && (
+          {canWithdraw && isStarter && isRunner && !isRework && fullVisibility && (
             <Button onClick={() => setWithdrawOpen(true)}>撤回流程</Button>
           )}
           {canOverride && isRunner && pendingTask && fullVisibility && (
@@ -340,6 +341,15 @@ export default function DetailPage() {
           showIcon
           message="当前账号仅可查看流程摘要"
           description="表单内容、附件、自动化作业和流程操作已隐藏。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {fullVisibility && isRework && (
+        <Alert
+          type="info"
+          showIcon
+          title="流程待修改"
+          description="请到移动端修改原表单并重新提交，原实例和单号已保留。"
           style={{ marginBottom: 16 }}
         />
       )}
@@ -396,9 +406,7 @@ export default function DetailPage() {
               ? 'green'
               : t.status === 'REJECTED'
                 ? 'red'
-                : t.status === 'SKIPPED'
-                  ? 'gray'
-                  : 'blue',
+                : 'blue',
           children: (
             <div>
               <strong>{t.nodeId}</strong>
@@ -615,12 +623,10 @@ export default function DetailPage() {
         okButtonProps={{ danger: true }}
       >
         <p>
-          撤回后所有 PENDING 任务将被标记为 SKIPPED，实例状态变为
-          WITHDRAWN。此操作不可恢复。
+          撤回后流程将进入待修改，原实例、表单数据和单号都会保留，可在移动端修改后重新提交。
         </p>
         <p style={{ color: '#999', fontSize: 12 }}>
-          注意：如果已有任何任务被审批或驳回，无法撤回（引擎会返回
-          ALREADY_ACTED）。
+          当前审批轮次已有实际审批时不能撤回；已成功执行的外部 Webhook 无法回滚。
         </p>
       </Modal>
     </Card>

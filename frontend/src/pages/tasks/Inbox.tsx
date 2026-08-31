@@ -55,7 +55,13 @@ export default function Inbox() {
                 <Button size="small" type="primary" onClick={() => open(t.id, 'approve')}>
                   同意
                 </Button>{' '}
-                <Button size="small" danger onClick={() => open(t.id, 'reject')}>
+                <Button
+                  size="small"
+                  danger
+                  disabled={!!t.parallelId}
+                  title={t.parallelId ? '并行审批节点不允许驳回' : undefined}
+                  onClick={() => open(t.id, 'reject')}
+                >
                   驳回
                 </Button>{' '}
                 <Button
