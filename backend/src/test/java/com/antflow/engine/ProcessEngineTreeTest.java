@@ -5,6 +5,7 @@ import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.common.FormalNumberService;
+import com.antflow.automation.WorkflowJobMapper;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.engine.resolver.AssigneeResolver;
@@ -14,6 +15,8 @@ import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
+import com.antflow.notify.NotificationEvent;
+import com.antflow.notify.NotificationPublisher;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskEntity;
@@ -70,6 +73,8 @@ class ProcessEngineTreeTest {
     private ObjectMapper json;
     private FormalNumberService formalNumberService;
     private AuthorizationService authorizationService;
+    private NotificationPublisher notifier;
+    private WorkflowJobMapper workflowJobMapper;
 
     private final ConditionEvaluator evaluator = new ConditionEvaluator();
 
@@ -89,8 +94,8 @@ class ProcessEngineTreeTest {
         return new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
-            historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class),
-            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class),
+            historyMapper, handlers, notifier,
+            json, formalNumberService, workflowJobMapper,
             authorizationService
         );
     }
@@ -105,11 +110,16 @@ class ProcessEngineTreeTest {
         processInstanceMapper = Mockito.mock(ProcessInstanceMapper.class);
         Mockito.when(processInstanceMapper.selectForUpdate(Mockito.anyLong()))
             .thenAnswer(invocation -> processInstanceMapper.selectById(invocation.getArgument(0)));
+        Mockito.when(taskMapper.selectForUpdate(Mockito.anyLong()))
+            .thenAnswer(invocation -> taskMapper.selectById(invocation.getArgument(0)));
+        Mockito.when(taskMapper.updateById(Mockito.any(TaskEntity.class))).thenReturn(1);
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         assigneeResolver = Mockito.mock(AssigneeResolver.class);
         json = new ObjectMapper();
         formalNumberService = Mockito.mock(FormalNumberService.class);
         authorizationService = Mockito.mock(AuthorizationService.class);
+        notifier = Mockito.mock(NotificationPublisher.class);
+        workflowJobMapper = Mockito.mock(WorkflowJobMapper.class);
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
 
         // Auto-increment ids for inserts.
@@ -290,6 +300,27 @@ class ProcessEngineTreeTest {
         t.setId(id); t.setProcInstId(1L); t.setNodeId(nodeId);
         t.setAssigneeId(assignee); t.setStatus(status);
         return t;
+    }
+
+    @Test
+    void approve_rechecksTaskUnderRowLock() {
+        Mockito.when(taskMapper.selectById(1L))
+            .thenReturn(taskWithId(1L, "a1", 42L, "PENDING"));
+        Mockito.when(taskMapper.selectForUpdate(1L))
+            .thenReturn(taskWithId(1L, "a1", 42L, "APPROVED"));
+        ProcessInstance instance = new ProcessInstance();
+        instance.setId(1L);
+        instance.setStatus("RUNNING");
+        Mockito.when(processInstanceMapper.selectById(1L)).thenReturn(instance);
+
+        assertThatThrownBy(() ->
+            engine().approve(new CompleteCmd(1L, "approve", "ok", null), 42L))
+            .isInstanceOf(BizException.class)
+            .matches(error -> "TASK_NOT_PENDING".equals(((BizException) error).getCode()));
+
+        Mockito.verify(taskMapper, Mockito.never()).updateById(any(TaskEntity.class));
+        Mockito.verify(historyMapper, Mockito.never()).insert(any(TaskHistoryEntity.class));
+        Mockito.verify(taskMapper, Mockito.never()).insert(any(TaskEntity.class));
     }
 
     // ---------- 2b. 节点级字段权限 ----------
@@ -521,6 +552,65 @@ class ProcessEngineTreeTest {
         // Look at history of inserts grouped by proc_inst_id.
         List<TaskEntity> tasks = capturesOfTaskInsert();
         assertThat(tasks).anyMatch(t -> "y".equals(t.getNodeId()) && t.getAssigneeId() == 200L);
+    }
+
+    @Test
+    void start_conditionsRouting_checksDefaultOnlyAfterOrdinaryBranches() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"c1","type":"CONDITIONS",
+              "branchs":[
+                {"id":"default","type":"CONDITION","props":{"isDefault":true},
+                  "children":{"id":"fallback","type":"APPROVAL","props":{"assignedType":"SELF"}}},
+                {"id":"matched","type":"CONDITION","props":{"groups":[{"groupType":"AND",
+                  "conditions":[{"field":"kind","operator":"==","value":"one"}]}]},
+                  "children":{"id":"chosen","type":"APPROVAL","props":{"assignedType":"SELF"}}}
+              ]}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("chosen"), any())).thenReturn(List.of(7L));
+
+        engine().start(new StartCmd("F1", Map.of("kind", "one"), null), 7L);
+
+        assertThat(capturesOfTaskInsert()).extracting(TaskEntity::getNodeId)
+            .containsExactly("chosen");
+    }
+
+    @Test
+    void approve_conditionBranchLeaf_continuesAtGatewayJoin() {
+        String processJson = """
+            {"id":"root","type":"ROOT","children":{"id":"c1","type":"CONDITIONS",
+              "branchs":[{"id":"matched","type":"CONDITION","props":{"groups":[{
+                "groupType":"AND","conditions":[{"field":"kind","operator":"==","value":"one"}]}]},
+                "children":{"id":"branchApproval","type":"APPROVAL",
+                  "props":{"assignedType":"SELF"}}},
+                {"id":"default","type":"CONDITION","props":{"isDefault":true}}],
+              "children":{"id":"joinApproval","type":"APPROVAL",
+                "props":{"assignedType":"SELF"}}}}
+            """;
+        stubFormAndPd("F1", processJson);
+        Mockito.when(assigneeResolver.resolve(eq("branchApproval"), any())).thenReturn(List.of(7L));
+        Mockito.when(assigneeResolver.resolve(eq("joinApproval"), any())).thenReturn(List.of(8L));
+        ProcessEngine engine = engine();
+        engine.start(new StartCmd("F1", Map.of("kind", "one"), null), 7L);
+        Mockito.when(taskMapper.selectById(1L))
+            .thenReturn(taskWithId(1L, "branchApproval", 7L, "PENDING"));
+        Mockito.when(taskMapper.selectList(any())).thenReturn(List.of());
+        Mockito.when(processInstanceMapper.selectById(1L)).thenAnswer(inv -> {
+            ProcessInstance instance = new ProcessInstance();
+            instance.setId(1L); instance.setFormDataId(1L); instance.setStartedBy(7L);
+            instance.setStatus("RUNNING"); instance.setProcessSnapshot(processJson);
+            return instance;
+        });
+        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+            FormData data = new FormData();
+            data.setId(1L); data.setFormDefId(1L); data.setData("{\"kind\":\"one\"}");
+            return data;
+        });
+
+        engine.approve(new CompleteCmd(1L, "APPROVE", null, null), 7L);
+
+        assertThat(capturesOfTaskInsert()).extracting(TaskEntity::getNodeId)
+            .containsExactly("branchApproval", "joinApproval");
     }
 
     private TaskEntity firstTaskFromInsert() {
@@ -827,6 +917,69 @@ class ProcessEngineTreeTest {
             .extracting(TaskEntity::getAssigneeId)
             .containsExactlyInAnyOrder(42L, 43L);
         assertThat(lastInstance().getCurrentNodeId()).isEqualTo("a1");
+    }
+
+    @Test
+    void withdraw_returnsRunningInstanceToStarterForRevision() {
+        ProcessInstance instance = new ProcessInstance();
+        instance.setId(1L); instance.setFormDataId(1L); instance.setStartedBy(7L);
+        instance.setStatus("RUNNING"); instance.setCurrentNodeId("a1");
+        Mockito.when(processInstanceMapper.selectById(1L)).thenReturn(instance);
+        Mockito.when(taskMapper.selectCount(any())).thenReturn(0L);
+        TaskEntity pending = taskWithId(1L, "a1", 8L, "PENDING");
+        TaskEntity cc = taskWithId(2L, "cc1", 9L, "CC");
+        Mockito.when(taskMapper.selectList(any())).thenReturn(List.of(pending, cc));
+        FormData formData = new FormData();
+        formData.setId(1L); formData.setStatus("SUBMITTED");
+        Mockito.when(formDataMapper.selectById(1L)).thenReturn(formData);
+
+        engine().withdraw(1L, 7L);
+
+        assertThat(pending.getStatus()).isEqualTo("SKIPPED");
+        assertThat(cc.getStatus()).isEqualTo("SKIPPED");
+        assertThat(formData.getStatus()).isEqualTo("NEEDS_REVISION");
+        assertThat(instance.getStatus()).isEqualTo("RUNNING");
+        assertThat(instance.getCurrentNodeId()).isEqualTo("__rework__");
+        assertThat(instance.getFinishedAt()).isNull();
+        assertThat(capturesOfTaskInsert()).anyMatch(task ->
+            "REWORK".equals(task.getTaskType()) && "PENDING".equals(task.getStatus())
+                && task.getAssigneeId() == 7L);
+        Mockito.verify(workflowJobMapper).cancelActive(1L);
+        ArgumentCaptor<NotificationEvent> events = ArgumentCaptor.forClass(NotificationEvent.class);
+        Mockito.verify(notifier).publish(events.capture());
+        assertThat(events.getValue().getType()).isEqualTo("TASK_RETURNED");
+    }
+
+    @Test
+    void withdraw_rejectsAfterActualApprovalAndDuplicateRework() {
+        ProcessInstance acted = new ProcessInstance();
+        acted.setId(1L); acted.setStartedBy(7L); acted.setStatus("RUNNING");
+        acted.setCurrentNodeId("a1");
+        Mockito.when(processInstanceMapper.selectById(1L)).thenReturn(acted);
+        Mockito.when(taskMapper.selectCount(any())).thenReturn(1L);
+        assertThatThrownBy(() -> engine().withdraw(1L, 7L))
+            .isInstanceOf(BizException.class)
+            .matches(error -> "ALREADY_ACTED".equals(((BizException) error).getCode()));
+
+        acted.setCurrentNodeId("__rework__");
+        assertThatThrownBy(() -> engine().withdraw(1L, 7L))
+            .isInstanceOf(BizException.class)
+            .matches(error -> "BAD_STATE".equals(((BizException) error).getCode()));
+        Mockito.verify(taskMapper, Mockito.never()).insert(any(TaskEntity.class));
+    }
+
+    @Test
+    void canWithdraw_usesLatestResubmittedReworkAsRoundBoundary() {
+        ProcessInstance instance = new ProcessInstance();
+        instance.setId(1L); instance.setStartedBy(7L); instance.setStatus("RUNNING");
+        instance.setCurrentNodeId("a1");
+        Mockito.when(processInstanceMapper.selectById(1L)).thenReturn(instance);
+        TaskEntity boundary = new TaskEntity();
+        boundary.setId(10L); boundary.setTaskType("REWORK"); boundary.setStatus("RESUBMITTED");
+        Mockito.when(taskMapper.selectOne(any())).thenReturn(boundary);
+        Mockito.when(taskMapper.selectCount(any())).thenReturn(0L);
+
+        assertThat(engine().canWithdraw(1L, 7L)).isTrue();
     }
 
 }

@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.antflow.process.DefinitionVersionRepository;
 
 import java.util.List;
 import java.util.Map;
@@ -20,6 +22,8 @@ public class FormDefinitionService {
     private final FormDefinitionMapper mapper;
     private final ObjectMapper json;
     private final FormGrantService formGrantService;
+    @Autowired(required = false)
+    private DefinitionVersionRepository versions;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
@@ -49,11 +53,14 @@ public class FormDefinitionService {
     }
 
     public FormDefinition getByCode(String code) {
-        return mapper.selectOne(new QueryWrapper<FormDefinition>().eq("code", code));
+        FormDefinition published = versions == null ? null : versions.runtimeFormByCode(code);
+        return published != null ? published
+            : mapper.selectOne(new QueryWrapper<FormDefinition>().eq("code", code));
     }
 
     public FormDefinition getPublishedByCode(String code) {
-        return mapper.selectOne(new QueryWrapper<FormDefinition>()
+        FormDefinition published = versions == null ? null : versions.runtimeFormByCode(code);
+        return published != null ? published : mapper.selectOne(new QueryWrapper<FormDefinition>()
             .eq("code", code)
             .eq("status", "PUBLISHED"));
     }
@@ -140,6 +147,7 @@ public class FormDefinitionService {
         fd.setStatus("PUBLISHED");
         fd.setVersion(fd.getVersion() + 1);
         mapper.updateById(fd);
+        if (versions != null) versions.publishForm(fd);
         return fd;
     }
 
@@ -582,7 +590,7 @@ public class FormDefinitionService {
 
     private void validatePublishingNode(com.fasterxml.jackson.databind.JsonNode node) {
         String type = node.path("type").asText("");
-        if (Set.of("select", "multi_select").contains(type)) {
+        if (Set.of("select", "radio", "multi_select", "checkbox").contains(type)) {
             validateSelectOptions(node);
         }
         validateDisplayCondition(node.path("props").path("displayCondition"));

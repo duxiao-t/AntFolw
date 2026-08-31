@@ -13,6 +13,7 @@ public class FormData {
     private Long formDefId;
     private Integer formDefVersion;
     private String businessNo;
+    private Long currentRevisionId;
     @TableField(typeHandler = JsonbJacksonTypeHandler.class)
     private String data;        // JSONB
     private String status;      // DRAFT or SUBMITTED

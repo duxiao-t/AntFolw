@@ -144,6 +144,43 @@ class AuthorizationServiceTest {
             .isInstanceOf(HiddenResourceException.class);
     }
 
+    @Test
+    void completedActualApproverKeepsFullTaskVisibility() {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
+            eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(1L);
+
+        assertThat(service.isReadableTaskAssignee(501L, 8L)).isTrue();
+
+        var sql = org.mockito.ArgumentCaptor.forClass(String.class);
+        Mockito.verify(jdbcTemplate).queryForObject(sql.capture(), eq(Long.class),
+            eq(501L), eq(8L), eq(8L), eq(501L), eq(8L));
+        assertThat(sql.getValue()).contains("approved_by", "APPROVED", "REJECTED")
+            .contains("PENDING", "CC", "t_cc_record");
+    }
+
+    @Test
+    void skippedHistoricalAssigneeDoesNotGetFullTaskVisibility() {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
+            eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(0L);
+
+        assertThat(service.isReadableTaskAssignee(501L, 8L)).isFalse();
+    }
+
+    @Test
+    void skippedOrDelegatedTaskDoesNotKeepParticipantVisibility() {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
+            eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(0L);
+
+        assertThat(service.isParticipant(501L, 8L)).isFalse();
+
+        var sql = org.mockito.ArgumentCaptor.forClass(String.class);
+        Mockito.verify(jdbcTemplate).queryForObject(sql.capture(), eq(Long.class),
+            eq(501L), eq(8L), eq(8L), eq(501L), eq(8L));
+        assertThat(sql.getValue()).contains("status NOT IN ('SKIPPED', 'CANCELLED')", "approved_by",
+                "t_cc_record")
+            .doesNotContain("delegated_from");
+    }
+
     private static AuthorizationService.AuthzSnapshot snapshot(
             AuthorizationService.RoleGrant role, Long departmentId, boolean admin) {
         return new AuthorizationService.AuthzSnapshot(7L, departmentId, admin,

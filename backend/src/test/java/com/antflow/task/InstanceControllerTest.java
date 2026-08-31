@@ -3,6 +3,7 @@ package com.antflow.task;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -71,6 +72,14 @@ class InstanceControllerTest {
         Map<?, ?> summaryTask = (Map<?, ?>) ((List<?>) result.get("tasks")).get(0);
         assertThat(summaryTask.containsKey("comment")).isFalse();
         assertThat(summaryTask.containsKey("procInstId")).isFalse();
+        var taskQuery = org.mockito.ArgumentCaptor.forClass(
+            com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        verify(tasks).selectList(taskQuery.capture());
+        assertThat(taskQuery.getValue().getSqlSegment().toUpperCase()).contains("STATUS <>");
+        var historyQuery = org.mockito.ArgumentCaptor.forClass(
+            com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        verify(history).selectList(historyQuery.capture());
+        assertThat(historyQuery.getValue().getSqlSegment().toUpperCase()).contains("ACTION <>");
         verifyNoInteractions(forms, formData, jobs);
     }
 }

@@ -15,6 +15,6 @@ public class EmptyHandler implements NodeHandler {
 
     @Override
     public NodeOutcome handle(JsonNode root, JsonNode node, ProcessInstance pi, NodeContext ctx) {
-        return NodeOutcome.next(ProcessTreeNav.childrenOf(node));
+        return NodeOutcome.next(ProcessTreeNav.next(root, node, ctx.parallelId()));
     }
 }

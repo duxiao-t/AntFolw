@@ -6,9 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -35,7 +32,7 @@ import java.util.Map;
 @Order(100)
 @Slf4j
 @RequiredArgsConstructor
-public class WebhookNotificationListener {
+public class WebhookNotificationListener implements NotificationListener {
 
     private final ObjectMapper json;
 
@@ -46,15 +43,14 @@ public class WebhookNotificationListener {
         "INSTANCE_APPROVED", "INSTANCE_REJECTED", "INSTANCE_WITHDRAWN"
     );
 
-    public String name() { return "webhook"; }
+    @Override public String name() { return "webhook"; }
 
-    public boolean accepts(NotificationEvent e) {
+    @Override public boolean accepts(NotificationEvent e) {
         return onCompleteUrl != null && !onCompleteUrl.isBlank()
             && INSTANCE_FINAL_EVENTS.contains(e.getType());
     }
 
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Override
     public void onEvent(NotificationEvent e) {
         if (!accepts(e)) return;
         try {
@@ -74,10 +70,16 @@ public class WebhookNotificationListener {
                 .timeout(Duration.ofSeconds(5))
                 .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                throw new IllegalStateException("webhook returned HTTP " + resp.statusCode());
+            }
             log.info("[webhook] type={} inst={} -> HTTP {}",
                 e.getType(), e.getProcInstId(), resp.statusCode());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("webhook interrupted", ex);
         } catch (Exception ex) {
-            log.warn("[webhook] failed for inst={}: {}", e.getProcInstId(), ex.toString());
+            throw new IllegalStateException("webhook failed for instance " + e.getProcInstId(), ex);
         }
     }
 }

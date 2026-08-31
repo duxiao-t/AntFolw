@@ -53,6 +53,7 @@ class MobileBootstrapControllerTest {
         user.setDisplayName("AntFlow Admin");
         when(userMapper.selectById(1L)).thenReturn(user);
         when(taskMapper.selectCount(any())).thenReturn(2L);
+        when(workflowMapper.countUnreadNotifications(1L)).thenReturn(4L);
         when(mobileAppService.favorites(1L)).thenReturn(List.of(
             new MobileAppDto(11L, "leave", "请假申请", null, "other", "其他", null)));
         when(workflowMapper.selectRecentProcesses(1L, 4)).thenReturn(List.of(
@@ -63,6 +64,7 @@ class MobileBootstrapControllerTest {
 
         assertEquals("admin", result.user().username());
         assertEquals(2, result.pendingCount());
+        assertEquals(4, result.unreadNotificationCount());
         assertEquals(1, result.favoriteApps().size());
         assertEquals("leave", result.favoriteApps().get(0).code());
         assertEquals(1, result.recentProcesses().size());

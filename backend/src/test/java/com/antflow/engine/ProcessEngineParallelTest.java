@@ -1,6 +1,7 @@
 package com.antflow.engine;
 
 import com.antflow.common.FormalNumberService;
+import com.antflow.automation.WorkflowJobMapper;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.engine.handler.ApprovalHandler;
@@ -16,6 +17,8 @@ import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
+import com.antflow.notify.NotificationEvent;
+import com.antflow.notify.NotificationPublisher;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskEntity;
@@ -55,6 +58,8 @@ class ProcessEngineParallelTest {
     private AssigneeResolver assigneeResolver;
     private ObjectMapper json;
     private FormalNumberService formalNumberService;
+    private NotificationPublisher notifier;
+    private WorkflowJobMapper workflowJobMapper;
 
     private final ConditionEvaluator evaluator = new ConditionEvaluator();
     private final AtomicLong fakeTaskId = new AtomicLong(0L);
@@ -87,8 +92,8 @@ class ProcessEngineParallelTest {
         return new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
-            historyMapper, handlers, Mockito.mock(com.antflow.notify.NotificationPublisher.class),
-            json, formalNumberService, Mockito.mock(com.antflow.automation.WorkflowJobMapper.class),
+            historyMapper, handlers, notifier,
+            json, formalNumberService, workflowJobMapper,
             Mockito.mock(com.antflow.authz.AuthorizationService.class)
         );
     }
@@ -114,10 +119,15 @@ class ProcessEngineParallelTest {
         processInstanceMapper = Mockito.mock(ProcessInstanceMapper.class);
         Mockito.when(processInstanceMapper.selectForUpdate(Mockito.anyLong()))
             .thenAnswer(invocation -> processInstanceMapper.selectById(invocation.getArgument(0)));
+        Mockito.when(taskMapper.selectForUpdate(Mockito.anyLong()))
+            .thenAnswer(invocation -> taskMapper.selectById(invocation.getArgument(0)));
+        Mockito.when(taskMapper.updateById(Mockito.any(TaskEntity.class))).thenReturn(1);
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         assigneeResolver = Mockito.mock(AssigneeResolver.class);
         json = new ObjectMapper();
         formalNumberService = Mockito.mock(FormalNumberService.class);
+        notifier = Mockito.mock(NotificationPublisher.class);
+        workflowJobMapper = Mockito.mock(WorkflowJobMapper.class);
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
 
         Mockito.doAnswer(inv -> {
@@ -135,6 +145,11 @@ class ProcessEngineParallelTest {
             t.setId(fakeTaskId.incrementAndGet());
             return 1;
         }).when(taskMapper).insert(any(TaskEntity.class));
+        Mockito.when(taskMapper.selectById(Mockito.anyLong())).thenAnswer(invocation -> {
+            long id = invocation.getArgument(0);
+            return insertedTasks().stream().filter(task -> task.getId() == id)
+                .findFirst().orElse(null);
+        });
         Mockito.when(historyMapper.insert(any(TaskHistoryEntity.class))).thenAnswer(inv -> {
             TaskHistoryEntity h = inv.getArgument(0);
             if (h.getId() == null) h.setId(fakeHistoryId.incrementAndGet());
@@ -274,6 +289,37 @@ class ProcessEngineParallelTest {
         assertThat(pi.getStatus()).isEqualTo("RUNNING");
     }
 
+    @Test
+    void start_threeParallelBranches_assignsAndNotifiesEveryApprover() {
+        String flow = """
+            {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
+              "branchs":[
+                {"id":"b1","type":"BRANCH","children":{"id":"a1","type":"APPROVAL",
+                  "props":{"assignedType":"ASSIGN_USER","assignedUser":[42]}}},
+                {"id":"b2","type":"BRANCH","children":{"id":"a2","type":"APPROVAL",
+                  "props":{"assignedType":"ASSIGN_USER","assignedUser":[43]}}},
+                {"id":"b3","type":"BRANCH","children":{"id":"a4","type":"APPROVAL",
+                  "props":{"assignedType":"ASSIGN_USER","assignedUser":[45]}}}
+              ],"children":{"id":"join","type":"APPROVAL","props":{"assignedType":"SELF"}}}}
+            """;
+        stubFormAndPd("F1", flow);
+        Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
+        Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
+        Mockito.when(assigneeResolver.resolve(eq("a4"), any())).thenReturn(List.of(45L));
+
+        engine().start(new StartCmd("F1", Map.of(), null), 7L);
+
+        assertThat(insertedTasks()).filteredOn(task -> "PENDING".equals(task.getStatus()))
+            .extracting(TaskEntity::getAssigneeId)
+            .containsExactlyInAnyOrder(42L, 43L, 45L);
+        ArgumentCaptor<NotificationEvent> events = ArgumentCaptor.forClass(NotificationEvent.class);
+        Mockito.verify(notifier, Mockito.atLeastOnce()).publish(events.capture());
+        assertThat(events.getAllValues()).filteredOn(event ->
+            "TASK_ASSIGNED".equals(event.getType()))
+            .extracting(NotificationEvent::getUserId)
+            .containsExactlyInAnyOrder(42L, 43L, 45L);
+    }
+
     // ---------- 3. all branches done -> join to next node ----------
     @Test
     void approve_parallel_allBranchesDone_joinsToNextNode() {
@@ -322,9 +368,9 @@ class ProcessEngineParallelTest {
         assertThat(pi.getCurrentNodeId()).isEqualTo("a3");
     }
 
-    // ---------- 4. reject inside a branch -> whole gateway rejected back ----------
+    // ---------- 4. reject inside a branch is disabled ----------
     @Test
-    void reject_parallel_skipsOtherBranchesAndReturnsToPrevious() {
+    void reject_parallelIsDisabledButForceRejectRemainsAvailable() {
         String flow = """
             {"id":"root","type":"ROOT","children":{
               "id":"a0","type":"APPROVAL",
@@ -364,30 +410,34 @@ class ProcessEngineParallelTest {
         assertThat(insertedTasks()).anyMatch(t -> "a1".equals(t.getNodeId()));
         assertThat(insertedTasks()).anyMatch(t -> "a2".equals(t.getNodeId()));
 
-        // Reject a1 -> sibling b2 pending skipped, return to a0.
+        // Reject a1 -> request is refused before either branch is changed.
         Mockito.when(taskMapper.selectById(2L))
             .thenReturn(taskWith(2L, "a1", 42L, "PENDING", "p1", "b1"));
         Mockito.when(taskMapper.selectById(3L))
             .thenReturn(taskWith(3L, "a2", 43L, "PENDING", "p1", "b2"));
-        Mockito.when(taskMapper.selectList(any()))
-            .thenReturn(List.of(taskWith(3L, "a2", 43L, "PENDING", "p1", "b2")));
-        // previousApproval -> the approved a0 task (parallel_id is null)
-        Mockito.when(taskMapper.selectOne(any())).thenReturn(taskWith(1L, "a0", 40L, "APPROVED", null, null));
+        Mockito.clearInvocations(taskMapper, processInstanceMapper);
 
-        eng.reject(new CompleteCmd(2L, "reject", "no", null), 42L);
+        assertThatThrownBy(() -> eng.reject(
+            new CompleteCmd(2L, "reject", "no", null), 42L))
+            .isInstanceOf(BizException.class)
+            .matches(error -> "PARALLEL_REJECT_DISABLED".equals(
+                ((BizException) error).getCode()));
 
-        // b2 task (id 3) must be SKIPPED.
-        ArgumentCaptor<TaskEntity> updCap = ArgumentCaptor.forClass(TaskEntity.class);
-        Mockito.verify(taskMapper, Mockito.atLeastOnce()).updateById(updCap.capture());
-        assertThat(updCap.getAllValues()).anyMatch(t ->
-            t.getId() == 3L && "SKIPPED".equals(t.getStatus()));
-        // A new PENDING APPROVAL task for a0 is created.
-        List<TaskEntity> tasks = insertedTasks();
-        TaskEntity back = tasks.get(tasks.size() - 1);
-        assertThat(back.getNodeId()).isEqualTo("a0");
-        assertThat(back.getStatus()).isEqualTo("PENDING");
-        assertThat(back.getAssigneeId()).isEqualTo(40L);
-        assertThat(back.getParallelId()).isNull();
+        assertThat(taskMapper.selectById(2L).getStatus()).isEqualTo("PENDING");
+        Mockito.verify(taskMapper, Mockito.never()).updateById(any(TaskEntity.class));
+        Mockito.verify(processInstanceMapper, Mockito.never())
+            .updateById(any(ProcessInstance.class));
+
+        TaskEntity sibling = taskWith(3L, "a2", 43L, "PENDING", "p1", "b2");
+        Mockito.when(taskMapper.selectList(any())).thenReturn(List.of(sibling));
+        Mockito.when(taskMapper.selectOne(any()))
+            .thenReturn(taskWith(1L, "a0", 40L, "APPROVED", null, null));
+
+        eng.forceReject(new CompleteCmd(2L, "reject", "incident", null), 7L);
+
+        assertThat(sibling.getStatus()).isEqualTo("SKIPPED");
+        assertThat(insertedTasks()).anyMatch(task ->
+            "a0".equals(task.getNodeId()) && "PENDING".equals(task.getStatus()));
     }
 
     @Test

@@ -121,7 +121,8 @@ public class MobileWorkflowController {
         auditService.execute(() -> workflowService.withdraw(id, userId),
             () -> auditService.success("workflow.instance.withdraw", "PROCESS_INSTANCE", id,
                 AuditService.RiskLevel.HIGH,
-                Map.of("changedFields", List.of("status", "endedAt")),
+                Map.of("changedFields", List.of("currentNodeId", "formData.status",
+                    "reworkTask")),
                 Map.of("client", "mobile")));
     }
 

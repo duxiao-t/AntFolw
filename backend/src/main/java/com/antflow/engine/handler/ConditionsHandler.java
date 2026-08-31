@@ -22,16 +22,23 @@ public class ConditionsHandler implements NodeHandler {
     @Override
     public NodeOutcome handle(JsonNode root, JsonNode node, ProcessInstance pi, NodeContext ctx) {
         JsonNode chosen = null;
+        JsonNode fallback = null;
         for (JsonNode b : node.withArray("branchs")) {
+            if (b.path("props").path("isDefault").asBoolean(false)) {
+                fallback = b;
+                continue;
+            }
             if (evaluator.matches(b.path("props"), ctx.formData())) {
                 chosen = b;
                 break;
             }
         }
+        if (chosen == null) chosen = fallback;
         if (chosen == null) {
             throw new BizException("BAD_FLOW", "无匹配条件分支");
         }
         JsonNode inner = ProcessTreeNav.childrenOf(chosen);
-        return NodeOutcome.next(inner != null ? inner : ProcessTreeNav.childrenOf(node));
+        return NodeOutcome.next(inner != null ? inner
+            : ProcessTreeNav.next(root, node, ctx.parallelId()));
     }
 }

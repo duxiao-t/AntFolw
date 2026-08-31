@@ -22,7 +22,10 @@ record MobileFormDto(String code, String name, Integer version, JsonNode schema,
                      JsonNode settings, JsonNode process) {
 }
 
-record MobileTaskActionRequest(String comment, JsonNode data) {
+record MobileTaskActionRequest(String comment, JsonNode data, String rejectToNodeId) {
+    MobileTaskActionRequest(String comment, JsonNode data) {
+        this(comment, data, null);
+    }
 }
 
 record MobileDraftRequest(String formCode, JsonNode data) {
@@ -51,14 +54,17 @@ record ApprovalSummaryDto(int flowedCount, int completedCount, int processingCou
 }
 
 record ApprovalRecordDto(String id, Long taskId, String nodeId, String nodeName,
-                         String status, String operatorName, String employeeNo,
-                         String department, String comment, OffsetDateTime receivedAt,
-                         OffsetDateTime completedAt) {
+                         String recordKind, String nodeType, String parallelId,
+                         String branchId, String operationKind, String sourceOperatorName,
+                          String status, String operatorName, String employeeNo,
+                          String department, String comment, OffsetDateTime receivedAt,
+                          OffsetDateTime completedAt, Integer roundNo) {
 }
 
 record MobileTaskDetailDto(MobileTaskDto task, JsonNode schema,
                            JsonNode formData, JsonNode processSnapshot,
                            List<MobileHistoryDto> history, List<String> allowedActions,
+                           boolean rejectDisabled,
                            List<RejectTargetDto> rejectTargets, List<MobileFileDto> files,
                            ApprovalSummaryDto approvalSummary,
                            List<ApprovalRecordDto> approvalRecords) {

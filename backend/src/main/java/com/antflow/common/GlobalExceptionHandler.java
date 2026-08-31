@@ -21,6 +21,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.util.DisconnectedClientHelper;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -125,6 +126,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleAny(Exception e) {
+        if (DisconnectedClientHelper.isClientDisconnectedException(e)) return null;
         log.error("unhandled exception", e);
         recordFailure("request.failed", "HTTP_RESOURCE", null,
             AuditService.RiskLevel.CRITICAL, "INTERNAL_ERROR", e);

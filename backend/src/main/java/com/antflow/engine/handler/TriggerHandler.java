@@ -24,7 +24,7 @@ public class TriggerHandler implements NodeHandler {
         var creation = jobs.queueTrigger(instance, node, context.formData(), context.starterId());
         if (!Boolean.TRUE.equals(creation.job().getBlocking())
             || "SUCCEEDED".equals(creation.job().getStatus())) {
-            return NodeOutcome.next(ProcessTreeNav.childrenOf(node));
+            return NodeOutcome.next(ProcessTreeNav.next(root, node, context.parallelId()));
         }
         instance.setCurrentNodeId(node.path("id").asText());
         return NodeOutcome.halt(java.util.List.of());

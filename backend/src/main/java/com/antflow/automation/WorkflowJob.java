@@ -15,8 +15,11 @@ import java.util.UUID;
 public class WorkflowJob {
     @TableId(type = IdType.AUTO) private Long id;
     private Long procInstId;
+    private Long taskId;
+    private Long nodeInstanceId;
     private String nodeId;
     private String jobType;
+    private String actionKey;
     private OffsetDateTime scheduledAt;
     private String status;
     private Integer attempts;

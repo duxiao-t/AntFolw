@@ -69,4 +69,33 @@ class ProcessTreeNavTest {
 
         assertThat(ProcessTreeNav.findById(root, "nope")).isNull();
     }
+
+    @Test void nextJoinsConditionBranchAndNestedCondition() {
+        JsonNode root = parse("""
+            {"id":"root","type":"ROOT","children":{"id":"outer","type":"CONDITIONS",
+              "branchs":[{"id":"ob","type":"CONDITION","children":{
+                "id":"inner","type":"CONDITIONS","branchs":[{
+                  "id":"ib","type":"CONDITION","children":{"id":"leaf","type":"APPROVAL"}}]}}],
+              "children":{"id":"join","type":"APPROVAL"}}}
+            """);
+
+        assertThat(ProcessTreeNav.next(root, ProcessTreeNav.findById(root, "leaf"), null)
+            .path("id").asText()).isEqualTo("join");
+    }
+
+    @Test void nextStopsAtParallelBoundaryButAllowsConditionJoinInsideIt() {
+        JsonNode root = parse("""
+            {"id":"root","type":"ROOT","children":{"id":"p","type":"PARALLEL",
+              "branchs":[{"id":"pb","type":"BRANCH","children":{
+                "id":"c","type":"CONDITIONS","branchs":[{
+                  "id":"cb","type":"CONDITION","children":{"id":"leaf","type":"EMPTY"}}],
+                "children":{"id":"insideJoin","type":"EMPTY"}}}],
+              "children":{"id":"outsideJoin","type":"APPROVAL"}}}
+            """);
+
+        JsonNode insideJoin = ProcessTreeNav.next(root,
+            ProcessTreeNav.findById(root, "leaf"), "p");
+        assertThat(insideJoin.path("id").asText()).isEqualTo("insideJoin");
+        assertThat(ProcessTreeNav.next(root, insideJoin, "p")).isNull();
+    }
 }

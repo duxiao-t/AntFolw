@@ -12,6 +12,6 @@ public interface NotificationListener {
     /** 是否对该事件感兴趣；默认 true */
     default boolean accepts(NotificationEvent e) { return true; }
 
-    /** 处理事件（不允许抛异常影响主流程；自己 try/catch） */
+    /** 处理事件；普通发布会隔离异常，outbox 可靠发布会用异常触发重试。 */
     void onEvent(NotificationEvent e);
 }

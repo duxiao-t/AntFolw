@@ -10,8 +10,10 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.DefinitionVersionRepository;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,6 +33,8 @@ public class InstanceController {
     private final AuditService auditService;
     private final FormDefinitionService formDefinitionService;
     private final FormDataMapper formDataMapper;
+    @Autowired(required = false)
+    private DefinitionVersionRepository definitionVersions;
 
     @PostMapping("/start")
     public Map<String, Object> start(@RequestBody StartCmd cmd) {
@@ -69,9 +73,10 @@ public class InstanceController {
         }
         var pi = instanceMapper.selectById(id);
         if (pi == null) throw new BizException("NOT_FOUND", "instance not found");
-        var tasks = taskMapper.selectList(new QueryWrapper<TaskEntity>().eq("proc_inst_id", id));
+        var tasks = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+            .eq("proc_inst_id", id).ne("status", "SKIPPED"));
         var history = historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
-            .eq("proc_inst_id", id).orderByAsc("created_at"));
+            .eq("proc_inst_id", id).ne("action", "SKIP").orderByAsc("created_at"));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("visibility", visibility.name());
         result.put("history", history);
@@ -84,8 +89,14 @@ public class InstanceController {
             result.put("instance", pi);
             result.put("tasks", tasks);
             result.put("automationJobs", workflowJobService.listViews(id));
-            result.put("schema", form == null ? null : form.getSchema());
+            String schema = pi.getCurrentFormRevisionId() != null && definitionVersions != null
+                ? definitionVersions.revisionSchema(pi.getCurrentFormRevisionId()) : null;
+            result.put("schema", schema != null ? schema : form == null ? null : form.getSchema());
             result.put("formData", formData == null ? null : formData.getData());
+            result.put("formRevisions", definitionVersions == null
+                ? List.of() : definitionVersions.revisions(id));
+            result.put("nodeInstances", definitionVersions == null
+                ? List.of() : definitionVersions.nodeInstances(id));
         }
         auditService.success("workflow.instance.detail.read", "PROCESS_INSTANCE", id,
             AuditService.RiskLevel.HIGH, Map.of(), Map.of());
@@ -96,7 +107,7 @@ public class InstanceController {
     public List<TaskHistoryEntity> history(@PathVariable Long id) {
         authorizationService.requireReadableInstance(id);
         return historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
-            .eq("proc_inst_id", id).orderByAsc("created_at"));
+            .eq("proc_inst_id", id).ne("action", "SKIP").orderByAsc("created_at"));
     }
 
     @PostMapping("/{id}/withdraw")
@@ -106,7 +117,8 @@ public class InstanceController {
         auditService.execute(() -> engine.withdraw(id, p.userId()),
             () -> auditService.success("workflow.instance.withdraw", "PROCESS_INSTANCE", id,
                 AuditService.RiskLevel.HIGH,
-                Map.of("changedFields", List.of("status", "endedAt")), Map.of()));
+                Map.of("changedFields", List.of("currentNodeId", "formData.status",
+                    "reworkTask")), Map.of()));
     }
 
     @PostMapping("/{id}/jobs/{jobId}/retry")
@@ -118,6 +130,23 @@ public class InstanceController {
                 Map.of("changedFields", List.of("status", "scheduledAt", "attempts",
                     "lastError")),
                 Map.of("processInstanceId", id)));
+    }
+
+    @PostMapping("/{id}/terminate")
+    public void terminate(@PathVariable Long id, @RequestBody AdminTerminateRequest request) {
+        authorizationService.requireManageInstance(id, PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE);
+        if (request == null || request.ticketNo() == null || request.ticketNo().isBlank()
+            || request.reason() == null || request.reason().isBlank()) {
+            throw new BizException("OVERRIDE_JUSTIFICATION_REQUIRED",
+                "ticket number and reason are required");
+        }
+        long operatorId = PrincipalHolder.current().orElseThrow().userId();
+        String reason = "[" + request.ticketNo().trim() + "] " + request.reason().trim();
+        auditService.execute(() -> engine.adminTerminate(id, operatorId, reason),
+            () -> auditService.success("workflow.instance.admin_terminate",
+                "PROCESS_INSTANCE", id, AuditService.RiskLevel.CRITICAL,
+                Map.of("changedFields", List.of("status", "finishedAt")),
+                Map.of("ticketNo", request.ticketNo())));
     }
 
     private static int fieldCount(Object data) {
@@ -145,4 +174,6 @@ public class InstanceController {
         result.put("approvedAt", task.getApprovedAt());
         return result;
     }
+
+    public record AdminTerminateRequest(String ticketNo, String reason) { }
 }

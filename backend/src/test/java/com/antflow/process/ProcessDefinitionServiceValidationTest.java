@@ -27,6 +27,55 @@ class ProcessDefinitionServiceValidationTest {
     private final ProcessDefinitionService service =
         new ProcessDefinitionService(null, null, new ObjectMapper());
 
+    @Test void normalize_condition_keeps_numeric_option_value() throws Exception {
+        String normalized = service.normalizeConditionValues(
+            optionCondition("==", "2"), optionSchema(false));
+
+        assertThat(new ObjectMapper().readTree(normalized)
+            .at("/children/branchs/0/props/groups/0/conditions/0/value").isNumber())
+            .isTrue();
+    }
+
+    @Test void normalize_condition_converts_unique_legacy_label() throws Exception {
+        String normalized = service.normalizeConditionValues(
+            optionCondition("==", "\"选项二\""), optionSchema(false));
+
+        assertThat(new ObjectMapper().readTree(normalized)
+            .at("/children/branchs/0/props/groups/0/conditions/0/value").asInt())
+            .isEqualTo(2);
+    }
+
+    @Test void normalize_condition_rejects_duplicate_or_unknown_label() {
+        assertThatThrownBy(() -> service.normalizeConditionValues(
+            optionCondition("==", "\"选项二\""), optionSchema(true)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("标签重复");
+        assertThatThrownBy(() -> service.normalizeConditionValues(
+            optionCondition("==", "\"不存在\""), optionSchema(false)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("选项不存在");
+    }
+
+    @Test void normalize_condition_rejects_dynamic_other_option() {
+        assertThatThrownBy(() -> service.normalizeConditionValues(
+            optionCondition("==", "\"其他\""), optionSchema(false)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不能作为流程条件");
+    }
+
+    @Test void normalize_multi_select_requires_contains_and_preserves_value_type() throws Exception {
+        String schema = optionSchema(false).replace("\"select\"", "\"multi_select\"");
+        String normalized = service.normalizeConditionValues(
+            optionCondition("contains", "2"), schema);
+        assertThat(new ObjectMapper().readTree(normalized)
+            .at("/children/branchs/0/props/groups/0/conditions/0/value").asInt())
+            .isEqualTo(2);
+        assertThatThrownBy(() -> service.normalizeConditionValues(
+            optionCondition("==", "2"), schema))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("仅支持包含");
+    }
+
     @Test void validate_rejects_approval_without_assignee() {
         String tree = """
             {"id":"root","type":"ROOT","props":{},"children":{"id":"a1","type":"APPROVAL",
@@ -293,5 +342,23 @@ class ProcessDefinitionServiceValidationTest {
                 {"id":"b2","type":"CONDITION","props":{"isDefault":true},"children":null}
               ],"children":null}}
             """.formatted(value);
+    }
+
+    private static String optionCondition(String operator, String value) {
+        return """
+            {"id":"root","type":"ROOT","children":{"id":"c1","type":"CONDITIONS",
+              "branchs":[{"id":"b1","type":"CONDITION","props":{"groups":[{
+                "groupType":"AND","conditions":[{"field":"kind","operator":"%s",
+                "value":%s}]}]}},{"id":"default","type":"CONDITION",
+                "props":{"isDefault":true}}]}}
+            """.formatted(operator, value);
+    }
+
+    private static String optionSchema(boolean duplicateLabel) {
+        return """
+            [{"id":"kind","type":"select","props":{"options":[
+              {"label":"%s","value":1},{"label":"选项二","value":2},
+              {"label":"其他","value":"__antflow_other__","isOther":true}]}}]
+            """.formatted(duplicateLabel ? "选项二" : "选项一");
     }
 }

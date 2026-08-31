@@ -2,8 +2,12 @@ package com.antflow.task;
 
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.engine.BizException;
+import com.antflow.engine.WorkflowRuntimeV2;
+import com.antflow.notify.NotificationEvent;
+import com.antflow.notify.NotificationPublisher;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +41,10 @@ public class TaskOperationService {
     private final TaskMapper taskMapper;
     private final TaskHistoryMapper historyMapper;
     private final ProcessInstanceMapper instanceMapper;
+    private final NotificationPublisher notifier;
+
+    @Autowired(required = false)
+    private WorkflowRuntimeV2 runtimeV2;
 
     /**
      * 转交：把 taskId 转给 targetUserId。taskId 必须 PENDING；operator 必须是当前 assignee。
@@ -67,13 +75,19 @@ public class TaskOperationService {
         child.setParentTaskId(parent.getId());
         child.setDelegatedFrom(parent.getAssigneeId());
         child.setIsAdditional(false);
-          child.setParallelId(parent.getParallelId());
-          child.setBranchId(parent.getBranchId());
+        child.setParallelId(parent.getParallelId());
+        child.setBranchId(parent.getBranchId());
+        if (runtimeV2 != null) {
+            runtimeV2.copyRuntimeTask(parent, child);
+            runtimeV2.reassignParticipant(parent, targetUserId);
+            child.setOperationKind("TRANSFER");
+        }
         taskMapper.insert(child);
         // 写历史
         historyMapper.insert(historyRow(parent.getProcInstId(),
             parent.getId(), child.getId(), parent.getNodeId(), parent.getNodeId(),
             "TRANSFER", p.userId(), comment));
+        notifyAssigned(child);
         return child.getId();
     }
 
@@ -104,12 +118,18 @@ public class TaskOperationService {
         child.setParentTaskId(parent.getId());
         child.setDelegatedFrom(parent.getAssigneeId());
         child.setIsAdditional(false);
-          child.setParallelId(parent.getParallelId());
-          child.setBranchId(parent.getBranchId());
+        child.setParallelId(parent.getParallelId());
+        child.setBranchId(parent.getBranchId());
+        if (runtimeV2 != null) {
+            runtimeV2.copyRuntimeTask(parent, child);
+            runtimeV2.reassignParticipant(parent, targetUserId);
+            child.setOperationKind("DELEGATE");
+        }
         taskMapper.insert(child);
         historyMapper.insert(historyRow(parent.getProcInstId(),
             parent.getId(), child.getId(), parent.getNodeId(), parent.getNodeId(),
             "DELEGATE", p.userId(), comment));
+        notifyAssigned(child);
         return child.getId();
     }
 
@@ -119,6 +139,11 @@ public class TaskOperationService {
      */
     @Transactional
     public Long addAssignee(long taskId, long targetUserId, String comment) {
+        return addAssignee(taskId, targetUserId, "BEFORE", comment);
+    }
+
+    @Transactional
+    public Long addAssignee(long taskId, long targetUserId, String position, String comment) {
         var p = PrincipalHolder.current().orElseThrow();
         TaskEntity parent = lockTask(taskId);
         if (parent == null || !"PENDING".equals(parent.getStatus())) {
@@ -138,12 +163,24 @@ public class TaskOperationService {
         child.setApprovalMode(parent.getApprovalMode());
         child.setParentTaskId(parent.getId());
         child.setIsAdditional(true);
-          child.setParallelId(parent.getParallelId());
-          child.setBranchId(parent.getBranchId());
+        child.setParallelId(parent.getParallelId());
+        child.setBranchId(parent.getBranchId());
+        boolean before = !"AFTER".equals(position);
+        if (runtimeV2 != null && parent.getNodeInstanceId() != null) {
+            runtimeV2.copyRuntimeTask(parent, child);
+            child.setSequenceNo(runtimeV2.addParticipant(parent, targetUserId, before));
+            child.setOperationKind(before ? "ADD_BEFORE" : "ADD_AFTER");
+            child.setStatus(before ? "PENDING" : "BLOCKED");
+            if (before) {
+                parent.setStatus("BLOCKED");
+                updateOrConflict(parent);
+            }
+        }
         taskMapper.insert(child);
         historyMapper.insert(historyRow(parent.getProcInstId(),
             parent.getId(), child.getId(), parent.getNodeId(), parent.getNodeId(),
             "ADD_ASSIGNEE", p.userId(), comment));
+        notifyAssigned(child);
         return child.getId();
     }
 
@@ -199,6 +236,7 @@ public class TaskOperationService {
         var q = new QueryWrapper<TaskEntity>()
             .eq("assignee_id", userId)
             .eq("status", status == null ? "PENDING" : status)
+            .ne("status", "SKIPPED")
             .orderByDesc("created_at");
         return taskMapper.selectList(q);
     }
@@ -207,6 +245,7 @@ public class TaskOperationService {
     public List<TaskEntity> listChildren(long parentTaskId) {
         return taskMapper.selectList(new QueryWrapper<TaskEntity>()
             .eq("parent_task_id", parentTaskId)
+            .ne("status", "SKIPPED")
             .orderByAsc("created_at"));
     }
 
@@ -238,7 +277,7 @@ public class TaskOperationService {
         List<TaskEntity> rows = taskMapper.selectList(new QueryWrapper<TaskEntity>()
             .eq("parent_task_id", parent.getId())
             .eq("assignee_id", targetUserId)
-            .eq("status", "PENDING")
+            .in("status", List.of("PENDING", "BLOCKED"))
             .eq("is_additional", additional)
             .last("LIMIT 1"));
         return rows == null ? null : rows.stream().findFirst().orElse(null);
@@ -248,5 +287,17 @@ public class TaskOperationService {
         if (taskMapper.updateById(task) == 0 && task.getVersion() != null) {
             throw new BizException("CONCURRENT_CONFLICT", "task changed concurrently");
         }
+    }
+
+    private void notifyAssigned(TaskEntity task) {
+        if (runtimeV2 != null && task.getNodeInstanceId() != null) {
+            if ("PENDING".equals(task.getStatus())) {
+                runtimeV2.outbox(task.getProcInstId(), task.getAssigneeId(),
+                    "TASK_ASSIGNED", task.getId());
+            }
+            return;
+        }
+        notifier.publish(new NotificationEvent(this, "TASK_ASSIGNED", task.getProcInstId(),
+            task.getId(), task.getAssigneeId(), "新任务 #" + task.getId() + " 节点 " + task.getNodeId()));
     }
 }

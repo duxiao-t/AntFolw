@@ -86,7 +86,7 @@ public class WorkplaceController {
             pendingItems.add(new PendingTaskItem(
                 task.getId(), instance.getId(), instance.getId(), formName(instance, processDefinitions, forms),
                 instance.getStartedBy(), userName(instance.getStartedBy(), users), task.getNodeId(),
-                task.getStatus(), task.getCreatedAt()));
+                task.getStatus(), task.getParallelId(), task.getCreatedAt()));
         }
 
         Map<String, Long> statusBreakdown = new LinkedHashMap<>();
@@ -190,6 +190,7 @@ public class WorkplaceController {
         String applicantName,
         String nodeId,
         String status,
+        String parallelId,
         OffsetDateTime createdAt) { }
 
     public record RecentInstanceItem(

@@ -41,6 +41,10 @@ public class AutomationJobScheduler {
 
     private void execute(WorkflowJob job) {
         try {
+            if ("TASK_TIMEOUT".equals(job.getJobType())) {
+                processEngine.completeTaskTimeout(job.getId());
+                return;
+            }
             if ("DELAY".equals(job.getJobType())) {
                 processEngine.completeAutomation(job.getId());
                 return;

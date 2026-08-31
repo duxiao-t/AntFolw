@@ -8,6 +8,8 @@ import lombok.Data;
 public class TaskEntity {
     @TableId(type = IdType.AUTO) private Long id;
     private Long procInstId;
+    /** V2 node activation. Null means a legacy V1 task. */
+    private Long nodeInstanceId;
     private String nodeId;
     private Long assigneeId;
     private String taskType;     // APPROVAL/REWORK
@@ -29,5 +31,9 @@ public class TaskEntity {
     private Boolean isAdditional;
     /** 抄送任务首次查看时间；普通审批任务保持 null。 */
     private java.time.OffsetDateTime readAt;
+    private Long actionFormRevisionId;
+    private Integer sequenceNo;
+    private String operationKind;
+    private java.time.OffsetDateTime timeoutAt;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }

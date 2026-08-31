@@ -30,6 +30,6 @@ public class AssignUserStrategy implements AssigneeStrategy {
         if (active.isEmpty()) {
             throw new NoAssigneeFoundException(nodeId, "no active users among ids");
         }
-        return active;
+        return spec.ids().stream().filter(active::contains).distinct().toList();
     }
 }

@@ -32,7 +32,8 @@ public class MobileBootstrapService {
         return new MobileBootstrapDto(
             new MobileUserDto(user.getId(), user.getUsername(), user.getDisplayName(),
                 List.copyOf(roles)),
-            pendingCount.intValue(),
+            pendingCount.intValue() + Math.toIntExact(workflowMapper.countUnreadCc(userId)),
+            Math.toIntExact(workflowMapper.countUnreadNotifications(userId)),
             mobileAppService.favorites(userId),
             workflowMapper.selectRecentProcesses(userId, MAX_RECENT_PROCESSES),
             BUILTIN_BRANDING_VERSION);

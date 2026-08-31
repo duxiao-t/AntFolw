@@ -14,6 +14,7 @@ import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
+import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskEntity;
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class MobileWorkflowService {
+    private static final long CC_TASK_ID_BASE = 8_000_000_000_000_000L;
     private static final String READY_STATUS = "READY";
     private static final String PENDING_STATUS = "PENDING";
     private static final String PUBLISHED_STATUS = "PUBLISHED";
@@ -58,6 +61,8 @@ public class MobileWorkflowService {
     private final MobileFileMapper fileMapper;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    @Autowired(required = false)
+    private DefinitionVersionRepository definitionVersions;
 
     public MobileFormDto getMobileForm(String code) {
         FormDefinition form = formDefinitionService.getByCode(code);
@@ -108,6 +113,12 @@ public class MobileWorkflowService {
             MobileFile row = requireReadyOwnedFile(file.fileId(), userId);
             workflowMapper.insertFileLink(formDataId, row.getId(), file.fieldId(),
                 file.sortOrder());
+        }
+        if (definitionVersions != null) {
+            ProcessInstance started = instanceMapper.selectById(instanceId);
+            if (started != null && started.getCurrentFormRevisionId() != null) {
+                definitionVersions.syncRevisionFiles(started.getCurrentFormRevisionId(), formDataId);
+            }
         }
         if (request.draftId() != null) {
             draftService.deleteAfterSubmit(request.draftId(), userId);
@@ -207,14 +218,21 @@ public class MobileWorkflowService {
         List<ApprovalRecordDto> records = approvalRecords(row.instanceId(), snapshot,
             row.applicantName(), row.applicantEmployeeNo(), row.applicantDepartment(),
             row.startedAt());
+        Set<String> permissions = authorizationService.snapshot(userId).permissions();
         return new MobileTaskDetailDto(
             toTaskDto(row, snapshot),
             readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON"),
             readJsonObject(row.formDataJson(), "BAD_JSON"),
             snapshot,
             history(row.instanceId()),
-            allowedActions(task, userId),
-            List.of(),
+            allowedActions(task, userId, permissions),
+            task.getParallelId() != null
+                && task.getNodeInstanceId() == null
+                && PENDING_STATUS.equals(task.getStatus())
+                && Objects.equals(task.getAssigneeId(), userId)
+                && permissions.contains(PermissionCodes.WORKFLOW_TASK_REJECT),
+            task.getParallelId() == null
+                ? rejectTargets(snapshot, task.getNodeId()) : List.of(),
             files(row.formDataId()),
             approvalSummary(instance, records),
             records
@@ -223,6 +241,11 @@ public class MobileWorkflowService {
 
     @Transactional(rollbackFor = Exception.class)
     public void markTaskRead(Long taskId, long userId) {
+        if (taskId != null && taskId >= CC_TASK_ID_BASE) {
+            int updated = workflowMapper.markCcRead(taskId - CC_TASK_ID_BASE, userId);
+            if (updated == 0) throw new AccessDeniedException("not your task");
+            return;
+        }
         TaskEntity task = requireExistingTask(taskId);
         if (!Objects.equals(task.getAssigneeId(), userId)) {
             throw new AccessDeniedException("not your task");
@@ -244,7 +267,7 @@ public class MobileWorkflowService {
     public void reject(Long taskId, MobileTaskActionRequest request, long userId) {
         engine.reject(new CompleteCmd(taskId, "REJECT",
             request == null ? null : request.comment(),
-            null), userId);
+            request == null ? null : request.rejectToNodeId()), userId);
     }
 
     public ReworkTaskDto getReworkTask(Long taskId, long userId) {
@@ -255,9 +278,11 @@ public class MobileWorkflowService {
         if (form == null) {
             throw new BizException("NOT_FOUND", "form definition not found");
         }
+        String schema = instance.getCurrentFormRevisionId() != null && definitionVersions != null
+            ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
         return new ReworkTaskDto(task.getId(), instance.getId(), form.getCode(), form.getName(),
             formData.getBusinessNo(),
-            readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"),
+            readJsonArray(schema == null ? form.getSchema() : schema, "BAD_SCHEMA_JSON"),
             readJsonObject(formData.getData(), "BAD_JSON"),
             readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON"),
             files(formData.getId()));
@@ -327,7 +352,11 @@ public class MobileWorkflowService {
             if (form == null) {
                 throw new BizException("NOT_FOUND", "form definition not found");
             }
-            formDefinitionService.validateSubmission(form.getSchema(), data);
+            String schema = instance.getCurrentFormRevisionId() != null
+                && definitionVersions != null
+                ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
+            formDefinitionService.validateSubmission(schema == null ? form.getSchema() : schema,
+                data);
         }
         formData.setData(writeJson(data));
         formData.setStatus("NEEDS_REVISION");
@@ -391,14 +420,7 @@ public class MobileWorkflowService {
     }
 
     private boolean canWithdraw(ProcessInstance instance, long userId) {
-        if (!Objects.equals(instance.getStartedBy(), userId)
-            || !RUNNING_STATUS.equals(instance.getStatus())) {
-            return false;
-        }
-        return taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", instance.getId())
-            .ne("status", PENDING_STATUS)
-            .last("LIMIT 1")).isEmpty();
+        return engine.canWithdraw(instance.getId(), userId);
     }
 
     private MobileInstanceDto toInstanceDto(MobileWorkflowMapper.InstanceRow row) {
@@ -439,6 +461,8 @@ public class MobileWorkflowService {
         task.setProcInstId(row.instanceId());
         task.setNodeId(row.nodeId());
         task.setAssigneeId(row.assigneeId());
+        task.setParallelId(row.parallelId());
+        task.setNodeInstanceId(row.nodeInstanceId());
         task.setTaskType(row.taskType());
         task.setStatus(row.taskStatus());
         task.setCreatedAt(row.taskCreatedAt());
@@ -466,6 +490,7 @@ public class MobileWorkflowService {
     private List<MobileHistoryDto> history(Long instanceId) {
         return historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
                 .eq("proc_inst_id", instanceId)
+                .ne("action", "SKIP")
                 .orderByAsc("created_at")
                 .orderByAsc("id"))
             .stream()
@@ -482,22 +507,35 @@ public class MobileWorkflowService {
                                                     OffsetDateTime startedAt) {
         List<ApprovalRecordDto> records = new ArrayList<>();
         records.add(new ApprovalRecordDto(
-            "submission", null, snapshot.path("id").asText("root"), "提交申请", "SUBMITTED",
+            "submission", null, snapshot.path("id").asText("root"), "提交申请",
+            "SUBMISSION", "ROOT", null, null, null, null, "SUBMITTED",
             applicantName == null ? "未记录" : applicantName, applicantEmployeeNo,
-            applicantDepartment, null, startedAt, startedAt));
+            applicantDepartment, null, startedAt, startedAt, 1));
 
         for (MobileWorkflowMapper.ApprovalRow task : workflowMapper.selectApprovalTasks(instanceId)) {
             String status = approvalRecordStatus(task);
             if (status == null) {
                 continue;
             }
+            JsonNode node = ProcessTreeNav.findById(snapshot, task.nodeId());
+            ProcessTreeNav.ParallelParent parent = ProcessTreeNav.findParallelParent(
+                snapshot, task.nodeId());
+            String taskType = "REWORK".equals(task.taskType()) ? "REWORK"
+                : "CC".equals(task.taskStatus()) ? "CC" : "APPROVAL";
             records.add(new ApprovalRecordDto(
                 "task-" + task.taskId(), task.taskId(), task.nodeId(),
                 "REWORK".equals(task.taskType()) ? "退回修改"
                     : nodeName(snapshot, task.nodeId()),
-                status, task.operatorName(), task.employeeNo(), task.department(),
+                taskType, node == null ? taskType : node.path("type").asText(taskType),
+                task.parallelId() != null ? task.parallelId()
+                    : parent == null ? null : parent.parallelId(),
+                task.branchId() != null ? task.branchId()
+                    : parent == null ? null : parent.branchId(),
+                task.operationKind(), task.sourceOperatorName(), status,
+                task.operatorName(), task.employeeNo(), task.department(),
                 approvalRecordComment(task), task.receivedAt(),
-                "CC".equals(task.taskStatus()) ? task.readAt() : task.approvedAt()));
+                "CC".equals(task.taskStatus()) ? task.readAt() : task.approvedAt(),
+                task.roundNo()));
         }
         return records;
     }
@@ -539,7 +577,8 @@ public class MobileWorkflowService {
             .toList();
     }
 
-    private List<String> allowedActions(TaskEntity task, long userId) {
+    private List<String> allowedActions(TaskEntity task, long userId,
+                                        Set<String> permissions) {
         if ("CC".equals(task.getStatus()) && task.getReadAt() == null
             && Objects.equals(task.getAssigneeId(), userId)) {
             return List.of("ACKNOWLEDGE");
@@ -550,17 +589,25 @@ public class MobileWorkflowService {
             || "CC".equals(task.getStatus())) {
             return List.of();
         }
-        Set<String> permissions = authorizationService.snapshot(userId).permissions();
         List<String> result = new ArrayList<>();
         if (permissions.contains(PermissionCodes.WORKFLOW_TASK_APPROVE)) result.add("APPROVE");
-        if (permissions.contains(PermissionCodes.WORKFLOW_TASK_REJECT)) result.add("REJECT");
+        if ((task.getParallelId() == null || task.getNodeInstanceId() != null)
+            && permissions.contains(PermissionCodes.WORKFLOW_TASK_REJECT)) result.add("REJECT");
         return result;
     }
 
     private List<RejectTargetDto> rejectTargets(JsonNode root, String currentNodeId) {
         List<RejectTargetDto> targets = new ArrayList<>();
         collectRejectTargets(root, currentNodeId, targets);
-        return targets;
+        JsonNode current = ProcessTreeNav.findById(root, currentNodeId);
+        JsonNode configured = current == null
+            ? objectMapper.missingNode() : current.path("props").path("rejectTargets");
+        if (!configured.isArray() || configured.isEmpty()) {
+            return targets.isEmpty() ? targets : List.of(targets.get(targets.size() - 1));
+        }
+        Set<String> allowed = new LinkedHashSet<>();
+        configured.forEach(value -> allowed.add(value.asText()));
+        return targets.stream().filter(target -> allowed.contains(target.nodeId())).toList();
     }
 
     private boolean collectRejectTargets(JsonNode node, String currentNodeId,

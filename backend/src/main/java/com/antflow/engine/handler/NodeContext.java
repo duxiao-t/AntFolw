@@ -18,5 +18,18 @@ public record NodeContext(
         /** 所属并行网关节点 id（并行分支内任务）；null 表示非并行 */
         String parallelId,
         /** 所属并行分支 id（并行分支内任务）；null 表示非并行 */
-        String branchId
-) {}
+        String branchId,
+        /** V2 node activation; null for legacy V1 execution. */
+        Long nodeInstanceId
+) {
+    public NodeContext(long starterId, JsonNode formData,
+                       Map<String, List<Long>> selfSelected, String fromNodeId,
+                       String parallelId, String branchId) {
+        this(starterId, formData, selfSelected, fromNodeId, parallelId, branchId, null);
+    }
+
+    public NodeContext atNode(long id) {
+        return new NodeContext(starterId, formData, selfSelected, fromNodeId,
+            parallelId, branchId, id);
+    }
+}

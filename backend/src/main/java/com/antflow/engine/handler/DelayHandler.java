@@ -23,7 +23,7 @@ public class DelayHandler implements NodeHandler {
     public NodeOutcome handle(JsonNode root, JsonNode node, ProcessInstance instance, NodeContext context) {
         var creation = jobs.scheduleDelay(instance, node, context.starterId());
         if ("SUCCEEDED".equals(creation.job().getStatus())) {
-            return NodeOutcome.next(ProcessTreeNav.childrenOf(node));
+            return NodeOutcome.next(ProcessTreeNav.next(root, node, context.parallelId()));
         }
         instance.setCurrentNodeId(node.path("id").asText());
         return NodeOutcome.halt(java.util.List.of());

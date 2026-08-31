@@ -173,6 +173,11 @@ class MobileWorkflowServiceTest {
         assertThat(detail.startedAt()).isEqualTo(
             OffsetDateTime.parse("2026-07-20T09:00:00+08:00"));
         assertThat(detail.currentNodeName()).isEqualTo("部门审批");
+        ArgumentCaptor<QueryWrapper<TaskHistoryEntity>> historyQuery =
+            ArgumentCaptor.forClass(QueryWrapper.class);
+        Mockito.verify(historyMapper).selectList(historyQuery.capture());
+        assertThat(historyQuery.getValue().getSqlSegment().toUpperCase()).contains("ACTION <>");
+        assertThat(historyQuery.getValue().getParamNameValuePairs()).containsValue("SKIP");
     }
 
     @Test
@@ -213,6 +218,7 @@ class MobileWorkflowServiceTest {
     @Test
     void processDetailReturnsCanWithdrawFromServerRules() {
         ProcessInstance instance = instance(501L, 7L, "RUNNING");
+        Mockito.when(engine.canWithdraw(501L, 7L)).thenReturn(true);
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
         Mockito.when(workflowMapper.selectInstanceDetail(501L))
             .thenReturn(instanceDetailRow(instance));
@@ -258,7 +264,9 @@ class MobileWorkflowServiceTest {
         MobileTaskDetailDto detail = service.getTaskDetail(401L, 8L, List.of("user"));
 
         assertThat(detail.allowedActions()).containsExactly("APPROVE", "REJECT");
-        assertThat(detail.rejectTargets()).isEmpty();
+        assertThat(detail.rejectDisabled()).isFalse();
+        assertThat(detail.rejectTargets())
+            .containsExactly(new RejectTargetDto("a1", "直属主管"));
         assertThat(detail.task().nodeName()).isEqualTo("部门审批");
     }
 
@@ -273,6 +281,21 @@ class MobileWorkflowServiceTest {
 
         assertThatThrownBy(() -> service.getTaskDetail(401L, 9L, List.of("user")))
             .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
+    void parallelTaskDetailDisablesRejectButKeepsApprove() {
+        TaskEntity task = task(401L, 501L, "a2", 8L, "PENDING");
+        task.setParallelId("parallel");
+        ProcessInstance instance = instanceWithTwoApprovals();
+        Mockito.when(workflowMapper.selectTaskDetail(401L)).thenReturn(taskDetailRow(task, instance));
+        Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+
+        MobileTaskDetailDto detail = service.getTaskDetail(401L, 8L, List.of("user"));
+
+        assertThat(detail.allowedActions()).containsExactly("APPROVE");
+        assertThat(detail.rejectDisabled()).isTrue();
     }
 
     @Test
@@ -291,13 +314,22 @@ class MobileWorkflowServiceTest {
         TaskEntity cc = task(402L, 501L, "cc1", 8L, "CC");
         ProcessInstance instance = instance(501L, 7L, "APPROVED");
         instance.setProcessSnapshot("""
-            {"id":"root","type":"ROOT","children":{"id":"cc1","name":"抄送人","type":"CC"}}
+            {"id":"root","type":"ROOT","children":{"id":"parallel","type":"PARALLEL",
+             "branchs":[
+               {"id":"approval-branch","type":"BRANCH","children":{"id":"a2","name":"财务审批","type":"APPROVAL"}},
+               {"id":"cc-branch","type":"BRANCH","children":{"id":"cc1","name":"抄送人","type":"CC"}}
+             ]}}
             """);
         Mockito.when(taskMapper.selectById(402L)).thenReturn(cc);
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
         Mockito.when(workflowMapper.selectTaskDetail(402L)).thenReturn(taskDetailRow(cc, instance));
         Mockito.when(workflowMapper.selectApprovalTasks(501L))
-            .thenReturn(List.of(approvalRow(cc, "李四")));
+            .thenReturn(List.of(
+                new MobileWorkflowMapper.ApprovalRow(403L, "a2", "APPROVAL", "APPROVED",
+                    null, null, "TRANSFER", "王五", "赵六", "E0009", "财务部", "同意",
+                    OffsetDateTime.parse("2026-07-20T09:01:00+08:00"),
+                    OffsetDateTime.parse("2026-07-20T09:02:00+08:00"), null, 1),
+                approvalRow(cc, "李四")));
         Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(cc));
@@ -314,6 +346,16 @@ class MobileWorkflowServiceTest {
             ApprovalRecordDto::status, ApprovalRecordDto::operatorName,
             ApprovalRecordDto::comment)
             .contains(tuple("抄送人", "PROCESSING", "李四", "等待确认抄送内容。"));
+        ApprovalRecordDto transferred = detail.approvalRecords().get(1);
+        assertThat(transferred.parallelId()).isEqualTo("parallel");
+        assertThat(transferred.branchId()).isEqualTo("approval-branch");
+        assertThat(transferred.operationKind()).isEqualTo("TRANSFER");
+        assertThat(transferred.sourceOperatorName()).isEqualTo("王五");
+        ApprovalRecordDto ccRecord = detail.approvalRecords().get(2);
+        assertThat(ccRecord.recordKind()).isEqualTo("CC");
+        assertThat(ccRecord.nodeType()).isEqualTo("CC");
+        assertThat(ccRecord.parallelId()).isEqualTo("parallel");
+        assertThat(ccRecord.branchId()).isEqualTo("cc-branch");
     }
 
     @Test
@@ -477,7 +519,7 @@ class MobileWorkflowServiceTest {
     private static MobileWorkflowMapper.TaskDetailRow taskDetailRow(
             TaskEntity task, ProcessInstance instance) {
         return new MobileWorkflowMapper.TaskDetailRow(task.getId(), instance.getId(),
-            task.getNodeId(), task.getAssigneeId(),
+            task.getNodeId(), task.getAssigneeId(), task.getParallelId(), null,
             task.getTaskType() == null ? "APPROVAL" : task.getTaskType(), task.getStatus(),
             task.getCreatedAt(), task.getReadAt(), instance.getStatus(), instance.getCurrentNodeId(),
             instance.getProcessSnapshot(), instance.getStartedBy(), instance.getStartedAt(),
@@ -489,8 +531,9 @@ class MobileWorkflowServiceTest {
 
     private static MobileWorkflowMapper.ApprovalRow approvalRow(TaskEntity task, String name) {
         return new MobileWorkflowMapper.ApprovalRow(task.getId(), task.getNodeId(),
-            task.getTaskType(), task.getStatus(), name, "E0008", "研发部", task.getComment(),
-            task.getCreatedAt(), task.getApprovedAt(), task.getReadAt());
+            task.getTaskType(), task.getStatus(), task.getParallelId(), task.getBranchId(),
+            null, null, name, "E0008", "研发部", task.getComment(),
+            task.getCreatedAt(), task.getApprovedAt(), task.getReadAt(), 1);
     }
 
     private static TaskHistoryEntity history(String action, String from, String to) {

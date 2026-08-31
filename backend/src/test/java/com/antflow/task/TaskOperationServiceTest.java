@@ -1,6 +1,8 @@
 package com.antflow.task;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.notify.NotificationEvent;
+import com.antflow.notify.NotificationPublisher;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,13 +25,15 @@ class TaskOperationServiceTest {
     private TaskMapper taskMapper;
     private TaskHistoryMapper historyMapper;
     private ProcessInstanceMapper instanceMapper;
+    private NotificationPublisher notifier;
     private TaskOperationService ops;
 
     @BeforeEach void setup() {
         taskMapper = Mockito.mock(TaskMapper.class);
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         instanceMapper = Mockito.mock(ProcessInstanceMapper.class);
-        ops = new TaskOperationService(taskMapper, historyMapper, instanceMapper);
+        notifier = Mockito.mock(NotificationPublisher.class);
+        ops = new TaskOperationService(taskMapper, historyMapper, instanceMapper, notifier);
         // 默认 insert 行为：分配 id
         Mockito.doAnswer(inv -> {
             TaskEntity t = inv.getArgument(0);
@@ -84,6 +88,9 @@ class TaskOperationServiceTest {
         assertThat(child.getParallelId()).isEqualTo("p1");
         assertThat(child.getBranchId()).isEqualTo("b1");
         assertThat(childId).isEqualTo(child.getId());
+        ArgumentCaptor<NotificationEvent> event = ArgumentCaptor.forClass(NotificationEvent.class);
+        Mockito.verify(notifier).publish(event.capture());
+        assertThat(event.getValue().getUserId()).isEqualTo(99L);
     }
 
     @Test
@@ -225,7 +232,9 @@ class TaskOperationServiceTest {
         assertThat(inbox).hasSize(2);
         ArgumentCaptor<QueryWrapper<TaskEntity>> cap = ArgumentCaptor.forClass(QueryWrapper.class);
         Mockito.verify(taskMapper).selectList(cap.capture());
-        // 验证 query 包含 assignee_id=42 AND status='PENDING'
-        assertThat(cap.getValue().getSqlSegment().toUpperCase()).contains("ASSIGNEE_ID");
+        // 用户列表永远排除引擎内部作废任务。
+        assertThat(cap.getValue().getSqlSegment().toUpperCase())
+            .contains("ASSIGNEE_ID", "STATUS <>");
+        assertThat(cap.getValue().getParamNameValuePairs()).containsValue("SKIPPED");
     }
 }

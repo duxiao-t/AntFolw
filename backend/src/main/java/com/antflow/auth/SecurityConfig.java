@@ -5,6 +5,7 @@ import com.antflow.audit.AuditDenialFilter;
 import com.antflow.audit.RequestIdFilter;
 import com.antflow.common.IdempotencyFilter;
 import lombok.RequiredArgsConstructor;
+import jakarta.servlet.DispatcherType;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,6 +65,7 @@ public class SecurityConfig {
             })
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(registry -> registry
+                .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
                 .requestMatchers("/api/public/**").permitAll()
                 .requestMatchers("/actuator/**", "/v3/api-docs/**", "/swagger-ui/**").permitAll()

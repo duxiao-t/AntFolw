@@ -65,7 +65,8 @@ public class TaskController {
         auditService.execute(() -> engine.withdraw(id, p.userId()),
             () -> auditService.success("workflow.instance.withdraw", "PROCESS_INSTANCE", id,
                 AuditService.RiskLevel.HIGH,
-                Map.of("changedFields", List.of("status", "endedAt")), Map.of()));
+                Map.of("changedFields", List.of("currentNodeId", "formData.status",
+                    "reworkTask")), Map.of()));
     }
 
     /** 转交：把任务给另一个人。原任务 SKIPPED；新任务 PENDING。 */
@@ -107,11 +108,14 @@ public class TaskController {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_ADD_ASSIGNEE);
         long targetUserId = Long.parseLong(asString(body.get("targetUserId")));
         String comment = asString(body.get("comment"));
-        long newTaskId = auditService.execute(() -> ops.addAssignee(id, targetUserId, comment),
+        String position = "AFTER".equals(asString(body.get("position"))) ? "AFTER" : "BEFORE";
+        long newTaskId = auditService.execute(
+            () -> ops.addAssignee(id, targetUserId, position, comment),
             createdTaskId -> auditService.success("workflow.task.add_assignee", "TASK", id,
                 AuditService.RiskLevel.HIGH,
                 Map.of("changedFields", List.of("childTaskId")),
-                Map.of("targetUserId", targetUserId, "newTaskId", createdTaskId,
+                Map.of("targetUserId", targetUserId, "position", position,
+                    "newTaskId", createdTaskId,
                     "commentLength", lengthOf(comment))));
         return Map.of("newTaskId", newTaskId);
     }
@@ -135,6 +139,17 @@ public class TaskController {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         authorizationService.requireReadableTask(id);
         return ops.listChildren(id);
+    }
+
+    @PostMapping("/{id}/recall-approval")
+    public void recallApproval(@PathVariable Long id) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_RECALL);
+        var principal = PrincipalHolder.current().orElseThrow();
+        auditService.execute(() -> engine.recallApproval(id, principal.userId()),
+            () -> auditService.success("workflow.task.recall_approval", "TASK", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", List.of("status", "approvedBy", "approvedAt")),
+                Map.of()));
     }
 
     @PostMapping("/{id}/override")
@@ -169,6 +184,24 @@ public class TaskController {
                 "reasonLength", body.reason().trim().length())));
     }
 
+    @PostMapping("/{id}/reassign")
+    public void reassign(@PathVariable Long id, @RequestBody ReassignRequest body) {
+        if (body == null || body.targetUserId() == null || body.ticketNo() == null
+            || body.ticketNo().isBlank() || body.reason() == null || body.reason().isBlank()) {
+            throw new BizException("OVERRIDE_JUSTIFICATION_REQUIRED",
+                "target user, ticket number and reason are required");
+        }
+        authorizationService.requireManageTask(id, PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE);
+        long operatorId = PrincipalHolder.current().orElseThrow().userId();
+        String reason = "[" + body.ticketNo().trim() + "] " + body.reason().trim();
+        auditService.execute(
+            () -> engine.adminReassign(id, body.targetUserId(), operatorId, reason),
+            () -> auditService.success("workflow.task.admin_reassign", "TASK", id,
+                AuditService.RiskLevel.CRITICAL,
+                Map.of("changedFields", List.of("assigneeId")),
+                Map.of("targetUserId", body.targetUserId(), "ticketNo", body.ticketNo())));
+    }
+
     private static String asString(Object o) { return o == null ? null : o.toString(); }
 
     private static Map<String, Object> commentMetadata(Map<String, Object> body) {
@@ -190,4 +223,5 @@ public class TaskController {
     public enum OverrideAction { APPROVE, REJECT }
     public record OverrideRequest(OverrideAction action, String ticketNo, String reason,
                                   String rejectToNodeId) { }
+    public record ReassignRequest(Long targetUserId, String ticketNo, String reason) { }
 }

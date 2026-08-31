@@ -5,11 +5,15 @@ import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinitionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashSet;
@@ -26,6 +30,8 @@ public class ProcessDefinitionService {
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper json;
     private final WebhookSecurityPolicy webhookSecurityPolicy;
+    @Autowired(required = false)
+    private DefinitionVersionRepository versions;
 
     public ProcessDefinitionService(ProcessDefinitionMapper mapper,
                                     FormDefinitionService formDefinitionService,
@@ -92,17 +98,21 @@ public class ProcessDefinitionService {
                 "Associated form must be PUBLISHED before publishing the flow");
         }
 
+        pd.setProcess(normalizeConditionValues(pd.getProcess(), fd.getSchema()));
         validateProcessTree(pd.getProcess(),
             formDefinitionService.leafFieldTypes(fd.getSchema()));
 
         pd.setStatus("PUBLISHED");
         pd.setVersion(pd.getVersion() + 1);
         mapper.updateById(pd);
+        if (versions != null) versions.publishProcess(pd, fd);
         return pd;
     }
 
     public ProcessDefinition latestPublishedForForm(Long formDefId) {
-        return mapper.selectOne(new QueryWrapper<ProcessDefinition>()
+        ProcessDefinition published = versions == null ? null
+            : versions.runtimeProcessForForm(formDefId);
+        return published != null ? published : mapper.selectOne(new QueryWrapper<ProcessDefinition>()
             .eq("form_def_id", formDefId).eq("status", "PUBLISHED")
             .orderByDesc("version").last("LIMIT 1"));
     }
@@ -116,6 +126,105 @@ public class ProcessDefinitionService {
     public List<ProcessDefinition> list() {
         return mapper.selectList(null);
     }
+
+    /** 将选项条件严格规范化为 Schema 中的真实 value；兼容唯一精确匹配的旧 label。 */
+    public String normalizeConditionValues(String processJson, String formSchema) {
+        try {
+            JsonNode root = json.readTree(processJson == null ? "{}" : processJson);
+            JsonNode schema = json.readTree(formSchema == null ? "[]" : formSchema);
+            Map<String, OptionField> fields = new LinkedHashMap<>();
+            collectOptionFields(schema, fields);
+            normalizeConditions(root, fields);
+            return json.writeValueAsString(root);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException("BAD_FLOW", "条件值规范化失败: " + e.getMessage());
+        }
+    }
+
+    private void collectOptionFields(JsonNode nodes, Map<String, OptionField> fields) {
+        if (!nodes.isArray()) return;
+        for (JsonNode node : nodes) {
+            String type = node.path("type").asText();
+            if (Set.of("select", "radio", "multi_select", "checkbox").contains(type)) {
+                List<JsonNode> options = new ArrayList<>();
+                node.path("props").path("options").forEach(options::add);
+                fields.put(node.path("id").asText(), new OptionField(type, options));
+            }
+            collectOptionFields(node.path("children"), fields);
+        }
+    }
+
+    private void normalizeConditions(JsonNode node, Map<String, OptionField> fields) {
+        if (node == null || node.isNull() || !node.has("id")) return;
+        if (isGateway(node)) {
+            for (JsonNode branch : node.path("branchs")) {
+                normalizeBranchConditions(branch, fields);
+                normalizeConditions(branch.path("children"), fields);
+            }
+        }
+        normalizeConditions(node.path("children"), fields);
+    }
+
+    private boolean isGateway(JsonNode node) {
+        String type = node.path("type").asText();
+        return "CONDITIONS".equals(type) || "PARALLEL".equals(type);
+    }
+
+    private void normalizeBranchConditions(JsonNode branch, Map<String, OptionField> fields) {
+        for (JsonNode group : branch.path("props").path("groups")) {
+            for (JsonNode condition : group.path("conditions")) {
+                OptionField field = fields.get(condition.path("field").asText());
+                if (field == null) continue;
+                String operator = condition.path("operator").asText();
+                boolean multiple = Set.of("multi_select", "checkbox").contains(field.type());
+                if (multiple && !"contains".equals(operator)) {
+                    throw new BizException("BAD_FLOW", "多选字段条件仅支持包含");
+                }
+                if (!multiple && !Set.of("==", "!=", "in").contains(operator)) {
+                    throw new BizException("BAD_FLOW", "单选字段条件仅支持等于、不等于、包含于");
+                }
+                JsonNode value = condition.path("value");
+                if ("in".equals(operator)) {
+                    if (!value.isArray() || value.isEmpty()) {
+                        throw new BizException("BAD_FLOW", "包含于条件必须选择至少一个选项");
+                    }
+                    var normalized = json.createArrayNode();
+                    value.forEach(item -> normalized.add(resolveOptionValue(field, item)));
+                    ((ObjectNode) condition).set("value", normalized);
+                } else {
+                    ((ObjectNode) condition).set("value", resolveOptionValue(field, value));
+                }
+            }
+        }
+    }
+
+    private JsonNode resolveOptionValue(OptionField field, JsonNode configured) {
+        List<JsonNode> labelMatches = new ArrayList<>();
+        for (JsonNode option : field.options()) {
+            JsonNode value = option.path("value");
+            boolean sameValue = configured.equals(value);
+            boolean sameLabel = configured.isTextual()
+                && configured.asText().equals(option.path("label").asText());
+            if (option.path("isOther").asBoolean(false)) {
+                if (sameValue || sameLabel) {
+                    throw new BizException("BAD_FLOW", "动态“其他”选项不能作为流程条件");
+                }
+                continue;
+            }
+            if (sameValue) return value.deepCopy();
+            if (sameLabel) labelMatches.add(value);
+        }
+        if (labelMatches.size() == 1) return labelMatches.get(0).deepCopy();
+        if (labelMatches.size() > 1) {
+            throw new BizException("BAD_FLOW", "条件选项标签重复，无法确定真实值: "
+                + configured.asText());
+        }
+        throw new BizException("BAD_FLOW", "条件选项不存在: " + configured.asText());
+    }
+
+    private record OptionField(String type, List<JsonNode> options) { }
 
     public List<ProcessDefinition> listAuthorized(long userId, boolean admin) {
         if (admin) return list();
@@ -149,6 +258,8 @@ public class ProcessDefinitionService {
             if (!walk(root, new HashSet<>(), fieldTypes)) {
                 throw new BizException("BAD_FLOW", "审批流程至少需要 1 个审批节点");
             }
+            validateRootSettings(root);
+            validateRejectTargets(root, root);
         } catch (BizException e) {
             throw e;
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -196,6 +307,10 @@ public class ProcessDefinitionService {
             }
             case "CONDITION" -> {}
             case "PARALLEL" -> {
+                String joinMode = n.path("props").path("joinMode").asText("ALL");
+                if (!Set.of("ALL", "ANY", "AND", "OR").contains(joinMode)) {
+                    throw new BizException("BAD_FLOW", "并行网关汇聚方式必须是 ALL 或 ANY");
+                }
                 com.fasterxml.jackson.databind.JsonNode branchs = n.path("branchs");
                 if (!branchs.isArray() || branchs.size() < 2) {
                     throw new BizException("BAD_FLOW", "并行网关至少需要 2 个分支");
@@ -374,6 +489,7 @@ public class ProcessDefinitionService {
         boolean empty = switch (at) {
             case "ASSIGN_USER" -> p.path("assignedUser").size() == 0;
             case "ROLE" -> p.path("role").size() == 0;
+            case "FIELD_USER" -> p.path("fieldUser").path("fieldId").asText().isBlank();
             case "LEADER", "DIRECT_MANAGER", "SELF", "SELF_SELECT" -> false;
             default -> true;
         };
@@ -385,7 +501,79 @@ public class ProcessDefinitionService {
                     + " 的直属上级层级必须为 1 到 10");
             }
         }
+        if ("FIELD_USER".equals(at)) {
+            String fieldId = p.path("fieldUser").path("fieldId").asText();
+            if (!Set.of("user_picker").contains(fieldTypes.get(fieldId))) {
+                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                    + " 的表单审批人字段必须是人员选择字段");
+            }
+        }
+        String mode = p.path("mode").asText("ANY");
+        if (!Set.of("OR", "AND", "ANY", "ALL", "RATIO", "SEQUENTIAL").contains(mode)) {
+            throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                + " 的多人审批方式无效");
+        }
+        if ("RATIO".equals(mode)) {
+            int ratio = p.path("ratio").asInt(p.path("passRatio").asInt(0));
+            if (ratio < 1 || ratio > 100) {
+                throw new BizException("BAD_FLOW", "比例签通过比例必须为 1 到 100");
+            }
+        }
+        validateTimeout(n);
         validateFormPerms(n, fieldTypes);
+    }
+
+    private void validateTimeout(com.fasterxml.jackson.databind.JsonNode node) {
+        var policy = node.path("props").path("timeoutPolicy");
+        if (policy.isMissingNode() || policy.isNull()) return;
+        long minutes = policy.path("afterMinutes").asLong(0);
+        String action = policy.path("action").asText();
+        if (!policy.isObject() || minutes < 1 || minutes > 525_600
+            || !Set.of("REMIND", "ESCALATE", "AUTO_APPROVE").contains(action)) {
+            throw new BizException("BAD_FLOW", "审批节点超时策略无效");
+        }
+        if ("AUTO_APPROVE".equals(action)
+            && !"LOW".equals(policy.path("riskLevel").asText())) {
+            throw new BizException("BAD_FLOW", "仅低风险流程允许超时自动通过");
+        }
+    }
+
+    private void validateRootSettings(com.fasterxml.jackson.databind.JsonNode root) {
+        var settings = root.path("props").path("settings");
+        if (!settings.isObject()) settings = root.path("props");
+        String strategy = settings.path("resubmitStrategy").asText("FULL");
+        if (!Set.of("FULL", "DIFF_CONTINUE").contains(strategy)) {
+            throw new BizException("BAD_FLOW", "重提策略必须是 FULL 或 DIFF_CONTINUE");
+        }
+        var fallback = settings.path("fallbackAssignee");
+        if (!fallback.isMissingNode() && !fallback.isNull()
+            && (!fallback.isObject()
+                || !Set.of("USER", "ROLE").contains(fallback.path("type").asText())
+                || !fallback.path("ids").isArray() || fallback.path("ids").isEmpty())) {
+            throw new BizException("BAD_FLOW", "兜底审批人必须配置用户或角色");
+        }
+    }
+
+    private void validateRejectTargets(com.fasterxml.jackson.databind.JsonNode root,
+                                       com.fasterxml.jackson.databind.JsonNode node) {
+        if (node == null || node.isNull() || !node.has("id")) return;
+        var targets = node.path("props").path("rejectTargets");
+        if (!targets.isMissingNode() && !targets.isNull()) {
+            if (!targets.isArray()) throw new BizException("BAD_FLOW", "驳回目标必须是数组");
+            for (var value : targets) {
+                String targetId = value.asText();
+                var target = com.antflow.engine.tree.ProcessTreeNav.findById(root, targetId);
+                if (target == null || !"APPROVAL".equals(target.path("type").asText())
+                    || !com.antflow.engine.tree.ProcessTreeNav.isAncestor(
+                        root, targetId, node.path("id").asText())) {
+                    throw new BizException("BAD_FLOW", "驳回目标必须是当前节点的上游审批节点");
+                }
+            }
+        }
+        if (node.has("branchs")) {
+            node.path("branchs").forEach(branch -> validateRejectTargets(root, branch));
+        }
+        validateRejectTargets(root, node.path("children"));
     }
 
     /** 校验节点级字段权限：字段必须存在于表单、模式合法、无重复；附件/检查项不可编辑。 */

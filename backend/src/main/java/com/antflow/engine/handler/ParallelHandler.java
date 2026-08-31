@@ -1,11 +1,13 @@
 package com.antflow.engine.handler;
 
 import com.antflow.engine.BizException;
+import com.antflow.engine.WorkflowRuntimeV2;
 import com.antflow.engine.condition.ConditionEvaluator;
 import com.antflow.engine.tree.ProcessTreeNav;
 import com.antflow.task.ProcessInstance;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -26,6 +28,9 @@ public class ParallelHandler implements NodeHandler {
     private final List<NodeHandler> nodeHandlers;
     private final ConditionEvaluator conditionEvaluator;
 
+    @Autowired(required = false)
+    private WorkflowRuntimeV2 runtimeV2;
+
     @Override public boolean supports(String type) { return "PARALLEL".equals(type); }
 
     @Override
@@ -36,15 +41,26 @@ public class ParallelHandler implements NodeHandler {
         }
         List<Long> allTaskIds = new ArrayList<>();
         boolean allCompleted = true;
-        int activeBranchCount = 0;
+        boolean shortCircuited = false;
+        List<JsonNode> activeBranches = new ArrayList<>();
         for (JsonNode branch : branchs) {
-            if (!shouldExecute(branch, ctx.formData())) {
-                continue;
+            if (shouldExecute(branch, ctx.formData())) {
+                activeBranches.add(branch);
+                if (runtimeV2 != null) {
+                    runtimeV2.registerParallelBranch(pi, ctx.nodeInstanceId(),
+                        branch.path("id").asText());
+                }
             }
-            activeBranchCount++;
+        }
+        for (JsonNode branch : activeBranches) {
             JsonNode inner = ProcessTreeNav.childrenOf(branch);
             if (inner == null) {
                 // 空分支视为已完成（发布校验会拒绝，这里防御性跳过）
+                if (runtimeV2 != null) {
+                    shortCircuited = runtimeV2.parallelBranchPassed(pi, root,
+                        node.path("id").asText(), branch.path("id").asText());
+                }
+                if (shortCircuited) break;
                 continue;
             }
             NodeContext branchCtx = new NodeContext(ctx.starterId(), ctx.formData(),
@@ -54,13 +70,17 @@ public class ParallelHandler implements NodeHandler {
             allTaskIds.addAll(result.taskIds());
             if (!result.completed()) {
                 allCompleted = false;
+            } else if (runtimeV2 != null) {
+                shortCircuited = runtimeV2.parallelBranchPassed(pi, root,
+                    node.path("id").asText(), branch.path("id").asText());
+                if (shortCircuited) break;
             }
         }
-        if (activeBranchCount == 0) {
+        if (activeBranches.isEmpty()) {
             throw new BizException("BAD_FLOW", "并行网关没有可执行分支");
         }
         if (allCompleted) {
-            return NodeOutcome.next(ProcessTreeNav.childrenOf(node));
+            return NodeOutcome.next(ProcessTreeNav.next(root, node, ctx.parallelId()));
         }
         pi.setCurrentNodeId(node.path("id").asText());
         return NodeOutcome.halt(allTaskIds);
@@ -103,19 +123,24 @@ public class ParallelHandler implements NodeHandler {
             if (handler == null) {
                 throw new BizException("BAD_NODE_TYPE", "未识别节点类型: " + type);
             }
-            NodeOutcome outcome = handler.handle(root, node, pi, ctx);
+            long nodeInstanceId = runtimeV2 == null ? 0 : runtimeV2.enterNode(pi, node, ctx);
+            NodeOutcome outcome = handler.handle(root, node, pi,
+                nodeInstanceId == 0 ? ctx : ctx.atNode(nodeInstanceId));
             switch (outcome.type()) {
                 case NEXT -> {
+                    if (runtimeV2 != null) runtimeV2.completeNode(nodeInstanceId, "PASSED");
                     ctx = new NodeContext(ctx.starterId(), ctx.formData(), ctx.selfSelected(),
                         node.path("id").asText(null), ctx.parallelId(), ctx.branchId());
                     node = outcome.node();
                 }
                 case JUMP -> {
+                    if (runtimeV2 != null) runtimeV2.completeNode(nodeInstanceId, "PASSED");
                     ctx = new NodeContext(ctx.starterId(), ctx.formData(), ctx.selfSelected(),
                         node.path("id").asText(null), ctx.parallelId(), ctx.branchId());
                     node = outcome.node();
                 }
                 case END -> {
+                    if (runtimeV2 != null) runtimeV2.completeNode(nodeInstanceId, "PASSED");
                     return BranchResult.completed(taskIds);
                 }
                 case HALT -> {

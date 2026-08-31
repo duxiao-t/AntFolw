@@ -1,6 +1,7 @@
 package com.antflow.notify;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +16,7 @@ import java.util.List;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class NotificationPublisher {
 
     private final ApplicationEventPublisher publisher;
@@ -28,8 +30,16 @@ public class NotificationPublisher {
             try {
                 if (l.accepts(e)) l.onEvent(e);
             } catch (Exception ex) {
-                // 异常吞掉，不影响主流程
+                log.warn("Notification listener {} failed: {}", l.name(), ex.toString());
             }
+        }
+    }
+
+    /** Outbox delivery path: listener failure must remain visible so it can be retried. */
+    public void publishReliable(NotificationEvent e) {
+        publisher.publishEvent(e);
+        for (NotificationListener listener : syncListeners) {
+            if (listener.accepts(e)) listener.onEvent(e);
         }
     }
 }

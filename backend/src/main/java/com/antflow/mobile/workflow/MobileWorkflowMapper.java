@@ -8,9 +8,48 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface MobileWorkflowMapper {
+    @Select("SELECT COUNT(*) FROM t_user_notification WHERE user_id = #{userId} AND read_at IS NULL")
+    long countUnreadNotifications(@Param("userId") long userId);
+
+    @Select("""
+        <script>
+        SELECT id, event_type, title,
+               NULLIF(payload->>'instanceId', '')::bigint AS instance_id,
+               NULLIF(payload->>'taskId', '')::bigint AS task_id,
+               created_at, read_at
+        FROM t_user_notification
+        WHERE user_id = #{userId}
+        <if test="unreadOnly">
+          AND read_at IS NULL
+        </if>
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+        </script>
+        """)
+    List<NotificationRow> selectNotifications(@Param("userId") long userId,
+                                              @Param("unreadOnly") boolean unreadOnly,
+                                              @Param("limit") int limit,
+                                              @Param("offset") int offset);
+
+    @Update("""
+        UPDATE t_user_notification SET read_at = COALESCE(read_at, now())
+        WHERE id = #{id} AND user_id = #{userId}
+        """)
+    int markNotificationRead(@Param("id") long id, @Param("userId") long userId);
+
+    @Select("SELECT COUNT(*) FROM t_cc_record WHERE recipient_id = #{userId} AND read_at IS NULL")
+    long countUnreadCc(@Param("userId") long userId);
+
+    @Update("""
+        UPDATE t_cc_record SET read_at = COALESCE(read_at, now())
+        WHERE id = #{id} AND recipient_id = #{userId}
+        """)
+    int markCcRead(@Param("id") long id, @Param("userId") long userId);
+
     @Select("""
         <script>
         SELECT t.id,
@@ -28,7 +67,16 @@ public interface MobileWorkflowMapper {
                pi.status AS instance_status,
                t.created_at,
                t.read_at
-        FROM t_task t
+        FROM (
+          SELECT task.id, task.proc_inst_id, task.node_id, task.assignee_id,
+                 task.task_type, task.status, task.created_at, task.read_at
+          FROM t_task task
+          UNION ALL
+          SELECT 8000000000000000 + cc.id, cc.proc_inst_id, node.node_id, cc.recipient_id,
+                 'CC', 'CC', cc.created_at, cc.read_at
+          FROM t_cc_record cc
+          LEFT JOIN t_process_node_instance node ON node.id = cc.node_instance_id
+        ) t
         JOIN t_process_instance pi ON pi.id = t.proc_inst_id
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
@@ -37,8 +85,8 @@ public interface MobileWorkflowMapper {
         WHERE t.assignee_id = #{userId}
         <choose>
           <when test="view == 'done'">
-            AND t.status != 'PENDING'
-            AND (t.status != 'CC' OR t.read_at IS NOT NULL)
+            AND (t.status IN ('APPROVED', 'REJECTED', 'RESUBMITTED')
+              OR (t.status = 'CC' AND t.read_at IS NOT NULL))
           </when>
           <otherwise>
             AND (t.status = 'PENDING' OR (t.status = 'CC' AND t.read_at IS NULL))
@@ -82,6 +130,7 @@ public interface MobileWorkflowMapper {
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
+          AND pi.current_node_id IS DISTINCT FROM '__rework__'
         <if test="status != null and status != ''">
           AND pi.status = #{status}
         </if>
@@ -115,13 +164,16 @@ public interface MobileWorkflowMapper {
                data.data::text AS form_data_json,
                form.code AS form_code,
                form.name AS form_name,
-               form.schema::text AS form_schema,
+               COALESCE(form_version.schema, form.schema)::text AS form_schema,
                COALESCE(NULLIF(applicant.display_name, ''), applicant.username) AS applicant_name,
                applicant.employee_no AS applicant_employee_no,
                dept.name AS applicant_department
         FROM t_process_instance pi
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
+        LEFT JOIN t_form_data_revision form_revision ON form_revision.id = pi.current_form_revision_id
+        LEFT JOIN t_form_definition_version form_version
+          ON form_version.id = form_revision.form_definition_version_id
         LEFT JOIN t_user applicant ON applicant.id = pi.started_by
         LEFT JOIN t_department dept ON dept.id = applicant.dept_id
         WHERE pi.id = #{instanceId}
@@ -133,6 +185,8 @@ public interface MobileWorkflowMapper {
                pi.id AS instance_id,
                t.node_id,
                t.assignee_id,
+               t.parallel_id,
+               t.node_instance_id,
                COALESCE(t.task_type, 'APPROVAL') AS task_type,
                t.status AS task_status,
                t.created_at AS task_created_at,
@@ -148,14 +202,27 @@ public interface MobileWorkflowMapper {
                data.data::text AS form_data_json,
                form.code AS form_code,
                form.name AS form_name,
-               form.schema::text AS form_schema,
+               COALESCE(form_version.schema, form.schema)::text AS form_schema,
                COALESCE(NULLIF(applicant.display_name, ''), applicant.username) AS applicant_name,
                applicant.employee_no AS applicant_employee_no,
                dept.name AS applicant_department
-        FROM t_task t
+        FROM (
+          SELECT task.id, task.proc_inst_id, task.node_id, task.assignee_id,
+                 task.parallel_id, task.node_instance_id, task.task_type, task.status,
+                 task.created_at, task.read_at
+          FROM t_task task
+          UNION ALL
+          SELECT 8000000000000000 + cc.id, cc.proc_inst_id, node.node_id, cc.recipient_id,
+                 NULL, cc.node_instance_id, 'CC', 'CC', cc.created_at, cc.read_at
+          FROM t_cc_record cc
+          LEFT JOIN t_process_node_instance node ON node.id = cc.node_instance_id
+        ) t
         JOIN t_process_instance pi ON pi.id = t.proc_inst_id
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
+        LEFT JOIN t_form_data_revision form_revision ON form_revision.id = pi.current_form_revision_id
+        LEFT JOIN t_form_definition_version form_version
+          ON form_version.id = form_revision.form_definition_version_id
         LEFT JOIN t_user applicant ON applicant.id = pi.started_by
         LEFT JOIN t_department dept ON dept.id = applicant.dept_id
         WHERE t.id = #{taskId}
@@ -167,15 +234,54 @@ public interface MobileWorkflowMapper {
                t.node_id,
                t.task_type,
                t.status AS task_status,
+               t.parallel_id,
+               t.branch_id,
+               COALESCE(t.operation_kind, CASE
+                 WHEN t.is_additional = TRUE THEN 'ADD_ASSIGNEE'
+                 ELSE (
+                   SELECT h.action
+                   FROM t_task_history h
+                   WHERE h.task_id = t.parent_task_id
+                     AND h.action IN ('TRANSFER', 'DELEGATE')
+                   ORDER BY h.id DESC
+                   LIMIT 1
+                 )
+               END) AS operation_kind,
+               COALESCE(NULLIF(source_operator.display_name, ''), source_operator.username)
+                   AS source_operator_name,
                COALESCE(NULLIF(operator.display_name, ''), operator.username, '未记录') AS operator_name,
                operator.employee_no,
                dept.name AS department,
                t.comment,
                t.created_at AS received_at,
                t.approved_at,
-               t.read_at
-        FROM t_task t
+               t.read_at,
+               COALESCE(runtime_node.round_no, 1 + (
+                 SELECT COUNT(*) FROM t_task prior_rework
+                 WHERE prior_rework.proc_inst_id = t.proc_inst_id
+                   AND prior_rework.task_type = 'REWORK'
+                   AND prior_rework.status = 'RESUBMITTED'
+                   AND prior_rework.created_at < t.created_at
+               ))::int AS round_no
+        FROM (
+          SELECT task.id, task.proc_inst_id, task.node_id, task.task_type, task.status,
+                  task.parallel_id, task.branch_id, task.operation_kind,
+                  task.is_additional, task.parent_task_id, task.assignee_id,
+                  task.approved_by, task.delegated_from, task.comment,
+                  task.created_at, task.approved_at, task.read_at, task.node_instance_id
+          FROM t_task task
+          UNION ALL
+          SELECT 8000000000000000 + cc.id, cc.proc_inst_id, node.node_id, 'CC', 'CC',
+                  NULL, node.branch_id, 'CC', false, NULL, cc.recipient_id,
+                  NULL, NULL, NULL, cc.created_at, NULL, cc.read_at, cc.node_instance_id
+          FROM t_cc_record cc
+          LEFT JOIN t_process_node_instance node ON node.id = cc.node_instance_id
+        ) t
+        LEFT JOIN t_process_node_instance runtime_node ON runtime_node.id = t.node_instance_id
+        LEFT JOIN t_task parent_task ON parent_task.id = t.parent_task_id
         LEFT JOIN t_user operator ON operator.id = COALESCE(t.approved_by, t.assignee_id)
+        LEFT JOIN t_user source_operator
+          ON source_operator.id = COALESCE(t.delegated_from, parent_task.assignee_id)
         LEFT JOIN t_department dept ON dept.id = operator.dept_id
         WHERE t.proc_inst_id = #{instanceId}
         ORDER BY t.created_at, t.id
@@ -243,7 +349,8 @@ public interface MobileWorkflowMapper {
     }
 
     record TaskDetailRow(Long taskId, Long instanceId, String nodeId, Long assigneeId,
-                         String taskType, String taskStatus, OffsetDateTime taskCreatedAt,
+                          String parallelId, Long nodeInstanceId,
+                          String taskType, String taskStatus, OffsetDateTime taskCreatedAt,
                          OffsetDateTime readAt, String instanceStatus, String currentNodeId,
                          String processSnapshot, Long startedBy, OffsetDateTime startedAt,
                          OffsetDateTime finishedAt, Long formDataId, String businessNo,
@@ -253,8 +360,13 @@ public interface MobileWorkflowMapper {
     }
 
     record ApprovalRow(Long taskId, String nodeId, String taskType, String taskStatus,
-                       String operatorName, String employeeNo, String department,
+                       String parallelId, String branchId, String operationKind,
+                       String sourceOperatorName, String operatorName, String employeeNo, String department,
                        String comment, OffsetDateTime receivedAt, OffsetDateTime approvedAt,
-                       OffsetDateTime readAt) {
+                       OffsetDateTime readAt, Integer roundNo) {
+    }
+
+    record NotificationRow(Long id, String eventType, String title, Long instanceId,
+                           Long taskId, OffsetDateTime createdAt, OffsetDateTime readAt) {
     }
 }

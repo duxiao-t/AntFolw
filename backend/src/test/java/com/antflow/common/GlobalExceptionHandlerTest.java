@@ -3,6 +3,7 @@ package com.antflow.common;
 import com.antflow.audit.AuditService;
 import com.antflow.audit.RequestIdFilter;
 import com.antflow.engine.BizException;
+import java.io.IOException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -15,6 +16,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class GlobalExceptionHandlerTest {
     private final AuditService auditService = org.mockito.Mockito.mock(AuditService.class);
@@ -73,5 +75,11 @@ class GlobalExceptionHandlerTest {
         verify(auditService).failure("request.failed", "HTTP_RESOURCE", null,
             AuditService.RiskLevel.HIGH, "FORM_DATA_INVALID",
             Map.of("exceptionType", "BizException"));
+    }
+
+    @Test
+    void ignoresDisconnectedSseClient() {
+        assertEquals(null, handler.handleAny(new IOException("Broken pipe")));
+        verifyNoInteractions(auditService);
     }
 }

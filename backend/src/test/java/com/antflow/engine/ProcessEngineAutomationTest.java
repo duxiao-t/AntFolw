@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -131,5 +132,76 @@ class ProcessEngineAutomationTest {
         assertThat(engine.completeAutomation(6L)).isTrue();
         assertThat(job.getStatus()).isEqualTo("SUCCEEDED");
         verify(histories).insert(any(TaskHistoryEntity.class));
+    }
+
+    @Test
+    void parallelBlockingJobsJoinOnlyAfterEveryBranchCompletes() {
+        ObjectMapper json = new ObjectMapper();
+        TaskMapper tasks = mock(TaskMapper.class);
+        TaskHistoryMapper histories = mock(TaskHistoryMapper.class);
+        ProcessInstanceMapper instances = mock(ProcessInstanceMapper.class);
+        FormDataMapper formDataMapper = mock(FormDataMapper.class);
+        WorkflowJobMapper jobs = mock(WorkflowJobMapper.class);
+        AssigneeResolver resolver = mock(AssigneeResolver.class);
+        NotificationPublisher notifier = mock(NotificationPublisher.class);
+        when(resolver.resolve(eq("join"), any())).thenReturn(List.of(42L));
+        String snapshot = """
+            {"id":"root","type":"ROOT","children":{"id":"p1","type":"PARALLEL",
+              "branchs":[
+                {"id":"b1","type":"BRANCH","children":{"id":"delay-1","type":"DELAY"}},
+                {"id":"b2","type":"BRANCH","children":{"id":"delay-2","type":"DELAY"}}
+              ],"children":{"id":"join","type":"APPROVAL",
+                "props":{"assignedType":"ASSIGN_USER","assignedUser":[42]}}}}
+            """;
+        ProcessInstance instance = new ProcessInstance();
+        instance.setId(9L); instance.setStatus("RUNNING"); instance.setStartedBy(7L);
+        instance.setFormDataId(3L); instance.setProcessSnapshot(snapshot);
+        instance.setCurrentNodeId("p1");
+        when(instances.selectForUpdate(9L)).thenReturn(instance);
+        FormData data = new FormData();
+        data.setData("{}");
+        when(formDataMapper.selectById(3L)).thenReturn(data);
+        WorkflowJob first = blockingJob(5L, "delay-1");
+        WorkflowJob second = blockingJob(6L, "delay-2");
+        when(jobs.selectById(5L)).thenReturn(first);
+        when(jobs.selectById(6L)).thenReturn(second);
+        when(jobs.selectForUpdate(5L)).thenReturn(first);
+        when(jobs.selectForUpdate(6L)).thenReturn(second);
+        when(tasks.selectCount(any())).thenReturn(0L);
+        when(jobs.selectList(any())).thenAnswer(invocation ->
+            List.of(first, second).stream()
+                .filter(job -> List.of("SCHEDULED", "RUNNING", "FAILED")
+                    .contains(job.getStatus()))
+                .toList());
+        List<TaskEntity> inserted = new ArrayList<>();
+        when(tasks.insert(any(TaskEntity.class))).thenAnswer(invocation -> {
+            TaskEntity task = invocation.getArgument(0);
+            task.setId(11L);
+            inserted.add(task);
+            return 1;
+        });
+        when(tasks.selectById(11L)).thenAnswer(invocation -> inserted.get(0));
+        ProcessEngine engine = new ProcessEngine(
+            mock(FormDefinitionService.class), formDataMapper,
+            mock(ProcessDefinitionService.class), tasks, instances,
+            new TaskMapperExt(instances), histories,
+            List.of(new EmptyHandler(), new ApprovalHandler(resolver, tasks, histories)),
+            notifier, json, mock(FormalNumberService.class), jobs,
+            mock(AuthorizationService.class));
+
+        assertThat(engine.completeAutomation(5L)).isTrue();
+        assertThat(inserted).isEmpty();
+        second.setStatus("RUNNING");
+        assertThat(engine.completeAutomation(6L)).isTrue();
+        assertThat(inserted).extracting(TaskEntity::getNodeId).containsExactly("join");
+        verify(notifier).publish(any(com.antflow.notify.NotificationEvent.class));
+    }
+
+    private static WorkflowJob blockingJob(long id, String nodeId) {
+        WorkflowJob job = new WorkflowJob();
+        job.setId(id); job.setProcInstId(9L); job.setNodeId(nodeId);
+        job.setJobType("DELAY"); job.setStatus("RUNNING"); job.setBlocking(true);
+        job.setDeliveryId(UUID.randomUUID());
+        return job;
     }
 }

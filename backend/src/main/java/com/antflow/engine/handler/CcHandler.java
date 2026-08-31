@@ -1,5 +1,6 @@
 package com.antflow.engine.handler;
 
+import com.antflow.engine.WorkflowRuntimeV2;
 import com.antflow.engine.tree.ProcessTreeNav;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.TaskEntity;
@@ -8,6 +9,7 @@ import com.antflow.task.TaskHistoryMapper;
 import com.antflow.task.TaskMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -23,12 +25,19 @@ public class CcHandler implements NodeHandler {
     private final TaskMapper taskMapper;
     private final TaskHistoryMapper historyMapper;
 
+    @Autowired(required = false)
+    private WorkflowRuntimeV2 runtimeV2;
+
     @Override public boolean supports(String type) { return "CC".equals(type); }
 
     @Override
     public NodeOutcome handle(JsonNode root, JsonNode node, ProcessInstance pi, NodeContext ctx) {
         var ccUsers = readIds(node.path("props").path("assignedUser"));
         for (Long u : ccUsers) {
+            if (runtimeV2 != null && runtimeV2.active(pi)) {
+                runtimeV2.recordCc(pi, ctx.nodeInstanceId(), u);
+                continue;
+            }
             TaskEntity ct = new TaskEntity();
             ct.setProcInstId(pi.getId());
             ct.setNodeId(node.path("id").asText());
@@ -46,7 +55,7 @@ public class CcHandler implements NodeHandler {
         h.setAction("CC");
         h.setOperatorId(ctx.starterId());
         historyMapper.insert(h);
-        return NodeOutcome.next(ProcessTreeNav.childrenOf(node));
+        return NodeOutcome.next(ProcessTreeNav.next(root, node, ctx.parallelId()));
     }
 
     private static List<Long> readIds(JsonNode arr) {

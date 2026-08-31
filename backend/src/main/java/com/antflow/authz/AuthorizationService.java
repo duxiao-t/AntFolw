@@ -381,20 +381,27 @@ public class AuthorizationService {
         return Boolean.TRUE.equals(result);
     }
 
-    private boolean isParticipant(long instanceId, long userId) {
+    boolean isParticipant(long instanceId, long userId) {
         Long count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*) FROM t_task
-            WHERE proc_inst_id = ?
-              AND (assignee_id = ? OR approved_by = ? OR delegated_from = ?)
-            """, Long.class, instanceId, userId, userId, userId);
+            SELECT (SELECT COUNT(*) FROM t_task
+                    WHERE proc_inst_id = ?
+                      AND ((assignee_id = ? AND status NOT IN ('SKIPPED', 'CANCELLED'))
+                        OR approved_by = ?))
+                 + (SELECT COUNT(*) FROM t_cc_record
+                    WHERE proc_inst_id = ? AND recipient_id = ?)
+            """, Long.class, instanceId, userId, userId, instanceId, userId);
         return count != null && count > 0;
     }
 
-    private boolean isReadableTaskAssignee(long instanceId, long userId) {
+    boolean isReadableTaskAssignee(long instanceId, long userId) {
         Long count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*) FROM t_task
-            WHERE proc_inst_id = ? AND assignee_id = ? AND status IN ('PENDING', 'CC')
-            """, Long.class, instanceId, userId);
+            SELECT (SELECT COUNT(*) FROM t_task
+                    WHERE proc_inst_id = ?
+                      AND ((assignee_id = ? AND status IN ('PENDING', 'CC'))
+                        OR (approved_by = ? AND status IN ('APPROVED', 'REJECTED'))))
+                 + (SELECT COUNT(*) FROM t_cc_record
+                    WHERE proc_inst_id = ? AND recipient_id = ?)
+            """, Long.class, instanceId, userId, userId, instanceId, userId);
         return count != null && count > 0;
     }
 
