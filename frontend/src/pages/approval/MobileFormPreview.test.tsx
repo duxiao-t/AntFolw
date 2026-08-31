@@ -1,127 +1,39 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { SchemaNode } from '../../registry/types';
-import MobileFormPreview, {
-  collectPreviewFieldErrors,
-} from './MobileFormPreview';
-
-const schema: SchemaNode[] = [
-  {
-    id: 'row',
-    type: 'span_layout',
-    label: '基本信息',
-    props: { dividerColor: '#123456' },
-    children: [
-      {
-        id: 'name',
-        type: 'text',
-        label: '姓名',
-        props: { required: true, placeholder: '请输入姓名' },
-      },
-      {
-        id: 'startDate',
-        type: 'date',
-        label: '开始日期',
-        props: { required: true },
-      },
-    ],
-  },
-  {
-    id: 'reason',
-    type: 'textarea',
-    label: '事由',
-    props: { placeholder: '请输入事由' },
-  },
-];
+import MobileFormPreview from './MobileFormPreview';
 
 describe('MobileFormPreview', () => {
-  it('renders the publish preview with flat mobile form fields', () => {
-    const onValueChange = vi.fn();
-    const onSaveDraft = vi.fn();
-    const onSubmit = vi.fn();
-
-    const { container } = render(
-      <MobileFormPreview
-        title="请假申请"
-        schema={schema}
-        values={{}}
-        errors={{ reason: '请填写事由' }}
-        onValueChange={onValueChange}
-        onSaveDraft={onSaveDraft}
-        onSubmit={onSubmit}
-      />,
-    );
-
-    expect(screen.getByTestId('mobile-form-preview')).toBeInTheDocument();
-    expect(container.firstElementChild).toHaveClass('approval-mobile-preview');
-    expect(screen.getByText('填写表单')).toBeInTheDocument();
-    expect(screen.getByText('预览模式')).toBeInTheDocument();
-    expect(screen.getByText('姓名')).toBeInTheDocument();
-    expect(screen.getByText('事由')).toBeInTheDocument();
-    expect(screen.getByText('请填写事由')).toBeInTheDocument();
-    expect(container.querySelector('.preview-span-layout'))
-      .toHaveStyle({ borderBottom: '1px solid #123456' });
-
-    fireEvent.change(screen.getByPlaceholderText('请输入姓名'), {
-      target: { value: '张三' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
-    fireEvent.click(screen.getByRole('button', { name: '提交' }));
-
-    expect(onValueChange).toHaveBeenCalledWith('name', '张三');
-    expect(onSaveDraft).toHaveBeenCalled();
-    expect(onSubmit).toHaveBeenCalled();
-  });
-
-  it('collects field-level errors for mobile preview validation', () => {
-    expect(collectPreviewFieldErrors(schema, {})).toMatchObject({
-      name: '请填写姓名',
-      startDate: '请填写开始日期',
-    });
-  });
-
-  it('renders and validates matrix cells in the mobile preview', () => {
-    const matrixSchema: SchemaNode[] = [{
-      id: 'matrix',
-      type: 'matrix_fill',
-      label: '检查矩阵',
-      props: {
-        rows: [{ id: 'row_1', label: '设备' }],
-        columns: [{ id: 'col_1', label: '结果' }],
-        cellType: 'textarea',
-        maxRows: 2,
-        maxColumns: 2,
-        maxLength: 20,
-        precision: 0,
-        required: true,
-      },
-    }];
+  it('sends the form schema to the real mobile preview route', () => {
     render(
       <MobileFormPreview
-        title="检查表"
-        schema={matrixSchema}
-        values={{}}
-        onValueChange={vi.fn()}
-        onSubmit={vi.fn()}
+        title="请假申请"
+        description="请填写请假信息"
+        schema={[{ id: 'reason', type: 'text', label: '原因' }]}
       />,
     );
-    expect(screen.getByText('设备')).toBeInTheDocument();
-    expect(screen.getByLabelText('设备 / 结果')).toBeInTheDocument();
-    expect(collectPreviewFieldErrors(matrixSchema, {}).matrix)
-      .toBe('请填写“设备 / 结果”');
-  });
+    const iframe = screen.getByTitle('手机端表单预览') as HTMLIFrameElement;
+    const postMessage = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
 
-  it('skips hidden required fields for in conditions', () => {
-    const conditional: SchemaNode[] = [{
-      id: 'detail',
-      type: 'text',
-      label: '详情',
-      props: {
-        required: true,
-        displayCondition: { fieldId: 'kind', operator: 'in', value: ['a', 'b'] },
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        origin: window.location.origin,
+        source: iframe.contentWindow,
+        data: { type: 'antflow:form-preview:ready' },
+      }),
+    );
+
+    expect(iframe).toHaveAttribute('src', '/mobile/form-preview');
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: 'antflow:form-preview:set',
+        payload: {
+          title: '请假申请',
+          description: '请填写请假信息',
+          schema: [{ id: 'reason', type: 'text', label: '原因' }],
+        },
       },
-    }];
-    expect(collectPreviewFieldErrors(conditional, { kind: 'c' })).toEqual({});
-    expect(collectPreviewFieldErrors(conditional, { kind: 'b' })).toEqual({ detail: '请填写详情' });
+      window.location.origin,
+    );
   });
 });

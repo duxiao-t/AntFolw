@@ -1,4 +1,11 @@
+import {
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { history, request, useLocation, useModel, useParams } from '@umijs/max';
 import {
   Alert,
   Button,
@@ -8,33 +15,24 @@ import {
   Input,
   List,
   Modal,
+  message,
   Select,
   Space,
   Steps,
   Switch,
   Tag,
-  message,
   theme,
 } from 'antd';
-import {
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ExclamationCircleOutlined,
-} from '@ant-design/icons';
-import { history, request, useLocation, useModel, useParams } from '@umijs/max';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
 import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
-import MobileFormPreview, {
-  collectPreviewFieldErrors,
-} from './MobileFormPreview';
 import FormGrantUserPicker, {
   type GrantDepartment,
   type GrantUser,
 } from './FormGrantUserPicker';
+import MobileFormPreview from './MobileFormPreview';
 
 type FormDefinition = {
   id: number;
@@ -92,7 +90,9 @@ function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
   }
 }
 
-function getWorkflowEnabled(settings: Record<string, any> | string | undefined) {
+function getWorkflowEnabled(
+  settings: Record<string, any> | string | undefined,
+) {
   return !!parseJsonValue<Record<string, any>>(settings, {}).workflowEnabled;
 }
 
@@ -162,15 +162,14 @@ export default function FormManagementWizard() {
   const qc = useQueryClient();
   const [form] = Form.useForm();
   const { token } = theme.useToken();
-  const [previewValue, setPreviewValue] = useState<Record<string, any>>({});
-  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
   const id = params.id;
   const isNew = !id || id === 'new';
   const formId = isNew ? null : Number(id);
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const canManageGrants = isAdmin
-    || (currentUser?.permissions ?? []).includes('form.authorization.manage');
+  const canManageGrants =
+    isAdmin ||
+    (currentUser?.permissions ?? []).includes('form.authorization.manage');
 
   const { data: definition } = useQuery<FormDefinition>({
     queryKey: ['form-management-definition', formId],
@@ -189,7 +188,9 @@ export default function FormManagementWizard() {
     queryKey: ['form-management-process', formId],
     queryFn: async () => {
       try {
-        return await request<ProcessDefinition>(`/api/processes/definitions/draft/by-form/${formId}`);
+        return await request<ProcessDefinition>(
+          `/api/processes/definitions/draft/by-form/${formId}`,
+        );
       } catch {
         return null;
       }
@@ -205,18 +206,30 @@ export default function FormManagementWizard() {
 
   const { data: grantCandidates } = useQuery<FormGrantCandidates>({
     queryKey: ['form-management-grant-candidates', formId ?? 'new'],
-    queryFn: () => request<FormGrantCandidates>(
-      formId ? `/api/forms/${formId}/grants/candidates` : '/api/forms/grant-candidates',
-    ),
+    queryFn: () =>
+      request<FormGrantCandidates>(
+        formId
+          ? `/api/forms/${formId}/grants/candidates`
+          : '/api/forms/grant-candidates',
+      ),
     enabled: canManageGrants,
   });
-  const initialGrantUsers: GrantUser[] = formGrant?.users ?? (currentUser?.id ? [{
-    id: currentUser.id,
-    username: currentUser.username ?? '',
-    displayName: currentUser.displayName ?? currentUser.name ?? currentUser.username,
-    employeeNo: currentUser.employeeNo,
-    departmentId: currentUser.departmentId,
-  }] : []);
+  const initialGrantUsers: GrantUser[] =
+    formGrant?.users ??
+    (currentUser?.id
+      ? [
+          {
+            id: currentUser.id,
+            username: currentUser.username ?? '',
+            displayName:
+              currentUser.displayName ??
+              currentUser.name ??
+              currentUser.username,
+            employeeNo: currentUser.employeeNo,
+            departmentId: currentUser.departmentId,
+          },
+        ]
+      : []);
 
   const schema = useMemo(
     () => parseJsonValue<SchemaNode[]>(definition?.schema, []),
@@ -319,38 +332,29 @@ export default function FormManagementWizard() {
         userIds: formGrant.userIds,
         roleIds: isAdmin ? formGrant.roleIds : [],
       });
-    } else if (canManageGrants && isNew && form.getFieldValue('userIds') === undefined) {
+    } else if (
+      canManageGrants &&
+      isNew &&
+      form.getFieldValue('userIds') === undefined
+    ) {
       form.setFieldsValue({
         userIds: currentUser?.id ? [currentUser.id] : [],
         roleIds: [],
       });
     }
-  }, [canManageGrants, currentUser?.id, definition, form, formGrant, isAdmin, isNew]);
+  }, [
+    canManageGrants,
+    currentUser?.id,
+    definition,
+    form,
+    formGrant,
+    isAdmin,
+    isNew,
+  ]);
 
   const goStep = (key: string, nextId = formId) => {
     if (!nextId) return;
     history.push(`/approval/forms/${nextId}/wizard?step=${key}`);
-  };
-
-  const handlePreviewSubmit = () => {
-    const validationErrors = collectPreviewFieldErrors(previewSchema, previewValue);
-    setPreviewErrors(validationErrors);
-    const firstError = Object.values(validationErrors)[0];
-    if (firstError) {
-      message.error(firstError);
-      return;
-    }
-    message.success('模拟提交校验通过');
-  };
-
-  const handlePreviewValueChange = (fieldId: string, value: any) => {
-    setPreviewValue((current) => ({ ...current, [fieldId]: value }));
-    setPreviewErrors((current) => {
-      if (!current[fieldId]) return current;
-      const next = { ...current };
-      delete next[fieldId];
-      return next;
-    });
   };
 
   const saveBasic = useMutation({
@@ -373,17 +377,24 @@ export default function FormManagementWizard() {
       if (!canManageGrants) return saved;
 
       try {
-        const latestGrant = await request<FormGrant>(`/api/forms/${saved.id}/grants`);
-        const userIds = Array.isArray(values.userIds) ? values.userIds : latestGrant.userIds;
-        const roleIds = Array.isArray(values.roleIds) ? values.roleIds : latestGrant.roleIds;
+        const latestGrant = await request<FormGrant>(
+          `/api/forms/${saved.id}/grants`,
+        );
+        const userIds = Array.isArray(values.userIds)
+          ? values.userIds
+          : latestGrant.userIds;
+        const roleIds = Array.isArray(values.roleIds)
+          ? values.roleIds
+          : latestGrant.roleIds;
         await request<FormGrant>(`/api/forms/${saved.id}/grants`, {
           method: 'PUT',
           data: { userIds, roleIds, version: latestGrant.version },
         });
       } catch (error: any) {
-        const grantError = error instanceof Error
-          ? error
-          : new Error(error?.message ?? '表单管理员保存失败');
+        const grantError =
+          error instanceof Error
+            ? error
+            : new Error(error?.message ?? '表单管理员保存失败');
         (grantError as any).formId = saved.id;
         throw grantError;
       }
@@ -400,8 +411,12 @@ export default function FormManagementWizard() {
     },
     onError: (error: any) => {
       if (error?.formId) {
-        qc.invalidateQueries({ queryKey: ['form-management-definition', error.formId] });
-        qc.invalidateQueries({ queryKey: ['form-management-grant', error.formId] });
+        qc.invalidateQueries({
+          queryKey: ['form-management-definition', error.formId],
+        });
+        qc.invalidateQueries({
+          queryKey: ['form-management-grant', error.formId],
+        });
         goStep('basic', error.formId);
       }
       message.error(error?.message ?? '保存失败');
@@ -521,10 +536,18 @@ export default function FormManagementWizard() {
           workflowEnabled: getWorkflowEnabled(definition?.settings),
         }}
       >
-        <Form.Item label="表单名称" name="name" rules={[{ required: true, message: '请输入表单名称' }]}>
+        <Form.Item
+          label="表单名称"
+          name="name"
+          rules={[{ required: true, message: '请输入表单名称' }]}
+        >
           <Input placeholder="例如：请假申请" />
         </Form.Item>
-        <Form.Item label="表单编码" name="code" rules={[{ required: true, message: '请输入表单编码' }]}>
+        <Form.Item
+          label="表单编码"
+          name="code"
+          rules={[{ required: true, message: '请输入表单编码' }]}
+        >
           <Input disabled={!!formId} placeholder="例如：leave_request" />
         </Form.Item>
         <Form.Item
@@ -551,17 +574,27 @@ export default function FormManagementWizard() {
                 gap: 16,
               }}
             >
-              <Form.Item label="用户管理员" name="userIds" style={{ marginBottom: 0 }}>
+              <Form.Item
+                label="用户管理员"
+                name="userIds"
+                style={{ marginBottom: 0 }}
+              >
                 <FormGrantUserPicker
                   users={initialGrantUsers}
                   departments={grantCandidates?.departments ?? []}
-                  endpoint={formId
-                    ? `/api/forms/${formId}/grants/user-candidates`
-                    : '/api/forms/grant-user-candidates'}
+                  endpoint={
+                    formId
+                      ? `/api/forms/${formId}/grants/user-candidates`
+                      : '/api/forms/grant-user-candidates'
+                  }
                 />
               </Form.Item>
               {isAdmin && (
-                <Form.Item label="角色管理员" name="roleIds" style={{ marginBottom: 0 }}>
+                <Form.Item
+                  label="角色管理员"
+                  name="roleIds"
+                  style={{ marginBottom: 0 }}
+                >
                   <Select
                     mode="multiple"
                     showSearch={{ optionFilterProp: 'label' }}
@@ -577,10 +610,16 @@ export default function FormManagementWizard() {
         )}
       </Form>
       <Space>
-        <Button type="primary" loading={saveBasic.isPending} onClick={() => saveBasic.mutate()}>
+        <Button
+          type="primary"
+          loading={saveBasic.isPending}
+          onClick={() => saveBasic.mutate()}
+        >
           保存并进入表单制作
         </Button>
-        <Button onClick={() => history.push('/approval/forms')}>返回列表</Button>
+        <Button onClick={() => history.push('/approval/forms')}>
+          返回列表
+        </Button>
       </Space>
     </Card>
   );
@@ -591,7 +630,9 @@ export default function FormManagementWizard() {
         return <CheckCircleOutlined style={{ color: token.colorSuccess }} />;
       }
       if (status === 'warning') {
-        return <ExclamationCircleOutlined style={{ color: token.colorWarning }} />;
+        return (
+          <ExclamationCircleOutlined style={{ color: token.colorWarning }} />
+        );
       }
       return <CloseCircleOutlined style={{ color: token.colorError }} />;
     };
@@ -610,13 +651,6 @@ export default function FormManagementWizard() {
             title={definition?.name ?? '未命名表单'}
             description={definition?.description}
             schema={previewSchema}
-            values={previewValue}
-            errors={previewErrors}
-            savePending={saveDraft.isPending}
-            submitDisabled={previewSchema.length === 0}
-            onValueChange={handlePreviewValueChange}
-            onSaveDraft={() => saveDraft.mutate()}
-            onSubmit={handlePreviewSubmit}
           />
         </Card>
 
@@ -671,10 +705,15 @@ export default function FormManagementWizard() {
               />
             )}
             <Space wrap>
-              <Button onClick={() => goStep(workflowEnabled ? 'process' : 'designer')}>
+              <Button
+                onClick={() => goStep(workflowEnabled ? 'process' : 'designer')}
+              >
                 上一步
               </Button>
-              <Button loading={saveDraft.isPending} onClick={() => saveDraft.mutate()}>
+              <Button
+                loading={saveDraft.isPending}
+                onClick={() => saveDraft.mutate()}
+              >
                 保存草稿
               </Button>
               <Button
@@ -709,8 +748,24 @@ export default function FormManagementWizard() {
         />
       </Card>
       {currentKey === 'basic' && renderBasic()}
-      {currentKey === 'designer' && formId && <FormDesignerSurface formId={formId} embedded onSaved={() => qc.invalidateQueries({ queryKey: ['form-management-definition'] })} />}
-      {currentKey === 'process' && workflowEnabled && formId && <ProcessDesignerSurface formDefId={formId} embedded onSaved={() => qc.invalidateQueries({ queryKey: ['form-management-process'] })} />}
+      {currentKey === 'designer' && formId && (
+        <FormDesignerSurface
+          formId={formId}
+          embedded
+          onSaved={() =>
+            qc.invalidateQueries({ queryKey: ['form-management-definition'] })
+          }
+        />
+      )}
+      {currentKey === 'process' && workflowEnabled && formId && (
+        <ProcessDesignerSurface
+          formDefId={formId}
+          embedded
+          onSaved={() =>
+            qc.invalidateQueries({ queryKey: ['form-management-process'] })
+          }
+        />
+      )}
       {currentKey === 'publish' && renderPublish()}
     </PageContainer>
   );

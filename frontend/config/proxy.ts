@@ -12,6 +12,11 @@
 export default {
   // AntFlow: dev server on :8000 forwards /api/** to the default backend port.
   dev: {
+    '/mobile/': {
+      target: process.env.ANTFLOW_MOBILE_TARGET ?? 'http://localhost:5173',
+      changeOrigin: true,
+      ws: true,
+    },
     '/api/': {
       target: process.env.ANTFLOW_API_TARGET ?? 'http://localhost:8080',
       changeOrigin: true,
