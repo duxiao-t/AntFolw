@@ -42,7 +42,7 @@ export type ProcessCondition = {
   id: string;
   field: string;
   operator: ConditionOperator;
-  value: string | string[];
+  value: string | number | Array<string | number>;
 };
 
 export type ProcessConditionGroup = {
@@ -69,6 +69,11 @@ export type FormFieldOption = {
   id: string;
   label: string;
   type: string;
+  options?: Array<{
+    label: string;
+    value: string | number;
+    isOther?: boolean;
+  }>;
 };
 
 export const APPROVAL_PROPS = () => ({

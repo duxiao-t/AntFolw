@@ -21,7 +21,7 @@ export function ApprovalNode({ node }: { node: TreeNode }) {
       node={node}
       kind="approval"
       icon={<UserSwitchOutlined />}
-      summary={`${summary} · ${props.mode === 'AND' ? '会签' : '或签'}`}
+      summary={`${summary} · ${{ AND: '会签', ALL: '会签', RATIO: '比例签', SEQUENTIAL: '顺签' }[props.mode as string] ?? '或签'}`}
     />
   );
 }

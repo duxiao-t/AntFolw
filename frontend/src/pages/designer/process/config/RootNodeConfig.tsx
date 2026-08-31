@@ -1,4 +1,4 @@
-import { Alert, Form, Input } from 'antd';
+import { Alert, Divider, Form, Input, Radio, Switch } from 'antd';
 import { AssigneePicker } from '../../../../components/AssigneePicker';
 import type { TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
@@ -32,6 +32,38 @@ export function RootNodeConfig({ node }: { node: TreeNode }) {
           mode="user"
           value={p.assignedUser ?? []}
           onChange={(ids) => set({ assignedUser: ids })}
+        />
+      </Form.Item>
+      <Divider />
+      <Form.Item label="驳回修改后重新提交">
+        <Radio.Group
+          value={(p.resubmitStrategy as string | undefined) ?? 'FULL'}
+          onChange={(event) => set({ resubmitStrategy: event.target.value })}
+          options={[
+            { value: 'FULL', label: '全部重新审批' },
+            { value: 'DIFF_CONTINUE', label: '未变字段续跑' },
+          ]}
+        />
+      </Form.Item>
+      <Form.Item label="发起人是审批人时自动通过">
+        <Switch
+          checked={Boolean(p.skipStarterAsApprover)}
+          onChange={(skipStarterAsApprover) => set({ skipStarterAsApprover })}
+        />
+      </Form.Item>
+      <Form.Item label="连续节点审批人相同时自动通过">
+        <Switch
+          checked={Boolean(p.skipConsecutiveSameApprover)}
+          onChange={(skipConsecutiveSameApprover) =>
+            set({ skipConsecutiveSameApprover })
+          }
+        />
+      </Form.Item>
+      <Form.Item label="流程兜底审批人">
+        <AssigneePicker
+          mode="user"
+          value={(p.fallbackAssignee as { ids?: number[] })?.ids ?? []}
+          onChange={(ids) => set({ fallbackAssignee: { type: 'USER', ids } })}
         />
       </Form.Item>
     </Form>

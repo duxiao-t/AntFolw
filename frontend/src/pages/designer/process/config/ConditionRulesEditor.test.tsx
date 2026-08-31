@@ -23,6 +23,35 @@ vi.mock('antd', async (importOriginal) => {
         </button>
       );
     }
+    if (props.mode === 'multiple') {
+      return (
+        <button
+          type="button"
+          data-testid="multiple-select"
+          onClick={() =>
+            props.onChange?.(
+              props.options?.map((option) => option.value) ?? [],
+              [] as never,
+            )
+          }
+        >
+          {props.options?.map((option) => String(option.label)).join('|')}
+        </button>
+      );
+    }
+    if (props.placeholder === '选择选项') {
+      return (
+        <button
+          type="button"
+          data-testid="option-select"
+          onClick={() =>
+            props.onChange?.(props.options?.[0]?.value as never, {} as never)
+          }
+        >
+          {props.options?.map((option) => String(option.label)).join('|')}
+        </button>
+      );
+    }
     return (
       <span data-testid="select">
         {props.options?.map((option) => String(option.label)).join('|')}
@@ -93,5 +122,46 @@ describe('ConditionRulesEditor', () => {
 
     const next = onChange.mock.calls[0][0] as ProcessConditionProps;
     expect(next.groups?.[0].conditions[0].value).toEqual(['alpha', 'beta']);
+  });
+
+  it('shows option labels but emits their typed values', () => {
+    const onChange = vi.fn();
+    render(
+      <ConditionRulesEditor
+        props={{
+          groups: [
+            {
+              id: 'group-1',
+              groupType: 'AND',
+              conditions: [
+                {
+                  id: 'condition-1',
+                  field: 'kind',
+                  operator: '==',
+                  value: '',
+                },
+              ],
+            },
+          ],
+        }}
+        formFields={[
+          {
+            id: 'kind',
+            label: '类型',
+            type: 'select',
+            options: [
+              { label: '选项一', value: 1 },
+              { label: '其他', value: '__other__', isOther: true },
+            ],
+          },
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByTestId('option-select')).toHaveTextContent('选项一');
+    expect(screen.getByTestId('option-select')).not.toHaveTextContent('其他');
+    fireEvent.click(screen.getByTestId('option-select'));
+    expect(onChange.mock.calls[0][0].groups[0].conditions[0].value).toBe(1);
   });
 });

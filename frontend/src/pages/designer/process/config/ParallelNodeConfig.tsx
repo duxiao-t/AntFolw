@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons';
-import { Alert, Button, Form, Input, Space, Typography } from 'antd';
+import { Alert, Button, Form, Input, Radio, Space, Typography } from 'antd';
 import type { TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
 
@@ -7,6 +7,8 @@ import { useProcessDesignerStore } from '../useProcessDesignerStore';
 export function ParallelNodeConfig({ node }: { node: TreeNode }) {
   const addBranch = useProcessDesignerStore((s) => s.addBranch);
   const updateName = useProcessDesignerStore((s) => s.updateName);
+  const updateProps = useProcessDesignerStore((s) => s.updateProps);
+  const props = node.props ?? {};
   return (
     <Space
       vertical
@@ -21,11 +23,27 @@ export function ParallelNodeConfig({ node }: { node: TreeNode }) {
             onChange={(event) => updateName(node.id, event.target.value)}
           />
         </Form.Item>
+        <Form.Item label="分支汇聚方式" style={{ marginTop: 16, marginBottom: 0 }}>
+          <Radio.Group
+            value={(props.joinMode as string | undefined) ?? 'ALL'}
+            onChange={(event) =>
+              updateProps(node.id, { ...props, joinMode: event.target.value })
+            }
+            options={[
+              { value: 'ALL', label: '全部通过；任一驳回则退回' },
+              { value: 'ANY', label: '任一通过；单分支驳回不影响其他分支' },
+            ]}
+          />
+        </Form.Item>
       </Form>
       <Alert
         type="info"
         showIcon
-        title="并行审批：所有分支的审批都完成后，流程才汇聚到下一步。任一分支被驳回时，整个并行网关驳回。"
+        title={
+          props.joinMode === 'ANY'
+            ? '任一分支通过后立即汇聚；只有所有分支都驳回时才退回。'
+            : '所有分支都通过后才汇聚；任一分支驳回会作废其他分支。'
+        }
       />
       <div>
         <Typography.Text strong>分支</Typography.Text>

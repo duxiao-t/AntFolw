@@ -32,6 +32,26 @@ function find(node: TreeNode | null | undefined, id: string): TreeNode | null {
   return find(node.children, id);
 }
 
+function upstreamApprovals(root: TreeNode, id: string): Array<{ id: string; label: string }> {
+  const path: TreeNode[] = [];
+  const visit = (node: TreeNode | null | undefined): boolean => {
+    if (!node) return false;
+    path.push(node);
+    if (node.id === id) return true;
+    for (const branch of node.branchs ?? []) {
+      if (visit(branch)) return true;
+    }
+    if (visit(node.children)) return true;
+    path.pop();
+    return false;
+  };
+  if (!visit(root)) return [];
+  return path
+    .slice(0, -1)
+    .filter((node) => node.type === 'APPROVAL')
+    .map((node) => ({ id: node.id, label: node.name || '审批人' }));
+}
+
 type FormDefinition = {
   id: number;
   code: string;
@@ -64,6 +84,20 @@ function flattenFormFields(nodes: any[]): FormFieldOption[] {
         id: node.id,
         label: node.label ?? node.props?.label ?? node.id,
         type: node.type,
+        options: Array.isArray(node.props?.options)
+          ? node.props.options
+              .filter(
+                (option: any) =>
+                  option &&
+                  !option.isOther &&
+                  (typeof option.value === 'string' ||
+                    typeof option.value === 'number'),
+              )
+              .map((option: any) => ({
+                label: String(option.label ?? option.value),
+                value: option.value,
+              }))
+          : undefined,
       });
     }
   };
@@ -224,7 +258,11 @@ export function ProcessDesignerSurface({
       >
         {selected?.type === 'ROOT' && <RootNodeConfig node={selected} />}
         {selected?.type === 'APPROVAL' && (
-          <ApprovalNodeConfig node={selected} formFields={formFields} />
+          <ApprovalNodeConfig
+            node={selected}
+            formFields={formFields}
+            rejectTargets={upstreamApprovals(process, selected.id)}
+          />
         )}
         {selected?.type === 'CC' && <CcNodeConfig node={selected} />}
         {selected?.type === 'CONDITION' && (

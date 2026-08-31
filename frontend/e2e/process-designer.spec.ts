@@ -108,39 +108,35 @@ test('process designer renders nested lanes, zoom and trigger drawer without ove
                   type: 'BRANCH',
                   name: '财务复核',
                   props: {
-                    conditionMode: 'WHEN_MATCHED',
-                    groupsType: 'OR',
-                    groups: [
-                      {
-                        groupType: 'AND',
-                        conditions: [
-                          {
-                            id: 'parallel-rule-amount',
-                            field: 'amount',
-                            operator: '>',
-                            value: '1000',
-                          },
-                        ],
-                      },
-                      {
-                        groupType: 'OR',
-                        conditions: [
-                          {
-                            id: 'parallel-rule-type',
-                            field: 'expenseType',
-                            operator: '==',
-                            value: 'travel',
-                          },
-                        ],
-                      },
-                    ],
+                    conditionMode: 'ALWAYS',
                   },
                   children: {
                     id: 'approval-finance',
                     type: 'APPROVAL',
                     name: '财务负责人',
                     props: { assignedType: 'SELF', mode: 'OR' },
-                    children: null,
+                    children: {
+                      id: 'nested-conditions',
+                      type: 'CONDITIONS',
+                      name: '二级条件',
+                      branchs: [
+                        {
+                          id: 'nested-condition-match',
+                          type: 'CONDITION',
+                          name: '需要复核',
+                          props: { groups: [], groupsType: 'OR' },
+                          children: null,
+                        },
+                        {
+                          id: 'nested-condition-default',
+                          type: 'CONDITION',
+                          name: '其他情况',
+                          props: { isDefault: true },
+                          children: null,
+                        },
+                      ],
+                      children: { id: 'nested-condition-join', type: 'EMPTY', children: null },
+                    },
                   },
                 },
                 {
@@ -224,7 +220,7 @@ test('process designer renders nested lanes, zoom and trigger drawer without ove
   ).toBeVisible();
   expect(runtimeErrors).toEqual([]);
   expect(failedResponses).toEqual([]);
-  await expect(page.locator('.pt-band')).toHaveCount(2);
+  await expect(page.locator('.pt-band')).toHaveCount(3);
   await expect(page.getByText('流程校验通过')).toHaveCount(0);
 
   const parallelBand = page.locator('.pt-band[data-node-id="parallel-review"]');
@@ -264,34 +260,25 @@ test('process designer renders nested lanes, zoom and trigger drawer without ove
   expect(addBranchBox?.y ?? 0).toBeGreaterThanOrEqual(
     (plusBox?.y ?? 0) + (plusBox?.height ?? 0),
   );
+  const nestedLastConnectorLeft = await page
+    .locator('[data-node-id="nested-condition-default"] > .pt-band__connector--top')
+    .evaluate((connector) => getComputedStyle(connector, '::before').left);
+  expect(Number.parseFloat(nestedLastConnectorLeft)).toBeLessThan(1);
   await expect(
     page
       .locator('[data-node-id="branch-finance"]')
+      .locator(':scope > .pt-branch > .pt-branch__actions')
       .getByRole('button', { name: '删除分支' }),
   ).toBeEnabled();
 
   await page
-    .locator('[data-node-id="branch-finance"] .pt-branch__main')
+    .locator('[data-node-id="branch-finance"] > .pt-branch > .pt-branch__main')
     .click();
   const branchDrawer = page.locator('.ant-drawer-content-wrapper');
   await expect(branchDrawer.getByText('执行方式')).toBeVisible();
-  await expect(
-    branchDrawer.getByText('满足条件时执行', { exact: true }),
-  ).toBeVisible();
-  await expect(branchDrawer.getByText('条件组之间')).toBeVisible();
-  await expect(
-    branchDrawer.getByText('条件组 1', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    branchDrawer.getByText('条件组 2', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    branchDrawer.getByText('条件组 1（全部条件） 或 条件组 2（任一条件）', {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(branchDrawer.locator('input[value="始终执行"]')).toBeVisible();
   await page.screenshot({
-    path: '../_preview/process-designer-branch-condition-drawer.png',
+    path: '../_preview/process-designer-branch-drawer.png',
     fullPage: false,
     animations: 'disabled',
   });

@@ -24,7 +24,29 @@ const approvalReady = (node: TreeNode): boolean => {
     const level = Number(props.manager?.level);
     return Number.isInteger(level) && level >= 1 && level <= 10;
   }
+  if (props.assignedType === 'FIELD_USER') {
+    return Boolean(props.fieldUser?.fieldId);
+  }
   return ['LEADER', 'SELF', 'SELF_SELECT'].includes(props.assignedType);
+};
+
+const approvalPolicyReady = (node: TreeNode): boolean => {
+  const props = node.props ?? {};
+  const mode = props.mode ?? 'OR';
+  if (!['OR', 'AND', 'ANY', 'ALL', 'RATIO', 'SEQUENTIAL'].includes(mode)) {
+    return false;
+  }
+  if (mode === 'RATIO' && !(Number(props.ratio) >= 1 && Number(props.ratio) <= 100)) {
+    return false;
+  }
+  const timeout = props.timeoutPolicy;
+  return (
+    timeout == null ||
+    (Number(timeout.afterMinutes) >= 1 &&
+      Number(timeout.afterMinutes) <= 525600 &&
+      ['REMIND', 'ESCALATE', 'AUTO_APPROVE'].includes(timeout.action) &&
+      (timeout.action !== 'AUTO_APPROVE' || timeout.riskLevel === 'LOW'))
+  );
 };
 
 const formPermsIssue = (node: TreeNode): string | null => {
@@ -142,6 +164,7 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
     if (node.type === 'APPROVAL' && !approvalReady(node))
       add(node.id, '请配置审批人');
     if (node.type === 'APPROVAL') {
+      if (!approvalPolicyReady(node)) add(node.id, '请配置有效的审批或超时规则');
       const permIssue = formPermsIssue(node);
       if (permIssue) add(node.id, permIssue);
     }
@@ -165,6 +188,9 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
       });
     } else if (node.type === 'PARALLEL') {
       const branches = node.branchs ?? [];
+      if (!['ALL', 'ANY'].includes(node.props?.joinMode ?? 'ALL')) {
+        add(node.id, '请选择有效的并行汇聚方式');
+      }
       if (branches.length < 2) add(node.id, '并行节点至少需要两个分支');
       branches.forEach((branch) => {
         if (!branchConditionReady(branch)) {

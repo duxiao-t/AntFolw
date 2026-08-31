@@ -7,7 +7,12 @@ import type {
   ProcessConditionProps,
 } from '../types';
 
-export type FieldDef = { id: string; label: string; type: string };
+export type FieldDef = {
+  id: string;
+  label: string;
+  type: string;
+  options?: Array<{ label: string; value: string | number; isOther?: boolean }>;
+};
 export type ConditionProps = ProcessConditionProps;
 
 export const displayFieldLabel = (field: FieldDef): string => {
@@ -37,15 +42,38 @@ const emptyCondition = (): ProcessCondition => ({
   value: '',
 });
 
-const listValue = (value: string | string[]): string[] =>
-  Array.isArray(value) ? value : value.trim() ? [value.trim()] : [];
+const listValue = (
+  value: string | number | Array<string | number>,
+): Array<string | number> =>
+  Array.isArray(value)
+    ? value
+    : typeof value === 'number'
+      ? [value]
+      : value.trim()
+        ? [value.trim()]
+        : [];
 
-const scalarValue = (value: string | string[]): string =>
+const scalarValue = (
+  value: string | number | Array<string | number>,
+): string | number =>
   Array.isArray(value) ? (value[0] ?? '') : value;
 
 const normalizedList = (values: string[]): string[] => [
   ...new Set(values.map((value) => value.trim()).filter(Boolean)),
 ];
+
+const SINGLE_OPTION_TYPES = new Set(['select', 'radio']);
+const MULTI_OPTION_TYPES = new Set(['multi_select', 'checkbox']);
+
+function operatorsFor(field?: FieldDef) {
+  if (field && SINGLE_OPTION_TYPES.has(field.type)) {
+    return OPERATORS.filter(({ value }) => ['==', '!=', 'in'].includes(value));
+  }
+  if (field && MULTI_OPTION_TYPES.has(field.type)) {
+    return OPERATORS.filter(({ value }) => value === 'contains');
+  }
+  return OPERATORS;
+}
 
 export function ConditionRulesEditor({
   props,
@@ -149,7 +177,14 @@ export function ConditionRulesEditor({
             </div>
 
             <Space vertical style={{ width: '100%' }} size={8}>
-              {group.conditions.map((condition) => (
+              {group.conditions.map((condition) => {
+                const field = formFields.find(
+                  (item) => item.id === condition.field,
+                );
+                const optionChoices = field?.options?.filter(
+                  (option) => !option.isOther,
+                );
+                return (
                 <Space.Compact key={condition.id} style={{ width: '100%' }}>
                   <Select
                     style={{ width: '42%' }}
@@ -157,12 +192,24 @@ export function ConditionRulesEditor({
                     placeholder="选择字段"
                     popupMatchSelectWidth={280}
                     showSearch={{ optionFilterProp: 'label' }}
-                    onChange={(field: string) =>
+                    onChange={(fieldId: string) =>
                       updateGroup(groupId, (current) => ({
                         ...current,
                         id: groupId,
                         conditions: current.conditions.map((item) =>
-                          item.id === condition.id ? { ...item, field } : item,
+                          item.id === condition.id
+                            ? {
+                                ...item,
+                                field: fieldId,
+                                operator: MULTI_OPTION_TYPES.has(
+                                  formFields.find(({ id }) => id === fieldId)
+                                    ?.type ?? '',
+                                )
+                                  ? 'contains'
+                                  : '==',
+                                value: '',
+                              }
+                            : item,
                         ),
                       }))
                     }
@@ -192,22 +239,46 @@ export function ConditionRulesEditor({
                         ),
                       }))
                     }
-                    options={OPERATORS}
+                    options={operatorsFor(field)}
                   />
                   {condition.operator === 'in' ? (
                     <Select
-                      mode="tags"
+                      mode={optionChoices ? 'multiple' : 'tags'}
                       style={{ width: '26%' }}
                       value={listValue(condition.value)}
                       tokenSeparators={[',']}
                       placeholder="值"
-                      onChange={(values: string[]) =>
+                      options={optionChoices}
+                      onChange={(values: Array<string | number>) =>
                         updateGroup(groupId, (current) => ({
                           ...current,
                           id: groupId,
                           conditions: current.conditions.map((item) =>
                             item.id === condition.id
-                              ? { ...item, value: normalizedList(values) }
+                              ? {
+                                  ...item,
+                                  value: optionChoices
+                                    ? values
+                                    : normalizedList(values as string[]),
+                                }
+                              : item,
+                          ),
+                        }))
+                      }
+                    />
+                  ) : optionChoices ? (
+                    <Select
+                      style={{ width: '26%' }}
+                      value={scalarValue(condition.value) || undefined}
+                      placeholder="选择选项"
+                      options={optionChoices}
+                      onChange={(value: string | number) =>
+                        updateGroup(groupId, (current) => ({
+                          ...current,
+                          id: groupId,
+                          conditions: current.conditions.map((item) =>
+                            item.id === condition.id
+                              ? { ...item, value }
                               : item,
                           ),
                         }))
@@ -247,7 +318,8 @@ export function ConditionRulesEditor({
                     }
                   />
                 </Space.Compact>
-              ))}
+                );
+              })}
               <Button
                 type="dashed"
                 size="small"

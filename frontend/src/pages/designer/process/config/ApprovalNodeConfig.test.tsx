@@ -12,6 +12,10 @@ vi.mock('../useProcessDesignerStore', () => ({
   }),
 }));
 
+vi.mock('../../../../components/AssigneePicker', () => ({
+  AssigneePicker: () => null,
+}));
+
 describe('ApprovalNodeConfig', () => {
   it('edits the reporting manager level without extra introduction content', () => {
     render(
