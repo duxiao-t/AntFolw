@@ -51,6 +51,7 @@ backend/probe*.class
 backend/probe*.out
 backend/probe*.err
 backend/mvn*.log
+backend/audit-*.log
 backend/smoke-run*.out
 backend/smoke-final.out
 backend/backend/

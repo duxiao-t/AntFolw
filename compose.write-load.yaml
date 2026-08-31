@@ -1,0 +1,54 @@
+name: antflow-write-load
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: antflow-write-load-postgres
+    environment:
+      POSTGRES_DB: antflow
+      POSTGRES_USER: antflow
+      POSTGRES_PASSWORD: write-load-postgres-only
+    volumes:
+      - write_load_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antflow -d antflow"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+      target: backend
+    container_name: antflow-write-load-backend
+    ports:
+      - "127.0.0.1:18080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/antflow?stringtype=unspecified
+      SPRING_DATASOURCE_USERNAME: antflow
+      SPRING_DATASOURCE_PASSWORD: write-load-postgres-only
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${HIKARI_POOL_SIZE:-10}
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics
+      JWT_SECRET: 275901518e1677d5506b5857912d003e72d99ffe16aeb3e76157a0d3fa25fd9d
+      MINIO_ENDPOINT: http://unused-minio:9000
+      MINIO_ACCESS_KEY: write-load-minio
+      MINIO_SECRET_KEY: write-load-minio-secret
+      MINIO_BUCKET: write-load-mobile-files
+      MINIO_CREATE_BUCKET: "false"
+      AUDIT_ARCHIVE_ENDPOINT: http://unused-minio:9000
+      AUDIT_ARCHIVE_ACCESS_KEY: write-load-audit
+      AUDIT_ARCHIVE_SECRET_KEY: write-load-audit-secret
+      AUDIT_ARCHIVE_BUCKET: write-load-audit
+      AUDIT_ARCHIVE_CREATE_BUCKET: "false"
+      AUDIT_ARCHIVE_ENCRYPTION_SECRET: 0951281495c69bcbac20ca23ff9c2bc377f0644d00c667cdd8fc71dc087972d0
+      ANTFLOW_INTEGRATION_ENCRYPTION_KEY: 1f18e14876e6422c9853e6bcde25384fd881198430bd575249365050514c10cb
+      ANTFLOW_TIME_ZONE: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  write_load_postgres_data:
