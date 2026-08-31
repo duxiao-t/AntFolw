@@ -232,13 +232,17 @@ public class TaskOperationService {
     /**
      * 列出某个 assignee 当前 PENDING 的任务（含转交/委托/加签产生的子任务）。
      */
-    public List<TaskEntity> listMyInbox(long userId, String status) {
-        var q = new QueryWrapper<TaskEntity>()
-            .eq("assignee_id", userId)
-            .eq("status", status == null ? "PENDING" : status)
-            .ne("status", "SKIPPED")
-            .orderByDesc("created_at");
-        return taskMapper.selectList(q);
+    public List<TaskEntity> listMyInbox(long userId, String status, int limit) {
+        String normalizedStatus = status == null ? "PENDING" : status;
+        String view = "PENDING".equals(normalizedStatus) ? "pending" : "done";
+        return taskMapper.selectTaskPage(userId, view, normalizedStatus,
+            Math.max(1, limit), 0);
+    }
+
+    public long countMyInbox(long userId, String status) {
+        String normalizedStatus = status == null ? "PENDING" : status;
+        String view = "PENDING".equals(normalizedStatus) ? "pending" : "done";
+        return taskMapper.countTaskPage(userId, view, normalizedStatus);
     }
 
     /** 列出某父任务的所有子任务（用于详情页展示转交/加签链路）。 */

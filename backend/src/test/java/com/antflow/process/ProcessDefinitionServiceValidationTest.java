@@ -181,6 +181,33 @@ class ProcessDefinitionServiceValidationTest {
         assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
+    @Test void validate_self_select_multiple_is_boolean_when_present() {
+        String missing = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF_SELECT"}}}
+            """;
+        String multiple = missing.replace("\"assignedType\":\"SELF_SELECT\"",
+            "\"assignedType\":\"SELF_SELECT\",\"selfSelect\":{\"multiple\":true}");
+        String invalid = missing.replace("\"assignedType\":\"SELF_SELECT\"",
+            "\"assignedType\":\"SELF_SELECT\",\"selfSelect\":{\"multiple\":\"true\"}");
+
+        assertThatCode(() -> service.validateProcessTree(missing)).doesNotThrowAnyException();
+        assertThatCode(() -> service.validateProcessTree(multiple)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateProcessTree(invalid))
+            .isInstanceOf(BizException.class).hasMessageContaining("multiple 必须是布尔值");
+    }
+
+    @Test void validate_limits_full_tree_depth_to_fifty_nodes() {
+        assertThatCode(() -> service.validateProcessTree(linearTree(50)))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateProcessTree(linearTree(51)))
+            .isInstanceOf(BizException.class).hasMessageContaining("不能超过 50 层");
+        assertThatCode(() -> service.validateProcessTree(parallelTree(46)))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateProcessTree(parallelTree(47)))
+            .isInstanceOf(BizException.class).hasMessageContaining("不能超过 50 层");
+    }
+
     @Test void validate_accepts_direct_manager_level() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
@@ -360,5 +387,34 @@ class ProcessDefinitionServiceValidationTest {
               {"label":"%s","value":1},{"label":"选项二","value":2},
               {"label":"其他","value":"__antflow_other__","isOther":true}]}}]
             """.formatted(duplicateLabel ? "选项二" : "选项一");
+    }
+
+    private static String linearTree(int depth) {
+        String child = "{\"id\":\"n" + (depth - 1)
+            + "\",\"type\":\"APPROVAL\",\"props\":{\"assignedType\":\"SELF\"}}";
+        for (int index = depth - 2; index >= 1; index--) {
+            child = "{\"id\":\"n" + index + "\",\"type\":\"EMPTY\",\"children\":"
+                + child + "}";
+        }
+        return "{\"id\":\"root\",\"type\":\"ROOT\",\"children\":" + child + "}";
+    }
+
+    private static String parallelTree(int wrappers) {
+        String child = """
+            {"id":"parallel","type":"PARALLEL","props":{"joinMode":"ALL"},
+             "branchs":[
+               {"id":"branch-a","type":"BRANCH","props":{"conditionMode":"ALWAYS"},
+                "children":{"id":"approval-a","type":"APPROVAL",
+                  "props":{"assignedType":"SELF"}}},
+               {"id":"branch-b","type":"BRANCH","props":{"conditionMode":"ALWAYS"},
+                "children":{"id":"approval-b","type":"APPROVAL",
+                  "props":{"assignedType":"SELF"}}}],
+             "children":{"id":"join","type":"EMPTY"}}
+            """;
+        for (int index = wrappers; index >= 1; index--) {
+            child = "{\"id\":\"w" + index + "\",\"type\":\"EMPTY\",\"children\":"
+                + child + "}";
+        }
+        return "{\"id\":\"root\",\"type\":\"ROOT\",\"children\":" + child + "}";
     }
 }

@@ -5,12 +5,18 @@ export type ProcessValidationIssue = {
   message: string;
 };
 
-const hasConfiguredApproval = (node: TreeNode | null | undefined): boolean => {
-  if (!node) return false;
+const MAX_TREE_DEPTH = 50;
+
+const hasConfiguredApproval = (
+  node: TreeNode | null | undefined,
+  depth = 1,
+): boolean => {
+  if (!node || depth > MAX_TREE_DEPTH) return false;
   if (node.type === 'APPROVAL') return true;
   return (
-    (node.branchs ?? []).some(hasConfiguredApproval) ||
-    hasConfiguredApproval(node.children)
+    (node.branchs ?? []).some((branch) =>
+      hasConfiguredApproval(branch, depth + 1),
+    ) || hasConfiguredApproval(node.children, depth + 1)
   );
 };
 
@@ -27,7 +33,17 @@ const approvalReady = (node: TreeNode): boolean => {
   if (props.assignedType === 'FIELD_USER') {
     return Boolean(props.fieldUser?.fieldId);
   }
-  return ['LEADER', 'SELF', 'SELF_SELECT'].includes(props.assignedType);
+  if (props.assignedType === 'SELF_SELECT') {
+    const selfSelect = props.selfSelect;
+    return (
+      selfSelect == null ||
+      (typeof selfSelect === 'object' &&
+        !Array.isArray(selfSelect) &&
+        (selfSelect.multiple === undefined ||
+          typeof selfSelect.multiple === 'boolean'))
+    );
+  }
+  return ['LEADER', 'SELF'].includes(props.assignedType);
 };
 
 const approvalPolicyReady = (node: TreeNode): boolean => {
@@ -159,8 +175,12 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
   const add = (nodeId: string, message: string) =>
     issues.push({ nodeId, message });
 
-  const walk = (node: TreeNode | null | undefined): void => {
+  const walk = (node: TreeNode | null | undefined, depth: number): void => {
     if (!node) return;
+    if (depth > MAX_TREE_DEPTH) {
+      add(node.id, `流程树深度不能超过 ${MAX_TREE_DEPTH} 层`);
+      return;
+    }
     if (node.type === 'APPROVAL' && !approvalReady(node))
       add(node.id, '请配置审批人');
     if (node.type === 'APPROVAL') {
@@ -184,7 +204,7 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
         add(node.id, '条件节点必须且只能有一个默认分支');
       branches.forEach((branch) => {
         if (!conditionReady(branch)) add(branch.id, '请完整配置分支条件');
-        walk(branch.children);
+        walk(branch, depth + 1);
       });
     } else if (node.type === 'PARALLEL') {
       const branches = node.branchs ?? [];
@@ -197,14 +217,14 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
           add(branch.id, '并行分支必须始终执行');
         }
         if (!branch.children) add(branch.id, '并行分支不能为空');
-        walk(branch.children);
+        walk(branch, depth + 1);
       });
     }
-    walk(node.children);
+    walk(node.children, depth + 1);
   };
 
   if (root.type !== 'ROOT') add(root.id, '流程必须从发起人节点开始');
-  walk(root);
+  walk(root, 1);
   if (!hasConfiguredApproval(root)) add(root.id, '流程至少需要一个审批节点');
   return issues;
 }

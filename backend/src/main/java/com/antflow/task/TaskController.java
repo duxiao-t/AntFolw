@@ -25,10 +25,22 @@ public class TaskController {
     private final AuditService auditService;
 
     @GetMapping
-    public List<TaskEntity> myInbox(@RequestParam(defaultValue = "PENDING") String status) {
+    public WorkflowPage<TaskEntity> myInbox(
+            @RequestParam(required = false) String view,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        return ops.listMyInbox(p.userId(), status);
+        String normalizedView = normalizeView(view, status);
+        int normalizedPage = Math.max(1, page);
+        int normalizedSize = Math.min(100, Math.max(1, size));
+        int offset = pageOffset(normalizedPage, normalizedSize);
+        return new WorkflowPage<>(
+            taskMapper.selectTaskPage(p.userId(), normalizedView, normalized(status),
+                normalizedSize, offset),
+            taskMapper.countTaskPage(p.userId(), normalizedView, normalized(status)),
+            normalizedPage, normalizedSize);
     }
 
     @PostMapping("/{id}/approve")
@@ -203,6 +215,29 @@ public class TaskController {
     }
 
     private static String asString(Object o) { return o == null ? null : o.toString(); }
+
+    private static String normalizeView(String view, String status) {
+        if (view == null || view.isBlank()) {
+            return status == null || status.isBlank() || "PENDING".equals(status)
+                ? "pending" : "done";
+        }
+        if (!"pending".equalsIgnoreCase(view) && !"done".equalsIgnoreCase(view)) {
+            throw new BizException("BAD_QUERY", "task view must be pending or done");
+        }
+        return view.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static String normalized(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static int pageOffset(int page, int size) {
+        long offset = (long) (page - 1) * size;
+        if (offset > Integer.MAX_VALUE) {
+            throw new BizException("BAD_QUERY", "page offset is too large");
+        }
+        return (int) offset;
+    }
 
     private static Map<String, Object> commentMetadata(Map<String, Object> body) {
         var metadata = new java.util.LinkedHashMap<String, Object>();

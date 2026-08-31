@@ -26,9 +26,18 @@ export default function RecordListPage() {
           { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 180 },
         ]}
         request={async (params: any) => {
-          const list = await request('/api/instances', { params });
-          return { data: list, success: true, total: list?.length ?? 0 };
+          const result = await request<WorkflowPage<any>>('/api/instances', {
+            params: {
+              scope: 'authorized',
+              page: params.current,
+              size: params.pageSize,
+              status: params.status,
+              startedBy: params.startedBy,
+            },
+          });
+          return { data: result.records, success: true, total: result.total };
         }}
+        pagination={{ defaultPageSize: 20 }}
         search={{ labelWidth: 'auto' }}
         onRow={(record: any) => ({
           onClick: () => history.push(`/proc/${record.id}`),
@@ -38,3 +47,5 @@ export default function RecordListPage() {
     </PageContainer>
   );
 }
+
+type WorkflowPage<T> = { records: T[]; total: number; page: number; size: number };

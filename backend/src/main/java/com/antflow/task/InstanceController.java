@@ -52,16 +52,36 @@ public class InstanceController {
     }
 
     @GetMapping
-    public List<ProcessInstance> list(@RequestParam(required = false) String status) {
+    public WorkflowPage<ProcessInstance> list(
+            @RequestParam(defaultValue = "authorized") String scope,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long startedBy,
+            @RequestParam(required = false) String keyword) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        var q = new QueryWrapper<ProcessInstance>()
-            .orderByDesc("started_at")
-            .orderByDesc("id");
-        if (status != null) q.eq("status", status);
-        return instanceMapper.selectList(q).stream()
-            .filter(instance -> authorizationService.canReadFullInstance(instance.getId(), p.userId()))
-            .toList();
+        String normalizedScope = scope == null ? "authorized"
+            : scope.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!"authorized".equals(normalizedScope) && !"mine".equals(normalizedScope)) {
+            throw new BizException("BAD_QUERY", "instance scope must be authorized or mine");
+        }
+        int normalizedPage = Math.max(1, page);
+        int normalizedSize = Math.min(100, Math.max(1, size));
+        int offset = pageOffset(normalizedPage, normalizedSize);
+        boolean admin = authorizationService.isAdmin();
+        boolean canReadTasks = authorizationService.hasPermission(
+            PermissionCodes.WORKFLOW_TASK_READ);
+        boolean canReadInstances = authorizationService.hasPermission(
+            PermissionCodes.WORKFLOW_INSTANCE_READ);
+        String normalizedStatus = normalized(status);
+        String normalizedKeyword = normalized(keyword);
+        return new WorkflowPage<>(instanceMapper.selectInstancePage(p.userId(), admin,
+                canReadTasks, canReadInstances, normalizedScope, normalizedStatus, startedBy,
+                normalizedKeyword, normalizedSize, offset),
+            instanceMapper.countInstancePage(p.userId(), admin, canReadTasks,
+                canReadInstances, normalizedScope, normalizedStatus, startedBy,
+                normalizedKeyword), normalizedPage, normalizedSize);
     }
 
     @GetMapping("/{id}")
@@ -151,6 +171,18 @@ public class InstanceController {
 
     private static int fieldCount(Object data) {
         return data instanceof Map<?, ?> map ? map.size() : 0;
+    }
+
+    private static String normalized(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static int pageOffset(int page, int size) {
+        long offset = (long) (page - 1) * size;
+        if (offset > Integer.MAX_VALUE) {
+            throw new BizException("BAD_QUERY", "page offset is too large");
+        }
+        return (int) offset;
     }
 
     private static Map<String, Object> summaryInstance(ProcessInstance instance) {

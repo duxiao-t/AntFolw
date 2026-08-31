@@ -64,12 +64,14 @@ class WorkplaceControllerTest {
         user.setDisplayName("运营员");
 
         var tasks = mock(TaskOperationService.class);
-        when(tasks.listMyInbox(7L, "PENDING")).thenReturn(List.of(task));
+        when(tasks.listMyInbox(7L, "PENDING", 8)).thenReturn(List.of(task));
+        when(tasks.countMyInbox(7L, "PENDING")).thenReturn(1L);
         var instances = mock(ProcessInstanceMapper.class);
-        when(instances.selectWorkplaceRecent(eq(7L), eq(false), eq(true), eq(8)))
+        when(instances.selectWorkplaceRecent(eq(7L), eq(false), eq(true), eq(true), eq(8)))
             .thenReturn(List.of(instance));
         when(instances.selectBatchIds(any())).thenReturn(List.of(instance));
-        when(instances.selectWorkplaceStatusCounts(eq(7L), eq(false), eq(true), any(), any()))
+        when(instances.selectWorkplaceStatusCounts(eq(7L), eq(false), eq(true), eq(true),
+            any(), any()))
             .thenReturn(List.of(Map.of("status", "RUNNING", "total", 1L,
                 "finished_today", 0L)));
         var processes = mock(ProcessDefinitionMapper.class);
@@ -110,6 +112,7 @@ class WorkplaceControllerTest {
 
         assertThat(result.pendingTasks()).isZero();
         assertThat(result.recentInstanceItems()).isEmpty();
-        verify(tasks, never()).listMyInbox(8L, "PENDING");
+        verify(tasks, never()).listMyInbox(8L, "PENDING", 8);
+        verify(tasks, never()).countMyInbox(8L, "PENDING");
     }
 }

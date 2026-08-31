@@ -16,6 +16,7 @@ import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
+import com.antflow.task.TaskMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
@@ -79,6 +80,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private AuditService auditService;
     @Autowired private FormProcessPublishService publishService;
     @Autowired private ProcessInstanceMapper processInstanceMapper;
+    @Autowired private TaskMapper taskMapper;
     @Autowired private FormGrantService formGrantService;
     @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
     @Autowired private AuthorizationService authorizationService;
@@ -630,11 +632,78 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Test
     void workplaceAuthorizationQueriesExecuteAgainstPostgres() {
         long adminId = userId("admin");
-        assertThat(processInstanceMapper.selectWorkplaceRecent(adminId, true, true, 8))
+        assertThat(processInstanceMapper.selectWorkplaceRecent(adminId, true, true, true, 8))
             .isNotNull();
         OffsetDateTime now = OffsetDateTime.now();
-        assertThat(processInstanceMapper.selectWorkplaceStatusCounts(adminId, true, true,
+        assertThat(processInstanceMapper.selectWorkplaceStatusCounts(adminId, true, true, true,
             now.minusDays(1), now.plusDays(1))).isNotNull();
+    }
+
+    @Test
+    void desktopWorkflowPagesFilterPermissionsBeforeLimitAndCount() {
+        long viewerId = insertUser("page_viewer_" + UUID.randomUUID());
+        long ownerId = insertUser("page_owner_" + UUID.randomUUID());
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(ownerId));
+        long visibleDataId = insertSubmittedData(formId, ownerId);
+        long invisibleDataId = insertSubmittedData(formId, ownerId);
+        long visibleInstanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, current_node_id,
+                                           started_by, started_at)
+            VALUES (?, ?, 'RUNNING', 'approved-node', ?, now() - interval '1 hour')
+            RETURNING id
+            """, Long.class, processId, visibleDataId, ownerId);
+        jdbcTemplate.update("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, current_node_id,
+                                           started_by, started_at)
+            VALUES (?, ?, 'RUNNING', 'hidden-node', ?, now())
+            """, processId, invisibleDataId, ownerId);
+        jdbcTemplate.update("""
+            INSERT INTO t_task(proc_inst_id, node_id, assignee_id, approved_by, status,
+                               approval_mode, task_type, approved_at)
+            VALUES (?, 'approved-node', ?, ?, 'APPROVED', 'OR_SIGN', 'APPROVAL', now())
+            """, visibleInstanceId, ownerId, viewerId);
+
+        assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
+            "authorized", null, ownerId, null, 1, 0))
+            .extracting(com.antflow.task.ProcessInstance::getId)
+            .containsExactly(visibleInstanceId);
+        assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
+            "authorized", null, ownerId, null)).isEqualTo(1L);
+
+        long mineDataId = insertSubmittedData(formId, viewerId);
+        long reworkDataId = insertSubmittedData(formId, viewerId);
+        long mineInstanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, current_node_id,
+                                           started_by, started_at)
+            VALUES (?, ?, 'RUNNING', NULL, ?, now()) RETURNING id
+            """, Long.class, processId, mineDataId, viewerId);
+        jdbcTemplate.update("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, current_node_id,
+                                           started_by, started_at)
+            VALUES (?, ?, 'RUNNING', '__rework__', ?, now() + interval '1 minute')
+            """, processId, reworkDataId, viewerId);
+        assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
+            "mine", null, null, null, 10, 0))
+            .extracting(com.antflow.task.ProcessInstance::getId)
+            .containsExactly(mineInstanceId);
+        assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
+            "mine", null, null, null)).isEqualTo(1L);
+
+        jdbcTemplate.update("""
+            INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, approval_mode, task_type)
+            VALUES (?, 'pending', ?, 'PENDING', 'OR_SIGN', 'APPROVAL'),
+                   (?, 'done', ?, 'APPROVED', 'OR_SIGN', 'APPROVAL'),
+                   (?, '__rework__', ?, 'RESUBMITTED', 'OR_SIGN', 'REWORK')
+            """, mineInstanceId, viewerId, mineInstanceId, viewerId,
+            mineInstanceId, viewerId);
+        assertThat(taskMapper.selectTaskPage(viewerId, "pending", null, 20, 0))
+            .extracting(com.antflow.task.TaskEntity::getNodeId).containsExactly("pending");
+        assertThat(taskMapper.countTaskPage(viewerId, "pending", null)).isEqualTo(1L);
+        assertThat(taskMapper.selectTaskPage(viewerId, "done", null, 20, 0))
+            .extracting(com.antflow.task.TaskEntity::getStatus)
+            .containsExactlyInAnyOrder("APPROVED", "RESUBMITTED");
+        assertThat(taskMapper.countTaskPage(viewerId, "done", "APPROVED")).isEqualTo(1L);
     }
 
     @Test
@@ -1186,6 +1255,16 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, 'Integration form', 1, ?::jsonb, '{}'::jsonb, ?, ?, 0)
             RETURNING id
             """, Long.class, code, schema, status, userId("admin"));
+    }
+
+    private long insertSubmittedData(long formId, long creatorId) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data,
+                                    status, created_by)
+            VALUES (?, 1, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, creatorId);
     }
 
     private StartedV2 startV2(String flow, long starterId) {

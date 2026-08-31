@@ -224,17 +224,13 @@ class TaskOperationServiceTest {
     // ---------- 5. listMyInbox ----------
     @Test
     void listMyInbox_returnsCurrentUserPending() {
-        Mockito.when(taskMapper.selectList(any())).thenReturn(List.of(
+        Mockito.when(taskMapper.selectTaskPage(42L, "pending", "PENDING", 8, 0))
+            .thenReturn(List.of(
             parentTask(1L, 42L, "PENDING"),
             parentTask(2L, 42L, "PENDING")
         ));
-        var inbox = ops.listMyInbox(42L, "PENDING");
+        var inbox = ops.listMyInbox(42L, "PENDING", 8);
         assertThat(inbox).hasSize(2);
-        ArgumentCaptor<QueryWrapper<TaskEntity>> cap = ArgumentCaptor.forClass(QueryWrapper.class);
-        Mockito.verify(taskMapper).selectList(cap.capture());
-        // 用户列表永远排除引擎内部作废任务。
-        assertThat(cap.getValue().getSqlSegment().toUpperCase())
-            .contains("ASSIGNEE_ID", "STATUS <>");
-        assertThat(cap.getValue().getParamNameValuePairs()).containsValue("SKIPPED");
+        Mockito.verify(taskMapper).selectTaskPage(42L, "pending", "PENDING", 8, 0);
     }
 }

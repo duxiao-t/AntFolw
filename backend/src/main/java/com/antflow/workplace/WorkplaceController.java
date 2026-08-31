@@ -51,15 +51,17 @@ public class WorkplaceController {
         boolean canSeeTasks = authorizationService.hasPermission(PermissionCodes.WORKFLOW_TASK_READ);
 
         List<TaskEntity> pendingTasks = canSeeTasks
-            ? taskOperationService.listMyInbox(userId, "PENDING")
+            ? taskOperationService.listMyInbox(userId, "PENDING", ITEM_LIMIT)
             : List.of();
+        long pendingTaskCount = canSeeTasks
+            ? taskOperationService.countMyInbox(userId, "PENDING") : 0;
         ZoneId zone = ZoneId.systemDefault();
         LocalDate today = LocalDate.now(zone);
         OffsetDateTime dayStart = today.atStartOfDay(zone).toOffsetDateTime();
         OffsetDateTime dayEnd = today.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
         boolean admin = authorizationService.isAdmin();
         List<ProcessInstance> recentInstances = instanceMapper.selectWorkplaceRecent(
-            userId, admin, canReadInstances, ITEM_LIMIT);
+            userId, admin, canSeeTasks, canReadInstances, ITEM_LIMIT);
         Set<Long> pendingInstanceIds = pendingTasks.stream().map(TaskEntity::getProcInstId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         List<ProcessInstance> pendingInstances = pendingInstanceIds.isEmpty() ? List.of()
@@ -97,7 +99,7 @@ public class WorkplaceController {
         long completedToday = 0;
         long rejectedToday = 0;
         for (Map<String, Object> row : instanceMapper.selectWorkplaceStatusCounts(
-            userId, admin, canReadInstances, dayStart, dayEnd)) {
+            userId, admin, canSeeTasks, canReadInstances, dayStart, dayEnd)) {
             String status = String.valueOf(row.get("status"));
             long total = ((Number) row.getOrDefault("total", 0L)).longValue();
             long finishedToday = ((Number) row.getOrDefault("finished_today", 0L)).longValue();
@@ -115,7 +117,7 @@ public class WorkplaceController {
             .toList();
 
         return new Overview(
-            pendingTasks.size(),
+            pendingTaskCount,
             statusBreakdown.getOrDefault("RUNNING", 0L),
             completedToday,
             rejectedToday,

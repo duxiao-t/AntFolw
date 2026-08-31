@@ -117,6 +117,31 @@ class AssigneeResolverTest {
         assertThat(resolver().resolve("n1", spec)).containsExactly(7L, 8L);
     }
 
+    @Test void roleAllowsOneHundredDistinctActiveUsers() {
+        List<UserRole> memberships = java.util.stream.LongStream.rangeClosed(1, 100)
+            .mapToObj(id -> new UserRole(id, 9L)).toList();
+        Mockito.when(userRoleMapper.selectList(any())).thenReturn(memberships);
+        Mockito.when(userMapper.selectById(any())).thenAnswer(invocation ->
+            user(invocation.getArgument(0), "ACTIVE"));
+
+        assertThat(resolver().resolve("n1", AssigneeSpec.of("ROLE", List.of(9L))))
+            .hasSize(100);
+    }
+
+    @Test void roleRejectsMoreThanOneHundredDistinctActiveUsers() {
+        List<UserRole> memberships = java.util.stream.LongStream.rangeClosed(1, 101)
+            .mapToObj(id -> new UserRole(id, 9L)).toList();
+        Mockito.when(userRoleMapper.selectList(any())).thenReturn(memberships);
+        Mockito.when(userMapper.selectById(any())).thenAnswer(invocation ->
+            user(invocation.getArgument(0), "ACTIVE"));
+
+        assertThatThrownBy(() -> resolver().resolve(
+            "n1", AssigneeSpec.of("ROLE", List.of(9L))))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode())
+                .isEqualTo("ROLE_ASSIGNEE_TOO_MANY"));
+    }
+
     @Test void resolve_selfSelect_deduplicatesChosenUsers() {
         Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "ACTIVE"));
         var spec = new AssigneeSpec("SELF_SELECT", List.of(), 1, null,

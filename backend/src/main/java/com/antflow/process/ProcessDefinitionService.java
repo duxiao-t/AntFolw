@@ -22,6 +22,7 @@ import java.util.Set;
 
 @Service
 public class ProcessDefinitionService {
+    private static final int MAX_TREE_DEPTH = 50;
     /** 附件/检查项等复杂字段在 v1 不支持审批节点编辑，只能隐藏或只读。 */
     private static final Set<String> EDITABLE_FORBIDDEN_TYPES = Set.of(
         "image_upload", "video_upload", "file_upload", "checklist");
@@ -134,7 +135,7 @@ public class ProcessDefinitionService {
             JsonNode schema = json.readTree(formSchema == null ? "[]" : formSchema);
             Map<String, OptionField> fields = new LinkedHashMap<>();
             collectOptionFields(schema, fields);
-            normalizeConditions(root, fields);
+            normalizeConditions(root, fields, 1);
             return json.writeValueAsString(root);
         } catch (BizException e) {
             throw e;
@@ -156,15 +157,18 @@ public class ProcessDefinitionService {
         }
     }
 
-    private void normalizeConditions(JsonNode node, Map<String, OptionField> fields) {
+    private void normalizeConditions(JsonNode node, Map<String, OptionField> fields,
+                                     int depth) {
         if (node == null || node.isNull() || !node.has("id")) return;
+        ensureTreeDepth(node, depth);
         if (isGateway(node)) {
             for (JsonNode branch : node.path("branchs")) {
+                ensureTreeDepth(branch, depth + 1);
                 normalizeBranchConditions(branch, fields);
-                normalizeConditions(branch.path("children"), fields);
+                normalizeConditions(branch.path("children"), fields, depth + 2);
             }
         }
-        normalizeConditions(node.path("children"), fields);
+        normalizeConditions(node.path("children"), fields, depth + 1);
     }
 
     private boolean isGateway(JsonNode node) {
@@ -255,7 +259,7 @@ public class ProcessDefinitionService {
             if (!"ROOT".equals(root.path("type").asText())) {
                 throw new BizException("BAD_FLOW", "流程必须以 ROOT 节点开始");
             }
-            if (!walk(root, new HashSet<>(), fieldTypes)) {
+            if (!walk(root, new HashSet<>(), fieldTypes, 1)) {
                 throw new BizException("BAD_FLOW", "审批流程至少需要 1 个审批节点");
             }
             validateRootSettings(root);
@@ -268,8 +272,9 @@ public class ProcessDefinitionService {
     }
 
     private boolean walk(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids,
-                         Map<String, String> fieldTypes) {
+                         Map<String, String> fieldTypes, int depth) {
         if (n == null || n.isNull() || !n.has("id")) return false;
+        ensureTreeDepth(n, depth);
         registerId(n, ids);
         boolean hasApprovalNode = false;
         String type = n.path("type").asText();
@@ -293,12 +298,13 @@ public class ProcessDefinitionService {
                         throw new BizException("BAD_FLOW", "条件节点包含非法分支类型");
                     }
                     registerId(b, ids);
+                    ensureTreeDepth(b, depth + 1);
                     if (b.path("props").path("isDefault").asBoolean(false)) {
                         defaultCount++;
                     } else {
                         validateCondition(b);
                     }
-                    hasApprovalNode = walk(b.path("children"), ids, fieldTypes)
+                    hasApprovalNode = walk(b.path("children"), ids, fieldTypes, depth + 2)
                         || hasApprovalNode;
                 }
                 if (defaultCount != 1) {
@@ -320,6 +326,7 @@ public class ProcessDefinitionService {
                         throw new BizException("BAD_FLOW", "并行节点包含非法分支类型");
                     }
                     registerId(b, ids);
+                    ensureTreeDepth(b, depth + 1);
                     String conditionMode = b.path("props").path("conditionMode")
                         .asText(null);
                     if ("ALWAYS".equals(conditionMode) || conditionMode == null) {
@@ -347,7 +354,7 @@ public class ProcessDefinitionService {
                     if (inner == null || inner.isNull() || !inner.has("id")) {
                         throw new BizException("BAD_FLOW", "并行分支不能为空");
                     }
-                    hasApprovalNode = walkParallelBranch(inner, ids, fieldTypes)
+                    hasApprovalNode = walkParallelBranch(inner, ids, fieldTypes, depth + 2)
                         || hasApprovalNode;
                 }
                 if (n.path("children") == null || n.path("children").isNull()
@@ -357,13 +364,20 @@ public class ProcessDefinitionService {
             }
             default -> throw new BizException("BAD_NODE_TYPE", "未知节点类型: " + type);
         }
-        return walk(n.path("children"), ids, fieldTypes) || hasApprovalNode;
+        return walk(n.path("children"), ids, fieldTypes, depth + 1) || hasApprovalNode;
     }
 
     /** 并行分支沿完整流程树递归校验，允许嵌套分支和自动化节点。 */
     private boolean walkParallelBranch(com.fasterxml.jackson.databind.JsonNode n,
-                                       Set<String> ids, Map<String, String> fieldTypes) {
-        return walk(n, ids, fieldTypes);
+                                       Set<String> ids, Map<String, String> fieldTypes,
+                                       int depth) {
+        return walk(n, ids, fieldTypes, depth);
+    }
+
+    private void ensureTreeDepth(com.fasterxml.jackson.databind.JsonNode node, int depth) {
+        if (node != null && !node.isNull() && node.has("id") && depth > MAX_TREE_DEPTH) {
+            throw new BizException("BAD_FLOW", "流程树深度不能超过 " + MAX_TREE_DEPTH + " 层");
+        }
     }
 
     private void registerId(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids) {
@@ -506,6 +520,20 @@ public class ProcessDefinitionService {
             if (!Set.of("user_picker").contains(fieldTypes.get(fieldId))) {
                 throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
                     + " 的表单审批人字段必须是人员选择字段");
+            }
+        }
+        if ("SELF_SELECT".equals(at)) {
+            var selfSelect = p.get("selfSelect");
+            if (selfSelect != null && !selfSelect.isNull()) {
+                if (!selfSelect.isObject()) {
+                    throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                        + " 的自选方式配置无效");
+                }
+                var multiple = selfSelect.get("multiple");
+                if (multiple != null && !multiple.isBoolean()) {
+                    throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                        + " 的 multiple 必须是布尔值");
+                }
             }
         }
         String mode = p.path("mode").asText("ANY");

@@ -367,4 +367,46 @@ describe('process designer validation', () => {
 
     expect(validateProcessTree(tree)).toEqual([]);
   });
+
+  it('limits the complete process tree depth to fifty nodes', () => {
+    const linearTree = (depth: number): TreeNode => {
+      let child: TreeNode = {
+        id: `node-${depth - 1}`,
+        type: 'APPROVAL',
+        props: { assignedType: 'SELF' },
+      };
+      for (let index = depth - 2; index >= 1; index -= 1) {
+        child = { id: `node-${index}`, type: 'EMPTY', children: child };
+      }
+      return { id: 'root', type: 'ROOT', children: child };
+    };
+
+    expect(validateProcessTree(linearTree(50))).toEqual([]);
+    expect(validateProcessTree(linearTree(51))).toContainEqual({
+      nodeId: 'node-50',
+      message: '流程树深度不能超过 50 层',
+    });
+  });
+
+  it('validates SELF_SELECT multiple while accepting legacy missing config', () => {
+    const tree = (multiple: unknown, includeConfig = true): TreeNode => ({
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: {
+          assignedType: 'SELF_SELECT',
+          ...(includeConfig ? { selfSelect: { multiple } } : {}),
+        },
+      },
+    });
+
+    expect(validateProcessTree(tree(false))).toEqual([]);
+    expect(validateProcessTree(tree(undefined, false))).toEqual([]);
+    expect(validateProcessTree(tree('true'))).toContainEqual({
+      nodeId: 'approval',
+      message: '请配置审批人',
+    });
+  });
 });

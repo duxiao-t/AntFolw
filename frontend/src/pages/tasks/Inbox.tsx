@@ -1,17 +1,14 @@
 import { ProTable } from '@ant-design/pro-components';
+import type { ActionType } from '@ant-design/pro-components';
 import { Button, Modal, Input, message } from 'antd';
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@umijs/max';
 import { request } from '@umijs/max';
 
 export default function Inbox() {
-  const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data } = useQuery({
-    queryKey: ['inbox'],
-    queryFn: () => request<any[]>('/api/tasks?status=PENDING').then((r: any) => r ?? []),
-  });
+  const actionRef = useRef<ActionType | undefined>(undefined);
   const [pending, setPending] = useState<{ id: number; action: 'approve' | 'reject' } | null>(null);
   const [comment, setComment] = useState('');
   const act = useMutation({
@@ -25,7 +22,7 @@ export default function Inbox() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['inbox'] });
+      actionRef.current?.reload();
       message.success('已完成');
       setPending(null);
       setComment('');
@@ -40,8 +37,19 @@ export default function Inbox() {
   return (
     <>
       <ProTable
+        actionRef={actionRef}
         rowKey="id"
-        dataSource={data ?? []}
+        request={async (params) => {
+          const result = await request<WorkflowPage<any>>('/api/tasks', {
+            params: {
+              view: 'pending',
+              page: params.current,
+              size: params.pageSize,
+            },
+          });
+          return { data: result.records, total: result.total, success: true };
+        }}
+        pagination={{ defaultPageSize: 20 }}
         search={false}
         columns={[
           { title: 'ID', dataIndex: 'id' },
@@ -100,3 +108,5 @@ export default function Inbox() {
     </>
   );
 }
+
+type WorkflowPage<T> = { records: T[]; total: number; page: number; size: number };

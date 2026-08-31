@@ -1,5 +1,6 @@
 package com.antflow.engine.handler;
 
+import com.antflow.engine.BizException;
 import com.antflow.engine.NoAssigneeFoundException;
 import com.antflow.engine.WorkflowRuntimeV2;
 import com.antflow.engine.resolver.AssigneeResolver;
@@ -136,9 +137,20 @@ public class ApprovalHandler implements NodeHandler {
             case "SELF":
                 return new AssigneeSpec("SELF", List.of(), 1, ctx.starterId(), List.of());
             case "SELF_SELECT":
-                return new AssigneeSpec("SELF_SELECT", List.of(), 1, ctx.starterId(),
-                    ctx.selfSelected() == null ? List.of() :
-                        ctx.selfSelected().getOrDefault(node.path("id").asText(), List.of()));
+                List<Long> selected = ctx.selfSelected() == null ? List.of()
+                    : ctx.selfSelected().getOrDefault(node.path("id").asText(), List.of());
+                long selectedCount = selected.stream().filter(java.util.Objects::nonNull)
+                    .distinct().count();
+                if (selectedCount == 0) {
+                    throw new BizException("SELF_SELECT_REQUIRED", "请选择审批人");
+                }
+                JsonNode multipleNode = props.path("selfSelect").path("multiple");
+                boolean multiple = multipleNode.isBoolean() && multipleNode.asBoolean();
+                if (!multiple && selectedCount != 1) {
+                    throw new BizException("SELF_SELECT_MULTIPLE_NOT_ALLOWED",
+                        "该审批节点只能选择一名审批人");
+                }
+                return new AssigneeSpec("SELF_SELECT", List.of(), 1, ctx.starterId(), selected);
             default:
                 throw new IllegalArgumentException("未识别审批人类型: " + type);
         }

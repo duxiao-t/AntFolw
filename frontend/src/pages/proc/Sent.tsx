@@ -1,19 +1,24 @@
 import { ProTable } from '@ant-design/pro-components';
-import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@umijs/max';
 import { request } from '@umijs/max';
 import { Button } from 'antd';
 
 export default function SentPage() {
   const navigate = useNavigate();
-  const { data } = useQuery({
-    queryKey: ['instances-mine'],
-    queryFn: () => request<any[]>('/api/instances').then((r: any) => r ?? []),
-  });
   return (
     <ProTable
       rowKey="id"
-      dataSource={data ?? []}
+      request={async (params) => {
+        const result = await request<WorkflowPage<any>>('/api/instances', {
+          params: {
+            scope: 'mine',
+            page: params.current,
+            size: params.pageSize,
+          },
+        });
+        return { data: result.records, total: result.total, success: true };
+      }}
+      pagination={{ defaultPageSize: 20 }}
       search={false}
       columns={[
         { title: 'ID', dataIndex: 'id' },
@@ -40,3 +45,5 @@ export default function SentPage() {
     />
   );
 }
+
+type WorkflowPage<T> = { records: T[]; total: number; page: number; size: number };
