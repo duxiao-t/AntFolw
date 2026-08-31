@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
@@ -15,6 +15,7 @@ import { clearIdempotencyKeyForPayload, findSelfSelectRules, formSchemaWithoutSe
 export function SubmitConfirmPage() {
   const { code = "" } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const flow = useSubmitFlowStore();
   const resetFlow = useSubmitFlowStore((state) => state.reset);
@@ -37,8 +38,14 @@ export function SubmitConfirmPage() {
       const result = await startMobileInstance({ formCode: flow.formCode ?? code, values: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, idempotencyKey: idempotencyKeyForPayload(currentPayload()) });
       return { mode: "workflow" as const, id: result.instanceId };
     },
-    onSuccess(result) {
-      if (result.mode === "workflow") clearIdempotencyKeyForPayload(currentPayload());
+    async onSuccess(result) {
+      if (result.mode === "workflow") {
+        clearIdempotencyKeyForPayload(currentPayload());
+        queryClient.removeQueries({ queryKey: queryKeys.taskRoot });
+        if (flow.reworkTaskId != null) queryClient.removeQueries({ queryKey: queryKeys.reworkTask(flow.reworkTaskId) });
+        queryClient.removeQueries({ queryKey: queryKeys.instance(result.id) });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
+      }
       if (user && flow.formCode) removeRecoveryDraft(user.id, flow.formCode,
         flow.reworkTaskId == null ? flow.draftId : -flow.reworkTaskId);
       resetFlow();

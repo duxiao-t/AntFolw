@@ -19,6 +19,11 @@ const routes: RouteObject[] = [
     errorElement: <RouteErrorPage title="登录失败" />,
   },
   {
+    path: '/form-preview',
+    lazy: () => import('../features/forms/FormPreviewPage').then(({ FormPreviewPage }) => ({ Component: FormPreviewPage })),
+    HydrateFallback: NoHydrate,
+  },
+  {
     element: <AuthenticatedRoute />,
     children: [
       {
@@ -89,6 +94,11 @@ const routes: RouteObject[] = [
       {
         path: '/profile/security',
         lazy: () => import('../features/profile/SecurityPage').then(({ SecurityPage }) => ({ Component: SecurityPage })),
+        HydrateFallback: NoHydrate,
+      },
+      {
+        path: '/profile/notifications',
+        lazy: () => import('../features/profile/NotificationCenterPage').then(({ NotificationCenterPage }) => ({ Component: NotificationCenterPage })),
         HydrateFallback: NoHydrate,
       },
     ],

@@ -84,8 +84,9 @@ export function TaskDetailPage() {
   const approvalSummary = detail.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   const canApprove = detail.allowedActions.includes("APPROVE");
   const canReject = detail.allowedActions.includes("REJECT");
+  const rejectDisabled = detail.rejectDisabled === true;
   const canAcknowledge = detail.allowedActions.includes("ACKNOWLEDGE");
-  const showActions = canApprove || canReject || canAcknowledge;
+  const showActions = canApprove || canReject || rejectDisabled || canAcknowledge;
   const isCc = task.taskStatus === "CC";
 
   return (
@@ -93,7 +94,7 @@ export function TaskDetailPage() {
       title={isCc ? "抄送详情" : "审批详情"}
       contentClassName="approval-detail-page"
       action={<button type="button" className="app-bar__action" aria-label="分享" onClick={() => shareTask(task.formName)}><ShareIcon /></button>}
-      bottomBar={showActions ? <div className="action-bar approval-action-bar">{canReject ? <button type="button" className="btn btn--ghost btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setRejectOpen(true); }}>驳回</button> : <span />}{canApprove ? <button type="button" className="btn btn--success btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setApproveOpen(true); }}>同意</button> : null}{canAcknowledge ? <button type="button" className="btn btn--success btn--lg" disabled={acknowledgeMutation.isPending} onClick={() => acknowledgeMutation.mutate()}>同意</button> : null}</div> : null}
+      bottomBar={showActions ? <div className="action-bar approval-action-bar">{canReject || rejectDisabled ? <button type="button" className="btn btn--ghost btn--lg" disabled={rejectDisabled || actionMutation.isPending} title={rejectDisabled ? "并行审批节点不允许驳回" : undefined} onClick={() => { setActionError(""); setRejectOpen(true); }}>驳回</button> : <span />}{canApprove ? <button type="button" className="btn btn--success btn--lg" disabled={actionMutation.isPending} onClick={() => { setActionError(""); setApproveOpen(true); }}>同意</button> : null}{canAcknowledge ? <button type="button" className="btn btn--success btn--lg" disabled={acknowledgeMutation.isPending} onClick={() => acknowledgeMutation.mutate()}>同意</button> : null}</div> : null}
     >
       <section className="approval-hero detail-hero--bleed">
         <div className="approval-hero__title-block"><span className="approval-hero__label">表单名称</span><h1>{task.formName}</h1></div>
@@ -119,15 +120,15 @@ export function TaskDetailPage() {
         ) : <p className="muted small">暂无表单字段</p>}
       </section>
 
-      <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} /></section>
+      <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} processSnapshot={detail.processSnapshot} schema={schema} history={detail.history} /></section>
 
       <ApproveSheet open={approveOpen} loading={actionMutation.isPending} error={approveOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setApproveOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "approve", payload: { ...payload, ...(hasEditableFields ? { data: editablePayload } : {}) }, idempotencyKey })} />
-      <RejectSheet open={rejectOpen} loading={actionMutation.isPending} error={rejectOpen ? actionError : undefined} onClose={() => { if (!actionMutation.isPending) { setRejectOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "reject", payload, idempotencyKey })} />
+      <RejectSheet open={rejectOpen} loading={actionMutation.isPending} error={rejectOpen ? actionError : undefined} rejectTargets={detail.rejectTargets} onClose={() => { if (!actionMutation.isPending) { setRejectOpen(false); setActionError(""); } }} onSubmit={(payload, idempotencyKey) => actionMutation.mutate({ action: "reject", payload, idempotencyKey })} />
     </AppPage>
   );
 }
 
-async function invalidateTaskCaches(queryClient: ReturnType<typeof useQueryClient>, taskId: number, instanceId?: number) { await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }), queryClient.invalidateQueries({ queryKey: ["mobile", "tasks"] }), queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) }), instanceId ? queryClient.invalidateQueries({ queryKey: queryKeys.instance(instanceId) }) : Promise.resolve()]); }
+async function invalidateTaskCaches(queryClient: ReturnType<typeof useQueryClient>, taskId: number, instanceId?: number) { await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }), queryClient.invalidateQueries({ queryKey: queryKeys.taskRoot }), queryClient.invalidateQueries({ queryKey: queryKeys.taskDetail(taskId) }), instanceId ? queryClient.invalidateQueries({ queryKey: queryKeys.instance(instanceId) }) : Promise.resolve()]); }
 function returnPath(params: URLSearchParams) { const next = new URLSearchParams(); const view = params.get("returnView"); const keyword = params.get("returnKeyword"); const status = params.get("returnStatus"); if (view) next.set("view", view); if (keyword) next.set("keyword", keyword); if (status) next.set("status", status); return next.size ? `/tasks?${next}` : "/tasks"; }
 function normalizeSchema(schema: unknown): MobileSchemaNode[] { return Array.isArray(schema) ? schema as MobileSchemaNode[] : []; }
 function normalizeValues(data?: Record<string, unknown> | null): MobileFormValues { return data && typeof data === "object" && !Array.isArray(data) ? data : {}; }

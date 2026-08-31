@@ -8,6 +8,7 @@ import { ProcessDetailPage } from './ProcessDetailPage';
 import type { MobileInstanceDetail } from './processes.api';
 
 const INSTANCE_DETAIL: MobileInstanceDetail = {
+  visibility: 'FULL',
   id: 9003,
   status: 'RUNNING',
   formName: '采购申请',
@@ -254,14 +255,43 @@ describe('ProcessDetailPage', () => {
     expect(screen.queryByRole('button', { name: '撤回流程' })).not.toBeInTheDocument();
   });
 
+  it('renders summary visibility without form data or actions', async () => {
+    setupFetch({
+      detail: {
+        ...INSTANCE_DETAIL,
+        visibility: 'SUMMARY',
+        formName: null,
+        businessNo: null,
+        schema: null,
+        formData: null,
+        processSnapshot: null,
+        canWithdraw: false,
+        files: [],
+      },
+    });
+    renderProcess();
+
+    expect(await screen.findByText('流程摘要')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('当前账号仅可查看流程摘要');
+    expect(screen.getByText('提交申请')).toBeInTheDocument();
+    expect(screen.queryByText('表单详情')).not.toBeInTheDocument();
+    expect(screen.queryByText('采购物品')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '分享' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '撤回流程' })).not.toBeInTheDocument();
+  });
+
   it('confirms withdrawal and navigates back after success', async () => {
     const confirmMock = mockConfirm(true);
     renderProcess();
     await screen.findByRole('button', { name: '撤回流程' });
     await userEvent.click(screen.getByRole('button', { name: '撤回流程' }));
 
-    expect(confirmMock).toHaveBeenCalled();
-    expect(await screen.findByRole('heading', { name: '我发起的流程' })).toBeInTheDocument();
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.stringContaining('原流程和单号会保留'),
+    );
+    expect(
+      await screen.findByRole('heading', { name: '需要你处理的审批' }),
+    ).toBeInTheDocument();
   });
 
   it('does not withdraw when confirmation is cancelled', async () => {

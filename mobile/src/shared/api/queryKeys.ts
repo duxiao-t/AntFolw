@@ -9,7 +9,10 @@ export const queryKeys = {
   drafts: ['mobile', 'drafts'] as const,
   draft: (id: number) => ['mobile', 'drafts', id] as const,
   instance: (id: number) => ['mobile', 'instances', id] as const,
+  taskRoot: ['mobile', 'tasks'] as const,
   tasks: (filters: TaskCenterFilters) => ['mobile', 'tasks', filters] as const,
   taskDetail: (id: number) => ['mobile', 'tasks', 'detail', id] as const,
+  notifications: ['mobile', 'notifications'] as const,
+  reworkTask: (id: number) => ['mobile', 'rework-task', id] as const,
   sessions: ['auth', 'sessions'] as const,
 } as const;

@@ -1,6 +1,6 @@
 import { CheckOutline, DownOutline } from 'antd-mobile-icons';
 import { Input } from 'antd-mobile';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import {
   allFieldOptions,
@@ -20,7 +20,10 @@ export function SelectField(props: MobileFieldProps) {
   const value = selectedValue(props.value);
   const [selected, setSelected] = useState<string | number | null>(value);
   const [visible, setVisible] = useState(false);
+  const [keyword, setKeyword] = useState('');
   const options = fieldOptions(props.node);
+  const searchable = props.node.props?.showSearch === true;
+  const clearable = props.node.props?.allowClear !== false;
   const allOptions = allFieldOptions(props.node);
   const useColor = props.node.props?.enableOptionColor === true;
   const otherOption = options.find((option) => option.isOther);
@@ -35,6 +38,12 @@ export function SelectField(props: MobileFieldProps) {
   }, [inferredOther, otherOption, selected]);
   const selectedLabel = otherSelected ? '其他' : selected == null ? '' : optionLabel(props.node, selected);
   const placeholder = String(props.node.props?.placeholder ?? `选择${label}`);
+  const visibleOptions = useMemo(() => {
+    const query = keyword.trim().toLocaleLowerCase();
+    return query
+      ? options.filter((option) => option.label.toLocaleLowerCase().includes(query))
+      : options;
+  }, [keyword, options]);
 
   useEffect(() => {
     setSelected(value);
@@ -53,7 +62,10 @@ export function SelectField(props: MobileFieldProps) {
           <button
             type="button"
             className={`control form-picker${selectedLabel ? '' : ' af-field-picker--placeholder'}`}
-            onClick={() => setVisible(true)}
+            onClick={() => {
+              setKeyword('');
+              setVisible(true);
+            }}
           >
             <span className="picker-value">{selectedLabel || placeholder}</span>
             <DownOutline aria-hidden="true" />
@@ -62,10 +74,26 @@ export function SelectField(props: MobileFieldProps) {
             visible={visible}
             title={`选择${label}`}
             subtitle="请选择一项"
-            onClose={() => setVisible(false)}
+            presentation="sheet"
+            headerAction={clearable && selectedLabel ? (
+              <button type="button" className="af-full-picker__clear" onClick={clearSelection}>
+                清空
+              </button>
+            ) : undefined}
+            onClose={closePicker}
           >
+            {searchable ? (
+              <input
+                type="search"
+                className="af-full-picker__search"
+                aria-label={`搜索${label}`}
+                placeholder="搜索选项"
+                value={keyword}
+                onChange={(event) => setKeyword(event.currentTarget.value)}
+              />
+            ) : null}
             <div role="listbox" aria-label={label} className="af-full-picker__list">
-              {options.map((option) => {
+              {visibleOptions.map((option) => {
                 const active = option.isOther ? otherSelected : !otherSelected && selected === option.value;
                 return (
                   <button
@@ -86,7 +114,7 @@ export function SelectField(props: MobileFieldProps) {
                         setSelected(option.value);
                         props.onValueChange(props.node.id, option.value);
                       }
-                      setVisible(false);
+                      closePicker();
                     }}
                   >
                     <span
@@ -105,6 +133,9 @@ export function SelectField(props: MobileFieldProps) {
                   </button>
                 );
               })}
+              {visibleOptions.length === 0 ? (
+                <p className="af-full-picker__empty" role="status">没有匹配的选项</p>
+              ) : null}
             </div>
           </MobileSelectionPopup>
         </>
@@ -126,6 +157,18 @@ export function SelectField(props: MobileFieldProps) {
       ) : null}
     </FieldShell>
   );
+
+  function closePicker() {
+    setKeyword('');
+    setVisible(false);
+  }
+
+  function clearSelection() {
+    setSelected(null);
+    setOtherSelected(false);
+    props.onValueChange(props.node.id, undefined);
+    closePicker();
+  }
 }
 
 function selectedValue(value: unknown) {

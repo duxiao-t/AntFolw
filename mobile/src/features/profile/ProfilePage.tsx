@@ -22,7 +22,7 @@ export function ProfilePage() {
       <div className="profile-stats"><div><b>{data.recentProcesses.length}</b><span>已发起</span></div><div style={{ borderLeft: "1px solid var(--af-color-line)", borderRight: "1px solid var(--af-color-line)" }}><b>{approvedCount}</b><span>已处理</span></div><div><b>{data.pendingCount}</b><span>待办</span></div></div>
       <section className="section"><div className="list-card">
         <MenuRow icon={<FileIcon />} title="我的草稿" hint="未提交的表单" onClick={() => navigate("/forms/drafts")} />
-        <MenuRow icon={<MessageIcon />} title="消息中心" hint="审批结果与通知" badge={data.pendingCount || undefined} />
+        <MenuRow icon={<MessageIcon />} title="消息中心" hint="审批结果与通知" badge={data.unreadNotificationCount || undefined} onClick={() => navigate("/profile/notifications")} />
         <MenuRow icon={<StarIcon />} title="我的收藏" hint={`${data.favoriteApps.length} 个常用表单`} onClick={() => navigate("/apps/favorites")} />
         <MenuRow icon={<LockIcon />} title="账号安全" hint="登录设备 · 密码 · 双因子" onClick={() => navigate("/profile/security")} />
         <MenuRow icon={<ClockIcon />} title="操作日志" hint="近 30 天" />

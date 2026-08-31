@@ -64,7 +64,7 @@ export function FormFillPage() {
     retry: 0,
   });
   const reworkQuery = useQuery({
-    queryKey: ["mobile", "rework-task", reworkTaskId ?? 0],
+    queryKey: queryKeys.reworkTask(reworkTaskId ?? 0),
     queryFn: () => fetchReworkTask(reworkTaskId ?? 0),
     enabled: reworkTaskId != null,
     retry: 0,

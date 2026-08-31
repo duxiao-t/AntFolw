@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { TaskEventsSubscriber } from '../tasks/TaskEventsSubscriber';
 import { useAuthStore } from './auth.store';
 
 const SKELETON_STYLE: React.CSSProperties = {
@@ -41,7 +42,12 @@ export function AuthenticatedRoute() {
     return <Navigate to={`/login?${params.toString()}`} replace />;
   }
 
-  return <Outlet />;
+  return (
+    <>
+      <TaskEventsSubscriber />
+      <Outlet />
+    </>
+  );
 }
 
 export default AuthenticatedRoute;

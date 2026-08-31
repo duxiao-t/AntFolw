@@ -13,7 +13,10 @@ export function MultiSelectField(props: MobileFieldProps) {
   const [selected, setSelected] = useState<Array<string | number>>(values);
   const [draftSelected, setDraftSelected] = useState<Array<string | number>>(values);
   const [visible, setVisible] = useState(false);
+  const [keyword, setKeyword] = useState('');
   const options = fieldOptions(props.node);
+  const searchable = props.node.props?.showSearch === true;
+  const clearable = props.node.props?.allowClear !== false;
   const allOptions = allFieldOptions(props.node);
   const useColor = props.node.props?.enableOptionColor === true;
   const otherOption = options.find((option) => option.isOther);
@@ -37,6 +40,12 @@ export function MultiSelectField(props: MobileFieldProps) {
   const selectedCustomValues = selected.filter((item) => !standardValues.includes(item));
   if (otherSelected) selectedLabels.push('其他');
   const placeholder = String(props.node.props?.placeholder ?? `选择${label}`);
+  const visibleOptions = useMemo(() => {
+    const query = keyword.trim().toLocaleLowerCase();
+    return query
+      ? options.filter((option) => option.label.toLocaleLowerCase().includes(query))
+      : options;
+  }, [keyword, options]);
 
   return (
     <FieldShell
@@ -52,6 +61,7 @@ export function MultiSelectField(props: MobileFieldProps) {
             type="button"
             className={`control form-picker control--multi${selectedLabels.length > 0 ? '' : ' af-field-picker--placeholder'}`}
             onClick={() => {
+              setKeyword('');
               setDraftSelected([
                 ...selected.filter((item) => standardValues.includes(item)),
                 ...(otherSelected ? [OTHER_OPTION_VALUE] : []),
@@ -72,6 +82,16 @@ export function MultiSelectField(props: MobileFieldProps) {
             visible={visible}
             title={`选择${label}`}
             subtitle={`已选 ${draftSelected.length} 项`}
+            presentation="sheet"
+            headerAction={clearable && draftSelected.length > 0 ? (
+              <button
+                type="button"
+                className="af-full-picker__clear"
+                onClick={() => setDraftSelected([])}
+              >
+                清空
+              </button>
+            ) : undefined}
             onClose={closePicker}
             footer={(
               <>
@@ -84,9 +104,19 @@ export function MultiSelectField(props: MobileFieldProps) {
               </>
             )}
           >
+            {searchable ? (
+              <input
+                type="search"
+                className="af-full-picker__search"
+                aria-label={`搜索${label}`}
+                placeholder="搜索选项"
+                value={keyword}
+                onChange={(event) => setKeyword(event.currentTarget.value)}
+              />
+            ) : null}
             <fieldset className="af-full-picker__list af-full-picker__fieldset">
               <legend className="visually-hidden">{label}</legend>
-              {options.map((option) => {
+              {visibleOptions.map((option) => {
                 const checked = draftSelected.includes(
                   option.isOther ? OTHER_OPTION_VALUE : option.value,
                 );
@@ -118,6 +148,9 @@ export function MultiSelectField(props: MobileFieldProps) {
                   </label>
                 );
               })}
+              {visibleOptions.length === 0 ? (
+                <p className="af-full-picker__empty" role="status">没有匹配的选项</p>
+              ) : null}
             </fieldset>
           </MobileSelectionPopup>
         </>
@@ -142,6 +175,7 @@ export function MultiSelectField(props: MobileFieldProps) {
   );
 
   function closePicker() {
+    setKeyword('');
     setDraftSelected([
       ...selected.filter((item) => standardValues.includes(item)),
       ...(otherSelected ? [OTHER_OPTION_VALUE] : []),

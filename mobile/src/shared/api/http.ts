@@ -1,10 +1,10 @@
-import { ApiErrorFactory } from './errors';
 import {
+  type AuthorizationHeader,
   getAuthController,
   isAuthEndpoint,
   readCsrfCookie,
-  type AuthorizationHeader,
 } from './auth';
+import { ApiErrorFactory } from './errors';
 
 const RETRY_HEADER = 'X-AF-Retry';
 
@@ -34,7 +34,11 @@ function buildHeaders(
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json');
   }
-  if (init.body && !isBrowserManagedBody(init.body) && !headers.has('Content-Type')) {
+  if (
+    init.body &&
+    !isBrowserManagedBody(init.body) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json');
   }
   if (auth.Authorization && !headers.has('Authorization')) {
@@ -50,10 +54,12 @@ function buildHeaders(
 }
 
 function isBrowserManagedBody(body: BodyInit) {
-  return body instanceof FormData
-    || body instanceof URLSearchParams
-    || body instanceof Blob
-    || body instanceof ArrayBuffer;
+  return (
+    body instanceof FormData ||
+    body instanceof URLSearchParams ||
+    body instanceof Blob ||
+    body instanceof ArrayBuffer
+  );
 }
 
 async function parseBody<T>(response: Response): Promise<T> {
@@ -67,7 +73,11 @@ async function parseBody<T>(response: Response): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function apiRequest<T>(path: string, init: RequestInit = {}, options: ApiRequestOptions = {}): Promise<T> {
+export async function apiFetch(
+  path: string,
+  init: RequestInit = {},
+  options: ApiRequestOptions = {},
+): Promise<Response> {
   const controller = getAuthController();
   const authHeader = controller.authorizationHeader();
   const headers = buildHeaders(init, authHeader, Boolean(options.csrf));
@@ -91,7 +101,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, option
     !headers.has(RETRY_HEADER)
   ) {
     await controller.refresh();
-    return apiRequest<T>(
+    return apiFetch(
       path,
       { ...init, headers: { ...headersRecord, [RETRY_HEADER]: '1' } },
       { ...options },
@@ -102,5 +112,13 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, option
     throw await ApiErrorFactory.fromResponse(response);
   }
 
-  return parseBody<T>(response);
+  return response;
+}
+
+export async function apiRequest<T>(
+  path: string,
+  init: RequestInit = {},
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  return parseBody<T>(await apiFetch(path, init, options));
 }

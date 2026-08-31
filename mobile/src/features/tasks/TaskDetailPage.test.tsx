@@ -64,6 +64,7 @@ const TASK_DETAIL: MobileTaskDetail = {
     },
   ],
   allowedActions: ['APPROVE', 'REJECT'],
+  rejectDisabled: false,
   rejectTargets: [{ nodeId: 'root', name: '发起人' }],
   files: [
     {
@@ -269,6 +270,22 @@ describe('TaskDetailPage', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '确认同意' }));
 
     expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
+  });
+
+  it('keeps reject visible but disabled for a parallel task', async () => {
+    setupFetch({
+      detail: {
+        ...TASK_DETAIL,
+        allowedActions: ['APPROVE'],
+        rejectDisabled: true,
+      },
+    });
+    renderDetail();
+
+    const reject = await screen.findByRole('button', { name: '驳回' });
+    expect(reject).toBeDisabled();
+    expect(reject).toHaveAttribute('title', '并行审批节点不允许驳回');
+    expect(screen.getByRole('button', { name: '同意' })).toBeEnabled();
   });
 
   it('shows an agree button for copied tasks and marks them read on confirmation', async () => {

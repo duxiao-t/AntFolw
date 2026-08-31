@@ -13,6 +13,7 @@ const BOOTSTRAP: MobileBootstrap = {
     roles: ['admin'],
   },
   pendingCount: 3,
+  unreadNotificationCount: 2,
   favoriteApps: [],
   recentProcesses: [],
   brandingVersion: 'tenant-2026-07-18',
@@ -55,6 +56,7 @@ describe('ProfilePage', () => {
     expect(screen.getByText((text) => text.includes('admin'))).toBeInTheDocument();
     expect(screen.getByText('待办').parentElement).toHaveTextContent('3');
     expect(screen.getByRole('button', { name: /我的草稿/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /消息中心/ })).toHaveTextContent('2');
     expect(screen.getByRole('button', { name: /账号安全/ })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/mobile/bootstrap', expect.any(Object));

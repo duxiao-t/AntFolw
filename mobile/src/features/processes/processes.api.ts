@@ -22,16 +22,17 @@ export type MobileProcessFile = {
 };
 
 export type MobileInstanceDetail = {
+  visibility: 'FULL' | 'SUMMARY';
   id: number;
   status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
-  formName?: string;
-  businessNo?: string;
+  formName?: string | null;
+  businessNo?: string | null;
   applicantName?: string | null;
   applicantEmployeeNo?: string | null;
   applicantDepartment?: string | null;
   startedAt?: string;
   currentNodeName?: string | null;
-  schema?: MobileSchemaNode[];
+  schema?: MobileSchemaNode[] | null;
   formData?: Record<string, unknown> | null;
   processSnapshot?: unknown;
   history?: MobileHistoryItem[];

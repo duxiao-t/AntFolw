@@ -136,17 +136,18 @@ describe('TaskCenterPage', () => {
   });
 
   it('restores done view and filters from URL, then keeps filters when switching tabs', async () => {
-    const { router } = renderTaskCenter('/tasks?view=done&keyword=报销&status=SKIPPED');
+    const { router } = renderTaskCenter('/tasks?view=done&keyword=报销&status=APPROVED');
 
     expect(await screen.findByText('报销申请')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '已处理' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('searchbox', { name: '搜索申请人或表单名' })).toHaveValue('报销');
-    expect(screen.getByRole('button', { name: '跳过' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '通过' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: '跳过' })).not.toBeInTheDocument();
     const doneCard = screen.getByRole('link', { name: /报销申请/ });
     expect(within(doneCard).getByText('已完成')).toBeInTheDocument();
     expect(doneCard).toHaveAttribute(
       'href',
-      '/tasks/402?returnView=done&returnKeyword=%E6%8A%A5%E9%94%80&returnStatus=SKIPPED',
+      '/tasks/402?returnView=done&returnKeyword=%E6%8A%A5%E9%94%80&returnStatus=APPROVED',
     );
 
     await userEvent.click(screen.getByRole('tab', { name: '我发起的' }));
@@ -155,7 +156,7 @@ describe('TaskCenterPage', () => {
     expect(screen.getByRole('searchbox', { name: '搜索申请人或表单名' })).toHaveValue('报销');
     expect(router.state.location.pathname + router.state.location.search).toContain('view=process');
     expect(router.state.location.pathname + router.state.location.search).toContain('keyword=%E6%8A%A5%E9%94%80');
-    expect(router.state.location.pathname + router.state.location.search).not.toContain('status=SKIPPED');
+    expect(router.state.location.pathname + router.state.location.search).not.toContain('status=APPROVED');
   });
 
   it('renders started process cards with current node and instance status', async () => {

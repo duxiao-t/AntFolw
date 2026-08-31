@@ -5,6 +5,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../auth/auth.store';
 import type { MobileUser } from '../../shared/api/types';
+import { queryKeys } from '../../shared/api/queryKeys';
 import { buildRecoveryKey } from '../../shared/recovery/userScopedStorage';
 import { FormFillPage } from './FormFillPage';
 import { SelfSelectPage } from './SelfSelectPage';
@@ -12,6 +13,7 @@ import { SubmitConfirmPage } from './SubmitConfirmPage';
 import { SubmitSuccessPage } from './SubmitSuccessPage';
 import { useSubmitFlowStore } from './submitFlow.store';
 import { ProcessDetailPage } from '../processes/ProcessDetailPage';
+import { TaskCenterPage } from '../tasks/TaskCenterPage';
 import { collectMobileFileRefs } from './start.api';
 
 const AUTH_USER: MobileUser = {
@@ -96,6 +98,9 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
       if (url.includes('/api/mobile/forms/leave')) {
         return jsonResponse(formResponse);
       }
+      if (url.includes('/api/mobile/rework-tasks/401/resubmit') && init?.method === 'POST') {
+        return jsonResponse(START_RESULT);
+      }
       if (url.includes('/api/mobile/instances') && init?.method === 'POST') {
         startAttempts += 1;
         if (options.failFirstStart && startAttempts === 1) {
@@ -127,6 +132,9 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
           ],
         });
       }
+      if (url.includes('/api/mobile/tasks?')) {
+        return jsonResponse({ items: [], hasMore: false });
+      }
       if (url.includes('/api/forms/data') && init?.method === 'POST') {
         return jsonResponse({ dataId: 6001 });
       }
@@ -153,14 +161,19 @@ function renderSubmitFlow(initialPath = '/forms/leave') {
       { path: '/forms/:code/confirm', element: <SubmitConfirmPage /> },
       { path: '/forms/:code/success/:instanceId', element: <SubmitSuccessPage /> },
       { path: '/processes/:instanceId', element: <ProcessDetailPage /> },
+      { path: '/tasks', element: <TaskCenterPage /> },
     ],
     { initialEntries: [initialPath] },
   );
-  return render(
+  return {
+    ...render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
-  );
+    ),
+    queryClient,
+    router,
+  };
 }
 
 beforeEach(() => {
@@ -198,6 +211,92 @@ describe('mobile form submit flow', () => {
     expect(await screen.findByText('本次提交将保留原单号')).toBeInTheDocument();
     expect(screen.queryByText('表单编号将在提交后生成')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认重提' })).toBeInTheDocument();
+  });
+
+  it('clears stale workflow caches and refetches pending tasks after rework', async () => {
+    useSubmitFlowStore.setState({
+      formCode: 'leave',
+      draftId: null,
+      reworkTaskId: 401,
+      values: { reason: '修改后的请假事由' },
+      selfSelected: {},
+    });
+    const { queryClient, router } = renderSubmitFlow('/forms/leave/confirm');
+    const pendingKey = queryKeys.tasks({ view: 'pending', page: 1, size: 20 });
+    const taskKeys = [
+      pendingKey,
+      queryKeys.tasks({ view: 'process', keyword: '请假', page: 2, size: 20 }),
+      queryKeys.tasks({ view: 'done', status: 'APPROVED', page: 1, size: 20 }),
+      queryKeys.taskDetail(401),
+    ];
+    taskKeys.forEach((key) => {
+      queryClient.setQueryData(key, { stale: true });
+    });
+    queryClient.setQueryData(pendingKey, {
+      items: [{
+        kind: 'task',
+        view: 'pending',
+        task: {
+          id: 401,
+          instanceId: 9001,
+          nodeId: '__rework__',
+          formCode: 'leave',
+          formName: '请假申请',
+          businessNo: '000000005001',
+          applicantName: '张三',
+          nodeName: '待修改原单',
+          taskType: 'REWORK',
+          taskStatus: 'PENDING',
+          instanceStatus: 'RUNNING',
+          createdAt: '2026-08-29T16:52:00+08:00',
+        },
+      }],
+      hasMore: false,
+    });
+    queryClient.setQueryData(queryKeys.reworkTask(401), { taskId: 401 });
+    queryClient.setQueryData(queryKeys.instance(START_RESULT.instanceId), { id: START_RESULT.instanceId });
+    queryClient.setQueryData(queryKeys.bootstrap, { pendingCount: 1 });
+
+    await userEvent.click(await screen.findByRole('button', { name: '确认重提' }));
+    expect(await screen.findByRole('heading', { name: '提交成功' })).toBeInTheDocument();
+
+    taskKeys.forEach((key) => {
+      expect(queryClient.getQueryData(key)).toBeUndefined();
+    });
+    expect(queryClient.getQueryData(queryKeys.reworkTask(401))).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.instance(START_RESULT.instanceId))).toBeUndefined();
+    expect(queryClient.getQueryState(queryKeys.bootstrap)?.isInvalidated).toBe(true);
+
+    await userEvent.click(screen.getByRole('button', { name: '查看流程' }));
+    expect(await screen.findByRole('heading', { name: '请假申请' })).toBeInTheDocument();
+    await router.navigate('/tasks?view=pending');
+    expect(await screen.findByText('暂无待办任务')).toBeInTheDocument();
+    expect(screen.queryByText('待修改原单')).not.toBeInTheDocument();
+    expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(
+      ([url]) => String(url).includes('/api/mobile/tasks?'),
+    )).toBe(true);
+  });
+
+  it('clears task and instance caches after a new workflow starts', async () => {
+    useSubmitFlowStore.setState({
+      formCode: 'leave',
+      draftId: null,
+      reworkTaskId: null,
+      values: { reason: '回家探亲' },
+      selfSelected: {},
+    });
+    const { queryClient } = renderSubmitFlow('/forms/leave/confirm');
+    const processKey = queryKeys.tasks({ view: 'process', page: 1, size: 20 });
+    queryClient.setQueryData(processKey, { items: [], hasMore: false });
+    queryClient.setQueryData(queryKeys.instance(START_RESULT.instanceId), { stale: true });
+    queryClient.setQueryData(queryKeys.bootstrap, { pendingCount: 0 });
+
+    await userEvent.click(await screen.findByRole('button', { name: '确认提交' }));
+    expect(await screen.findByRole('heading', { name: '提交成功' })).toBeInTheDocument();
+
+    expect(queryClient.getQueryData(processKey)).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.instance(START_RESULT.instanceId))).toBeUndefined();
+    expect(queryClient.getQueryState(queryKeys.bootstrap)?.isInvalidated).toBe(true);
   });
 
   it('requires self-select assignees before confirmation when schema has self-select nodes', async () => {

@@ -15,7 +15,7 @@ export type TaskListItem = {
   applicantDepartment?: string;
   nodeName: string;
   taskType: 'APPROVAL' | 'REWORK' | string;
-  taskStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SKIPPED' | 'CC' | string;
+  taskStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CC' | string;
   instanceStatus: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
   createdAt: string;
   readAt?: string | null;
@@ -119,13 +119,20 @@ export type ApprovalRecord = {
   taskId?: number | null;
   nodeId?: string | null;
   nodeName: string;
-  status: 'SUBMITTED' | 'PROCESSING' | 'APPROVED' | 'REJECTED' | 'RETURNED' | 'RESUBMITTED' | string;
+  recordKind?: 'SUBMISSION' | 'APPROVAL' | 'REWORK' | 'CC' | 'AUTOMATION' | string;
+  nodeType?: string | null;
+  parallelId?: string | null;
+  branchId?: string | null;
+  operationKind?: 'TRANSFER' | 'DELEGATE' | 'ADD_ASSIGNEE' | string | null;
+  sourceOperatorName?: string | null;
+  status: 'SUBMITTED' | 'PROCESSING' | 'APPROVED' | 'REJECTED' | 'RETURNED' | 'RESUBMITTED' | 'COMPLETED' | 'FAILED' | string;
   operatorName: string;
   employeeNo?: string | null;
   department?: string | null;
   comment?: string | null;
   receivedAt: string;
   completedAt?: string | null;
+  roundNo?: number | null;
 };
 
 export type MobileTaskFile = {
@@ -143,6 +150,7 @@ export type MobileTaskDetail = {
   processSnapshot: unknown;
   history: MobileHistoryItem[];
   allowedActions: string[];
+  rejectDisabled: boolean;
   rejectTargets: RejectTarget[];
   files: MobileTaskFile[];
   approvalSummary: ApprovalSummary;
@@ -152,6 +160,7 @@ export type MobileTaskDetail = {
 export type TaskActionPayload = {
   comment?: string;
   data?: Record<string, unknown>;
+  rejectToNodeId?: string;
 };
 
 export async function fetchTaskDetail(taskId: number): Promise<MobileTaskDetail> {

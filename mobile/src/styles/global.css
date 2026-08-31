@@ -1267,6 +1267,40 @@ body {
 .list-item__main small { display: block; font-size: 11px; color: var(--af-color-muted); margin-top: 2px; }
 .list-item__chev { color: var(--af-color-muted); font-size: 16px; }
 
+/* ─ 24b. 流程消息 ─────────────────────────────── */
+.notification-list {
+  overflow: hidden;
+  border: 1px solid var(--af-color-line);
+  border-radius: var(--af-radius-card);
+  background: var(--af-color-surface);
+  box-shadow: var(--af-shadow-card);
+}
+.notification-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto 14px;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 72px;
+  padding: 13px 14px;
+  border: 0;
+  border-top: 1px solid var(--af-color-line);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.notification-item:first-child { border-top: 0; }
+.notification-item--unread { background: var(--af-color-primary-soft); }
+.notification-item__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--af-color-line); }
+.notification-item--unread .notification-item__dot { background: var(--af-color-primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--af-color-primary) 12%, transparent); }
+.notification-item__body { min-width: 0; }
+.notification-item__body strong { display: block; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.notification-item__body small { display: block; margin-top: 4px; color: var(--af-color-muted); font-size: 11px; }
+.notification-item time { color: var(--af-color-muted); font-size: 10px; white-space: nowrap; }
+.notification-item__chev { color: var(--af-color-muted); font-size: 18px; }
+.notification-more { margin-top: 14px; }
+
 /* ─ 25. 时间线(竖排) ─────────────────────────── */
 .timeline { list-style: none; margin: 0; padding: 8px 0 0 16px; position: relative; }
 .timeline::before { content: ""; position: absolute; left: 6px; top: 14px; bottom: 14px; width: 2px; background: linear-gradient(to bottom, var(--af-color-success), var(--af-color-primary), #e6ebf3); }
@@ -1754,54 +1788,89 @@ body {
   text-align: left;
 }
 
-/* 审批记录：独立记录卡 + 共用纵向连接线 */
-.approval-records__list {
-  margin: 0;
-  padding: 14px 14px 16px;
-  list-style: none;
-}
-.approval-records__item {
-  position: relative;
-  display: grid;
-  grid-template-columns: 16px minmax(0,1fr);
-  gap: 10px;
-  padding: 0 0 12px;
-}
+/* 审批记录：流程轨道 + 原有记录卡 */
+.approval-records__list { position: relative; margin: 0; padding: 14px 14px 16px; list-style: none; }
+.approval-records__round { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; color: var(--af-color-primary); }
+.approval-records__round::after { content: ""; height: 1px; flex: 1; background: color-mix(in srgb, var(--af-color-primary) 22%, var(--af-color-line)); }
+.approval-records__round strong { flex: none; padding: 3px 8px; border-radius: 999px; background: var(--af-color-primary-soft); font-size: 11px; line-height: 1.5; }
+.approval-records__item,
+.approval-records__gateway { position: relative; display: grid; grid-template-columns: 24px minmax(0,1fr); gap: 8px; }
+.approval-records__item { padding: 0 0 12px; }
 .approval-records__item:last-child { padding-bottom: 0; }
-.approval-records__item:not(:last-child)::after {
+.approval-records__item::before,
+.approval-records__gateway::before {
   content: "";
   position: absolute;
-  left: 7px;
-  top: 26px;
-  bottom: -16px;
-  width: 2px;
+  z-index: 0;
+  left: 11px;
+  top: -12px;
+  bottom: -12px;
+  width: 1.5px;
   border-radius: 2px;
   background: var(--af-color-line);
 }
+.approval-records__item:first-child::before { top: 17px; }
+.approval-records__item:last-child::before { bottom: 17px; }
 .approval-records__marker {
   position: relative;
   z-index: 1;
   width: 10px;
   height: 10px;
-  margin: 17px auto 0;
+  margin: 18px auto 0;
   border: 2px solid var(--af-color-surface);
   border-radius: 50%;
   background: var(--af-color-muted);
   box-shadow: 0 0 0 2px var(--af-color-line);
+  color: currentColor;
+  font-size: 11px;
 }
-.approval-records__item--done .approval-records__marker {
-  background: var(--af-color-success);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--af-color-success) 24%, var(--af-color-surface));
+.approval-records__marker svg { width: 13px; height: 13px; }
+.approval-records__marker--done { background: var(--af-color-success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--af-color-success) 24%, var(--af-color-surface)); }
+.approval-records__marker--current { background: #f59e0b; box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 18%, var(--af-color-surface)); }
+.approval-records__marker--parallel,
+.approval-records__marker--operation,
+.approval-records__marker--cc,
+.approval-records__marker--automation,
+.approval-records__marker--rejected {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  margin-top: 6px;
+  place-items: center;
+  border-width: 1.5px;
+  background: var(--af-color-surface);
+  box-shadow: none;
+  font-weight: 700;
 }
-.approval-records__item--current .approval-records__marker {
-  background: var(--af-color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--af-color-primary) 18%, var(--af-color-surface));
+.approval-records__marker--parallel { border-color: #15a879; color: #0d9b70; font-size: 10px; }
+.approval-records__marker--operation { border-color: #1677ff; color: #1677ff; }
+.approval-records__marker--cc { border-color: #8b5cf6; color: #8b5cf6; }
+.approval-records__marker--automation { border-color: #9aa8b5; color: #82909c; }
+.approval-records__marker--rejected { border-color: var(--af-color-danger); color: var(--af-color-danger); }
+.approval-records__gateway { min-height: 42px; }
+.approval-records__gateway-marker {
+  position: relative;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  margin: 8px auto 0;
+  border: 2px solid #f59e0b;
+  border-radius: 3px;
+  background: var(--af-color-surface);
+  transform: rotate(45deg);
 }
-.approval-records__item--rejected .approval-records__marker {
-  background: var(--af-color-danger);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--af-color-danger) 18%, var(--af-color-surface));
-}
+.approval-records__gateway strong { align-self: start; padding-top: 5px; color: var(--af-color-text-secondary); font-size: 12px; line-height: 1.55; }
+.approval-records__gateway--condition::before { background: color-mix(in srgb, #f59e0b 55%, var(--af-color-line)); }
+.approval-records__parallel-grid { display: grid; min-width: 0; gap: 8px; }
+.approval-records__parallel-grid--two { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.approval-records__parallel-grid--stacked { grid-template-columns: minmax(0,1fr); }
+.approval-records__parallel-branch { display: grid; min-width: 0; align-content: start; gap: 8px; }
+.approval-records__parallel-branch h4 { margin: 0; color: var(--af-color-text-secondary); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.approval-records__parallel-grid--two .approval-records__parallel-branch { grid-template-rows: auto 1fr; align-content: stretch; }
+.approval-records__parallel-grid--two .approval-records__parallel-branch h4 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-records__parallel-grid--two .approval-record-card { height: 100%; }
 .approval-record-card {
+  position: relative;
   display: block;
   width: 100%;
   min-width: 0;
@@ -1813,81 +1882,36 @@ body {
   box-shadow: 0 2px 8px rgba(13,28,51,.035);
   text-align: left;
 }
-.approval-record-card--button {
-  appearance: none;
-  cursor: pointer;
-  transition: border-color .16s ease, box-shadow .16s ease, transform .12s ease;
-}
+.approval-record-card--button { appearance: none; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .12s ease; }
 .approval-record-card--button:active { transform: scale(.992); }
-.approval-record-card--button:hover {
-  border-color: color-mix(in srgb, var(--af-color-primary) 28%, var(--af-color-line));
-}
-.approval-record-card--current {
-  border-color: color-mix(in srgb, var(--af-color-primary) 42%, var(--af-color-line));
-  background: color-mix(in srgb, var(--af-color-primary) 5%, var(--af-color-surface));
-  box-shadow: 0 7px 18px rgba(11,87,208,.08);
-}
-.approval-record-card--rejected {
-  border-color: color-mix(in srgb, var(--af-color-danger) 48%, var(--af-color-line));
-  background: color-mix(in srgb, var(--af-color-danger) 5%, var(--af-color-surface));
-  box-shadow: 0 7px 18px color-mix(in srgb, var(--af-color-danger) 10%, transparent);
-}
-.approval-record-card__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
+.approval-record-card--button:hover { border-color: color-mix(in srgb, var(--af-color-primary) 28%, var(--af-color-line)); }
+.approval-record-card--current { border-color: color-mix(in srgb, #f59e0b 42%, var(--af-color-line)); background: color-mix(in srgb, #f59e0b 4%, var(--af-color-surface)); box-shadow: 0 7px 18px color-mix(in srgb, #f59e0b 9%, transparent); }
+.approval-record-card--rejected { border-color: color-mix(in srgb, var(--af-color-danger) 48%, var(--af-color-line)); background: color-mix(in srgb, var(--af-color-danger) 5%, var(--af-color-surface)); box-shadow: 0 7px 18px color-mix(in srgb, var(--af-color-danger) 10%, transparent); }
+.approval-record-card--operation { border-color: color-mix(in srgb, #1677ff 50%, var(--af-color-line)); background: color-mix(in srgb, #1677ff 4%, var(--af-color-surface)); }
+.approval-record-card--cc { border-color: color-mix(in srgb, #8b5cf6 44%, var(--af-color-line)); background: color-mix(in srgb, #8b5cf6 4%, var(--af-color-surface)); }
+.approval-record-card--automation { border-color: color-mix(in srgb, #94a3b8 55%, var(--af-color-line)); background: color-mix(in srgb, #94a3b8 5%, var(--af-color-surface)); }
+.approval-record-card--compact { padding: 11px; }
+.approval-record-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .approval-record-card__top > div { min-width: 0; }
-.approval-record-card__node {
-  display: block;
-  margin-bottom: 1px;
-  color: var(--af-color-muted);
-  font-size: 10.5px;
-  line-height: 1.3;
-}
-.approval-record-card__top strong {
-  display: block;
-  font-size: 13px;
-  line-height: 1.4;
-  font-weight: 700;
-}
-.approval-record-card__status {
-  flex: 0 0 auto;
-  padding-top: 2px;
-  font-size: 11px;
-  line-height: 1.35;
-  font-weight: 700;
-}
+.approval-record-card__node { display: block; margin-bottom: 1px; overflow: hidden; color: var(--af-color-muted); font-size: 10.5px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.approval-record-card__top strong { display: block; min-width: 0; overflow: hidden; font-size: 13px; line-height: 1.4; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.approval-record-card__top strong em { color: #1677ff; font-size: 10px; font-style: normal; font-weight: 600; }
+.approval-record-card__status { flex: 0 0 auto; padding-top: 2px; font-size: 11px; line-height: 1.35; font-weight: 700; }
 .approval-record-card__status--done { color: var(--af-color-success); }
-.approval-record-card__status--current { color: var(--af-color-primary-action); }
+.approval-record-card__status--current { color: #d97706; }
 .approval-record-card__status--rejected { color: var(--af-color-danger); }
-.approval-record-card p {
-  margin: 8px 0 0;
-  color: var(--af-color-text-secondary);
-  font-size: 11.5px;
-  line-height: 1.55;
-}
-.approval-record-card footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 9px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--af-color-line);
-  color: var(--af-color-muted);
-  font-size: 10px;
-  line-height: 1.4;
-}
-.approval-record-card footer span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.approval-record-card footer time {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
+.approval-record-card p { display: -webkit-box; min-width: 0; margin: 8px 0 0; overflow: hidden; color: var(--af-color-text-secondary); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.approval-record-card__tag { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; background: var(--af-color-bg); color: var(--af-color-muted); font-size: 10px; line-height: 1.3; font-weight: 600; white-space: nowrap; }
+.approval-record-card__tag--rejected { color: var(--af-color-danger); }
+.approval-record-card__tag--operation { color: #1677ff; }
+.approval-record-card footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--af-color-line); color: var(--af-color-muted); font-size: 10px; line-height: 1.4; }
+.approval-record-card__meta { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: space-between; gap: 10px; }
+.approval-record-card__meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-record-card__meta time { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
+.approval-records__parallel-grid--two .approval-record-card__meta { flex-direction: column; align-items: flex-start; gap: 3px; }
+.approval-record-card--compact .approval-record-card__top { gap: 4px; }
+.approval-record-card--compact .approval-record-card__top strong { font-size: 12px; }
+.approval-record-card--compact .approval-record-card__status { font-size: 10px; }
 
 /* 附件每项固定为：名称 / 上传人 / 上传时间，右侧为大小与下载 */
 .attachment-list { display: grid; }
@@ -3542,6 +3566,7 @@ body {
   display: flex;
   align-items: center;
 }
+.af-control.adm-input { height: 44px; }
 .af-control.adm-text-area {
   align-items: stretch;
   min-height: 92px;
@@ -3640,6 +3665,31 @@ body {
   background: var(--af-color-bg);
   outline: 0;
 }
+.adm-popup-body.af-selection-sheet {
+  left: 50%;
+  right: auto;
+  translate: -50% 0;
+  width: min(100%, var(--af-page-max));
+  max-width: var(--af-page-max);
+  overflow: hidden;
+  border-radius: 15px 15px 0 0;
+  background: var(--af-color-bg);
+}
+.af-full-picker__panel--sheet {
+  position: relative;
+  height: 100%;
+  padding-top: 12px;
+}
+.af-selection-sheet__handle {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--af-color-muted) 45%, transparent);
+  transform: translateX(-50%);
+}
 .af-full-picker__head {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
@@ -3650,6 +3700,11 @@ body {
   border-bottom: 1px solid var(--af-color-line);
   background: color-mix(in srgb, var(--af-color-surface) 96%, transparent);
 }
+.af-full-picker__head--sheet {
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  padding: 8px 8px;
+}
+.af-full-picker__head--sheet > div { text-align: center; }
 .af-full-picker__head button {
   display: grid;
   place-items: center;
@@ -3664,6 +3719,12 @@ body {
 .af-full-picker__head button svg {
   width: 20px;
   height: 20px;
+}
+.af-full-picker__head .af-full-picker__clear {
+  width: 42px;
+  color: var(--af-color-primary);
+  font-size: 12px;
+  font-weight: 700;
 }
 .af-full-picker__head h3 {
   margin: 0;

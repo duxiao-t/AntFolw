@@ -47,7 +47,7 @@ function StartedProcessCard({ process, returnSearch }: { process: StartedProcess
   );
 }
 
-export function taskStatusLabel(status: string) { return ({ PENDING: "待审批", APPROVED: "已完成", REJECTED: "已驳回", RESUBMITTED: "已重新提交", SKIPPED: "跳过", CC: "抄送" } as Record<string, string>)[status] ?? status; }
+export function taskStatusLabel(status: string) { return ({ PENDING: "待审批", APPROVED: "已完成", REJECTED: "已驳回", RESUBMITTED: "已重新提交", CC: "抄送" } as Record<string, string>)[status] ?? status; }
 export function instanceStatusLabel(status: string) { return ({ RUNNING: "审批中", APPROVED: "已完成", REJECTED: "已驳回", WITHDRAWN: "已撤回" } as Record<string, string>)[status] ?? status; }
 function formatTime(value: string) { const date = new Date(value); if (Number.isNaN(date.getTime())) return value; const hh = String(date.getHours()).padStart(2, "0"); const mm = String(date.getMinutes()).padStart(2, "0"); return `${date.getMonth() + 1}月${date.getDate()}日 ${hh}:${mm}`; }
 
