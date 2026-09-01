@@ -141,6 +141,41 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void publishedDefinitionsAndRevisionAcceptEscapedJsonText() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        String schema = """
+            [{"id":"subject","type":"text","label":"第一行\\n路径 C:\\\\temp"}]
+            """;
+        long formId = insertForm("DRAFT", schema);
+        long processId = insertProcess(formId, "DRAFT", twoApprovalFlow(bobId, adminId));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            publishService.publish(formId, processId);
+            Map<String, Object> started = processEngine.start(new StartCmd(code,
+                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of()), adminId);
+
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_form_definition_version
+                WHERE form_definition_id = ? AND length(checksum) = 64
+                """, Long.class, formId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_process_definition_version
+                WHERE process_definition_id = ? AND length(checksum) = 64
+                """, Long.class, processId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_form_data_revision
+                WHERE form_data_id = ? AND length(checksum) = 64
+                """, Long.class, ((Number) started.get("formDataId")).longValue()))
+                .isEqualTo(1L);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
     void v2AllSignWaitsForEveryoneBeforeCreatingDownstreamTask() {
         long adminId = userId("admin");
         long bobId = userId("bob");

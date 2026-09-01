@@ -23,7 +23,7 @@ public class DefinitionVersionRepository {
                 form_definition_id, version_no, schema, settings, checksum,
                 published_by, published_at)
             VALUES (?, ?, ?::jsonb, ?::jsonb,
-                    encode(digest((?::jsonb::text || ?::jsonb::text)::bytea, 'sha256'), 'hex'),
+                    encode(digest(?::jsonb::text || ?::jsonb::text, 'sha256'), 'hex'),
                     ?, now())
             ON CONFLICT (form_definition_id, version_no) DO NOTHING
             RETURNING id
@@ -44,7 +44,7 @@ public class DefinitionVersionRepository {
                 process_definition_id, form_definition_version_id, version_no,
                 process, settings, checksum, published_by, published_at)
             VALUES (?, ?, ?, ?::jsonb, '{}'::jsonb,
-                    encode(digest(?::jsonb::text::bytea, 'sha256'), 'hex'), ?, now())
+                    encode(digest(?::jsonb::text, 'sha256'), 'hex'), ?, now())
             ON CONFLICT (process_definition_id, version_no, checksum) DO NOTHING
             RETURNING id
             """, rs -> rs.next() ? rs.getLong(1) : null,
@@ -54,7 +54,7 @@ public class DefinitionVersionRepository {
         return requiredLong("""
             SELECT id FROM t_process_definition_version
             WHERE process_definition_id = ? AND version_no = ?
-              AND checksum = encode(digest(?::jsonb::text::bytea, 'sha256'), 'hex')
+              AND checksum = encode(digest(?::jsonb::text, 'sha256'), 'hex')
             """, process.getId(), process.getVersion(), process.getProcess());
     }
 
@@ -109,7 +109,7 @@ public class DefinitionVersionRepository {
                 form_data_id, revision_no, form_definition_version_id, data,
                 status, reason, checksum, created_by)
             SELECT ?, COALESCE(MAX(revision_no), 0) + 1, ?, ?::jsonb, ?, ?,
-                   encode(digest(?::jsonb::text::bytea, 'sha256'), 'hex'), ?
+                   encode(digest(?::jsonb::text, 'sha256'), 'hex'), ?
             FROM t_form_data_revision WHERE form_data_id = ?
             RETURNING id
             """, rs -> rs.next() ? rs.getLong(1) : null,

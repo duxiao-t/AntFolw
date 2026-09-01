@@ -521,7 +521,10 @@ export default function FormManagementWizard() {
       qc.invalidateQueries({ queryKey: ['form-management-definition'] });
       qc.invalidateQueries({ queryKey: ['form-management-process'] });
     },
-    onError: (error: any) => message.error(error?.message ?? '发布失败'),
+    onError: (error: any) => {
+      // HTTP errors are already rendered once by the global request handler.
+      if (!error?.response) message.error(error?.message ?? '发布失败');
+    },
   });
 
   const confirmPublish = () => {
