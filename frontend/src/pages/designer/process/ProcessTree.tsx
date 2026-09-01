@@ -4,10 +4,20 @@ import { NodeChain } from './NodeChain';
 import { ProcessValidationContext } from './ProcessValidationContext';
 import { useProcessDesignerStore } from './useProcessDesignerStore';
 import { validateProcessTree } from './validation';
+import type { FormFieldOption } from './types';
 
-export function ProcessTree({ zoom = 100 }: { zoom?: number }) {
+export function ProcessTree({
+  zoom = 100,
+  formFields,
+}: {
+  zoom?: number;
+  formFields?: FormFieldOption[];
+}) {
   const process = useProcessDesignerStore((state) => state.process);
-  const issues = useMemo(() => validateProcessTree(process), [process]);
+  const issues = useMemo(
+    () => validateProcessTree(process, formFields),
+    [process, formFields],
+  );
   return (
     <ProcessValidationContext.Provider value={issues}>
       <div className="pt-canvas" style={{ zoom: zoom / 100 }}>

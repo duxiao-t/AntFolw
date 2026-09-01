@@ -23,6 +23,7 @@ type State = {
   copyBranch(ownerId: string, branchId: string): void;
   removeBranch(ownerId: string, branchId: string): void;
   moveBranch(ownerId: string, branchId: string, direction: -1 | 1): void;
+  reconcileFormFields(fieldIds: string[]): void;
   updateProps(id: string, props: any): void;
   updateName(id: string, name: string): void;
 };
@@ -140,6 +141,36 @@ function cloneSubtree(node: TreeNode | null | undefined): TreeNode | null {
     branchs: node.branchs?.map((branch) => cloneSubtree(branch) as TreeNode),
     children: cloneSubtree(node.children),
   };
+}
+
+function pruneMissingFormPerms(node: TreeNode, allowedIds: Set<string>): TreeNode {
+  const branchs = node.branchs?.map((branch) =>
+    pruneMissingFormPerms(branch, allowedIds),
+  );
+  const children = node.children
+    ? pruneMissingFormPerms(node.children, allowedIds)
+    : node.children;
+  let props = node.props;
+  if (node.type === 'APPROVAL' && Array.isArray(node.props?.formPerms)) {
+    const formPerms = node.props.formPerms.filter((entry: any) => {
+      const fieldId = entry?.fieldId;
+      return (
+        typeof fieldId !== 'string' ||
+        !fieldId.trim() ||
+        allowedIds.has(fieldId)
+      );
+    });
+    if (formPerms.length !== node.props.formPerms.length) {
+      props = { ...node.props, formPerms };
+    }
+  }
+  const branchsChanged = branchs?.some(
+    (branch, index) => branch !== node.branchs?.[index],
+  );
+  if (props === node.props && !branchsChanged && children === node.children) {
+    return node;
+  }
+  return { ...node, props, branchs, children };
 }
 
 function createLinearNode(
@@ -326,6 +357,15 @@ export const useProcessDesignerStore = create<State>((set) => ({
         owner.branchs = branches;
       }),
     })),
+
+  reconcileFormFields: (fieldIds) =>
+    set((state) => {
+      const process = pruneMissingFormPerms(
+        state.process,
+        new Set(fieldIds),
+      );
+      return process === state.process ? state : { ...state, process };
+    }),
 
   removeNode: (id) =>
     set((state) => ({

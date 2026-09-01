@@ -199,6 +199,30 @@ describe('process designer tree operations', () => {
     expect(promoted?.id).toBe('cc-default');
     expect(promoted?.children?.id).toBe('approval-after');
   });
+
+  it('removes permissions for deleted form fields without touching valid ones', () => {
+    reset({
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: {
+          assignedType: 'SELF',
+          formPerms: [
+            { fieldId: 'deleted', mode: 'HIDDEN' },
+            { fieldId: 'subject', mode: 'EDITABLE' },
+          ],
+        },
+      },
+    });
+
+    useProcessDesignerStore.getState().reconcileFormFields(['subject']);
+
+    expect(
+      useProcessDesignerStore.getState().process.children?.props?.formPerms,
+    ).toEqual([{ fieldId: 'subject', mode: 'EDITABLE' }]);
+  });
 });
 
 describe('process designer validation', () => {
@@ -408,5 +432,83 @@ describe('process designer validation', () => {
       nodeId: 'approval',
       message: '请配置审批人',
     });
+  });
+
+  it('locates deleted semantic form references while allowing stale permissions', () => {
+    const tree: TreeNode = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'conditions',
+        type: 'CONDITIONS',
+        branchs: [
+          {
+            id: 'matched',
+            type: 'CONDITION',
+            props: {
+              groups: [
+                {
+                  conditions: [
+                    { field: 'deleted', operator: '==', value: 'yes' },
+                  ],
+                },
+              ],
+            },
+            children: {
+              id: 'field-user',
+              type: 'APPROVAL',
+              props: {
+                assignedType: 'FIELD_USER',
+                fieldUser: { fieldId: 'deleted-user' },
+                formPerms: [{ fieldId: 'old-permission', mode: 'HIDDEN' }],
+              },
+            },
+          },
+          { id: 'default', type: 'CONDITION', props: { isDefault: true } },
+        ],
+        children: {
+          id: 'trigger',
+          type: 'TRIGGER',
+          props: {
+            method: 'POST',
+            url: 'https://hooks.example.com/flow',
+            contentType: 'application/json',
+            continueMode: 'ON_SUCCESS',
+            secret: '12345678',
+            headers: [],
+            parameters: [
+              { key: 'subject', source: 'FIELD', fieldId: 'deleted-hook' },
+            ],
+          },
+        },
+      },
+    };
+
+    expect(
+      validateProcessTree(tree, [
+        { id: 'subject', label: '主题', type: 'text' },
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          nodeId: 'matched',
+          message: '分支条件引用的表单字段 deleted 已删除，请重新选择',
+        },
+        {
+          nodeId: 'field-user',
+          message:
+            '表单审批人字段 deleted-user 已删除或类型不再是人员选择',
+        },
+        {
+          nodeId: 'trigger',
+          message: 'Webhook 参数引用的表单字段 deleted-hook 已删除',
+        },
+      ]),
+    );
+    expect(
+      validateProcessTree(tree, [
+        { id: 'subject', label: '主题', type: 'text' },
+      ]).some((issue) => issue.message.includes('old-permission')),
+    ).toBe(false);
   });
 });

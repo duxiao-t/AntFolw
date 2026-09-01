@@ -1,4 +1,4 @@
-import type { TreeNode } from './types';
+import type { FormFieldOption, TreeNode } from './types';
 
 export type ProcessValidationIssue = {
   nodeId: string;
@@ -6,6 +6,50 @@ export type ProcessValidationIssue = {
 };
 
 const MAX_TREE_DEPTH = 50;
+const FIELD_CONTAINER_TYPES = new Set(['span_layout', 'table_list']);
+const EDITABLE_FORBIDDEN_TYPES = new Set([
+  'image_upload',
+  'video_upload',
+  'file_upload',
+  'audio_upload',
+  'location',
+  'checklist',
+]);
+
+export function flattenFormFields(nodes: any[]): FormFieldOption[] {
+  const result: FormFieldOption[] = [];
+  const visit = (list: any[]) => {
+    for (const node of list) {
+      if (!node?.id) continue;
+      if (FIELD_CONTAINER_TYPES.has(node.type)) {
+        if (Array.isArray(node.children)) visit(node.children);
+        continue;
+      }
+      if (node.type === 'description') continue;
+      result.push({
+        id: node.id,
+        label: node.label ?? node.props?.label ?? node.id,
+        type: node.type,
+        options: Array.isArray(node.props?.options)
+          ? node.props.options
+              .filter(
+                (option: any) =>
+                  option &&
+                  !option.isOther &&
+                  (typeof option.value === 'string' ||
+                    typeof option.value === 'number'),
+              )
+              .map((option: any) => ({
+                label: String(option.label ?? option.value),
+                value: option.value,
+              }))
+          : undefined,
+      });
+    }
+  };
+  visit(nodes);
+  return result;
+}
 
 const hasConfiguredApproval = (
   node: TreeNode | null | undefined,
@@ -65,7 +109,10 @@ const approvalPolicyReady = (node: TreeNode): boolean => {
   );
 };
 
-const formPermsIssue = (node: TreeNode): string | null => {
+const formPermsIssue = (
+  node: TreeNode,
+  fieldTypes?: Map<string, string>,
+): string | null => {
   const perms = node.props?.formPerms;
   if (perms == null) return null;
   if (!Array.isArray(perms)) return '字段权限配置必须是数组';
@@ -74,6 +121,7 @@ const formPermsIssue = (node: TreeNode): string | null => {
     if (!entry || typeof entry.fieldId !== 'string' || !entry.fieldId.trim()) {
       return '字段权限缺少字段 id';
     }
+    if (fieldTypes && !fieldTypes.has(entry.fieldId)) continue;
     if (!['HIDDEN', 'READONLY', 'EDITABLE'].includes(entry.mode)) {
       return `字段 ${entry.fieldId} 的权限模式非法`;
     }
@@ -81,6 +129,14 @@ const formPermsIssue = (node: TreeNode): string | null => {
       return `字段 ${entry.fieldId} 重复配置权限`;
     }
     seen.add(entry.fieldId);
+    const fieldType = fieldTypes?.get(entry.fieldId);
+    if (
+      fieldType &&
+      entry.mode === 'EDITABLE' &&
+      EDITABLE_FORBIDDEN_TYPES.has(fieldType)
+    ) {
+      return `字段 ${entry.fieldId} 暂不支持编辑`;
+    }
   }
   return null;
 };
@@ -120,6 +176,29 @@ const branchConditionReady = (node: TreeNode): boolean => {
     Array.isArray(groups) &&
     groups.every((group: any) => (group.conditions?.length ?? 0) === 0);
   return mode === 'ALWAYS' || (mode === 'WHEN_MATCHED' && emptyGroups);
+};
+
+const conditionFieldIssue = (
+  node: TreeNode,
+  fieldTypes?: Map<string, string>,
+): string | null => {
+  if (!fieldTypes || node.props?.isDefault) return null;
+  for (const group of node.props?.groups ?? []) {
+    for (const condition of group.conditions ?? []) {
+      if (condition.field && !fieldTypes.has(condition.field)) {
+        return `分支条件引用的表单字段 ${condition.field} 已删除，请重新选择`;
+      }
+      if (
+        condition.field &&
+        ['audio_upload', 'location'].includes(
+          fieldTypes.get(condition.field) ?? '',
+        )
+      ) {
+        return '录音和定位字段不能作为流程条件';
+      }
+    }
+  }
+  return null;
 };
 
 const delayReady = (node: TreeNode): boolean => {
@@ -170,8 +249,28 @@ const triggerReady = (node: TreeNode): boolean => {
   );
 };
 
-export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
+const missingTriggerField = (
+  node: TreeNode,
+  fieldTypes?: Map<string, string>,
+): string | null => {
+  if (!fieldTypes) return null;
+  const row = (node.props?.parameters ?? []).find(
+    (parameter: any) =>
+      parameter.source === 'FIELD' &&
+      parameter.fieldId &&
+      !fieldTypes.has(parameter.fieldId),
+  );
+  return row ? String(row.fieldId) : null;
+};
+
+export function validateProcessTree(
+  root: TreeNode,
+  formFields?: FormFieldOption[],
+): ProcessValidationIssue[] {
   const issues: ProcessValidationIssue[] = [];
+  const fieldTypes = formFields
+    ? new Map(formFields.map((field) => [field.id, field.type]))
+    : undefined;
   const add = (nodeId: string, message: string) =>
     issues.push({ nodeId, message });
 
@@ -185,7 +284,15 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
       add(node.id, '请配置审批人');
     if (node.type === 'APPROVAL') {
       if (!approvalPolicyReady(node)) add(node.id, '请配置有效的审批或超时规则');
-      const permIssue = formPermsIssue(node);
+      const fieldUserId = node.props?.fieldUser?.fieldId;
+      if (
+        fieldTypes &&
+        fieldUserId &&
+        fieldTypes.get(fieldUserId) !== 'user_picker'
+      ) {
+        add(node.id, `表单审批人字段 ${fieldUserId} 已删除或类型不再是人员选择`);
+      }
+      const permIssue = formPermsIssue(node, fieldTypes);
       if (permIssue) add(node.id, permIssue);
     }
     if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
@@ -193,8 +300,13 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
     }
     if (node.type === 'DELAY' && !delayReady(node))
       add(node.id, '请配置有效的延时规则');
-    if (node.type === 'TRIGGER' && !triggerReady(node)) {
-      add(node.id, '请完整配置 Webhook 地址、签名和参数');
+    if (node.type === 'TRIGGER') {
+      const missingField = missingTriggerField(node, fieldTypes);
+      if (missingField) {
+        add(node.id, `Webhook 参数引用的表单字段 ${missingField} 已删除`);
+      } else if (!triggerReady(node)) {
+        add(node.id, '请完整配置 Webhook 地址、签名和参数');
+      }
     }
     if (node.type === 'CONDITIONS') {
       const branches = node.branchs ?? [];
@@ -203,7 +315,12 @@ export function validateProcessTree(root: TreeNode): ProcessValidationIssue[] {
       if (defaults.length !== 1)
         add(node.id, '条件节点必须且只能有一个默认分支');
       branches.forEach((branch) => {
-        if (!conditionReady(branch)) add(branch.id, '请完整配置分支条件');
+        const fieldIssue = conditionFieldIssue(branch, fieldTypes);
+        if (fieldIssue) {
+          add(branch.id, fieldIssue);
+        } else if (!conditionReady(branch)) {
+          add(branch.id, '请完整配置分支条件');
+        }
         walk(branch, depth + 1);
       });
     } else if (node.type === 'PARALLEL') {

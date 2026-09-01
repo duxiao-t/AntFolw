@@ -28,6 +28,11 @@ import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
 import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
+import type { TreeNode } from '../designer/process/types';
+import {
+  flattenFormFields,
+  validateProcessTree,
+} from '../designer/process/validation';
 import FormGrantUserPicker, {
   type GrantDepartment,
   type GrantUser,
@@ -241,6 +246,14 @@ export default function FormManagementWizard() {
     [processDefinition?.process],
   );
   const approvalNodeReady = hasApprovalNode(processTree);
+  const processFormFields = useMemo(() => flattenFormFields(schema), [schema]);
+  const processIssues = useMemo(
+    () =>
+      processTree
+        ? validateProcessTree(processTree as TreeNode, processFormFields)
+        : [],
+    [processFormFields, processTree],
+  );
   const optionErrors = useMemo(() => collectOptionErrors(schema), [schema]);
   const uploadWarnings = useMemo(() => collectUploadWarnings(schema), [schema]);
   const publishChecks = useMemo<PublishCheckItem[]>(() => {
@@ -290,12 +303,19 @@ export default function FormManagementWizard() {
       checks.push({
         key: 'workflow',
         status:
-          processDefinition?.id && approvalNodeReady ? 'success' : 'error',
+          processDefinition?.id &&
+          approvalNodeReady &&
+          processIssues.length === 0
+            ? 'success'
+            : 'error',
         title: '审批流程已配置',
         description:
-          processDefinition?.id && approvalNodeReady
+          processDefinition?.id &&
+          approvalNodeReady &&
+          processIssues.length === 0
             ? '已配置至少一个审批节点'
-            : '启用审批流程后，必须至少配置一个审批节点',
+            : processIssues[0]?.message ??
+              '启用审批流程后，必须至少配置一个审批节点',
       });
     } else {
       checks.push({
@@ -312,6 +332,7 @@ export default function FormManagementWizard() {
     definition,
     optionErrors,
     processDefinition?.id,
+    processIssues,
     schema.length,
     uploadWarnings,
     workflowEnabled,

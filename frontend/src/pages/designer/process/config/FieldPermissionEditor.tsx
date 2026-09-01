@@ -5,6 +5,8 @@ const EDITABLE_FORBIDDEN_TYPES = new Set([
   'image_upload',
   'video_upload',
   'file_upload',
+  'audio_upload',
+  'location',
   'checklist',
 ]);
 

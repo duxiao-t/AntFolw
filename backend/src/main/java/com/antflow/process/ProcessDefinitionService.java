@@ -25,7 +25,7 @@ public class ProcessDefinitionService {
     private static final int MAX_TREE_DEPTH = 50;
     /** 附件/检查项等复杂字段在 v1 不支持审批节点编辑，只能隐藏或只读。 */
     private static final Set<String> EDITABLE_FORBIDDEN_TYPES = Set.of(
-        "image_upload", "video_upload", "file_upload", "checklist");
+        "image_upload", "video_upload", "file_upload", "audio_upload", "location", "checklist");
 
     private final ProcessDefinitionMapper mapper;
     private final FormDefinitionService formDefinitionService;
@@ -99,7 +99,7 @@ public class ProcessDefinitionService {
                 "Associated form must be PUBLISHED before publishing the flow");
         }
 
-        pd.setProcess(normalizeConditionValues(pd.getProcess(), fd.getSchema()));
+        pd.setProcess(normalizeConditionValuesForPublish(pd.getProcess(), fd.getSchema()));
         validateProcessTree(pd.getProcess(),
             formDefinitionService.leafFieldTypes(fd.getSchema()));
 
@@ -130,12 +130,24 @@ public class ProcessDefinitionService {
 
     /** 将选项条件严格规范化为 Schema 中的真实 value；兼容唯一精确匹配的旧 label。 */
     public String normalizeConditionValues(String processJson, String formSchema) {
+        return normalizeConditionValues(processJson, formSchema, false);
+    }
+
+    String normalizeConditionValuesForPublish(String processJson, String formSchema) {
+        return normalizeConditionValues(processJson, formSchema, true);
+    }
+
+    private String normalizeConditionValues(String processJson, String formSchema,
+                                            boolean reconcileReferences) {
         try {
             JsonNode root = json.readTree(processJson == null ? "{}" : processJson);
             JsonNode schema = json.readTree(formSchema == null ? "[]" : formSchema);
             Map<String, OptionField> fields = new LinkedHashMap<>();
-            collectOptionFields(schema, fields);
-            normalizeConditions(root, fields, 1);
+            Set<String> formFieldIds = new HashSet<>();
+            Set<String> forbiddenConditionFields = new HashSet<>();
+            collectOptionFields(schema, fields, formFieldIds, forbiddenConditionFields);
+            normalizeConditions(root, fields, formFieldIds, forbiddenConditionFields,
+                reconcileReferences, 1);
             return json.writeValueAsString(root);
         } catch (BizException e) {
             throw e;
@@ -144,31 +156,66 @@ public class ProcessDefinitionService {
         }
     }
 
-    private void collectOptionFields(JsonNode nodes, Map<String, OptionField> fields) {
+    private void collectOptionFields(JsonNode nodes, Map<String, OptionField> fields,
+                                     Set<String> formFieldIds,
+                                     Set<String> forbiddenConditionFields) {
         if (!nodes.isArray()) return;
         for (JsonNode node : nodes) {
             String type = node.path("type").asText();
+            String fieldId = node.path("id").asText();
+            if (!fieldId.isBlank()
+                && !Set.of("span_layout", "table_list", "description").contains(type)) {
+                formFieldIds.add(fieldId);
+            }
             if (Set.of("select", "radio", "multi_select", "checkbox").contains(type)) {
                 List<JsonNode> options = new ArrayList<>();
                 node.path("props").path("options").forEach(options::add);
-                fields.put(node.path("id").asText(), new OptionField(type, options));
+                fields.put(fieldId, new OptionField(type, options));
             }
-            collectOptionFields(node.path("children"), fields);
+            if (Set.of("audio_upload", "location").contains(type)) {
+                forbiddenConditionFields.add(fieldId);
+            }
+            collectOptionFields(node.path("children"), fields, formFieldIds,
+                forbiddenConditionFields);
         }
     }
 
     private void normalizeConditions(JsonNode node, Map<String, OptionField> fields,
+                                     Set<String> formFieldIds,
+                                     Set<String> forbiddenConditionFields,
+                                     boolean reconcileReferences,
                                      int depth) {
         if (node == null || node.isNull() || !node.has("id")) return;
         ensureTreeDepth(node, depth);
+        if (reconcileReferences) pruneMissingFormPerms(node, formFieldIds);
         if (isGateway(node)) {
             for (JsonNode branch : node.path("branchs")) {
                 ensureTreeDepth(branch, depth + 1);
-                normalizeBranchConditions(branch, fields);
-                normalizeConditions(branch.path("children"), fields, depth + 2);
+                normalizeBranchConditions(branch, fields, formFieldIds,
+                    forbiddenConditionFields, reconcileReferences);
+                normalizeConditions(branch.path("children"), fields, formFieldIds,
+                    forbiddenConditionFields, reconcileReferences, depth + 2);
             }
         }
-        normalizeConditions(node.path("children"), fields, depth + 1);
+        normalizeConditions(node.path("children"), fields, formFieldIds,
+            forbiddenConditionFields, reconcileReferences, depth + 1);
+    }
+
+    private void pruneMissingFormPerms(JsonNode node, Set<String> formFieldIds) {
+        JsonNode props = node.path("props");
+        JsonNode perms = props.path("formPerms");
+        if (!"APPROVAL".equals(node.path("type").asText())
+            || !(props instanceof ObjectNode propsObject) || !perms.isArray()) {
+            return;
+        }
+        var kept = json.createArrayNode();
+        perms.forEach(entry -> {
+            String fieldId = entry.path("fieldId").asText("").trim();
+            if (fieldId.isBlank() || formFieldIds.contains(fieldId)) {
+                kept.add(entry.deepCopy());
+            }
+        });
+        propsObject.set("formPerms", kept);
     }
 
     private boolean isGateway(JsonNode node) {
@@ -176,10 +223,22 @@ public class ProcessDefinitionService {
         return "CONDITIONS".equals(type) || "PARALLEL".equals(type);
     }
 
-    private void normalizeBranchConditions(JsonNode branch, Map<String, OptionField> fields) {
+    private void normalizeBranchConditions(JsonNode branch, Map<String, OptionField> fields,
+                                           Set<String> formFieldIds,
+                                           Set<String> forbiddenConditionFields,
+                                           boolean reconcileReferences) {
         for (JsonNode group : branch.path("props").path("groups")) {
             for (JsonNode condition : group.path("conditions")) {
-                OptionField field = fields.get(condition.path("field").asText());
+                String fieldId = condition.path("field").asText();
+                if (fieldId.isBlank()) continue;
+                if (reconcileReferences && !formFieldIds.contains(fieldId)) {
+                    throw new BizException("BAD_FLOW", "条件分支 "
+                        + branch.path("id").asText() + " 引用了已删除的表单字段 " + fieldId);
+                }
+                if (forbiddenConditionFields.contains(fieldId)) {
+                    throw new BizException("BAD_FLOW", "录音和定位字段不能作为流程条件");
+                }
+                OptionField field = fields.get(fieldId);
                 if (field == null) continue;
                 String operator = condition.path("operator").asText();
                 boolean multiple = Set.of("multi_select", "checkbox").contains(field.type());
@@ -286,7 +345,7 @@ public class ProcessDefinitionService {
                 hasApprovalNode = true;
             }
             case "DELAY" -> validateDelay(n);
-            case "TRIGGER" -> validateTrigger(n);
+            case "TRIGGER" -> validateTrigger(n, fieldTypes);
             case "CONDITIONS" -> {
                 com.fasterxml.jackson.databind.JsonNode branchs = n.path("branchs");
                 if (!branchs.isArray() || branchs.size() < 1) {
@@ -453,7 +512,8 @@ public class ProcessDefinitionService {
         }
     }
 
-    private void validateTrigger(com.fasterxml.jackson.databind.JsonNode n) {
+    private void validateTrigger(com.fasterxml.jackson.databind.JsonNode n,
+                                 Map<String, String> fieldTypes) {
         var props = n.path("props");
         if (!Set.of("GET", "POST", "PUT", "PATCH", "DELETE")
             .contains(props.path("method").asText())) {
@@ -488,11 +548,17 @@ public class ProcessDefinitionService {
         }
         for (var parameter : props.path("parameters")) {
             String source = parameter.path("source").asText();
+            String fieldId = parameter.path("fieldId").asText();
             if (parameter.path("key").asText().isBlank()
                 || !("FIXED".equals(source) || "FIELD".equals(source))
-                || ("FIELD".equals(source) && parameter.path("fieldId").asText().isBlank())
+                || ("FIELD".equals(source) && fieldId.isBlank())
                 || ("FIXED".equals(source) && !parameter.has("value"))) {
                 throw new BizException("BAD_FLOW", "Webhook 请求参数配置无效");
+            }
+            if ("FIELD".equals(source) && !fieldTypes.containsKey(fieldId)) {
+                throw new BizException("BAD_FLOW", "Webhook 节点 "
+                    + n.path("id").asText() + " 的参数 "
+                    + parameter.path("key").asText() + " 引用了已删除的表单字段 " + fieldId);
             }
         }
     }

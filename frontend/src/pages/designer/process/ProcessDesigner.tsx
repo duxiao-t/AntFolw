@@ -18,9 +18,9 @@ import { ParallelNodeConfig } from './config/ParallelNodeConfig';
 import { RootNodeConfig } from './config/RootNodeConfig';
 import { TriggerNodeConfig } from './config/TriggerNodeConfig';
 import { ProcessTree } from './ProcessTree';
-import type { FormFieldOption, TreeNode } from './types';
+import type { TreeNode } from './types';
 import { useProcessDesignerStore } from './useProcessDesignerStore';
-import { validateProcessTree } from './validation';
+import { flattenFormFields, validateProcessTree } from './validation';
 
 function find(node: TreeNode | null | undefined, id: string): TreeNode | null {
   if (!node) return null;
@@ -68,43 +68,6 @@ function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
   }
 }
 
-const FIELD_CONTAINER_TYPES = new Set(['span_layout', 'table_list']);
-
-function flattenFormFields(nodes: any[]): FormFieldOption[] {
-  const result: FormFieldOption[] = [];
-  const visit = (list: any[]) => {
-    for (const node of list) {
-      if (!node?.id) continue;
-      if (FIELD_CONTAINER_TYPES.has(node.type)) {
-        if (Array.isArray(node.children)) visit(node.children);
-        continue;
-      }
-      if (node.type === 'description') continue;
-      result.push({
-        id: node.id,
-        label: node.label ?? node.props?.label ?? node.id,
-        type: node.type,
-        options: Array.isArray(node.props?.options)
-          ? node.props.options
-              .filter(
-                (option: any) =>
-                  option &&
-                  !option.isOther &&
-                  (typeof option.value === 'string' ||
-                    typeof option.value === 'number'),
-              )
-              .map((option: any) => ({
-                label: String(option.label ?? option.value),
-                value: option.value,
-              }))
-          : undefined,
-      });
-    }
-  };
-  visit(nodes);
-  return result;
-}
-
 export function ProcessDesignerSurface({
   formDefId: formDefIdProp,
   embedded = false,
@@ -122,6 +85,9 @@ export function ProcessDesignerSurface({
   const selectedId = useProcessDesignerStore((state) => state.selectedId);
   const load = useProcessDesignerStore((state) => state.load);
   const select = useProcessDesignerStore((state) => state.select);
+  const reconcileFormFields = useProcessDesignerStore(
+    (state) => state.reconcileFormFields,
+  );
   const [pdId, setPdId] = useState<number | null>(null);
   const [zoom, setZoom] = useState(100);
   const [saving, setSaving] = useState(false);
@@ -150,8 +116,19 @@ export function ProcessDesignerSurface({
       request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
     enabled: !!formDefId,
   });
-  const formFields = flattenFormFields(parseJsonValue<any[]>(formDef?.schema, []));
-  const issues = useMemo(() => validateProcessTree(process), [process]);
+  const formFields = useMemo(
+    () => flattenFormFields(parseJsonValue<any[]>(formDef?.schema, [])),
+    [formDef?.schema],
+  );
+  const conditionFormFields = formFields.filter((field) => !['audio_upload', 'location'].includes(field.type));
+  useEffect(() => {
+    if (formDef) reconcileFormFields(formFields.map((field) => field.id));
+  }, [formDef, formFields, process, reconcileFormFields]);
+  const validationFields = formDef ? formFields : undefined;
+  const issues = useMemo(
+    () => validateProcessTree(process, validationFields),
+    [process, validationFields],
+  );
 
   const save = async (): Promise<void> => {
     setSaving(true);
@@ -247,7 +224,7 @@ export function ProcessDesignerSurface({
         </Space.Compact>
       </div>
       <div ref={viewportRef} className="process-designer__viewport">
-        <ProcessTree zoom={zoom} />
+        <ProcessTree zoom={zoom} formFields={validationFields} />
       </div>
       <Drawer
         open={!!selected}
@@ -266,13 +243,13 @@ export function ProcessDesignerSurface({
         )}
         {selected?.type === 'CC' && <CcNodeConfig node={selected} />}
         {selected?.type === 'CONDITION' && (
-          <ConditionNodeConfig node={selected} formFields={formFields} />
+          <ConditionNodeConfig node={selected} formFields={conditionFormFields} />
         )}
         {selected?.type === 'PARALLEL' && (
           <ParallelNodeConfig node={selected} />
         )}
         {selected?.type === 'BRANCH' && (
-          <BranchNodeConfig node={selected} formFields={formFields} />
+          <BranchNodeConfig node={selected} formFields={conditionFormFields} />
         )}
         {selected?.type === 'DELAY' && <DelayNodeConfig node={selected} />}
         {selected?.type === 'TRIGGER' && (

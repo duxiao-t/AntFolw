@@ -2,6 +2,7 @@ package com.antflow.process;
 
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -61,6 +62,71 @@ class ProcessDefinitionServiceValidationTest {
             optionCondition("==", "\"其他\""), optionSchema(false)))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("不能作为流程条件");
+    }
+
+    @Test void normalize_removes_only_form_permissions_for_deleted_fields() throws Exception {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF","formPerms":[
+                {"fieldId":"deleted","mode":"HIDDEN"},
+                {"fieldId":"kind","mode":"EDITABLE"}]}}}
+            """;
+
+        JsonNode normalized = new ObjectMapper().readTree(
+            service.normalizeConditionValuesForPublish(tree, optionSchema(false)));
+
+        assertThat(normalized.at("/children/props/formPerms")).hasSize(1);
+        assertThat(normalized.at("/children/props/formPerms/0/fieldId").asText())
+            .isEqualTo("kind");
+    }
+
+    @Test void publish_normalization_repairs_stale_permission_after_condition_reconfigured()
+            throws Exception {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"conditions",
+              "type":"CONDITIONS","branchs":[
+                {"id":"matched","type":"CONDITION","props":{"groups":[{
+                  "conditions":[{"field":"subject","operator":"==","value":"yes"}]}]},
+                  "children":{"id":"a1","type":"APPROVAL",
+                    "props":{"assignedType":"SELF"}}},
+                {"id":"default","type":"CONDITION","props":{"isDefault":true},
+                  "children":{"id":"a2","type":"APPROVAL",
+                    "props":{"assignedType":"SELF","formPerms":[
+                      {"fieldId":"deleted-select","mode":"HIDDEN"}]}}}]}}
+            """;
+        String schema = "[{\"id\":\"subject\",\"type\":\"text\"}]";
+
+        String normalized = service.normalizeConditionValuesForPublish(tree, schema);
+
+        JsonNode process = new ObjectMapper().readTree(normalized);
+        assertThat(process.at(
+            "/children/branchs/1/children/props/formPerms")).isEmpty();
+        assertThatCode(() -> service.validateProcessTree(normalized,
+            Map.of("subject", "text"))).doesNotThrowAnyException();
+    }
+
+    @Test void normalize_rejects_condition_referencing_deleted_field() {
+        String tree = optionCondition("==", "2")
+            .replace("\"field\":\"kind\"", "\"field\":\"deleted\"");
+
+        assertThatThrownBy(() ->
+            service.normalizeConditionValuesForPublish(tree, optionSchema(false)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("条件分支")
+            .hasMessageContaining("已删除的表单字段 deleted");
+    }
+
+    @Test void runtime_normalization_keeps_snapshot_references_for_inflight_instances()
+            throws Exception {
+        String tree = optionCondition("==", "2")
+            .replace("\"field\":\"kind\"", "\"field\":\"deleted\"");
+
+        JsonNode normalized = new ObjectMapper().readTree(
+            service.normalizeConditionValues(tree, optionSchema(false)));
+
+        assertThat(normalized.at(
+            "/children/branchs/0/props/groups/0/conditions/0/field").asText())
+            .isEqualTo("deleted");
     }
 
     @Test void normalize_multi_select_requires_contains_and_preserves_value_type() throws Exception {
@@ -179,6 +245,23 @@ class ProcessDefinitionServiceValidationTest {
               ],"children":{"id":"join","type":"EMPTY"}}}
             """;
         assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
+    }
+
+    @Test void validate_rejects_webhook_parameter_referencing_deleted_field() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF"},"children":{"id":"t1","type":"TRIGGER",
+              "props":{"method":"POST","url":"https://hooks.example.com/flow",
+              "contentType":"application/json","continueMode":"ON_SUCCESS",
+              "secret":"12345678","headers":[],"parameters":[
+                {"key":"amount","source":"FIELD","fieldId":"deleted"}]}}}}
+            """;
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree,
+            Map.of("amount", "number")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("Webhook 节点 t1")
+            .hasMessageContaining("已删除的表单字段 deleted");
     }
 
     @Test void validate_self_select_multiple_is_boolean_when_present() {
