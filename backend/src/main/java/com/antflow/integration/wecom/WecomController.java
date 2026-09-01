@@ -41,7 +41,7 @@ public class WecomController {
 
     @PostMapping("/sync-jobs")
     public WecomService.JobDto start(@Valid @RequestBody StartJobRequest request) {
-        return service.start(request.companyId());
+        return service.start(request.companyId(), request.mode());
     }
 
     @GetMapping("/sync-jobs/{id}")
@@ -57,5 +57,5 @@ public class WecomController {
                                       Boolean oauthEnabled,
                                       Boolean jsSdkEnabled,
                                       Boolean messageEnabled) { }
-    public record StartJobRequest(@NotNull Long companyId) { }
+    public record StartJobRequest(@NotNull Long companyId, String mode) { }
 }

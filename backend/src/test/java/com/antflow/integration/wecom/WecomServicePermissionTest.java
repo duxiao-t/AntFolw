@@ -45,7 +45,7 @@ class WecomServicePermissionTest {
         doThrow(new AccessDeniedException("user scope")).when(authorization)
             .requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
 
-        assertThatThrownBy(() -> service.start(1)).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> service.start(1, "FULL")).isInstanceOf(AccessDeniedException.class);
         verify(authorization).requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_WRITE);
         verify(authorization).requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
     }

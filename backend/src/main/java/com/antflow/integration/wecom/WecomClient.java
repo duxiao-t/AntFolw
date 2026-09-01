@@ -49,30 +49,41 @@ class WecomClient {
         return result;
     }
 
-    List<WecomUserRef> userIds(Session session) {
-        Map<String, LinkedHashSet<Long>> users = new LinkedHashMap<>();
-        String cursor = "";
-        Set<String> seenCursors = new LinkedHashSet<>();
-        int pages = 0;
-        do {
-            if (++pages > 1000) throw new WecomApiException("企业微信成员分页数量异常");
-            if (!seenCursors.add(cursor)) throw new WecomApiException("企业微信成员分页游标重复");
-            JsonNode response = send("POST", "/cgi-bin/user/list_id",
-                json.createObjectNode().put("cursor", cursor).put("limit", 10000), session);
-            for (JsonNode item : response.path("dept_user")) {
-                String userId = item.path("userid").asText();
-                if (userId.isBlank()) continue;
-                LinkedHashSet<Long> departments = users.computeIfAbsent(userId,
-                    ignored -> new LinkedHashSet<>());
-                JsonNode department = item.path("department");
-                if (department.isArray()) department.forEach(value -> departments.add(value.asLong()));
-                else if (department.isNumber()) departments.add(department.asLong());
-            }
-            cursor = response.path("next_cursor").asText("");
-        } while (!cursor.isBlank());
-        return users.entrySet().stream()
-            .map(entry -> new WecomUserRef(entry.getKey(), List.copyOf(entry.getValue())))
-            .toList();
+    List<WecomUser> users(Session session, List<Long> departmentIds) {
+        Map<String, WecomUser> users = new LinkedHashMap<>();
+        for (Long departmentId : departmentIds) {
+            String nextOpenId = "";
+            int pages = 0;
+            do {
+                if (++pages > 1000) throw new WecomApiException("企业微信成员分页数量异常");
+                String path = "/cgi-bin/user/list?department_id=" + departmentId + "&fetch_child=0";
+                if (!nextOpenId.isBlank()) path += "&next_openid=" + encode(nextOpenId);
+                JsonNode response = send("GET", path, null, session);
+                for (JsonNode item : response.path("userlist")) {
+                    String userId = item.path("userid").asText();
+                    if (userId.isBlank()) continue;
+                    List<Long> departments = longs(item.path("department"));
+                    WecomUser previous = users.get(userId);
+                    if (previous == null) {
+                        users.put(userId, new WecomUser(userId,
+                            item.path("name").asText(userId), departments,
+                            item.path("main_department").asLong(0),
+                            item.path("mobile").asText(), item.path("email").asText(),
+                            item.path("position").asText(), item.path("gender").asText(),
+                            item.path("status").asInt(1), List.of()));
+                    } else {
+                        Set<Long> merged = new LinkedHashSet<>(previous.departmentIds());
+                        merged.addAll(departments);
+                        users.put(userId, new WecomUser(userId, previous.name(),
+                            List.copyOf(merged), previous.mainDepartment(), previous.phone(),
+                            previous.email(), previous.position(), previous.gender(),
+                            previous.status(), List.of()));
+                    }
+                }
+                nextOpenId = response.path("next_openid").asText("");
+            } while (!nextOpenId.isBlank());
+        }
+        return List.copyOf(users.values());
     }
 
     WecomUser user(Session session, WecomUserRef reference) {

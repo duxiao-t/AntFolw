@@ -16,8 +16,10 @@ import java.security.MessageDigest;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -27,8 +29,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -43,6 +50,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class WecomService {
     private static final int MAX_ERROR_SUMMARIES = 10;
+    private static final int USER_BATCH_SIZE = 200;
+    private static final int MANAGER_POOL_SIZE = 12;
+    private static final long MANAGER_BATCH_INTERVAL_MS = 350;
     private final JdbcTemplate jdbc;
     private final WecomSecretCipher cipher;
     private final WecomClient client;
@@ -150,7 +160,7 @@ public class WecomService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public JobDto start(long companyId) {
+    public JobDto start(long companyId, String syncMode) {
         authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
         authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_WRITE);
         authorization.requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
@@ -158,15 +168,17 @@ public class WecomService {
         if (config(companyId) == null) {
             throw new BizException("WECOM_NOT_CONFIGURED", "请先保存企业微信连接配置");
         }
+        String mode = "FULL".equalsIgnoreCase(syncMode) ? "FULL" : "INCREMENTAL";
         PrincipalHolder.Principal actor = PrincipalHolder.current().orElseThrow();
         Long id = jdbc.query("""
-            INSERT INTO t_wecom_sync_job(company_id, initiated_by, message)
-            VALUES (?, ?, '任务已排队')
+            INSERT INTO t_wecom_sync_job(company_id, initiated_by, sync_mode, message)
+            VALUES (?, ?, ?, '任务已排队')
             ON CONFLICT (company_id) WHERE status IN ('PENDING', 'RUNNING') DO NOTHING
             RETURNING id
             """, statement -> {
                 statement.setLong(1, companyId);
                 statement.setLong(2, actor.userId());
+                statement.setString(3, mode);
             }, result -> result.next() ? result.getLong(1) : null);
         if (id == null) return activeJob(companyId);
 
@@ -222,6 +234,7 @@ public class WecomService {
             JobDto initial = job(jobId, false);
             Config config = config(initial.companyId());
             if (config == null) throw new WecomClient.WecomApiException("企业微信配置不存在");
+            boolean full = "FULL".equals(initial.syncMode());
             stage(jobId, "CONNECTING", 5, "正在连接企业微信");
             WecomClient.Session session = client.connect(config.corpId(),
                 cipher.decrypt(config.encryptedSecret(), initial.companyId()));
@@ -232,45 +245,302 @@ public class WecomService {
             stage(jobId, "DEPARTMENTS", 25, "部门同步完成");
 
             stage(jobId, "FETCHING_USERS", 30, "正在获取成员列表");
-            List<WecomUserRef> references = client.userIds(session);
+            List<WecomUser> externalUsers = client.users(session,
+                departments.stream().map(WecomDepartment::id).toList());
             jdbc.update("UPDATE t_wecom_sync_job SET total_users = ?, updated_at = now() WHERE id = ?",
-                references.size(), jobId);
+                externalUsers.size(), jobId);
 
-            List<String> errors = new ArrayList<>();
-            Map<String, WecomUser> synchronizedUsers = new LinkedHashMap<>();
+            List<String> errors = new CopyOnWriteArrayList<>();
+            SyncContext context = loadContext(initial.companyId(), externalUsers, full);
             int created = 0;
             int updated = 0;
             int failed = 0;
-            for (int index = 0; index < references.size(); index++) {
-                WecomUserRef reference = references.get(index);
+            for (int offset = 0; offset < context.pending.size(); offset += USER_BATCH_SIZE) {
+                List<WecomUser> batch = context.pending.subList(offset,
+                    Math.min(offset + USER_BATCH_SIZE, context.pending.size()));
                 try {
-                    WecomUser user = client.user(session, reference);
-                    boolean wasCreated = Boolean.TRUE.equals(transactions.execute(status ->
-                        syncUser(initial.companyId(), user, departmentMappings)));
-                    synchronizedUsers.put(user.userId(), user);
-                    if (wasCreated) created++; else updated++;
+                    int[] counts = transactions.execute(status ->
+                        syncUsers(initial.companyId(), batch, departmentMappings, context));
+                    created += counts[0];
+                    updated += counts[1];
                 } catch (RuntimeException exception) {
-                    failed++;
-                    addError(errors, "成员 " + mask(reference.userId()) + " 同步失败："
+                    failed += batch.size();
+                    addError(errors, "成员批次 " + (offset / USER_BATCH_SIZE + 1) + " 同步失败："
                         + userError(exception));
                 }
-                int processed = index + 1;
-                int percent = references.isEmpty() ? 85
-                    : 35 + (int) Math.floor(processed * 50.0 / references.size());
-                progress(jobId, percent, references.size(), processed, created, updated, failed,
-                    "正在同步成员 " + processed + "/" + references.size(), errors);
+                int processed = Math.min(offset + USER_BATCH_SIZE, context.pending.size());
+                int percent = context.pending.isEmpty() ? 75
+                    : 35 + (int) Math.floor(processed * 40.0 / context.pending.size());
+                progress(jobId, percent, externalUsers.size(), processed, created, updated, failed,
+                    "正在同步成员 " + processed + "/" + context.pending.size(), errors);
             }
 
-            stage(jobId, "RELATIONS", 90, "正在同步直属上级和部门负责人");
-            syncRelations(initial.companyId(), synchronizedUsers, departments, errors);
-            finish(jobId, failed == 0 && errors.isEmpty() ? "SUCCESS" : "PARTIAL",
-                failed == 0 && errors.isEmpty() ? "通讯录同步完成" : "通讯录同步完成，部分数据未能同步",
-                errors);
+            stage(jobId, "RELATIONS", 88, "正在同步部门负责人和直属上级");
+            syncDepartmentLeaders(initial.companyId(), departments, errors);
+            syncManagers(initial.companyId(), session,
+                full ? externalUsers : context.createdUsers, context, errors);
+            int disabled = deactivateMissing(initial.companyId(), externalUsers);
+            String summary = "通讯录同步完成"
+                + (disabled > 0 ? "，已停用 " + disabled + " 名成员" : "");
+            boolean clean = failed == 0 && errors.isEmpty();
+            finish(jobId, clean ? "SUCCESS" : "PARTIAL",
+                clean ? summary : summary + "，部分数据未能同步", errors);
         } catch (RuntimeException exception) {
             fail(jobId, fatalError(exception), List.of(fatalError(exception)));
         } finally {
             auditResult(jobId, actor);
         }
+    }
+
+    private SyncContext loadContext(long companyId, List<WecomUser> externalUsers, boolean full) {
+        SyncContext context = new SyncContext();
+        context.roleId = jdbc.queryForObject(
+            "SELECT id FROM t_role WHERE code = 'user' AND enabled = true", Long.class);
+        if (context.roleId == 0) throw new SyncUserException("内置 user 角色不存在");
+        List<LocalUserState> localUsers = jdbc.query("""
+            SELECT u.id, u.username, u.employee_no, u.phone, u.email, u.display_name,
+                   u.position, u.gender, u.status, m.wecom_user_id
+            FROM t_user u
+            JOIN t_department d ON d.id = u.dept_id
+            LEFT JOIN t_wecom_user_mapping m ON m.user_id = u.id AND m.company_id = ?
+            WHERE d.company_id = ?
+            """, (rs, rowNum) -> new LocalUserState(rs.getLong(1), rs.getString(2),
+                rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)),
+            companyId, companyId);
+        for (LocalUserState state : localUsers) {
+            context.usernames.add(state.username());
+            if (state.employeeNo() != null) context.employeeNos.add(state.employeeNo());
+            if (state.wecomUserId() != null) context.mappedIds.put(state.wecomUserId(), state.id());
+            if (state.phone() != null) context.byPhone
+                .computeIfAbsent(state.phone(), ignored -> new ArrayList<>()).add(state.id());
+            if (state.email() != null) context.byEmail
+                .computeIfAbsent(state.email().toLowerCase(), ignored -> new ArrayList<>()).add(state.id());
+            context.byId.put(state.id(), state);
+        }
+        long need = Math.max(externalUsers.size(), 1) + 64;
+        List<String> candidates = jdbc.query(
+            "SELECT nextval('seq_employee_no') FROM generate_series(1, ?)",
+            (rs, rowNum) -> String.format("%06d", rs.getLong(1)), need);
+        for (String candidate : candidates) {
+            if (context.employeeNos.add(candidate)) context.employeeNoQueue.add(candidate);
+        }
+        for (WecomUser user : externalUsers) {
+            if (full) {
+                context.pending.add(user);
+                continue;
+            }
+            LocalUserState local = context.byId.get(context.mappedIds.get(user.userId()));
+            if (local == null || changed(user, local)) context.pending.add(user);
+        }
+        return context;
+    }
+
+    private static boolean changed(WecomUser external, LocalUserState local) {
+        return !Objects.equals(trim(local.displayName()), displayName(external))
+            || !Objects.equals(local.status(), external.status() == 1 ? "ACTIVE" : "DISABLED")
+            || !Objects.equals(blankToNull(local.position()), blankToNull(external.position()))
+            || !Objects.equals(blankToNull(local.phone()), blankToNull(external.phone()))
+            || !Objects.equals(blankToNull(local.email()), blankToNull(external.email()))
+            || !Objects.equals(gender(local.gender()), gender(external.gender()));
+    }
+
+    private int[] syncUsers(long companyId, List<WecomUser> batch,
+                            Map<Long, Long> departmentMappings, SyncContext context) {
+        List<Object[]> inserts = new ArrayList<>();
+        List<String> insertedUsernames = new ArrayList<>();
+        List<Integer> insertedIndexes = new ArrayList<>();
+        List<Object[]> updates = new ArrayList<>();
+        int created = 0;
+        int updated = 0;
+        for (int index = 0; index < batch.size(); index++) {
+            WecomUser user = batch.get(index);
+            Long localId = context.mappedIds.get(user.userId());
+            if (localId == null) localId = matchLocal(context, user.phone(), user.email());
+            if (localId == null) {
+                Long departmentId = departmentMappings.get(primaryDepartment(user));
+                if (departmentId == null) throw new SyncUserException("主部门未绑定");
+                String username = deterministicUsername(companyId, user.userId());
+                if (!context.usernames.add(username)) {
+                    throw new SyncUserException("自动生成的账号已存在");
+                }
+                String employeeNo = nextEmployeeNo(context);
+                String password = passwords.encode(UUID.randomUUID() + ":" + UUID.randomUUID());
+                inserts.add(new Object[]{departmentId, employeeNo, username, password,
+                    displayName(user), blankToNull(user.email()), blankToNull(user.phone()),
+                    blankToNull(user.position()), gender(user.gender()),
+                    user.status() == 1 ? "ACTIVE" : "DISABLED"});
+                insertedUsernames.add(username);
+                insertedIndexes.add(index);
+                created++;
+            } else {
+                Long departmentId = departmentMappings.get(primaryDepartment(user));
+                if (departmentId == null) throw new SyncUserException("主部门未绑定");
+                updates.add(new Object[]{departmentId, displayName(user), trim(user.phone()),
+                    trim(user.email()), blankToNull(user.position()), gender(user.gender()),
+                    user.status() == 1 ? "ACTIVE" : "DISABLED", localId});
+                updated++;
+            }
+        }
+        if (!inserts.isEmpty()) {
+            jdbc.batchUpdate("""
+                INSERT INTO t_user(dept_id, employee_no, username, password_hash, display_name,
+                                   email, phone, position, gender, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, inserts);
+            String placeholders = String.join(",",
+                Collections.nCopies(insertedUsernames.size(), "?"));
+            Map<String, Long> idByUsername = new HashMap<>();
+            jdbc.query("SELECT id, username FROM t_user WHERE username IN (" + placeholders + ")",
+                rs -> {
+                    idByUsername.put(rs.getString("username"), rs.getLong("id"));
+                    return null;
+                }, insertedUsernames.toArray());
+            List<Object[]> roleInserts = new ArrayList<>();
+            for (int i = 0; i < insertedUsernames.size(); i++) {
+                Long insertedId = idByUsername.get(insertedUsernames.get(i));
+                if (insertedId == null) throw new SyncUserException("新增成员落库失败");
+                context.mappedIds.put(batch.get(insertedIndexes.get(i)).userId(), insertedId);
+                context.createdUsers.add(batch.get(insertedIndexes.get(i)));
+                roleInserts.add(new Object[]{insertedId, context.roleId});
+            }
+            jdbc.batchUpdate("INSERT INTO t_user_role(user_id, role_id) VALUES (?, ?)",
+                roleInserts);
+        }
+        List<Object[]> mappings = new ArrayList<>();
+        for (WecomUser user : batch) {
+            Long id = context.mappedIds.get(user.userId());
+            if (id == null) throw new SyncUserException("成员映射缺失");
+            mappings.add(new Object[]{companyId, user.userId(), id});
+        }
+        jdbc.batchUpdate("""
+            INSERT INTO t_wecom_user_mapping(company_id, wecom_user_id, user_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT (company_id, wecom_user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            """, mappings);
+        if (!updates.isEmpty()) {
+            jdbc.batchUpdate("""
+                UPDATE t_user SET dept_id = ?, display_name = ?,
+                    phone = COALESCE(NULLIF(?, ''), phone),
+                    email = COALESCE(NULLIF(?, ''), email),
+                    position = ?, gender = ?, status = ?
+                WHERE id = ?
+                """, updates);
+        }
+        return new int[]{created, updated};
+    }
+
+    private static Long matchLocal(SyncContext context, String phone, String email) {
+        List<Long> phoneMatches = blankToNull(phone) == null ? List.of()
+            : context.byPhone.getOrDefault(trim(phone), List.of());
+        List<Long> emailMatches = blankToNull(email) == null ? List.of()
+            : context.byEmail.getOrDefault(trim(email).toLowerCase(), List.of());
+        return resolveMatch(phoneMatches, emailMatches);
+    }
+
+    private String nextEmployeeNo(SyncContext context) {
+        if (context.employeeNoQueue.isEmpty()) {
+            List<String> candidates = jdbc.query(
+                "SELECT nextval('seq_employee_no') FROM generate_series(1, 64)",
+                (rs, rowNum) -> String.format("%06d", rs.getLong(1)));
+            for (String candidate : candidates) {
+                if (context.employeeNos.add(candidate)) context.employeeNoQueue.add(candidate);
+            }
+        }
+        if (context.employeeNoQueue.isEmpty()) throw new SyncUserException("可用工号已耗尽");
+        return context.employeeNoQueue.poll();
+    }
+
+    private void syncDepartmentLeaders(long companyId, List<WecomDepartment> departments,
+                                       List<String> errors) {
+        for (WecomDepartment department : departments) {
+            try {
+                transactions.executeWithoutResult(status -> {
+                    Long departmentId = mappedDepartment(companyId, department.id());
+                    if (departmentId == null) return;
+                    jdbc.update("DELETE FROM t_department_leader WHERE department_id = ?",
+                        departmentId);
+                    for (String leader : new LinkedHashSet<>(department.leaderUserIds())) {
+                        Long userId = mappedUser(companyId, leader);
+                        if (userId != null) jdbc.update("""
+                            INSERT INTO t_department_leader(department_id, user_id)
+                            VALUES (?, ?) ON CONFLICT DO NOTHING
+                            """, departmentId, userId);
+                    }
+                    Long first = department.leaderUserIds().stream()
+                        .map(leader -> mappedUser(companyId, leader))
+                        .filter(Objects::nonNull).findFirst().orElse(null);
+                    jdbc.update("UPDATE t_department SET leader_id = ? WHERE id = ?",
+                        first, departmentId);
+                });
+            } catch (RuntimeException exception) {
+                addError(errors, "部门 " + department.id() + " 的负责人同步失败");
+            }
+        }
+    }
+
+    private void syncManagers(long companyId, WecomClient.Session session, List<WecomUser> targets,
+                              SyncContext context, List<String> errors) {
+        if (targets.isEmpty()) return;
+        ExecutorService pool = Executors.newFixedThreadPool(MANAGER_POOL_SIZE);
+        List<Object[]> updates = Collections.synchronizedList(new ArrayList<>());
+        try {
+            for (int offset = 0; offset < targets.size(); offset += MANAGER_POOL_SIZE) {
+                List<WecomUser> chunk = targets.subList(offset,
+                    Math.min(offset + MANAGER_POOL_SIZE, targets.size()));
+                List<Future<?>> futures = new ArrayList<>();
+                for (WecomUser user : chunk) {
+                    futures.add(pool.submit(() -> {
+                        try {
+                            WecomUser full = client.user(session,
+                                new WecomUserRef(user.userId(), user.departmentIds()));
+                            Long managerId = full.directLeaders().isEmpty() ? null
+                                : context.mappedIds.get(full.directLeaders().get(0));
+                            Long localId = context.mappedIds.get(user.userId());
+                            if (localId == null) return;
+                            if (Objects.equals(localId, managerId)) managerId = null;
+                            updates.add(new Object[]{managerId, localId});
+                        } catch (RuntimeException exception) {
+                            addError(errors, "成员 " + mask(user.userId()) + " 的直属上级同步失败");
+                        }
+                    }));
+                }
+                for (Future<?> future : futures) {
+                    try {
+                        future.get();
+                    } catch (Exception ignored) {
+                        // Per-user errors are captured in the errors list.
+                    }
+                }
+                try {
+                    Thread.sleep(MANAGER_BATCH_INTERVAL_MS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        } finally {
+            pool.shutdown();
+        }
+        if (!updates.isEmpty()) {
+            jdbc.batchUpdate("UPDATE t_user SET manager_id = ? WHERE id = ?", updates);
+        }
+    }
+
+    private int deactivateMissing(long companyId, List<WecomUser> externalUsers) {
+        Set<String> externalIds = externalUsers.stream()
+            .map(WecomUser::userId).collect(Collectors.toSet());
+        List<Object[]> targets = jdbc.query("""
+            SELECT wecom_user_id, user_id FROM t_wecom_user_mapping WHERE company_id = ?
+            """, (rs, rowNum) -> new Object[]{rs.getString(1), rs.getLong(2)}, companyId)
+            .stream()
+            .filter(row -> !externalIds.contains((String) row[0]))
+            .map(row -> new Object[]{row[1]})
+            .toList();
+        if (targets.isEmpty()) return 0;
+        jdbc.batchUpdate(
+            "UPDATE t_user SET status = 'DISABLED' WHERE id = ? AND status <> 'DISABLED'", targets);
+        return targets.size();
     }
 
     private Map<Long, Long> syncDepartments(long companyId, List<WecomDepartment> departments) {
@@ -324,109 +594,6 @@ public class WecomService {
             mappings.put(department.id(), localId);
         }
         return mappings;
-    }
-
-    private boolean syncUser(long companyId, WecomUser external,
-                             Map<Long, Long> departmentMappings) {
-        Long departmentId = departmentMappings.get(primaryDepartment(external));
-        if (departmentId == null) throw new SyncUserException("主部门未绑定");
-        Long localId = mappedUser(companyId, external.userId());
-        boolean created = false;
-        if (localId == null) localId = matchUser(companyId, external.phone(), external.email());
-        if (localId == null) {
-            String username = deterministicUsername(companyId, external.userId());
-            Long usernameCount = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM t_user WHERE username = ?", Long.class, username);
-            if (usernameCount != null && usernameCount > 0) {
-                throw new SyncUserException("自动生成的账号已存在");
-            }
-            String employeeNo = formalNumbers.employeeNo(null, null);
-            String password = passwords.encode(UUID.randomUUID() + ":" + UUID.randomUUID());
-            localId = jdbc.queryForObject("""
-                INSERT INTO t_user(dept_id, employee_no, username, password_hash, display_name,
-                                   email, phone, position, gender, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-                """, Long.class, departmentId, employeeNo, username, password,
-                displayName(external), blankToNull(external.email()), blankToNull(external.phone()),
-                blankToNull(external.position()), gender(external.gender()),
-                external.status() == 1 ? "ACTIVE" : "DISABLED");
-            Long roleId = jdbc.queryForObject(
-                "SELECT id FROM t_role WHERE code = 'user' AND enabled = true", Long.class);
-            if (roleId == null) throw new SyncUserException("内置 user 角色不存在");
-            jdbc.update("INSERT INTO t_user_role(user_id, role_id) VALUES (?, ?)", localId, roleId);
-            created = true;
-        } else {
-            jdbc.update("""
-                UPDATE t_user SET
-                    dept_id = ?, display_name = ?,
-                    phone = COALESCE(NULLIF(?, ''), phone),
-                    email = COALESCE(NULLIF(?, ''), email),
-                    position = ?, gender = ?
-                WHERE id = ?
-                """, departmentId, displayName(external), trim(external.phone()),
-                trim(external.email()), blankToNull(external.position()), gender(external.gender()),
-                localId);
-        }
-        jdbc.update("""
-            INSERT INTO t_wecom_user_mapping(company_id, wecom_user_id, user_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT (company_id, wecom_user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            """, companyId, external.userId(), localId);
-        return created;
-    }
-
-    private void syncRelations(long companyId, Map<String, WecomUser> users,
-                               List<WecomDepartment> departments, List<String> errors) {
-        for (WecomUser user : users.values()) {
-            try {
-                transactions.executeWithoutResult(status -> {
-                    Long userId = mappedUser(companyId, user.userId());
-                    Long managerId = user.directLeaders().isEmpty() ? null
-                        : mappedUser(companyId, user.directLeaders().get(0));
-                    if (Objects.equals(userId, managerId)) managerId = null;
-                    if (userId != null) jdbc.update("UPDATE t_user SET manager_id = ? WHERE id = ?",
-                        managerId, userId);
-                });
-            } catch (RuntimeException exception) {
-                addError(errors, "成员 " + mask(user.userId()) + " 的直属上级同步失败");
-            }
-        }
-        for (WecomDepartment department : departments) {
-            try {
-                transactions.executeWithoutResult(status -> {
-                    Long departmentId = mappedDepartment(companyId, department.id());
-                    if (departmentId == null) return;
-                    jdbc.update("DELETE FROM t_department_leader WHERE department_id = ?", departmentId);
-                    for (String leader : new LinkedHashSet<>(department.leaderUserIds())) {
-                        Long userId = mappedUser(companyId, leader);
-                        if (userId != null) jdbc.update("""
-                            INSERT INTO t_department_leader(department_id, user_id)
-                            VALUES (?, ?) ON CONFLICT DO NOTHING
-                            """, departmentId, userId);
-                    }
-                    Long first = department.leaderUserIds().stream()
-                        .map(leader -> mappedUser(companyId, leader))
-                        .filter(Objects::nonNull).findFirst().orElse(null);
-                    jdbc.update("UPDATE t_department SET leader_id = ? WHERE id = ?", first, departmentId);
-                });
-            } catch (RuntimeException exception) {
-                addError(errors, "部门 " + department.id() + " 的负责人同步失败");
-            }
-        }
-    }
-
-    private Long matchUser(long companyId, String phone, String email) {
-        List<Long> phoneMatches = blankToNull(phone) == null ? List.of() : jdbc.queryForList("""
-            SELECT u.id FROM t_user u
-            JOIN t_department d ON d.id = u.dept_id
-            WHERE d.company_id = ? AND u.phone = ? ORDER BY u.id
-            """, Long.class, companyId, phone.trim());
-        List<Long> emailMatches = blankToNull(email) == null ? List.of() : jdbc.queryForList("""
-            SELECT u.id FROM t_user u
-            JOIN t_department d ON d.id = u.dept_id
-            WHERE d.company_id = ? AND lower(u.email) = lower(?) ORDER BY u.id
-            """, Long.class, companyId, email.trim());
-        return resolveMatch(phoneMatches, emailMatches);
     }
 
     static Long resolveMatch(List<Long> phoneMatches, List<Long> emailMatches) {
@@ -592,12 +759,18 @@ public class WecomService {
     }
 
     private JobDto mapJob(ResultSet rs) throws SQLException {
+        String syncMode = "FULL";
+        try {
+            syncMode = rs.getString("sync_mode");
+        } catch (SQLException ignored) {
+            // Older database rows without the column default to FULL.
+        }
         return new JobDto(rs.getLong("id"), rs.getLong("company_id"), rs.getString("status"),
             rs.getString("phase"), rs.getInt("percent"), rs.getInt("total_users"),
             rs.getInt("processed_users"), rs.getInt("created_users"),
             rs.getInt("updated_users"), rs.getInt("failed_users"), rs.getString("message"),
             errorList(rs.getString("error_summary")), rs.getObject("started_at", OffsetDateTime.class),
-            rs.getObject("finished_at", OffsetDateTime.class));
+            rs.getObject("finished_at", OffsetDateTime.class), syncMode);
     }
 
     private void requireCompany(long companyId) {
@@ -671,6 +844,21 @@ public class WecomService {
                           String encryptedAgentSecret, boolean oauthEnabled,
                           boolean jsSdkEnabled, boolean messageEnabled) { }
     private record DepartmentState(long companyId, String path) { }
+    private record LocalUserState(long id, String username, String employeeNo, String phone,
+                                  String email, String displayName, String position,
+                                  String gender, String status, String wecomUserId) { }
+    private static final class SyncContext {
+        final Map<String, Long> mappedIds = new HashMap<>();
+        final Map<String, List<Long>> byPhone = new HashMap<>();
+        final Map<String, List<Long>> byEmail = new HashMap<>();
+        final Set<String> usernames = new HashSet<>();
+        final Set<String> employeeNos = new HashSet<>();
+        final ArrayDeque<String> employeeNoQueue = new ArrayDeque<>();
+        final Map<Long, LocalUserState> byId = new HashMap<>();
+        long roleId;
+        final List<WecomUser> pending = new ArrayList<>();
+        final List<WecomUser> createdUsers = new ArrayList<>();
+    }
 
     static class SyncUserException extends RuntimeException {
         SyncUserException(String message) {
@@ -689,5 +877,15 @@ public class WecomService {
     public record JobDto(long id, long companyId, String status, String phase, int percent,
                          int totalUsers, int processedUsers, int createdUsers, int updatedUsers,
                          int failedUsers, String message, List<String> errorSummary,
-                         OffsetDateTime startedAt, OffsetDateTime finishedAt) { }
+                         OffsetDateTime startedAt, OffsetDateTime finishedAt,
+                         String syncMode) {
+        public JobDto(long id, long companyId, String status, String phase, int percent,
+                      int totalUsers, int processedUsers, int createdUsers, int updatedUsers,
+                      int failedUsers, String message, List<String> errorSummary,
+                      OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+            this(id, companyId, status, phase, percent, totalUsers, processedUsers, createdUsers,
+                updatedUsers, failedUsers, message, errorSummary, startedAt, finishedAt,
+                "FULL");
+        }
+    }
 }

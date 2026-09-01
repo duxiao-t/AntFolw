@@ -34,12 +34,14 @@ class WecomClientTest {
                     + "\"department_leader\":[\"boss\"]}]}");
             }
         });
-        server.createContext("/cgi-bin/user/list_id", exchange -> {
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            respond(exchange, body.contains("cursor-2")
-                ? "{\"errcode\":0,\"dept_user\":[{\"userid\":\"u2\",\"department\":2}]}"
-                : "{\"errcode\":0,\"dept_user\":[{\"userid\":\"u1\",\"department\":1}],"
-                    + "\"next_cursor\":\"cursor-2\"}");
+        server.createContext("/cgi-bin/user/list", exchange -> {
+            String query = exchange.getRequestURI().getQuery();
+            respond(exchange, query != null && query.contains("next_openid=openid-2")
+                ? "{\"errcode\":0,\"userlist\":[{\"userid\":\"u2\",\"department\":[2],"
+                    + "\"name\":\"李四\",\"status\":1,\"position\":\"测试\"}]}"
+                : "{\"errcode\":0,\"userlist\":[{\"userid\":\"u1\",\"department\":[1],"
+                    + "\"name\":\"张三\",\"status\":1,\"position\":\"开发\"}],"
+                    + "\"next_openid\":\"openid-2\"}");
         });
         server.createContext("/cgi-bin/user/get", exchange -> respond(exchange,
             "{\"errcode\":0,\"userid\":\"u1\",\"name\":\"林晓\","
@@ -64,8 +66,10 @@ class WecomClientTest {
         assertThat(client.departments(session)).extracting(WecomClient.WecomDepartment::id)
             .containsExactly(2L, 1L);
         assertThat(tokens).hasValue(2);
-        assertThat(client.userIds(session)).extracting(WecomClient.WecomUserRef::userId)
-            .containsExactly("u1", "u2");
+        assertThat(client.users(session, java.util.List.of(1L)))
+            .extracting(WecomClient.WecomUser::userId).containsExactly("u1", "u2");
+        assertThat(client.users(session, java.util.List.of(1L)))
+            .extracting(WecomClient.WecomUser::name).containsExactly("张三", "李四");
         WecomClient.WecomUser user = client.user(session,
             new WecomClient.WecomUserRef("u1", java.util.List.of(1L)));
         assertThat(user.mainDepartment()).isEqualTo(2);

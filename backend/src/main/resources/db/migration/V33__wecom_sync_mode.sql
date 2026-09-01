@@ -1,0 +1,1 @@
+ALTER TABLE t_wecom_sync_job ADD COLUMN sync_mode VARCHAR(16) NOT NULL DEFAULT 'FULL';
