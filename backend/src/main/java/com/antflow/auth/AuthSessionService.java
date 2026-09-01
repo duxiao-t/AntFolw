@@ -218,7 +218,7 @@ public class AuthSessionService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    static String hash(String value) {
+    public static String hash(String value) {
         try {
             return java.util.HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));

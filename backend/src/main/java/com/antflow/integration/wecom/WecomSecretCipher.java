@@ -11,12 +11,12 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Component;
 
 @Component
-class WecomSecretCipher {
+public class WecomSecretCipher {
     private static final int IV_BYTES = 12;
     private final SecretKeySpec key;
     private final SecureRandom random = new SecureRandom();
 
-    WecomSecretCipher(WecomProperties properties) {
+    public WecomSecretCipher(WecomProperties properties) {
         try {
             String value = properties.getEncryptionKey();
             if (value == null || value.isBlank()) {
@@ -29,14 +29,18 @@ class WecomSecretCipher {
         }
     }
 
-    String encrypt(String secret, long companyId) {
+    public String encrypt(String secret, long companyId) {
+        return encrypt(secret, Long.toString(companyId));
+    }
+
+    public String encrypt(String secret, String context) {
         if (secret == null || secret.isBlank()) throw new IllegalArgumentException("secret is required");
         try {
             byte[] iv = new byte[IV_BYTES];
             random.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
-            cipher.updateAAD(Long.toString(companyId).getBytes(StandardCharsets.UTF_8));
+            cipher.updateAAD(context.getBytes(StandardCharsets.UTF_8));
             byte[] encrypted = cipher.doFinal(secret.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(ByteBuffer.allocate(iv.length + encrypted.length)
                 .put(iv).put(encrypted).array());
@@ -45,7 +49,11 @@ class WecomSecretCipher {
         }
     }
 
-    String decrypt(String value, long companyId) {
+    public String decrypt(String value, long companyId) {
+        return decrypt(value, Long.toString(companyId));
+    }
+
+    public String decrypt(String value, String context) {
         try {
             ByteBuffer buffer = ByteBuffer.wrap(Base64.getDecoder().decode(value));
             byte[] iv = new byte[IV_BYTES];
@@ -54,7 +62,7 @@ class WecomSecretCipher {
             buffer.get(encrypted);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, iv));
-            cipher.updateAAD(Long.toString(companyId).getBytes(StandardCharsets.UTF_8));
+            cipher.updateAAD(context.getBytes(StandardCharsets.UTF_8));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (Exception exception) {
             throw new IllegalStateException("could not decrypt integration secret", exception);

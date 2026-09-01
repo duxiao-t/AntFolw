@@ -87,6 +87,66 @@ class WecomClient {
             strings(item.path("direct_leader")));
     }
 
+    String oauthUserId(Session session, String code) {
+        JsonNode response = send("GET", "/cgi-bin/auth/getuserinfo?code=" + encode(code), null, session);
+        String userId = response.path("UserId").asText();
+        if (userId.isBlank()) throw new WecomApiException("企业微信未返回内部成员身份");
+        return userId;
+    }
+
+    String jsapiTicket(Session session) {
+        String ticket = send("GET", "/cgi-bin/get_jsapi_ticket", null, session)
+            .path("ticket").asText();
+        if (ticket.isBlank()) throw new WecomApiException("企业微信未返回 JS-SDK ticket");
+        return ticket;
+    }
+
+    Media temporaryMedia(Session session, String mediaId, String fallbackType) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(properties.getBaseUrl()
+                    + "/cgi-bin/media/get?access_token=" + encode(session.accessToken)
+                    + "&media_id=" + encode(mediaId)))
+                .timeout(properties.getRequestTimeout()).GET().build();
+            try {
+                HttpResponse<byte[]> response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                String contentType = response.headers().firstValue("Content-Type")
+                    .orElse(fallbackType == null ? "application/octet-stream" : fallbackType)
+                    .split(";", 2)[0].trim();
+                if (response.statusCode() >= 200 && response.statusCode() < 300
+                    && !contentType.toLowerCase().contains("json")) {
+                    String disposition = response.headers().firstValue("Content-Disposition").orElse("");
+                    return new Media(fileName(disposition, contentType), contentType, response.body());
+                }
+                JsonNode error = json.readTree(response.body());
+                int code = error.path("errcode").asInt(0);
+                if (EXPIRED_TOKEN_CODES.contains(code) && attempt == 0) {
+                    session.accessToken = token(session);
+                    continue;
+                }
+                throw new WecomApiException("企业微信临时素材下载失败（" + code + "）");
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new WecomApiException("企业微信请求已中断");
+            } catch (IOException exception) {
+                if (attempt == 0) continue;
+                throw new WecomApiException("无法下载企业微信临时素材");
+            }
+        }
+        throw new WecomApiException("企业微信临时素材下载失败");
+    }
+
+    void sendTextCard(Session session, int agentId, String userId, String title,
+                      String description, String url) {
+        var textcard = json.createObjectNode()
+            .put("title", title).put("description", description)
+            .put("url", url).put("btntxt", "查看详情");
+        var body = json.createObjectNode()
+            .put("touser", userId).put("msgtype", "textcard").put("agentid", agentId);
+        body.set("textcard", textcard);
+        body.put("enable_duplicate_check", 1).put("duplicate_check_interval", 1800);
+        send("POST", "/cgi-bin/message/send", body, session);
+    }
+
     private String token(Session session) {
         JsonNode response = send("GET", "/cgi-bin/gettoken?corpid=" + encode(session.corpId)
             + "&corpsecret=" + encode(session.secret), null, null);
@@ -147,6 +207,15 @@ class WecomClient {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
+    private static String fileName(String disposition, String contentType) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("filename=\\\"?([^\\\";]+)")
+            .matcher(disposition == null ? "" : disposition);
+        if (matcher.find()) return matcher.group(1).replaceAll("[^A-Za-z0-9._-]", "_");
+        if (contentType.startsWith("audio/")) return "wecom-audio." + contentType.substring(6).replace("x-", "");
+        if (contentType.startsWith("image/")) return "wecom-image." + contentType.substring(6);
+        return "wecom-media.bin";
+    }
+
     private static List<String> strings(JsonNode node) {
         List<String> result = new ArrayList<>();
         if (node.isArray()) node.forEach(value -> {
@@ -180,6 +249,7 @@ class WecomClient {
     record WecomUser(String userId, String name, List<Long> departmentIds,
                      long mainDepartment, String phone, String email, String position,
                      String gender, int status, List<String> directLeaders) { }
+    record Media(String fileName, String contentType, byte[] content) { }
 
     static class WecomApiException extends RuntimeException {
         WecomApiException(String message) {

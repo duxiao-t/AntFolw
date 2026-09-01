@@ -16,12 +16,14 @@ import {
   Col,
   Form,
   Input,
+  InputNumber,
   Progress,
   Row,
   Select,
   Space,
   Tag,
   Typography,
+  Switch,
 } from 'antd';
 import { createStyles } from 'antd-style';
 import dayjs from 'dayjs';
@@ -50,8 +52,22 @@ type Settings = {
   corpId: string;
   secretConfigured: boolean;
   latestJob?: SyncJob;
+  agentId?: number;
+  agentSecretConfigured: boolean;
+  oauthEnabled: boolean;
+  jsSdkEnabled: boolean;
+  messageEnabled: boolean;
 };
-type FormValues = { corpId: string; secret?: string };
+type FormValues = {
+  corpId: string;
+  secret?: string;
+  agentId?: number;
+  agentSecret?: string;
+  oauthEnabled: boolean;
+  jsSdkEnabled: boolean;
+  messageEnabled: boolean;
+};
+type DeliveryStatus = { pending: number; dead: number; oldestPendingAt?: string };
 
 const WECOM_GREEN = '#07c160';
 const active = (job?: SyncJob) =>
@@ -139,6 +155,12 @@ const useStyles = createStyles(({ token }) => ({
     borderTop: `1px solid ${token.colorSplit}`,
   },
   time: { color: token.colorTextTertiary, fontSize: 12 },
+  chain: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12,
+    '@media (max-width: 760px)': { gridTemplateColumns: '1fr 1fr' } },
+  chainItem: { padding: 14, border: `1px solid ${token.colorBorderSecondary}`,
+    borderRadius: token.borderRadiusLG, background: token.colorFillAlter },
+  chainIndex: { display: 'block', marginBottom: 5, color: WECOM_GREEN, fontSize: 11,
+    fontWeight: 700, letterSpacing: '.08em' },
 }));
 
 function Metric({ label, value }: { label: string; value: number | string }) {
@@ -181,7 +203,15 @@ export default function WecomPage() {
 
   useEffect(() => {
     if (!settings) return;
-    form.setFieldsValue({ corpId: settings.corpId, secret: undefined });
+    form.setFieldsValue({
+      corpId: settings.corpId,
+      secret: undefined,
+      agentId: settings.agentId,
+      agentSecret: undefined,
+      oauthEnabled: settings.oauthEnabled,
+      jsSdkEnabled: settings.jsSdkEnabled,
+      messageEnabled: settings.messageEnabled,
+    });
     setDirty(false);
   }, [form, settings]);
 
@@ -194,6 +224,12 @@ export default function WecomPage() {
     refetchInterval: (query) => syncPollInterval(query.state.data as SyncJob | undefined),
   });
   const job = jobQuery.data ?? settings?.latestJob;
+  const deliveryQuery = useQuery({
+    queryKey: ['wecom-message-status', companyId],
+    queryFn: () => request<DeliveryStatus>('/api/integrations/wecom/message-status', { params: { companyId } }),
+    enabled: companyId !== undefined && settings?.messageEnabled === true,
+    refetchInterval: 10_000,
+  });
 
   const saveMutation = useMutation({
     mutationFn: (values: FormValues) => request<Settings>('/api/integrations/wecom/settings', {
@@ -202,11 +238,17 @@ export default function WecomPage() {
         companyId,
         corpId: values.corpId.trim(),
         ...(values.secret?.trim() ? { secret: values.secret.trim() } : {}),
+        agentId: values.agentId,
+        ...(values.agentSecret?.trim() ? { agentSecret: values.agentSecret.trim() } : {}),
+        oauthEnabled: values.oauthEnabled,
+        jsSdkEnabled: values.jsSdkEnabled,
+        messageEnabled: values.messageEnabled,
       },
     }),
     onSuccess: (saved) => {
       queryClient.setQueryData(['wecom-settings', companyId], saved);
       form.setFieldValue('secret', undefined);
+      form.setFieldValue('agentSecret', undefined);
       setDirty(false);
       message.success('企业微信连接配置已保存');
     },
@@ -223,6 +265,18 @@ export default function WecomPage() {
       message.success(started.status === 'PENDING' ? '同步任务已创建' : '已恢复正在运行的任务');
     },
   });
+  const testMessageMutation = useMutation({
+    mutationFn: () => request('/api/integrations/wecom/test-message', {
+      method: 'POST', data: { companyId },
+    }),
+    onSuccess: () => message.success('测试消息已发送到当前管理员的企业微信'),
+  });
+  const retryMessagesMutation = useMutation({
+    mutationFn: () => request('/api/integrations/wecom/retry-messages', {
+      method: 'POST', data: { companyId },
+    }),
+    onSuccess: () => { void deliveryQuery.refetch(); message.success('失败消息已重新进入投递队列'); },
+  });
 
   const selectCompany = (value: number) => {
     setCompanyId(value);
@@ -237,8 +291,8 @@ export default function WecomPage() {
 
   return (
     <PageContainer
-      title="企业微信通讯录"
-      subTitle="连接通讯录并将部门、成员与组织关系同步到 AntFlow"
+      title="企业微信"
+      subTitle="按通讯录、免登、JS-SDK、应用消息的顺序完成审批入口配置"
     >
       <Row gutter={[24, 24]} className={styles.grid}>
         <Col xs={24} xl={10}>
@@ -282,6 +336,28 @@ export default function WecomPage() {
                 rules={[{ required: true, whitespace: true, message: '请输入 CorpID' }]}
               >
                 <Input prefix={<SafetyCertificateOutlined />} maxLength={128} placeholder="ww..." />
+              </Form.Item>
+              <Form.Item name="agentId" label="自建应用 AgentId">
+                <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="企业微信应用 AgentId" />
+              </Form.Item>
+              <Form.Item
+                name="agentSecret"
+                label="自建应用 Secret"
+                extra={settings?.agentSecretConfigured
+                  ? <span className={styles.secretHint}><CheckCircleFilled style={{ color: WECOM_GREEN }} /> 已安全配置，留空表示不修改</span>
+                  : '与通讯录同步 Secret 分开配置，保存后不会回显'}
+              >
+                <Input.Password prefix={<KeyOutlined />} maxLength={512} autoComplete="new-password"
+                  placeholder={settings?.agentSecretConfigured ? '已配置（留空不修改）' : '请输入应用 Secret'} />
+              </Form.Item>
+              <Form.Item name="oauthEnabled" label="企业微信内自动免登" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Form.Item name="jsSdkEnabled" label="表单 JS-SDK 能力" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Form.Item name="messageEnabled" label="审批应用消息" valuePropName="checked">
+                <Switch />
               </Form.Item>
               <Form.Item
                 name="secret"
@@ -400,6 +476,35 @@ export default function WecomPage() {
           </Card>
         </Col>
       </Row>
+      <Card className={styles.card} style={{ marginTop: 24 }} title="接入状态">
+        <div className={styles.chain}>
+          {[
+            ['01 通讯录', settings?.secretConfigured, '同步成员并建立身份映射'],
+            ['02 免登', settings?.oauthEnabled, '企业微信内自动进入工作台'],
+            ['03 JS-SDK', settings?.jsSdkEnabled, '选图、录音、扫码与定位'],
+            ['04 应用消息', settings?.messageEnabled, '待办与结果可靠送达'],
+          ].map(([label, enabled, detail]) => (
+            <div className={styles.chainItem} key={String(label)}>
+              <span className={styles.chainIndex}>{label}</span>
+              <Typography.Text strong>{enabled ? '已启用' : '未启用'}</Typography.Text><br />
+              <Typography.Text type="secondary">{detail}</Typography.Text>
+            </div>
+          ))}
+        </div>
+        {settings?.messageEnabled ? (
+          <div className={styles.footer}>
+            <Typography.Text type="secondary">
+              待投递 {deliveryQuery.data?.pending ?? 0} · 失败 {deliveryQuery.data?.dead ?? 0}
+            </Typography.Text>
+            <Space wrap>
+              {(deliveryQuery.data?.dead ?? 0) > 0 && <Button loading={retryMessagesMutation.isPending}
+                onClick={() => retryMessagesMutation.mutate()}>重试失败消息</Button>}
+              <Button type="primary" loading={testMessageMutation.isPending}
+                onClick={() => testMessageMutation.mutate()}>发送测试消息</Button>
+            </Space>
+          </div>
+        ) : null}
+      </Card>
     </PageContainer>
   );
 }

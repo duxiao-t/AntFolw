@@ -27,6 +27,25 @@ import { errorConfig } from './requestErrorConfig';
 
 const isDev = process.env.NODE_ENV === 'development' || process.env.UMI_ENV === 'dev';
 const loginPath = '/user/login';
+const TOKEN_KEY = 'antflow-token';
+
+async function restoreCookieSession(): Promise<boolean> {
+  const csrf = document.cookie.split('; ')
+    .find((entry) => entry.startsWith('antflow-csrf='))?.split('=').slice(1).join('=');
+  if (!csrf) return false;
+  try {
+    const response = await fetch('/api/auth/refresh', {
+      method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': decodeURIComponent(csrf) },
+    });
+    if (!response.ok) return false;
+    const payload = await response.json() as { accessToken?: string };
+    if (!payload.accessToken) return false;
+    localStorage.setItem(TOKEN_KEY, payload.accessToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function AuthzRefresh() {
   const { initialState, setInitialState } = useModel('@@initialState');
@@ -65,6 +84,7 @@ export async function getInitialState(): Promise<{
 }> {
   const fetchUserInfo = async () => {
     try {
+      if (!localStorage.getItem(TOKEN_KEY)) await restoreCookieSession();
       // AntFlow: hit our backend instead of the upstream mock.
       // skipErrorHandler=true keeps GlobalExceptionHandler from showing toast on 401.
       const me = await umiRequest<API.CurrentUser>('/api/auth/me', {

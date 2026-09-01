@@ -29,7 +29,14 @@ public class WecomController {
 
     @PutMapping("/settings")
     public WecomService.SettingsDto save(@Valid @RequestBody SaveSettingsRequest request) {
-        return service.saveSettings(request.companyId(), request.corpId(), request.secret());
+        if (request.agentId() == null && request.agentSecret() == null
+            && request.oauthEnabled() == null && request.jsSdkEnabled() == null
+            && request.messageEnabled() == null) {
+            return service.saveSettings(request.companyId(), request.corpId(), request.secret());
+        }
+        return service.saveSettings(request.companyId(), request.corpId(), request.secret(),
+            request.agentId(), request.agentSecret(), Boolean.TRUE.equals(request.oauthEnabled()),
+            Boolean.TRUE.equals(request.jsSdkEnabled()), Boolean.TRUE.equals(request.messageEnabled()));
     }
 
     @PostMapping("/sync-jobs")
@@ -44,6 +51,11 @@ public class WecomController {
 
     public record SaveSettingsRequest(@NotNull Long companyId,
                                       @NotBlank @Size(max = 128) String corpId,
-                                      @Size(max = 512) String secret) { }
+                                      @Size(max = 512) String secret,
+                                      Integer agentId,
+                                      @Size(max = 512) String agentSecret,
+                                      Boolean oauthEnabled,
+                                      Boolean jsSdkEnabled,
+                                      Boolean messageEnabled) { }
     public record StartJobRequest(@NotNull Long companyId) { }
 }

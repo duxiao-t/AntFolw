@@ -14,6 +14,7 @@ public final class PermissionCodes {
     public static final String PAGE_SETTINGS_COMPANY = "page.settings.company";
     public static final String PAGE_SETTINGS_S3 = "page.settings.s3";
     public static final String PAGE_SETTINGS_WECOM = "page.settings.wecom";
+    public static final String PAGE_SETTINGS_IDENTITY_PROVIDERS = "page.settings.identity_providers";
     public static final String PAGE_SETTINGS_BILLING = "page.settings.billing";
     public static final String SECURITY_PERMISSION_READ = "security.permission.read";
     public static final String SECURITY_ROLE_READ = "security.role.read";

@@ -76,11 +76,26 @@ public class WecomService {
         requireCompany(companyId);
         Config config = config(companyId);
         return new SettingsDto(companyId, config == null ? "" : config.corpId(),
-            config != null && !config.encryptedSecret().isBlank(), latestJob(companyId));
+            config != null && !config.encryptedSecret().isBlank(), latestJob(companyId),
+            config == null ? null : config.agentId(),
+            config != null && config.encryptedAgentSecret() != null,
+            config != null && config.oauthEnabled(), config != null && config.jsSdkEnabled(),
+            config != null && config.messageEnabled());
     }
 
     @Transactional(rollbackFor = Exception.class)
     public SettingsDto saveSettings(long companyId, String corpId, String secret) {
+        Config current = config(companyId);
+        return saveSettings(companyId, corpId, secret,
+            current == null ? null : current.agentId(), null,
+            current != null && current.oauthEnabled(), current != null && current.jsSdkEnabled(),
+            current != null && current.messageEnabled());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
+                                    String agentSecret, boolean oauthEnabled,
+                                    boolean jsSdkEnabled, boolean messageEnabled) {
         authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
         requireCompany(companyId);
         String normalizedCorpId = corpId == null ? "" : corpId.trim();
@@ -94,20 +109,44 @@ public class WecomService {
         if (encrypted == null) {
             throw new BizException("WECOM_SECRET_REQUIRED", "首次配置时请输入通讯录同步 Secret");
         }
+        String encryptedAgentSecret = agentSecret == null || agentSecret.isBlank()
+            ? current == null ? null : current.encryptedAgentSecret()
+            : cipher.encrypt(agentSecret.trim(), "wecom-agent:" + companyId);
+        boolean appEnabled = oauthEnabled || jsSdkEnabled || messageEnabled;
+        if (appEnabled && (agentId == null || agentId <= 0 || encryptedAgentSecret == null)) {
+            throw new BizException("WECOM_APP_REQUIRED", "启用免登、JS-SDK 或应用消息前请配置 AgentId 和应用 Secret");
+        }
+        if (oauthEnabled) {
+            Integer otherOauth = jdbc.queryForObject("""
+                SELECT count(*) FROM t_wecom_config WHERE oauth_enabled AND company_id <> ?
+                """, Integer.class, companyId);
+            if (otherOauth != null && otherOauth > 0) {
+                throw new BizException("WECOM_OAUTH_CONFLICT", "当前只允许启用一个企业微信 Corp 免登入口");
+            }
+        }
         long actorId = authorization.currentUserId();
         jdbc.update("""
-            INSERT INTO t_wecom_config(company_id, corp_id, secret_encrypted, created_by, updated_by)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO t_wecom_config(company_id, corp_id, secret_encrypted, agent_id,
+                agent_secret_encrypted, oauth_enabled, js_sdk_enabled, message_enabled,
+                created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (company_id) DO UPDATE SET
                 corp_id = EXCLUDED.corp_id,
                 secret_encrypted = EXCLUDED.secret_encrypted,
+                agent_id = EXCLUDED.agent_id,
+                agent_secret_encrypted = EXCLUDED.agent_secret_encrypted,
+                oauth_enabled = EXCLUDED.oauth_enabled,
+                js_sdk_enabled = EXCLUDED.js_sdk_enabled,
+                message_enabled = EXCLUDED.message_enabled,
                 updated_by = EXCLUDED.updated_by,
                 updated_at = now()
-            """, companyId, normalizedCorpId, encrypted, actorId, actorId);
+            """, companyId, normalizedCorpId, encrypted, agentId, encryptedAgentSecret,
+            oauthEnabled, jsSdkEnabled, messageEnabled, actorId, actorId);
         audit.success("integration.wecom.settings.update", "COMPANY", companyId,
             AuditService.RiskLevel.HIGH,
             Map.of("changedFields", List.of("corpId", "secretConfigured")), Map.of());
-        return new SettingsDto(companyId, normalizedCorpId, true, latestJob(companyId));
+        return new SettingsDto(companyId, normalizedCorpId, true, latestJob(companyId), agentId,
+            encryptedAgentSecret != null, oauthEnabled, jsSdkEnabled, messageEnabled);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -504,8 +543,12 @@ public class WecomService {
 
     private Config config(long companyId) {
         return jdbc.query("""
-            SELECT corp_id, secret_encrypted FROM t_wecom_config WHERE company_id = ?
-            """, rs -> rs.next() ? new Config(rs.getString(1), rs.getString(2)) : null, companyId);
+            SELECT corp_id, secret_encrypted, agent_id, agent_secret_encrypted,
+                   oauth_enabled, js_sdk_enabled, message_enabled
+            FROM t_wecom_config WHERE company_id = ?
+            """, rs -> rs.next() ? new Config(rs.getString(1), rs.getString(2),
+                (Integer) rs.getObject(3), rs.getString(4), rs.getBoolean(5),
+                rs.getBoolean(6), rs.getBoolean(7)) : null, companyId);
     }
 
     private Long mappedDepartment(long companyId, long externalId) {
@@ -624,7 +667,9 @@ public class WecomService {
         return value.charAt(0) + "***" + value.charAt(value.length() - 1);
     }
 
-    private record Config(String corpId, String encryptedSecret) { }
+    private record Config(String corpId, String encryptedSecret, Integer agentId,
+                          String encryptedAgentSecret, boolean oauthEnabled,
+                          boolean jsSdkEnabled, boolean messageEnabled) { }
     private record DepartmentState(long companyId, String path) { }
 
     static class SyncUserException extends RuntimeException {
@@ -634,7 +679,13 @@ public class WecomService {
     }
 
     public record SettingsDto(long companyId, String corpId, boolean secretConfigured,
-                              JobDto latestJob) { }
+                              JobDto latestJob, Integer agentId, boolean agentSecretConfigured,
+                              boolean oauthEnabled, boolean jsSdkEnabled,
+                              boolean messageEnabled) {
+        public SettingsDto(long companyId, String corpId, boolean secretConfigured, JobDto latestJob) {
+            this(companyId, corpId, secretConfigured, latestJob, null, false, false, false, false);
+        }
+    }
     public record JobDto(long id, long companyId, String status, String phase, int percent,
                          int totalUsers, int processedUsers, int createdUsers, int updatedUsers,
                          int failedUsers, String message, List<String> errorSummary,

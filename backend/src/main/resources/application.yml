@@ -31,6 +31,7 @@ spring:
     default-property-inclusion: non_null
 server:
   port: ${PORT:8080}
+  forward-headers-strategy: framework
   error:
     include-message: always
 antflow:
@@ -45,6 +46,9 @@ antflow:
     per-hour: 30
   auth:
     session-ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:2592000}
+    public-base-url: ${ANTFLOW_PUBLIC_BASE_URL:http://localhost:5173}
+    oidc-allowed-hosts: ${ANTFLOW_OIDC_ALLOWED_HOSTS:}
+    oidc-https-only: ${ANTFLOW_OIDC_HTTPS_ONLY:true}
   audit:
     trusted-proxies: ${AUDIT_TRUSTED_PROXIES:}
     online-retention-days: ${AUDIT_ONLINE_RETENTION_DAYS:365}

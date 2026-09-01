@@ -9,6 +9,7 @@ import { Alert, App, Button, Checkbox, Form, Input } from 'antd';
 import { Helmet, request, useIntl, useModel } from '@umijs/max';
 import { createStyles } from 'antd-style';
 import React, { startTransition, useState } from 'react';
+import { useEffect } from 'react';
 import Settings from '../../../../config/defaultSettings';
 import './login.css';
 
@@ -61,6 +62,13 @@ const Login: React.FC = () => {
   const { message } = App.useApp();
   const intl = useIntl();
   const { styles } = useStyles();
+  const [providers, setProviders] = useState<Array<{ code: string; displayName: string }>>([]);
+
+  useEffect(() => {
+    void request<Array<{ code: string; displayName: string }>>('/api/public/auth/providers', {
+      skipErrorHandler: true,
+    }).then(setProviders).catch(() => setProviders([]));
+  }, []);
 
   const fetchUserInfo = async () => {
     const userInfo = await initialState?.fetchUserInfo?.();
@@ -176,6 +184,17 @@ const Login: React.FC = () => {
               登录运营中心
             </Button>
           </Form>
+          {providers.length > 0 ? (
+            <div className="login-oidc">
+              <span>或使用企业身份登录</span>
+              {providers.map((provider) => (
+                <Button key={provider.code} block onClick={() => {
+                  const redirect = getSafeRedirectUrl(new URL(window.location.href).searchParams.get('redirect'));
+                  window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(redirect)}`);
+                }}>{provider.displayName}</Button>
+              ))}
+            </div>
+          ) : null}
           <p className="login-footnote">登录即表示你已获授权访问企业审批数据。</p>
         </div>
       </section>

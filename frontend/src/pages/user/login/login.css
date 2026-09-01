@@ -172,6 +172,9 @@
   text-align: center;
 }
 
+.login-oidc { display: grid; gap: 10px; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--af-color-border); }
+.login-oidc > span { color: var(--af-color-text-secondary); font-size: 12px; text-align: center; }
+
 @media (max-width: 760px) {
   .login-page {
     display: block;

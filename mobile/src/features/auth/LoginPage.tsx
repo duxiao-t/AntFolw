@@ -4,8 +4,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { isApiError } from "../../shared/api/errors";
 import { useBranding } from "../branding/BrandProvider";
 import { safeReturnUrl, useAuthStore } from "./auth.store";
+import { usePlatformAdapter } from "../../shared/platform/PlatformProvider";
+import { apiRequest } from "../../shared/api/http";
 
 const REMEMBERED_USERNAME_KEY = "antflow-mobile-remembered-username";
+const WECOM_SILENT_ATTEMPT_KEY = "antflow-wecom-silent-login-attempted";
 
 export function LoginPage() {
   const branding = useBranding();
@@ -13,11 +16,33 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const login = useAuthStore((state) => state.login);
   const status = useAuthStore((state) => state.status);
+  const restore = useAuthStore((state) => state.restore);
+  const platform = usePlatformAdapter();
   const [submitting, setSubmitting] = useState(false);
   const [username, setUsername] = useState(readRememberedUsername);
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(() => readRememberedUsername().length > 0);
   const [errorMessage, setErrorMessage] = useState("");
+  const [providers, setProviders] = useState<Array<{ code: string; displayName: string }>>([]);
+  const [wecomEnabled, setWecomEnabled] = useState(false);
+  const [wecomChecked, setWecomChecked] = useState(false);
+
+  useEffect(() => {
+    if (import.meta.env.MODE === 'test') return;
+    void apiRequest<Array<{ code: string; displayName: string }>>('/api/public/auth/providers')
+      .then(setProviders).catch(() => setProviders([]));
+    void apiRequest<{ oauthEnabled: boolean }>('/api/public/auth/wecom/status')
+      .then((result) => setWecomEnabled(result.oauthEnabled)).catch(() => setWecomEnabled(false))
+      .finally(() => setWecomChecked(true));
+  }, []);
+
+  useEffect(() => {
+    if (platform.kind !== 'wecom' || !wecomChecked || !wecomEnabled) return;
+    if (status === 'unknown') { void restore(); return; }
+    if (status !== 'anonymous' || sessionStorage.getItem(WECOM_SILENT_ATTEMPT_KEY)) return;
+    sessionStorage.setItem(WECOM_SILENT_ATTEMPT_KEY, '1');
+    void platform.trySilentLogin();
+  }, [platform, restore, status, wecomChecked, wecomEnabled]);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -81,8 +106,8 @@ export function LoginPage() {
       <div className="login__third">
         <span>第三方登录</span>
         <div className="login__socials">
-          <button className="login__social" type="button" aria-label="企业微信"><svg viewBox="0 0 24 24" fill="#1aad19" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg></button>
-          <button className="login__social" type="button" aria-label="钉钉"><svg viewBox="0 0 24 24" fill="#1989fa" aria-hidden="true"><path d="M4 6h12v8H8l-2 3v-3H4V6Zm14 2h2v6l-2 .5v2.5l-1.5-2H14V8h4Z" /></svg></button>
+          {wecomEnabled ? <button className="login__social" type="button" aria-label="企业微信" onClick={() => { window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}><svg viewBox="0 0 24 24" fill="#1aad19" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg></button> : null}
+          {providers.map((provider) => <button key={provider.code} className="login__social login__social--oidc" type="button" aria-label={provider.displayName} title={provider.displayName} onClick={() => { window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}><span aria-hidden="true">{provider.displayName.slice(0, 1)}</span></button>)}
         </div>
       </div>
       <p className="login__agreement">登录即代表你已阅读并同意 <button className="link" type="button">用户协议</button> 与 <button className="link" type="button">隐私政策</button></p>

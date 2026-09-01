@@ -1,5 +1,6 @@
 package com.antflow.auth;
 
+import com.antflow.audit.AuditService;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import jakarta.servlet.FilterChain;
@@ -19,11 +20,14 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LoginRateLimitFilter extends OncePerRequestFilter {
 
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
+    private final AuditService auditService;
     private final long perMinute;
     private final long perHour;
 
-    public LoginRateLimitFilter(@Value("${antflow.login.per-minute:5}") long perMinute,
+    public LoginRateLimitFilter(AuditService auditService,
+                                @Value("${antflow.login.per-minute:5}") long perMinute,
                                 @Value("${antflow.login.per-hour:30}") long perHour) {
+        this.auditService = auditService;
         this.perMinute = perMinute;
         this.perHour = perHour;
     }
@@ -32,7 +36,7 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws ServletException, IOException {
         if ("POST".equals(req.getMethod()) && "/api/auth/login".equals(req.getRequestURI())) {
-            Bucket b = buckets.computeIfAbsent(req.getRemoteAddr(), k -> newBucket());
+            Bucket b = buckets.computeIfAbsent(auditService.clientIp(req), k -> newBucket());
             if (!b.tryConsume(1)) {
                 res.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
                 res.setContentType("application/json");

@@ -55,12 +55,13 @@ export default function access(
         page('page.report.dashboard')) && can('form.data.read'),
     canManageSettings:
       page('page.settings.company') || page('page.settings.s3') ||
-      page('page.settings.wecom') || page('page.settings.billing'),
+      page('page.settings.wecom') || page('page.settings.identity_providers') || page('page.settings.billing'),
     canManageCompany:
       page('page.settings.company') && can('org.company.manage'),
     canManageS3: page('page.settings.s3'),
     canManageWecom:
       page('page.settings.wecom') && can('org.company.manage'),
+    canManageIdentityProviders: page('page.settings.identity_providers'),
     canManageBilling: page('page.settings.billing'),
     canUseRuntime:
       page('page.workplace') && can('form.runtime.read'),
