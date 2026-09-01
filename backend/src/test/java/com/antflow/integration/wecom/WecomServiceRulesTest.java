@@ -3,6 +3,7 @@ package com.antflow.integration.wecom;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.net.URI;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +43,20 @@ class WecomServiceRulesTest {
             .isEqualTo(WecomService.deterministicUsername(1, "zhangsan"))
             .isNotEqualTo(WecomService.deterministicUsername(2, "zhangsan"))
             .startsWith("wx_");
+    }
+
+    @Test
+    void derivesEnterpriseWecomUrlsFromThePublicOrigin() {
+        WecomAppService.AccessInfo info = WecomAppService.accessInfo(
+            URI.create("http://test.cqzc.cn:12387"));
+
+        assertThat(info.trustedDomain()).isEqualTo("test.cqzc.cn");
+        assertThat(info.mobileHomeUrl()).isEqualTo("http://test.cqzc.cn:12387/mobile/");
+        assertThat(info.oauthCallbackUrl()).isEqualTo(
+            "http://test.cqzc.cn:12387/api/public/auth/wecom/callback");
+        assertThat(info.verificationFileUrl()).isEqualTo(
+            "http://test.cqzc.cn:12387/WW_verify_F22tLVc7f8HR2P9B.txt");
+        assertThat(info.secure()).isFalse();
     }
 
     private static WecomClient.WecomUser user(List<Long> departments, long main) {

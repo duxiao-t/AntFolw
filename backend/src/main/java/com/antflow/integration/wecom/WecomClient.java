@@ -1,5 +1,6 @@
 package com.antflow.integration.wecom;
 
+import com.antflow.engine.BizException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -100,8 +101,13 @@ class WecomClient {
 
     String oauthUserId(Session session, String code) {
         JsonNode response = send("GET", "/cgi-bin/auth/getuserinfo?code=" + encode(code), null, session);
-        String userId = response.path("UserId").asText();
-        if (userId.isBlank()) throw new WecomApiException("企业微信未返回内部成员身份");
+        String userId = response.path("userid").asText(response.path("UserId").asText());
+        if (userId.isBlank() && !response.path("openid").asText().isBlank()) {
+            throw new BizException("WECOM_NOT_INTERNAL_MEMBER", "仅支持本企业内部成员登录");
+        }
+        if (userId.isBlank()) {
+            throw new BizException("WECOM_OAUTH_FAILED", "企业微信未返回成员身份，请重新进入应用");
+        }
         return userId;
     }
 

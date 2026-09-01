@@ -22,9 +22,9 @@ import {
   Row,
   Select,
   Space,
+  Switch,
   Tag,
   Typography,
-  Switch,
 } from 'antd';
 import { createStyles } from 'antd-style';
 import dayjs from 'dayjs';
@@ -70,6 +70,14 @@ type FormValues = {
   messageEnabled: boolean;
 };
 type DeliveryStatus = { pending: number; dead: number; oldestPendingAt?: string };
+type AccessInfo = {
+  publicBaseUrl: string;
+  trustedDomain: string;
+  mobileHomeUrl: string;
+  oauthCallbackUrl: string;
+  verificationFileUrl: string;
+  secure: boolean;
+};
 
 const WECOM_GREEN = '#07c160';
 const active = (job?: SyncJob) =>
@@ -163,6 +171,8 @@ const useStyles = createStyles(({ token }) => ({
     borderRadius: token.borderRadiusLG, background: token.colorFillAlter },
   chainIndex: { display: 'block', marginBottom: 5, color: WECOM_GREEN, fontSize: 11,
     fontWeight: 700, letterSpacing: '.08em' },
+  accessGrid: { display: 'grid', gridTemplateColumns: '160px minmax(0, 1fr)', gap: '12px 18px',
+    alignItems: 'center', '@media (max-width: 680px)': { gridTemplateColumns: '1fr' } },
 }));
 
 function Metric({ label, value }: { label: string; value: number | string }) {
@@ -189,7 +199,7 @@ export default function WecomPage() {
     queryKey: ['companies'],
     queryFn: () => request<Company[]>('/api/companies'),
   });
-  const companies = companiesQuery.data ?? [];
+  const companies = (companiesQuery.data ?? []) as Company[];
 
   useEffect(() => {
     if (companyId === undefined && companies.length) setCompanyId(companies[0].id);
@@ -203,6 +213,11 @@ export default function WecomPage() {
     enabled: companyId !== undefined,
   });
   const settings = settingsQuery.data;
+  const accessQuery = useQuery({
+    queryKey: ['wecom-access-info'],
+    queryFn: () => request<AccessInfo>('/api/integrations/wecom/access-info'),
+  });
+  const accessInfo = accessQuery.data?.publicBaseUrl ? accessQuery.data : undefined;
 
   useEffect(() => {
     if (!settings) return;
@@ -226,7 +241,7 @@ export default function WecomPage() {
     initialData: jobId === settings?.latestJob?.id ? settings?.latestJob : undefined,
     refetchInterval: (query) => syncPollInterval(query.state.data as SyncJob | undefined),
   });
-  const job = jobQuery.data ?? settings?.latestJob;
+  const job = (jobQuery.data ?? settings?.latestJob) as SyncJob | undefined;
   const deliveryQuery = useQuery({
     queryKey: ['wecom-message-status', companyId],
     queryFn: () => request<DeliveryStatus>('/api/integrations/wecom/message-status', { params: { companyId } }),
@@ -257,7 +272,7 @@ export default function WecomPage() {
     },
   });
 
-  const startMutation = useMutation({
+  const startMutation = useMutation<SyncJob, Error, 'FULL' | 'INCREMENTAL'>({
     mutationFn: (mode: 'FULL' | 'INCREMENTAL') => request<SyncJob>('/api/integrations/wecom/sync-jobs', {
       method: 'POST',
       data: { companyId, mode },
@@ -279,6 +294,19 @@ export default function WecomPage() {
       method: 'POST', data: { companyId },
     }),
     onSuccess: () => { void deliveryQuery.refetch(); message.success('失败消息已重新进入投递队列'); },
+  });
+  const verificationMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessInfo) throw new Error('公网接入信息尚未加载');
+      const expected = new URL(accessInfo.verificationFileUrl).pathname
+        .match(/\/WW_verify_(.+)\.txt$/)?.[1];
+      const response = await fetch(accessInfo.verificationFileUrl, { cache: 'no-store' });
+      if (!expected || !response.ok || (await response.text()).trim() !== expected) {
+        throw new Error('验证文件不可达或内容不匹配');
+      }
+    },
+    onSuccess: () => message.success('验证文件可达且内容正确'),
+    onError: (error: Error) => message.error(error.message),
   });
 
   const selectCompany = (value: number) => {
@@ -499,6 +527,33 @@ export default function WecomPage() {
           </Card>
         </Col>
       </Row>
+      <Card className={styles.card} style={{ marginTop: 24 }} title="企业微信后台配置"
+        loading={accessQuery.isLoading}>
+        {accessInfo ? (
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+            {!accessInfo.secure && (
+              <Alert type="warning" showIcon
+                title="当前公网入口使用 HTTP"
+                description="可信域名校验可以使用，但摄像头、麦克风、定位及部分企业微信能力可能要求 HTTPS。" />
+            )}
+            <div className={styles.accessGrid}>
+              <Typography.Text type="secondary">可信域名</Typography.Text>
+              <Typography.Text code copyable>{accessInfo.trustedDomain}</Typography.Text>
+              <Typography.Text type="secondary">移动端应用主页</Typography.Text>
+              <Typography.Text copyable>{accessInfo.mobileHomeUrl}</Typography.Text>
+              <Typography.Text type="secondary">OAuth 回调地址</Typography.Text>
+              <Typography.Text copyable>{accessInfo.oauthCallbackUrl}</Typography.Text>
+              <Typography.Text type="secondary">域名验证文件</Typography.Text>
+              <Space wrap>
+                <Typography.Text copyable>{accessInfo.verificationFileUrl}</Typography.Text>
+                <Button href={accessInfo.verificationFileUrl} target="_blank">打开</Button>
+                <Button loading={verificationMutation.isPending}
+                  onClick={() => verificationMutation.mutate()}>检测</Button>
+              </Space>
+            </div>
+          </Space>
+        ) : null}
+      </Card>
       <Card className={styles.card} style={{ marginTop: 24 }} title="接入状态">
         <div className={styles.chain}>
           {[

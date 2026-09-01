@@ -76,6 +76,19 @@ public class WecomAppService implements NotificationListener {
         return new Status(Boolean.TRUE.equals(enabled));
     }
 
+    public AccessInfo accessInfo() {
+        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        return accessInfo(authProperties.publicBaseUri());
+    }
+
+    static AccessInfo accessInfo(URI base) {
+        return new AccessInfo(base.toString(), base.getHost(),
+            base.resolve("/mobile/").toString(),
+            base.resolve("/api/public/auth/wecom/callback").toString(),
+            base.resolve("/WW_verify_F22tLVc7f8HR2P9B.txt").toString(),
+            "https".equalsIgnoreCase(base.getScheme()));
+    }
+
     public URI authorize(String returnUrl) {
         AppConfig config = requireEnabled("oauth_enabled");
         String state = randomToken(32);
@@ -110,9 +123,11 @@ public class WecomAppService implements NotificationListener {
             JOIN t_user user_row ON user_row.id = mapping.user_id AND user_row.status = 'ACTIVE'
             WHERE mapping.company_id = ? AND mapping.wecom_user_id = ?
             """, rs -> rs.next() ? rs.getLong(1) : null, config.companyId(), wecomUserId);
-        if (userId == null) throw new BadCredentialsException("企业微信成员尚未同步或本地账号已停用");
+        if (userId == null) {
+            throw new BizException("WECOM_ACCOUNT_UNAVAILABLE", "企业微信成员尚未同步或本地账号已停用");
+        }
         AuthService.Authenticated authenticated = authService.resume(userId)
-            .orElseThrow(() -> new BadCredentialsException("local user is disabled"));
+            .orElseThrow(() -> new BizException("WECOM_ACCOUNT_UNAVAILABLE", "本地账号已停用"));
         sessions.create(authenticated, request, response);
         return authProperties.publicBaseUri().resolve(flow.returnPath());
     }
@@ -400,6 +415,9 @@ public class WecomAppService implements NotificationListener {
                             long recipientId, String title, int attempts) { }
     private record TaskLink(String type, String formCode) { }
     public record Status(boolean oauthEnabled) { }
+    public record AccessInfo(String publicBaseUrl, String trustedDomain,
+                             String mobileHomeUrl, String oauthCallbackUrl,
+                             String verificationFileUrl, boolean secure) { }
     public record JsSdkConfig(String appId, long timestamp, String nonceStr, String signature) { }
     public record DeliveryStatus(long pending, long dead, OffsetDateTime oldestPendingAt) { }
 

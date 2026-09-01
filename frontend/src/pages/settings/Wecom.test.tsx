@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import WecomPage, { syncPollInterval } from './Wecom';
 
 const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
@@ -30,6 +30,7 @@ function renderPage() {
 
 describe('WecomPage', () => {
   beforeEach(() => requestMock.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
 
   it('restores saved configuration without exposing the secret and shows partial results', async () => {
     const latestJob = {
@@ -102,14 +103,14 @@ describe('WecomPage', () => {
       '/api/integrations/wecom/settings',
       expect.objectContaining({
         method: 'PUT',
-        data: { companyId: 1, corpId: 'ww-updated' },
+        data: expect.objectContaining({ companyId: 1, corpId: 'ww-updated' }),
       }),
     ));
     await waitFor(() => expect(screen.getByRole('button', { name: /开始同步/ })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /开始同步/ }));
     await waitFor(() => expect(requestMock).toHaveBeenCalledWith(
       '/api/integrations/wecom/sync-jobs',
-      { method: 'POST', data: { companyId: 1 } },
+      { method: 'POST', data: { companyId: 1, mode: 'INCREMENTAL' } },
     ));
   });
 
@@ -118,5 +119,40 @@ describe('WecomPage', () => {
     expect(syncPollInterval({ status: 'PENDING' } as never)).toBe(1000);
     expect(syncPollInterval({ status: 'SUCCESS' } as never)).toBe(false);
     expect(syncPollInterval({ status: 'FAILED' } as never)).toBe(false);
+  });
+
+  it('shows the authoritative public URLs and validates the domain file', async () => {
+    const accessInfo = {
+      publicBaseUrl: 'http://test.cqzc.cn:12387',
+      trustedDomain: 'test.cqzc.cn',
+      mobileHomeUrl: 'http://test.cqzc.cn:12387/mobile/',
+      oauthCallbackUrl: 'http://test.cqzc.cn:12387/api/public/auth/wecom/callback',
+      verificationFileUrl:
+        'http://test.cqzc.cn:12387/WW_verify_F22tLVc7f8HR2P9B.txt',
+      secure: false,
+    };
+    requestMock.mockImplementation((url: string) => {
+      if (url === '/api/companies')
+        return Promise.resolve([{ id: 1, name: 'AntFlow' }]);
+      if (url === '/api/integrations/wecom/settings')
+        return Promise.resolve(settings);
+      if (url === '/api/integrations/wecom/access-info')
+        return Promise.resolve(accessInfo);
+      return Promise.resolve({});
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('F22tLVc7f8HR2P9B', { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    expect(await screen.findByText('test.cqzc.cn')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /检\s*测/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      accessInfo.verificationFileUrl,
+      { cache: 'no-store' },
+    ));
+    expect(await screen.findByText('验证文件可达且内容正确')).toBeInTheDocument();
   });
 });

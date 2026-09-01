@@ -1,7 +1,9 @@
 package com.antflow.integration.wecom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.antflow.engine.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -48,6 +50,18 @@ class WecomClientTest {
                 + "\"department\":[1,2],\"main_department\":2,\"mobile\":\"13800000000\","
                 + "\"email\":\"lin@example.com\",\"gender\":\"2\",\"status\":1,"
                 + "\"direct_leader\":[\"boss\"]}"));
+        server.createContext("/cgi-bin/auth/getuserinfo", exchange -> {
+            String query = exchange.getRequestURI().getQuery();
+            if (query != null && query.contains("code=lowercase")) {
+                respond(exchange, "{\"errcode\":0,\"userid\":\"u1\"}");
+            } else if (query != null && query.contains("code=legacy")) {
+                respond(exchange, "{\"errcode\":0,\"UserId\":\"u2\"}");
+            } else if (query != null && query.contains("code=external")) {
+                respond(exchange, "{\"errcode\":0,\"openid\":\"external-openid\"}");
+            } else {
+                respond(exchange, "{\"errcode\":0}");
+            }
+        });
         server.start();
     }
 
@@ -74,6 +88,25 @@ class WecomClientTest {
             new WecomClient.WecomUserRef("u1", java.util.List.of(1L)));
         assertThat(user.mainDepartment()).isEqualTo(2);
         assertThat(user.directLeaders()).containsExactly("boss");
+    }
+
+    @Test
+    void readsCurrentAndLegacyOauthUserIdsAndRejectsNonMembers() {
+        WecomProperties properties = new WecomProperties();
+        properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        WecomClient client = new WecomClient(properties, new ObjectMapper(), HttpClient.newHttpClient());
+        WecomClient.Session session = client.connect("corp", "secret");
+
+        assertThat(client.oauthUserId(session, "lowercase")).isEqualTo("u1");
+        assertThat(client.oauthUserId(session, "legacy")).isEqualTo("u2");
+        assertThatThrownBy(() -> client.oauthUserId(session, "external"))
+            .isInstanceOfSatisfying(BizException.class, error -> {
+                assertThat(error.getCode()).isEqualTo("WECOM_NOT_INTERNAL_MEMBER");
+                assertThat(error.getMessage()).isEqualTo("仅支持本企业内部成员登录");
+            });
+        assertThatThrownBy(() -> client.oauthUserId(session, "missing"))
+            .isInstanceOfSatisfying(BizException.class, error ->
+                assertThat(error.getCode()).isEqualTo("WECOM_OAUTH_FAILED"));
     }
 
     private static void respond(HttpExchange exchange, String body) throws IOException {

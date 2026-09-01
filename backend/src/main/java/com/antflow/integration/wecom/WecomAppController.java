@@ -21,6 +21,9 @@ public class WecomAppController {
     @GetMapping("/api/public/auth/wecom/status")
     public WecomAppService.Status status() { return service.status(); }
 
+    @GetMapping("/api/integrations/wecom/access-info")
+    public WecomAppService.AccessInfo accessInfo() { return service.accessInfo(); }
+
     @GetMapping("/api/public/auth/wecom/authorize")
     public void authorize(@RequestParam(required = false) String returnUrl,
                           HttpServletResponse response) throws IOException {
