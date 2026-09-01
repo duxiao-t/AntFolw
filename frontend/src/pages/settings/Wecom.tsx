@@ -18,6 +18,7 @@ import {
   Input,
   InputNumber,
   Progress,
+  Radio,
   Row,
   Select,
   Space,
@@ -46,6 +47,7 @@ type SyncJob = {
   errorSummary: string[];
   startedAt?: string;
   finishedAt?: string;
+  syncMode?: 'FULL' | 'INCREMENTAL';
 };
 type Settings = {
   companyId: number;
@@ -181,6 +183,7 @@ export default function WecomPage() {
   const [companyId, setCompanyId] = useState<number>();
   const [startedJobId, setStartedJobId] = useState<number>();
   const [dirty, setDirty] = useState(false);
+  const [syncMode, setSyncMode] = useState<'FULL' | 'INCREMENTAL'>('INCREMENTAL');
 
   const companiesQuery = useQuery({
     queryKey: ['companies'],
@@ -255,9 +258,9 @@ export default function WecomPage() {
   });
 
   const startMutation = useMutation({
-    mutationFn: () => request<SyncJob>('/api/integrations/wecom/sync-jobs', {
+    mutationFn: (mode: 'FULL' | 'INCREMENTAL') => request<SyncJob>('/api/integrations/wecom/sync-jobs', {
       method: 'POST',
-      data: { companyId },
+      data: { companyId, mode },
     }),
     onSuccess: (started) => {
       setStartedJobId(started.id);
@@ -442,16 +445,26 @@ export default function WecomPage() {
                         ? `开始于 ${dayjs(job.startedAt).format('YYYY-MM-DD HH:mm:ss')}`
                         : '等待执行器接收任务'}
                   </span>
-                  <Button
-                    type="primary"
-                    icon={<CloudSyncOutlined />}
-                    disabled={!canStart}
-                    loading={startMutation.isPending}
-                    onClick={() => startMutation.mutate()}
-                    style={{ background: canStart ? WECOM_GREEN : undefined }}
-                  >
-                    {active(job) ? '同步进行中' : '开始同步'}
-                  </Button>
+                  <Space>
+                    <Radio.Group
+                      value={syncMode}
+                      onChange={(event) => setSyncMode(event.target.value)}
+                      disabled={!canStart || startMutation.isPending}
+                    >
+                      <Radio.Button value="INCREMENTAL">增量同步</Radio.Button>
+                      <Radio.Button value="FULL">全量同步</Radio.Button>
+                    </Radio.Group>
+                    <Button
+                      type="primary"
+                      icon={<CloudSyncOutlined />}
+                      disabled={!canStart}
+                      loading={startMutation.isPending}
+                      onClick={() => startMutation.mutate(syncMode)}
+                      style={{ background: canStart ? WECOM_GREEN : undefined }}
+                    >
+                      {active(job) ? '同步进行中' : '开始同步'}
+                    </Button>
+                  </Space>
                 </div>
               </>
             ) : (
@@ -460,16 +473,26 @@ export default function WecomPage() {
                   <CloudSyncOutlined className={styles.emptyIcon} />
                   <Typography.Text strong>尚未执行通讯录同步</Typography.Text>
                   <Typography.Text type="secondary">保存连接配置后即可创建持久化同步任务</Typography.Text>
-                  <Button
-                    type="primary"
-                    icon={<CloudSyncOutlined />}
-                    disabled={!canStart}
-                    loading={startMutation.isPending}
-                    onClick={() => startMutation.mutate()}
-                    style={{ background: canStart ? WECOM_GREEN : undefined, marginTop: 10 }}
-                  >
-                    开始同步
-                  </Button>
+                  <Space>
+                    <Radio.Group
+                      value={syncMode}
+                      onChange={(event) => setSyncMode(event.target.value)}
+                      disabled={!canStart || startMutation.isPending}
+                    >
+                      <Radio.Button value="INCREMENTAL">增量同步</Radio.Button>
+                      <Radio.Button value="FULL">全量同步</Radio.Button>
+                    </Radio.Group>
+                    <Button
+                      type="primary"
+                      icon={<CloudSyncOutlined />}
+                      disabled={!canStart}
+                      loading={startMutation.isPending}
+                      onClick={() => startMutation.mutate(syncMode)}
+                      style={{ background: canStart ? WECOM_GREEN : undefined, marginTop: 10 }}
+                    >
+                      开始同步
+                    </Button>
+                  </Space>
                 </Space>
               </div>
             )}
