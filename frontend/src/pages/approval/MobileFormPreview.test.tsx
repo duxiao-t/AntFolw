@@ -24,6 +24,7 @@ describe('MobileFormPreview', () => {
     );
 
     expect(iframe).toHaveAttribute('src', '/mobile/form-preview');
+    expect(iframe).toHaveAttribute('allow', 'camera; microphone; geolocation');
     expect(postMessage).toHaveBeenCalledWith(
       {
         type: 'antflow:form-preview:set',

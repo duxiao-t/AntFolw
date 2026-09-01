@@ -42,7 +42,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class MobileWorkflowService {
     private static final long CC_TASK_ID_BASE = 8_000_000_000_000_000L;
-    private static final String READY_STATUS = "READY";
     private static final String PENDING_STATUS = "PENDING";
     private static final String PUBLISHED_STATUS = "PUBLISHED";
     private static final String RUNNING_STATUS = "RUNNING";
@@ -58,7 +57,7 @@ public class MobileWorkflowService {
     private final ProcessInstanceMapper instanceMapper;
     private final TaskMapper taskMapper;
     private final TaskHistoryMapper historyMapper;
-    private final MobileFileMapper fileMapper;
+    private final MobileFileLinkService fileLinkService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
     @Autowired(required = false)
@@ -109,11 +108,7 @@ public class MobileWorkflowService {
         String businessNo = Objects.toString(result.get("businessNo"), null);
         List<Long> firstTaskIds = asLongList(result.get("firstTaskIds"));
 
-        for (MobileFileRef file : filesOf(request)) {
-            MobileFile row = requireReadyOwnedFile(file.fileId(), userId);
-            workflowMapper.insertFileLink(formDataId, row.getId(), file.fieldId(),
-                file.sortOrder());
-        }
+        fileLinkService.append(formDataId, filesOf(request), userId);
         if (definitionVersions != null) {
             ProcessInstance started = instanceMapper.selectById(instanceId);
             if (started != null && started.getCurrentFormRevisionId() != null) {
@@ -309,17 +304,6 @@ public class MobileWorkflowService {
         engine.withdraw(instanceId, userId);
     }
 
-    private MobileFile requireReadyOwnedFile(java.util.UUID fileId, long userId) {
-        MobileFile file = fileMapper.selectById(fileId);
-        if (file == null || file.getDeletedAt() != null || !READY_STATUS.equals(file.getStatus())) {
-            throw new BizException("FILE_NOT_FOUND", "file not found");
-        }
-        if (!Objects.equals(file.getOwnerId(), userId)) {
-            throw new AccessDeniedException("file belongs to another user");
-        }
-        return file;
-    }
-
     private ProcessInstance requireReadableInstance(Long instanceId, long userId) {
         ProcessInstance instance = requireExistingInstance(instanceId);
         if (authorizationService.canReadInstance(instanceId, userId)) {
@@ -362,30 +346,9 @@ public class MobileWorkflowService {
         formData.setStatus("NEEDS_REVISION");
         formDataMapper.updateById(formData);
         if (request.files() != null) {
-            reconcileFileLinks(formData.getId(), request.files(), userId);
+            fileLinkService.reconcile(formData.getId(), request.files(), userId);
         }
         return formData;
-    }
-
-    private void reconcileFileLinks(Long formDataId, List<MobileFileRef> fileRefs, long userId) {
-        List<MobileFileRef> normalized = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-        for (MobileFileRef ref : fileRefs) {
-            if (ref == null || ref.fileId() == null || ref.fieldId() == null
-                || ref.fieldId().isBlank() || ref.sortOrder() < 0) {
-                throw new BizException("BAD_FILE_REF", "附件关联无效");
-            }
-            requireReadyOwnedFile(ref.fileId(), userId);
-            String key = ref.fileId() + "\u0000" + ref.fieldId();
-            if (seen.add(key)) {
-                normalized.add(ref);
-            }
-        }
-        workflowMapper.deleteFileLinks(formDataId);
-        for (MobileFileRef ref : normalized) {
-            workflowMapper.insertFileLink(formDataId, ref.fileId(), ref.fieldId(),
-                ref.sortOrder());
-        }
     }
 
     private ProcessInstance requireExistingInstance(Long instanceId) {

@@ -1,5 +1,5 @@
 import { ImageViewer } from 'antd-mobile';
-import { FileOutline, PlayOutline } from 'antd-mobile-icons';
+import { FileOutline, PlayOutline, SoundOutline } from 'antd-mobile-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isApiError } from '../../../shared/api/errors';
 import { fetchMobileFileBlob } from '../files.api';
@@ -12,6 +12,7 @@ export type MediaFile = {
   contentUrl: string;
   url?: string;
   size?: number;
+  durationSeconds?: number;
 };
 
 const IMAGE_EXTENSION = /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i;
@@ -23,7 +24,12 @@ export function isImageFile(file: MediaFile) {
 }
 
 export function isVideoFile(file: MediaFile) {
-  return /^video\//i.test(file.contentType ?? '') || VIDEO_EXTENSION.test(file.name ?? '');
+  return !/^audio\//i.test(file.contentType ?? '')
+    && (/^video\//i.test(file.contentType ?? '') || VIDEO_EXTENSION.test(file.name ?? ''));
+}
+
+export function isAudioFile(file: MediaFile) {
+  return /^audio\//i.test(file.contentType ?? '') || /\.(mp3|m4a|aac|wav|ogg|webm|amr)$/i.test(file.name ?? '');
 }
 
 export function formatFileSize(size?: number) {
@@ -170,6 +176,9 @@ function AttachmentRow({
   if (isVideoFile(file)) {
     return <VideoAttachmentRow file={file} />;
   }
+  if (isAudioFile(file)) {
+    return <AudioAttachmentRow file={file} />;
+  }
   return (
     <div className="af-field__attachment">
       <span className="af-field__attachment-thumb af-field__attachment-thumb--file" aria-hidden="true">
@@ -188,6 +197,31 @@ function AttachmentRow({
       </div>
     </div>
   );
+}
+
+export function AudioAttachmentRow({ file }: { file: MediaFile }) {
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let objectUrl = '';
+    let alive = true;
+    fetchMobileFileBlob(file.contentUrl).then((blob) => {
+      if (!alive) return;
+      objectUrl = URL.createObjectURL(blob);
+      setUrl(objectUrl);
+    }).catch((reason) => { if (alive) setError(mediaErrorMessage(reason)); });
+    return () => { alive = false; if (objectUrl) revokeUrl(objectUrl); };
+  }, [file.contentUrl]);
+  return <div className="af-field__attachment af-field__attachment--audio">
+    <span className="af-field__attachment-thumb af-field__attachment-thumb--file" aria-hidden="true"><SoundOutline /></span>
+    <div className="af-field__attachment-main">
+      <strong className="af-field__attachment-name" title={file.name}>{file.name ?? '录音'}</strong>
+      <small className="af-field__attachment-meta">{file.durationSeconds ? `${Math.round(file.durationSeconds)} 秒 · ` : ''}{formatFileSize(file.size)}{error ? ` · ${error}` : ''}</small>
+      {/* biome-ignore lint/a11y/useMediaCaption: voice recordings do not provide caption tracks. */}
+      {url ? <audio className="af-field__audio" src={url} controls preload="metadata" /> : null}
+    </div>
+    <div className="af-field__attachment-actions"><AttachmentDownloadButton file={file} /></div>
+  </div>;
 }
 
 function VideoAttachmentRow({ file }: { file: MediaFile }) {

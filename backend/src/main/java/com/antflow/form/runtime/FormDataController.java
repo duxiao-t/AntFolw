@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import com.antflow.mobile.workflow.MobileFileRef;
 
 @RestController
 @RequestMapping("/api/forms/data")
@@ -18,14 +19,15 @@ public class FormDataController {
     private final AuthorizationService authorizationService;
 
     @PostMapping
-    public Map<String, Object> submit(@RequestBody Map<String, Object> body) {
+    public Map<String, Object> submit(@RequestBody SubmitRequest body) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
         Long id = service.submit(
-            (String) body.get("formCode"),
-            (String) body.get("status"),
-            body.get("data"),
-            p.userId());
+            body.formCode(),
+            body.status(),
+            body.data(),
+            p.userId(),
+            body.files() == null ? List.of() : body.files());
         return Map.of("dataId", id);
     }
 
@@ -52,4 +54,7 @@ public class FormDataController {
         authorizationService.requireReadableFormData(id);
         return service.getById(id);
     }
+
+    public record SubmitRequest(String formCode, String status, Object data,
+                                List<MobileFileRef> files) { }
 }

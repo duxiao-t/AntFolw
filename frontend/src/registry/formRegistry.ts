@@ -17,6 +17,9 @@ import { SpanLayoutField } from '../components/form-fields/SpanLayoutField';
 import { TableListField } from '../components/form-fields/TableListField';
 import { ChecklistField } from '../components/form-fields/ChecklistField';
 import { MatrixFillField } from '../components/form-fields/MatrixFillField';
+import { ScanCodeField } from '../components/form-fields/ScanCodeField';
+import { AudioUploadField } from '../components/form-fields/AudioUploadField';
+import { LocationField } from '../components/form-fields/LocationField';
 
 export const formRegistry: Record<string, FieldType> = {
   text: TextField,
@@ -37,6 +40,9 @@ export const formRegistry: Record<string, FieldType> = {
   table_list: TableListField,
   checklist: ChecklistField,
   matrix_fill: MatrixFillField,
+  scan_code: ScanCodeField,
+  audio_upload: AudioUploadField,
+  location: LocationField,
 };
 
 export type PaletteEntry = {
@@ -78,6 +84,8 @@ export const paletteGroups: PaletteGroup[] = [
       'table_list',
       'checklist',
       'matrix_fill',
+      'scan_code',
+      'location',
     ]
       .map((type) => paletteEntries.find((entry) => entry.type === type))
       .filter((entry): entry is PaletteEntry => Boolean(entry)),
@@ -85,7 +93,7 @@ export const paletteGroups: PaletteGroup[] = [
   {
     key: 'media',
     title: '多媒体组件',
-    entries: ['image_upload', 'video_upload', 'file_upload']
+    entries: ['image_upload', 'video_upload', 'file_upload', 'audio_upload']
       .map((type) => paletteEntries.find((entry) => entry.type === type))
       .filter((entry): entry is PaletteEntry => Boolean(entry)),
   },

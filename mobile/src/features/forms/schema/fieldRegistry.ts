@@ -27,6 +27,9 @@ import { TableListField } from '../fields/TableListField';
 import { MatrixFillField } from '../fields/MatrixFillField';
 import { TimeField } from '../fields/TimeField';
 import { UserPickerField } from '../fields/UserPickerField';
+import { ScanCodeField } from '../fields/ScanCodeField';
+import { AudioUploadField } from '../fields/AudioUploadField';
+import { LocationField } from '../fields/LocationField';
 import { summarizeValue, validateCommonRules, visibleNodeIds } from './validators';
 import { summarizeMatrix, validateMatrixValue } from './matrixFill';
 import type {
@@ -177,6 +180,15 @@ export const registeredFields: MobileFieldDefinition[] = [
   field('table_list', TableListField, {
     validate: validateTableList,
     summarize: (_node, value) => summarizeRows(value),
+  }),
+  field('scan_code', ScanCodeField),
+  field('audio_upload', AudioUploadField, {
+    validate: validateAudioUpload,
+    summarize: (_node, value) => summarizeUploadedFiles(value, '段录音'),
+  }),
+  field('location', LocationField, {
+    validate: validateLocation,
+    summarize: (_node, value) => summarizeLocation(value),
   }),
   field('matrix_fill', MatrixFillField, {
     validate: validateMatrixValue,
@@ -360,6 +372,33 @@ function summarizeUploadedFiles(value: unknown, unit = '个附件') {
     return '未填写';
   }
   return `${value.length}${unit}`;
+}
+
+function validateAudioUpload(node: MobileSchemaNode, value: unknown) {
+  const configured = typeof node.props?.maxCount === 'number' ? node.props.maxCount : 3;
+  return validateMaxCount({ ...node, props: { ...node.props, maxCount: configured } }, value, '段录音')
+    ?? validateFileUpload(node, value);
+}
+
+function validateLocation(node: MobileSchemaNode, value: unknown) {
+  if (value == null || value === '') return node.props?.required === true ? `请填写${node.label ?? node.id}` : null;
+  if (typeof value !== 'object') return '位置信息格式不正确';
+  const location = value as Record<string, unknown>;
+  const coordinateSystem = location.coordinateSystem;
+  return typeof location.latitude === 'number' && location.latitude >= -90 && location.latitude <= 90
+    && typeof location.longitude === 'number' && location.longitude >= -180 && location.longitude <= 180
+    && (location.accuracy == null || (typeof location.accuracy === 'number' && location.accuracy >= 0))
+    && (coordinateSystem == null || coordinateSystem === 'WGS84' || coordinateSystem === 'GCJ02')
+    ? null : '位置信息格式不正确';
+}
+
+function summarizeLocation(value: unknown) {
+  if (typeof value !== 'object' || value == null) return '未填写';
+  const location = value as Record<string, unknown>;
+  if (typeof location.name === 'string' && location.name) return location.name;
+  if (typeof location.address === 'string' && location.address) return location.address;
+  return typeof location.latitude === 'number' && typeof location.longitude === 'number'
+    ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}` : '未填写';
 }
 
 function validateTableList(node: MobileSchemaNode, value: unknown) {

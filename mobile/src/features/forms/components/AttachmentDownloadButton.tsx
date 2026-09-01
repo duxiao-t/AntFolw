@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { isApiError } from '../../../shared/api/errors';
 import { fetchMobileFileBlob } from '../files.api';
+import { usePlatformAdapter } from '../../../shared/platform/PlatformProvider';
 
 const DOWNLOAD_OBJECT_URL_REVOKE_DELAY_MS = 60_000;
 
@@ -9,6 +10,8 @@ export type DownloadableAttachment = {
   name?: string;
   contentUrl: string;
   url?: string;
+  contentType?: string;
+  size?: number;
 };
 
 type AttachmentDownloadButtonProps = {
@@ -16,6 +19,7 @@ type AttachmentDownloadButtonProps = {
 };
 
 export function AttachmentDownloadButton({ file }: AttachmentDownloadButtonProps) {
+  const platform = usePlatformAdapter();
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
 
@@ -41,6 +45,16 @@ export function AttachmentDownloadButton({ file }: AttachmentDownloadButtonProps
     }
     setDownloading(true);
     setError('');
+    if (platform.kind === 'wecom') {
+      try {
+        await platform.openFile({ id: file.id ?? '', name: file.name ?? '附件', contentUrl,
+          contentType: file.contentType ?? 'application/octet-stream', size: file.size ?? 0, url: file.url });
+        setDownloading(false);
+        return;
+      } catch {
+        // Continue with the authenticated browser download fallback.
+      }
+    }
     let objectUrl = '';
     try {
       const blob = await fetchMobileFileBlob(contentUrl);

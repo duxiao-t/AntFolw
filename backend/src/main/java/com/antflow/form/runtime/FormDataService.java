@@ -7,6 +7,8 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.org.UserMapper;
+import com.antflow.mobile.workflow.MobileFileLinkService;
+import com.antflow.mobile.workflow.MobileFileRef;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +31,7 @@ public class FormDataService {
     private final AuthorizationService authorizationService;
     private final UserMapper userMapper;
     private final FormDefinitionMapper formDefinitionMapper;
+    private final MobileFileLinkService fileLinkService;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -36,6 +39,12 @@ public class FormDataService {
      */
     @Transactional
     public Long submit(String formCode, String status, Object data, Long userId) {
+        return submit(formCode, status, data, userId, List.of());
+    }
+
+    @Transactional
+    public Long submit(String formCode, String status, Object data, Long userId,
+                       List<MobileFileRef> files) {
         FormDefinition fd = formDefinitionService.getByCode(formCode);
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
@@ -55,6 +64,7 @@ public class FormDataService {
         fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
         mapper.insert(fd2);
+        fileLinkService.append(fd2.getId(), files, userId);
         return fd2.getId();
     }
 

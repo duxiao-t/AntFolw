@@ -7,7 +7,7 @@ describe('mobile field registry', () => {
   it('registers exactly the supported mobile field types once', () => {
     const typeCodes = registeredFields.map((field) => field.type);
 
-    expect(typeCodes).toHaveLength(23);
+    expect(typeCodes).toHaveLength(26);
     expect(new Set(typeCodes).size).toBe(typeCodes.length);
     expect(typeCodes).toEqual([
       'text',
@@ -32,6 +32,9 @@ describe('mobile field registry', () => {
       'description',
       'span_layout',
       'table_list',
+      'scan_code',
+      'audio_upload',
+      'location',
       'matrix_fill',
     ]);
   });
@@ -209,6 +212,23 @@ describe('mobile field registry', () => {
     expect(collectVisibleValues(schema, {
       level1: 'hide', level2: 'show', level3: '保留值',
     })).toEqual({ level1: 'hide' });
+  });
+
+  it('enforces native recording count and location metadata', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'voice', type: 'audio_upload', props: { maxCount: 2 } },
+      { id: 'place', type: 'location' },
+    ];
+    const file = (id: string) => ({ id, name: `${id}.webm`, contentType: 'audio/webm', contentUrl: `/files/${id}`, size: 10 });
+
+    expect(validateSchemaValues(schema, { voice: [file('a'), file('b'), file('c')] }))
+      .toEqual({ voice: '最多上传 2 段录音' });
+    expect(validateSchemaValues(schema, { place: {
+      latitude: 31.2, longitude: 121.5, accuracy: 8, coordinateSystem: 'WGS84',
+    } })).toEqual({});
+    expect(validateSchemaValues(schema, { place: {
+      latitude: 31.2, longitude: 121.5, coordinateSystem: 'BD09',
+    } })).toEqual({ place: '位置信息格式不正确' });
   });
 
 });

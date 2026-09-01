@@ -81,9 +81,16 @@ export default function Fill() {
 
   const startInstance = useMutation({
     mutationFn: (payload: { selfSelected: Record<string, number[]>; data: Record<string, any> }) =>
-      request('/api/instances/start', {
+      request('/api/mobile/instances', {
         method: 'POST',
-        data: { formCode: code, data: payload.data, selfSelected: payload.selfSelected },
+        headers: { 'Idempotency-Key': createIdempotencyKey() },
+        data: {
+          formCode: code,
+          data: payload.data,
+          selfSelected: payload.selfSelected,
+          draftId: null,
+          files: collectFileRefs(payload.data),
+        },
       }),
     onSuccess: () => {
       message.success('提交成功');
@@ -95,7 +102,7 @@ export default function Fill() {
     mutationFn: (data: Record<string, any>) =>
       request('/api/forms/data', {
         method: 'POST',
-        data: { formCode: code, status: 'SUBMITTED', data },
+        data: { formCode: code, status: 'SUBMITTED', data, files: collectFileRefs(data) },
       }),
     onSuccess: () => {
       message.success('提交成功');
@@ -212,4 +219,32 @@ export default function Fill() {
       </Modal>
     </Card>
   );
+}
+
+function collectFileRefs(values: Record<string, unknown>) {
+  const refs: Array<{ fileId: string; fieldId: string; sortOrder: number }> = [];
+  for (const [fieldId, value] of Object.entries(values)) collectValueFiles(value, fieldId, refs);
+  return refs;
+}
+
+function createIdempotencyKey() {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function collectValueFiles(value: unknown, fieldId: string, refs: Array<{ fileId: string; fieldId: string; sortOrder: number }>) {
+  if (!Array.isArray(value)) return;
+  if (value.every((item) => typeof item === 'object' && item != null
+    && typeof (item as { id?: unknown }).id === 'string'
+    && typeof (item as { contentType?: unknown }).contentType === 'string')) {
+    value.forEach((file, sortOrder) => {
+      refs.push({ fileId: (file as { id: string }).id, fieldId, sortOrder });
+    });
+    return;
+  }
+  value.forEach((row) => {
+    if (typeof row !== 'object' || row == null || Array.isArray(row)) return;
+    for (const [nestedFieldId, nested] of Object.entries(row)) collectValueFiles(nested, nestedFieldId, refs);
+  });
 }

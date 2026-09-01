@@ -48,6 +48,7 @@ export function MobileFormPreview(props: MobileFormPreviewProps) {
         ref={iframeRef}
         title="手机端表单预览"
         src={PREVIEW_URL}
+        allow="camera; microphone; geolocation"
         sandbox="allow-forms allow-modals allow-same-origin allow-scripts"
         onLoad={() => setReady(false)}
       />

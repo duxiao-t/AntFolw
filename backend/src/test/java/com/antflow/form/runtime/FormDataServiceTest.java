@@ -8,6 +8,7 @@ import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
+import com.antflow.mobile.workflow.MobileFileLinkService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.util.Map;
+import java.util.List;
+import java.util.UUID;
+import com.antflow.mobile.workflow.MobileFileRef;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +32,7 @@ class FormDataServiceTest {
     private FormalNumberService formalNumberService;
     private UserMapper userMapper;
     private FormDataService service;
+    private MobileFileLinkService fileLinkService;
 
     @BeforeEach
     void setUp() {
@@ -37,9 +42,10 @@ class FormDataServiceTest {
         userMapper = Mockito.mock(UserMapper.class);
         var formDefinitionService = new FormDefinitionService(formDefinitionMapper, json,
             Mockito.mock(FormGrantService.class));
+        fileLinkService = Mockito.mock(MobileFileLinkService.class);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
             formalNumberService, Mockito.mock(AuthorizationService.class), userMapper,
-            formDefinitionMapper);
+            formDefinitionMapper, fileLinkService);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(formDataMapper.insert(any(FormData.class))).thenAnswer(invocation -> {
@@ -69,6 +75,18 @@ class FormDataServiceTest {
         assertThat(json.readTree(saved.getData()).path("applicant").asText()).isEqualTo("张三");
         assertThat(json.readTree(saved.getData()).path("reason").asText()).isEqualTo("报销");
         assertThat(json.readTree(saved.getData()).has("row")).isFalse();
+    }
+
+    @Test
+    void directSubmitLinksUploadedFilesInTheSubmissionTransaction() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+        UUID fileId = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
+        List<MobileFileRef> refs = List.of(new MobileFileRef(fileId, "voice", 0));
+
+        service.submit("expense", "SUBMITTED",
+            Map.of("applicant", "张三", "reason", "报销"), 7L, refs);
+
+        Mockito.verify(fileLinkService).append(100L, refs, 7L);
     }
 
     @Test

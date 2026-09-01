@@ -34,6 +34,7 @@ const placeholderTypes = new Set([
   'multi_select',
   'user_picker',
   'dept_picker',
+  'scan_code',
 ]);
 
 const requiredTypes = new Set([
@@ -50,6 +51,9 @@ const requiredTypes = new Set([
   'file_upload',
   'image_upload',
   'video_upload',
+  'scan_code',
+  'audio_upload',
+  'location',
   'matrix_fill',
 ]);
 
@@ -1027,6 +1031,34 @@ function renderComponentSettings(
           </Checkbox>
           <Typography.Text type="secondary">
             子组件拖入分栏将在容器拖拽能力完成后开放。
+          </Typography.Text>
+        </Space>
+      );
+    case 'audio_upload':
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <PanelField label="最多录音段数">
+            <InputNumber
+              min={1}
+              max={10}
+              precision={0}
+              style={{ width: '100%' }}
+              value={props.maxCount ?? 3}
+              onChange={(value) => updateProps({ maxCount: value ?? 3 })}
+            />
+          </PanelField>
+          <PanelField label="每段最长时长(秒)">
+            <InputNumber
+              min={5}
+              max={60}
+              precision={0}
+              style={{ width: '100%' }}
+              value={props.maxDuration ?? 60}
+              onChange={(value) => updateProps({ maxDuration: value ?? 60 })}
+            />
+          </PanelField>
+          <Typography.Text type="secondary">
+            填报时直接调用浏览器或企业微信录音，不允许选择已有音频。
           </Typography.Text>
         </Space>
       );

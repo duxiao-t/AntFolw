@@ -27,6 +27,9 @@ import {
   UploadOutlined,
   UserOutlined,
   VideoCameraOutlined,
+  ScanOutlined,
+  AudioOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons';
 import { App, Button, Space, theme } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -68,6 +71,9 @@ const paletteIcons: Record<string, React.ReactNode> = {
   file_upload: <UploadOutlined />,
   image_upload: <PictureOutlined />,
   video_upload: <VideoCameraOutlined />,
+  scan_code: <ScanOutlined />,
+  audio_upload: <AudioOutlined />,
+  location: <EnvironmentOutlined />,
   span_layout: <ColumnWidthOutlined />,
   table_list: <TableOutlined />,
   checklist: <CheckCircleOutlined />,

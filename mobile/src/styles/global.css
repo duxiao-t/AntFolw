@@ -1525,6 +1525,19 @@ body {
 .login__socials { display: flex; gap: 14px; justify-content: center; margin-top: 12px; }
 .login__social { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--af-color-line); background: #fff; display: grid; place-items: center; cursor: pointer; }
 .login__social svg { width: 20px; height: 20px; }
+.login__social--oidc { color: var(--af-color-primary); font-weight: 800; }
+
+.af-platform-field-row { display: flex; gap: 8px; align-items: stretch; }
+.af-platform-field-row .af-input { flex: 1; min-width: 0; }
+.af-platform-field-row .btn { flex: 0 0 auto; }
+.af-platform-record { width: 100%; border: 1px dashed var(--af-color-border); background: var(--af-color-surface); }
+.af-location-value { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px 12px; border-radius: var(--af-radius-control); background: var(--af-color-fill); color: var(--af-color-text); }
+.af-location-value > span { display: grid; gap: 2px; min-width: 0; }
+.af-location-value small { color: var(--af-color-muted); font-size: 12px; }
+.af-location-actions { display: flex; justify-content: space-between; padding-top: 8px; }
+.af-field__audio { width: 100%; height: 36px; margin-top: 6px; }
+.af-audio-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.af-location-summary { width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
 .login__agreement { margin: 16px 14px 0; font-size: 11px; color: var(--af-color-muted); text-align: center; }
 .login__agreement a { color: var(--af-color-primary-action); text-decoration: none; }
 

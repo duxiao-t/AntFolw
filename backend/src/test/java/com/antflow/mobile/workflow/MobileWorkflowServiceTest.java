@@ -86,7 +86,8 @@ class MobileWorkflowServiceTest {
         Mockito.when(workflowMapper.selectApprovalTasks(Mockito.anyLong())).thenReturn(List.of());
         service = new MobileWorkflowService(engine, draftService, workflowMapper,
             formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
-            taskMapper, historyMapper, fileMapper, objectMapper, authorizationService);
+            taskMapper, historyMapper, new MobileFileLinkService(workflowMapper, fileMapper),
+            objectMapper, authorizationService);
     }
 
     @Test

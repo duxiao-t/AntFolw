@@ -280,6 +280,41 @@ class FormDefinitionServiceSchemaTest {
             .doesNotThrowAnyException();
     }
 
+    @Test void validatesNativeAudioAndLocationValuesWithHistoryCompatibility() {
+        String schema = """
+            [{"id":"voice","type":"audio_upload","props":{"maxCount":2,"maxDuration":30}},
+             {"id":"place","type":"location"}]
+            """;
+        assertThatCode(() -> service.validateSubmission(schema, Map.of(
+            "voice", List.of(Map.of("id", "file-1")),
+            "place", Map.of("latitude", 31.2, "longitude", 121.5))))
+            .doesNotThrowAnyException();
+        assertThatCode(() -> service.validateSubmission(schema, Map.of(
+            "voice", List.of(Map.of("id", "file-1", "durationSeconds", 20)),
+            "place", Map.of("latitude", 31.2, "longitude", 121.5,
+                "accuracy", 12, "coordinateSystem", "WGS84"))))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateSubmission(schema, Map.of(
+            "voice", List.of(Map.of("id", "a"), Map.of("id", "b"), Map.of("id", "c")))))
+            .isInstanceOf(BizException.class).hasMessageContaining("maxCount");
+        assertThatThrownBy(() -> service.validateSubmission(schema, Map.of(
+            "place", Map.of("latitude", 31.2, "longitude", 121.5,
+                "coordinateSystem", "BD09"))))
+            .isInstanceOf(BizException.class).hasMessageContaining("coordinates");
+    }
+
+    @Test void publishRejectsAudioLimitsOutsideDesignerRange() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setSchema("[{\"id\":\"voice\",\"type\":\"audio_upload\",\"props\":{\"maxCount\":11,\"maxDuration\":60}}]");
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("audio_upload limits");
+    }
+
     @Test void displayConditionsSupportInAndSkipHiddenRequiredFields() {
         String schema = """
             [{"id":"kind","type":"select","props":{"options":[

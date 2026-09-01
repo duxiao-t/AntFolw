@@ -50,6 +50,7 @@ export async function submitMobileFormData({
       formCode,
       status: 'SUBMITTED',
       data: values,
+      files: collectMobileFileRefs(values),
     }),
   });
 }

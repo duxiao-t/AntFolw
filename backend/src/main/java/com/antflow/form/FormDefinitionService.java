@@ -32,7 +32,8 @@ public class FormDefinitionService {
         "date", "date_range", "time", "switch",
         "image_upload", "video_upload", "file_upload", "checklist",
         "user_picker", "dept_picker",
-        "description", "span_layout", "table_list", "matrix_fill"
+        "description", "span_layout", "table_list", "matrix_fill",
+        "scan_code", "audio_upload", "location"
     );
     private static final Set<String> CONTAINER_TYPES = Set.of("span_layout");
 
@@ -339,6 +340,7 @@ public class FormDefinitionService {
             return;
         }
         Object value = values.get(node.path("id").asText());
+        String type = node.path("type").asText();
         var props = node.path("props");
         var rules = node.path("rules");
         if ("matrix_fill".equals(node.path("type").asText())) {
@@ -366,6 +368,43 @@ public class FormDefinitionService {
         var children = node.path("children");
         if (children.isArray()) {
             children.forEach(child -> validateNodeValue(child, values, visibleIds));
+        }
+        if ("scan_code".equals(type) && !isEmpty(value) && !(value instanceof String)) {
+            throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " must be a string");
+        }
+        if ("audio_upload".equals(type) && !isEmpty(value)) {
+            if (!(value instanceof List<?> files) || files.stream().anyMatch(file ->
+                !(file instanceof Map<?, ?> item) || !(item.get("id") instanceof String))) {
+                throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " must be a file list");
+            }
+            int maxCount = props.path("maxCount").asInt(3);
+            int maxDuration = props.path("maxDuration").asInt(60);
+            if (files.size() > maxCount) {
+                throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " exceeds maxCount");
+            }
+            for (Object file : files) {
+                Object duration = ((Map<?, ?>) file).get("durationSeconds");
+                if (duration != null && (!(duration instanceof Number seconds)
+                    || !Double.isFinite(seconds.doubleValue()) || seconds.doubleValue() < 0
+                    || seconds.doubleValue() > maxDuration)) {
+                    throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " has invalid duration");
+                }
+            }
+        }
+        if ("location".equals(type) && !isEmpty(value)) {
+            if (!(value instanceof Map<?, ?> location)
+                || !(location.get("latitude") instanceof Number latitude)
+                || !(location.get("longitude") instanceof Number longitude)
+                || latitude.doubleValue() < -90 || latitude.doubleValue() > 90
+                || longitude.doubleValue() < -180 || longitude.doubleValue() > 180
+                || !Double.isFinite(latitude.doubleValue()) || !Double.isFinite(longitude.doubleValue())
+                || (location.get("accuracy") != null
+                    && (!(location.get("accuracy") instanceof Number accuracy)
+                        || !Double.isFinite(accuracy.doubleValue()) || accuracy.doubleValue() < 0))
+                || (location.get("coordinateSystem") != null
+                    && !Set.of("WGS84", "GCJ02").contains(location.get("coordinateSystem")))) {
+                throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " has invalid coordinates");
+            }
         }
         if (Set.of("number", "money").contains(node.path("type").asText()) && !isEmpty(value)) {
             java.math.BigDecimal number;
@@ -592,6 +631,17 @@ public class FormDefinitionService {
         String type = node.path("type").asText("");
         if (Set.of("select", "radio", "multi_select", "checkbox").contains(type)) {
             validateSelectOptions(node);
+        }
+        if ("audio_upload".equals(type)) {
+            var maxCountValue = node.path("props").path("maxCount");
+            var maxDurationValue = node.path("props").path("maxDuration");
+            int maxCount = maxCountValue.asInt(3);
+            int maxDuration = maxDurationValue.asInt(60);
+            if ((!maxCountValue.isMissingNode() && !maxCountValue.isIntegralNumber())
+                || (!maxDurationValue.isMissingNode() && !maxDurationValue.isIntegralNumber())
+                || maxCount < 1 || maxCount > 10 || maxDuration < 5 || maxDuration > 60) {
+                throw new BizException("BAD_SCHEMA", "audio_upload limits are invalid");
+            }
         }
         validateDisplayCondition(node.path("props").path("displayCondition"));
         node.path("children").forEach(this::validatePublishingNode);

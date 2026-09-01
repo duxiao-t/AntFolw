@@ -5,6 +5,7 @@ import { deleteMobileFile, fetchMobileFileBlob, uploadMobileFile } from '../file
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
 import { ReadonlyMediaList } from '../components/MediaPreview';
+import { usePlatformAdapter } from '../../../shared/platform/PlatformProvider';
 
 export type UploadItem = {
   localId: string;
@@ -39,6 +40,7 @@ export function hasBlockingUploadQueue(value: unknown) {
 }
 
 export function FileUploadField(props: MobileFieldProps) {
+  const platform = usePlatformAdapter();
   const label = fieldLabel(props.node);
   const endpoint = String(props.node.props?.uploadEndpoint ?? '/api/mobile/files');
   const accept = typeof props.node.props?.accept === 'string' ? props.node.props.accept : DEFAULT_FILE_ACCEPT;
@@ -240,7 +242,29 @@ export function FileUploadField(props: MobileFieldProps) {
               );
             })}
           </div>
-          <label className="upload-trigger">
+          {previewImages && platform.chooseImages ? (
+            <button type="button" className="upload-trigger" onClick={() => {
+              setLocalError(null);
+              const remaining = Math.max(1, (maxCount ?? 20) - readyFiles(itemsRef.current).length);
+              const configuredSource = props.node.props?.source;
+              const source = configuredSource === 'camera' || configuredSource === 'album'
+                ? configuredSource : 'both';
+              void platform.chooseImages?.(remaining, source).then((selected) => {
+                const nextItems = [...itemsRef.current, ...selected.map((remote) => ({
+                  localId: remote.id,
+                  file: new File([], remote.name || remote.id, { type: remote.contentType }),
+                  status: 'ready' as const,
+                  progress: 100,
+                  remote,
+                  createdInSession: true,
+                }))].slice(0, maxCount ?? Number.POSITIVE_INFINITY);
+                commitItems(nextItems);
+              }).catch((error) => setLocalError(error instanceof Error ? error.message : '选择图片失败'));
+            }}>
+              <UploadOutline aria-hidden="true" />
+              <span><strong>{addLabel}</strong><small>从相册选择或拍照</small></span>
+            </button>
+          ) : <label className="upload-trigger">
             <input
               ref={inputRef}
               aria-label={label}
@@ -261,7 +285,7 @@ export function FileUploadField(props: MobileFieldProps) {
               <strong>{addLabel}</strong>
               <small>{uploadHint(accept, multiple)}</small>
             </span>
-          </label>
+          </label>}
         </div>
       )}
     </FieldShell>

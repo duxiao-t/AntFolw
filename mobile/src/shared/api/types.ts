@@ -68,4 +68,5 @@ export interface MobileFile {
   url?: string;
   sizeBytes?: number;
   status?: 'PROCESSING' | 'READY' | 'FAILED';
+  durationSeconds?: number;
 }

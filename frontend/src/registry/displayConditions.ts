@@ -105,6 +105,13 @@ function firstVisibleValidationErrorIn(
       return String(node.props.validationMessage ?? `请填写${node.label ?? node.id}`);
     }
     const value = values[node.id] ?? node.props?.defaultValue;
+    if (node.type === 'audio_upload') {
+      if (Array.isArray(value) && (value as unknown as Record<symbol, unknown>)[Symbol.for('antflowPendingUpload')] === true) {
+        return '仍有录音未完成上传';
+      }
+      const maxCount = typeof node.props?.maxCount === 'number' ? node.props.maxCount : 3;
+      if (Array.isArray(value) && value.length > maxCount) return `最多录制 ${maxCount} 段`;
+    }
     if ((node.type === 'number' || node.type === 'money') && !isEmptyValue(value)) {
       const number = Number(value);
       if (!Number.isFinite(number)) return `${node.label ?? node.id}必须是数字`;
