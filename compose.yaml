@@ -23,6 +23,9 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
+    ports:
+      - "7072:9000"
+      - "7073:9001"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -54,7 +57,8 @@ services:
       AUDIT_ARCHIVE_ENCRYPTION_SECRET: ${AUDIT_ARCHIVE_ENCRYPTION_SECRET:?set AUDIT_ARCHIVE_ENCRYPTION_SECRET}
       AUDIT_ARCHIVE_KEY_ID: docker-local-v1
       ANTFLOW_INTEGRATION_ENCRYPTION_KEY: ${ANTFLOW_INTEGRATION_ENCRYPTION_KEY:?set ANTFLOW_INTEGRATION_ENCRYPTION_KEY}
-      ANTFLOW_PUBLIC_BASE_URL: ${ANTFLOW_PUBLIC_BASE_URL:-http://127.0.0.1:8000}
+      ANTFLOW_PUBLIC_BASE_URL: ${ANTFLOW_PUBLIC_BASE_URL:-http://127.0.0.1:7070}
+      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
       ANTFLOW_OIDC_ALLOWED_HOSTS: ${ANTFLOW_OIDC_ALLOWED_HOSTS:-}
       ANTFLOW_OIDC_HTTPS_ONLY: ${ANTFLOW_OIDC_HTTPS_ONLY:-true}
       ANTFLOW_TIME_ZONE: Asia/Shanghai
@@ -71,7 +75,7 @@ services:
       dockerfile: Dockerfile.local
       target: web
     ports:
-      - "8000:80"
+      - "7070:80"
     depends_on:
       - backend
 

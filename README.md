@@ -76,9 +76,9 @@ docker compose --env-file .env.docker.local ps
 
 访问地址：
 
-- 桌面管理端：<http://127.0.0.1:8000/>
-- 移动端：<http://127.0.0.1:8000/mobile/login>
-- 后端健康检查：<http://127.0.0.1:8000/actuator/health>
+- 桌面管理端：<http://127.0.0.1:7070/>
+- 移动端：<http://127.0.0.1:7070/mobile/login>
+- 后端健康检查：<http://127.0.0.1:7070/actuator/health>
 - 初始开发账号：`admin / ant.design`、`bob / ant.design`
 
 首次启动会自动执行 Flyway 迁移。PostgreSQL 和 MinIO 分别使用 `antflow-local_postgres_data`、`antflow-local_minio_data` 持久卷。
@@ -89,7 +89,7 @@ docker compose --env-file .env.docker.local ps
 
 ```powershell
 docker compose --env-file .env.docker.local up -d --build backend web
-Invoke-RestMethod http://127.0.0.1:8000/actuator/health
+Invoke-RestMethod http://127.0.0.1:7070/actuator/health
 ```
 
 不要执行 `docker compose down -v`，除非明确需要删除 PostgreSQL 和 MinIO 的全部本地数据。
