@@ -92,6 +92,15 @@ public class MobileDraftService {
         delete(draftId, userId);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteAfterSubmit(long draftId, long formDefId, long userId) {
+        FormData draft = requireOwnedDraft(draftId, userId);
+        if (!Objects.equals(draft.getFormDefId(), formDefId)) {
+            throw new BizException("BAD_DRAFT", "draft does not belong to requested form");
+        }
+        formDataMapper.deleteById(draftId);
+    }
+
     private FormData requireOwnedDraft(long draftId, long userId) {
         FormData draft = formDataMapper.selectById(draftId);
         if (draft == null) {

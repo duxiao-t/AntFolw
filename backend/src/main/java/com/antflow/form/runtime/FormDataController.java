@@ -27,7 +27,8 @@ public class FormDataController {
             body.status(),
             body.data(),
             p.userId(),
-            body.files() == null ? List.of() : body.files());
+            body.files() == null ? List.of() : body.files(),
+            body.draftId());
         Map<String, Object> response = new java.util.LinkedHashMap<>();
         response.put("dataId", result.dataId());
         response.put("businessNo", result.businessNo());
@@ -59,5 +60,5 @@ public class FormDataController {
     }
 
     public record SubmitRequest(String formCode, String status, Object data,
-                                List<MobileFileRef> files) { }
+                                List<MobileFileRef> files, Long draftId) { }
 }

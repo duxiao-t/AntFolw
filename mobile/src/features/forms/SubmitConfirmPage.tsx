@@ -34,22 +34,19 @@ export function SubmitConfirmPage() {
           idempotencyKeyForPayload(currentPayload()));
         return { mode: "workflow" as const, id: result.instanceId, businessNo: result.businessNo };
       }
-      if (!workflowEnabled) { const result = await submitMobileFormData({ formCode: flow.formCode ?? code, values: flow.values }); return { mode: "direct" as const, id: result.dataId, businessNo: result.businessNo }; }
+      if (!workflowEnabled) { const result = await submitMobileFormData({ formCode: flow.formCode ?? code, values: flow.values, draftId: flow.draftId }); return { mode: "direct" as const, id: result.dataId, businessNo: result.businessNo }; }
       const result = await startMobileInstance({ formCode: flow.formCode ?? code, values: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, idempotencyKey: idempotencyKeyForPayload(currentPayload()) });
       return { mode: "workflow" as const, id: result.instanceId, businessNo: result.businessNo };
     },
-    async onSuccess(result) {
+    onSuccess(result) {
       if (result.mode === "workflow") {
         clearIdempotencyKeyForPayload(currentPayload());
         queryClient.removeQueries({ queryKey: queryKeys.taskRoot });
-        queryClient.removeQueries({ queryKey: queryKeys.drafts });
-        if (flow.draftId != null) {
-          queryClient.removeQueries({ queryKey: queryKeys.draft(flow.draftId) });
-        }
         if (flow.reworkTaskId != null) queryClient.removeQueries({ queryKey: queryKeys.reworkTask(flow.reworkTaskId) });
         queryClient.removeQueries({ queryKey: queryKeys.instance(result.id) });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
       }
+      queryClient.removeQueries({ queryKey: queryKeys.drafts });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }).catch(() => undefined);
       if (user && flow.formCode) removeRecoveryDraft(user.id, flow.formCode,
         flow.reworkTaskId == null ? flow.draftId : -flow.reworkTaskId);
       resetFlow();

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -84,6 +84,7 @@ describe('DraftListPage', () => {
 
     await screen.findByText('请假申请');
     await userEvent.click(screen.getByRole('button', { name: '删除 请假申请' }));
+    fireEvent.click(await screen.findByRole('button', { name: '删除' }));
 
     await waitFor(() => {
       const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;

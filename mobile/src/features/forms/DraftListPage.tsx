@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Dialog, Toast } from "antd-mobile";
 import { useNavigate } from "react-router-dom";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
@@ -16,8 +17,22 @@ export function DraftListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [deletedIds, setDeletedIds] = useState<number[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<MobileDraft | null>(null);
   const draftsQuery = useQuery({ queryKey: queryKeys.drafts, queryFn: fetchMobileDrafts, retry: 0, refetchOnMount: "always" });
-  const deleteMutation = useMutation({ mutationFn: deleteMobileDraft, async onSuccess() { await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.drafts }), queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap })]); } });
+  const deleteMutation = useMutation({
+    mutationFn: deleteMobileDraft,
+    onSuccess(_result, id) {
+      const draft = draftsQuery.data?.find((item) => item.id === id);
+      if (user && draft) removeRecoveryDraft(user.id, draft.formCode, draft.id);
+      queryClient.setQueryData<MobileDraft[]>(queryKeys.drafts,
+        (current) => current?.filter((draft) => draft.id !== id));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }).catch(() => undefined);
+    },
+    onError(_error, id) {
+      setDeletedIds((current) => current.filter((deletedId) => deletedId !== id));
+      Toast.show({ icon: "fail", content: "草稿删除失败，请重试" });
+    },
+  });
   const drafts = useMemo(() => (draftsQuery.data ?? []).filter((draft) => !deletedIds.includes(draft.id)), [deletedIds, draftsQuery.data]);
 
   if (draftsQuery.isPending) return <PageSkeleton rows={4} />;
@@ -26,16 +41,22 @@ export function DraftListPage() {
   return (
     <AppPage title="我的草稿" action={<button className="app-bar__action" type="button">编辑</button>}>
       <p className="muted small" style={{ margin: "4px 4px 14px" }}>未提交的草稿，将在 72 小时后自动归档。</p>
-      {drafts.length === 0 ? <PageEmpty title="暂无草稿" hint="新表单中途退出时会自动保存到这里。" /> : <section style={{ display: "grid", gap: 10 }}>{drafts.map((draft, index) => { const count = completionCount(draft); return <div className={`draft-card draft-card--${TONES[index % TONES.length]}`} key={draft.id}><span className="draft-card__icon">{draft.formName.trim().charAt(0) || "稿"}</span><button type="button" className="draft-card__main draft-card__open" aria-label={`继续填写 ${draft.formName}`} onClick={() => navigate(`/forms/${draft.formCode}?draftId=${draft.id}`)}><b>{draft.formName}</b><small>{formatUpdatedAt(draft.updatedAt)} · 步骤 {count.filled}/{count.total}</small></button><span className="draft-card__chev">›</span><button className="draft-card__del" type="button" aria-label={`删除 ${draft.formName}`} disabled={deleteMutation.isPending} onClick={() => deleteDraft(draft)}>删除</button></div>; })}</section>}
+      {drafts.length === 0 ? <PageEmpty title="暂无草稿" hint="新表单中途退出时会自动保存到这里。" /> : <section style={{ display: "grid", gap: 10 }}>{drafts.map((draft, index) => { const count = completionCount(draft); return <div className={`draft-card draft-card--${TONES[index % TONES.length]}`} key={draft.id}><span className="draft-card__icon">{draft.formName.trim().charAt(0) || "稿"}</span><button type="button" className="draft-card__main draft-card__open" aria-label={`继续填写 ${draft.formName}`} onClick={() => navigate(`/forms/${draft.formCode}?draftId=${draft.id}`)}><b>{draft.formName}</b><small>{formatUpdatedAt(draft.updatedAt)} · 步骤 {count.filled}/{count.total}</small></button><span className="draft-card__chev">›</span><button className="draft-card__del" type="button" aria-label={`删除 ${draft.formName}`} disabled={deleteMutation.isPending} onClick={() => setPendingDelete(draft)}>删除</button></div>; })}</section>}
       {drafts.length > 0 ? <div className="empty-hero"><div className="empty-hero__art"><svg viewBox="0 0 120 120" fill="none" aria-hidden="true"><circle cx="60" cy="60" r="44" fill="#f1f5f9" /><path d="M40 50h40M40 60h28M40 70h36" stroke="#94a3b8" strokeWidth="4" strokeLinecap="round" /></svg></div><h3>已加载全部草稿</h3><p>新表单中途退出时会自动保存到这里。</p></div> : null}
+      <Dialog visible={pendingDelete != null} title="删除草稿" content="确认删除该草稿？"
+        onClose={() => setPendingDelete(null)} actions={[[
+          { key: "cancel", text: "取消", onClick: () => setPendingDelete(null) },
+          { key: "delete", text: "删除", danger: true, onClick: confirmDelete },
+        ]]} />
     </AppPage>
   );
 
-  function deleteDraft(draft: MobileDraft) {
-    if (typeof window.confirm === "function" && !window.confirm("确认删除该草稿？")) return;
+  function confirmDelete() {
+    const draft = pendingDelete;
+    if (!draft) return;
+    setPendingDelete(null);
     setDeletedIds((current) => [...current, draft.id]);
-    if (user) removeRecoveryDraft(user.id, draft.formCode, draft.id);
-    void deleteMutation.mutateAsync(draft.id);
+    deleteMutation.mutate(draft.id);
   }
 }
 

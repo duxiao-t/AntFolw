@@ -108,6 +108,19 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
         }
         return jsonResponse(START_RESULT);
       }
+      if (url.includes('/api/mobile/drafts') && init?.method === 'POST') {
+        return jsonResponse(101);
+      }
+      if (url.includes('/api/mobile/drafts/101')) {
+        return jsonResponse({
+          id: 101,
+          formCode: 'leave',
+          formName: '请假申请',
+          formVersion: 3,
+          data: { reason: '回家探亲' },
+          readOnly: false,
+        });
+      }
       if (url.includes('/api/mobile/instances/9001')) {
         return jsonResponse({
           id: 9001,
@@ -432,7 +445,14 @@ describe('mobile form submit flow', () => {
     renderSubmitFlow();
 
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
-    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await screen.findByText('草稿已保存');
+    await userEvent.type(await screen.findByLabelText('请假事由'), '（再次修改）');
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([url, init]) => String(url).includes('/api/mobile/drafts/101')
+        && (init as RequestInit).method === 'PUT')).toHaveLength(1));
+    await userEvent.click(await screen.findByRole('button', { name: '提交' }));
 
     expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
     expect(screen.queryByText(/审批流（/)).not.toBeInTheDocument();
@@ -443,6 +463,9 @@ describe('mobile form submit flow', () => {
       const directCalls = fetchMock.mock.calls.filter(([url, init]) =>
         String(url).includes('/api/forms/data') && (init as RequestInit).method === 'POST');
       expect(directCalls).toHaveLength(1);
+      const directCall = directCalls[0];
+      if (!directCall) throw new Error('direct submit call missing');
+      expect(JSON.parse(String((directCall[1] as RequestInit).body))).toMatchObject({ draftId: 101 });
       expect(instancePostCalls()).toHaveLength(0);
     });
     expect(await screen.findByText('表单数据已提交完成。')).toBeInTheDocument();

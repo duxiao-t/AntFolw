@@ -9,6 +9,7 @@ import com.antflow.form.FormDefinitionService;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.antflow.mobile.workflow.MobileFileLinkService;
+import com.antflow.mobile.workflow.MobileDraftService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +34,7 @@ class FormDataServiceTest {
     private UserMapper userMapper;
     private FormDataService service;
     private MobileFileLinkService fileLinkService;
+    private MobileDraftService draftService;
 
     @BeforeEach
     void setUp() {
@@ -43,9 +45,10 @@ class FormDataServiceTest {
         var formDefinitionService = new FormDefinitionService(formDefinitionMapper, json,
             Mockito.mock(FormGrantService.class));
         fileLinkService = Mockito.mock(MobileFileLinkService.class);
+        draftService = Mockito.mock(MobileDraftService.class);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
             formalNumberService, Mockito.mock(AuthorizationService.class), userMapper,
-            formDefinitionMapper, fileLinkService);
+            formDefinitionMapper, fileLinkService, draftService);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(formDataMapper.insert(any(FormData.class))).thenAnswer(invocation -> {
@@ -87,6 +90,16 @@ class FormDataServiceTest {
             Map.of("applicant", "张三", "reason", "报销"), 7L, refs);
 
         Mockito.verify(fileLinkService).append(100L, refs, 7L);
+    }
+
+    @Test
+    void directSubmitConsumesItsSourceDraftInTheSubmissionTransaction() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+
+        service.submit("expense", "SUBMITTED",
+            Map.of("applicant", "张三", "reason", "报销"), 7L, List.of(), 101L);
+
+        Mockito.verify(draftService).deleteAfterSubmit(101L, 10L, 7L);
     }
 
     @Test

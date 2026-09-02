@@ -42,9 +42,11 @@ export async function startMobileInstance({
 export async function submitMobileFormData({
   formCode,
   values,
+  draftId,
 }: {
   formCode: string;
   values: MobileFormValues;
+  draftId: number | null;
 }) {
   return apiRequest<DirectSubmitResult>('/api/forms/data', {
     method: 'POST',
@@ -52,6 +54,7 @@ export async function submitMobileFormData({
       formCode,
       status: 'SUBMITTED',
       data: values,
+      draftId,
       files: collectMobileFileRefs(values),
     }),
   });

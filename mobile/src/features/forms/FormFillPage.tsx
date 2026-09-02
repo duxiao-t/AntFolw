@@ -38,9 +38,9 @@ export function FormFillPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
-  const draftIdFromUrl = numberParam(searchParams.get("draftId"));
+  const initialDraftId = useRef(numberParam(searchParams.get("draftId"))).current;
   const reworkTaskId = numberParam(searchParams.get("reworkTaskId"));
-  const [savedDraftId, setSavedDraftId] = useState<number | null>(draftIdFromUrl);
+  const [savedDraftId, setSavedDraftId] = useState<number | null>(initialDraftId);
   const draftId = savedDraftId;
   const [values, setValues] = useState<MobileFormValues>({});
   const [initialValues, setInitialValues] = useState<MobileFormValues>({});
@@ -48,6 +48,7 @@ export function FormFillPage() {
   const [initialized, setInitialized] = useState(false);
   const [status, setStatus] = useState("");
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
+  const touchSaveAtRef = useRef(0);
   const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
   const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
   const [draftVersionMismatch, setDraftVersionMismatch] = useState(false);
@@ -59,9 +60,9 @@ export function FormFillPage() {
     retry: 0,
   });
   const draftQuery = useQuery({
-    queryKey: queryKeys.draft(draftIdFromUrl ?? 0),
-    queryFn: () => fetchMobileDraft(draftIdFromUrl ?? 0),
-    enabled: draftIdFromUrl != null,
+    queryKey: queryKeys.draft(initialDraftId ?? 0),
+    queryFn: () => fetchMobileDraft(initialDraftId ?? 0),
+    enabled: initialDraftId != null,
     retry: 0,
   });
   const reworkQuery = useQuery({
@@ -116,14 +117,14 @@ export function FormFillPage() {
   });
 
   useEffect(() => {
-    if (reworkTaskId != null || draftIdFromUrl != null || savedDraftId == null) return;
+    if (reworkTaskId != null || initialDraftId != null || savedDraftId == null) return;
     void navigate(`/forms/${encodeURIComponent(code)}?draftId=${savedDraftId}`, {
       replace: true,
     });
-  }, [code, draftIdFromUrl, navigate, reworkTaskId, savedDraftId]);
+  }, [code, initialDraftId, navigate, reworkTaskId, savedDraftId]);
 
   useEffect(() => {
-    if (!formQuery.data || (draftIdFromUrl != null && draftQuery.isPending)
+    if (!formQuery.data || (initialDraftId != null && draftQuery.isPending)
       || (reworkTaskId != null && reworkQuery.isPending)) {
       return;
     }
@@ -137,7 +138,7 @@ export function FormFillPage() {
       chooseInitialValues({
         baseValues,
         code,
-        draftId: recoveryId(reworkTaskId, draftIdFromUrl),
+        draftId: recoveryId(reworkTaskId, initialDraftId),
         schemaVersion: formQuery.data.version,
         userId: user?.id ?? null,
       }),
@@ -145,7 +146,7 @@ export function FormFillPage() {
     setValues(nextValues);
     setInitialValues(nextValues);
     setInitialized(true);
-  }, [code, draftIdFromUrl, draftQuery.data, draftQuery.isPending, formQuery.data, reworkQuery.data, reworkQuery.isPending, reworkTaskId, user?.id]);
+  }, [code, initialDraftId, draftQuery.data, draftQuery.isPending, formQuery.data, reworkQuery.data, reworkQuery.isPending, reworkTaskId, user?.id]);
 
   useEffect(() => {
     if (!user || !formQuery.data) {
@@ -216,7 +217,7 @@ export function FormFillPage() {
   }, [draftQuery.data?.readOnly, formQuery.data?.starterFieldModes,
     reworkQuery.data?.processSnapshot, reworkTaskId]);
 
-  if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)
+  if (formQuery.isPending || (initialDraftId != null && draftQuery.isPending)
     || (reworkTaskId != null && reworkQuery.isPending)) {
     return <PageSkeleton rows={5} />;
   }
@@ -265,7 +266,13 @@ export function FormFillPage() {
           type="button"
           className="btn btn--ghost btn--lg"
           disabled={saveMutation.isPending}
-          onClick={() => saveDraft()}
+          onPointerDown={(event) => {
+            if (event.pointerType === "mouse") return;
+            event.preventDefault();
+            touchSaveAtRef.current = Date.now();
+            saveDraft();
+          }}
+          onClick={() => { if (Date.now() - touchSaveAtRef.current > 750) saveDraft(); }}
         >
           {saveMutation.isPending ? "保存中" : reworkTaskId ? "保存原单" : "保存草稿"}
         </button>
@@ -303,13 +310,13 @@ export function FormFillPage() {
   );
 
   async function discardDraft() {
-    if (draftIdFromUrl == null) {
+    if (initialDraftId == null) {
       return;
     }
     try {
-      await deleteMobileDraft(draftIdFromUrl);
+      await deleteMobileDraft(initialDraftId);
       if (user) {
-        removeRecoveryDraft(user.id, code, recoveryId(reworkTaskId, draftIdFromUrl));
+        removeRecoveryDraft(user.id, code, recoveryId(reworkTaskId, initialDraftId));
       }
       setSavedDraftId(null);
       setDraftVersionMismatch(false);

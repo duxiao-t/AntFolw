@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -206,7 +206,7 @@ describe('FormFillPage', () => {
     renderForm('/forms/leave?draftId=101');
     await screen.findByLabelText('开始时间');
     await userEvent.type(inputByLabel('请假事由'), '再次填写');
-    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: '保存草稿' }), { pointerType: 'touch' });
 
     expect(await screen.findByText('草稿已保存')).toBeInTheDocument();
     expect(updateAttempts).toBe(2);

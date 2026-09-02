@@ -12,6 +12,7 @@ import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormProcessPublishService;
 import com.antflow.form.FormDefinitionMapper;
+import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.org.UserService;
@@ -86,7 +87,31 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private AuthorizationService authorizationService;
     @Autowired private RoleAdminService roleAdminService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
+    @Autowired private FormDataService formDataService;
     @Autowired private WecomService wecomService;
+
+    @Test
+    void directSubmissionConsumesOnlyItsSourceDraft() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED",
+            "[{\"id\":\"subject\",\"type\":\"text\",\"label\":\"Subject\",\"props\":{\"required\":true}}]");
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long draftId = insertDraft(formId, adminId);
+
+        formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
+            List.of(), draftId);
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
+
+        long invalidDraftId = insertDraft(formId, adminId);
+        assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
+            List.of(), invalidDraftId)).isInstanceOf(BizException.class);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, invalidDraftId))
+            .isEqualTo(1L);
+    }
 
     @Test
     void v2StartBindsImmutableVersionsNodeInstanceAndFormRevision() {
@@ -1419,6 +1444,14 @@ class PostgresTransactionalIntegrityIntegrationTest {
                                     status, created_by)
             VALUES (?, 1, lpad(nextval('seq_business_no')::text, 12, '0'),
                     '{}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, creatorId);
+    }
+
+    private long insertDraft(long formId, long creatorId) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, data, status, created_by)
+            VALUES (?, 1, '{}'::jsonb, 'DRAFT', ?)
             RETURNING id
             """, Long.class, formId, creatorId);
     }

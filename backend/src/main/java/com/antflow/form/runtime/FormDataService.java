@@ -10,6 +10,7 @@ import com.antflow.form.FormDefinitionService;
 import com.antflow.org.UserMapper;
 import com.antflow.mobile.workflow.MobileFileLinkService;
 import com.antflow.mobile.workflow.MobileFileRef;
+import com.antflow.mobile.workflow.MobileDraftService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,7 @@ public class FormDataService {
     private final UserMapper userMapper;
     private final FormDefinitionMapper formDefinitionMapper;
     private final MobileFileLinkService fileLinkService;
+    private final MobileDraftService draftService;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -49,6 +51,12 @@ public class FormDataService {
     @Transactional
     public SubmitResult submit(String formCode, String status, Object data, Long userId,
                        List<MobileFileRef> files) {
+        return submit(formCode, status, data, userId, files, null);
+    }
+
+    @Transactional
+    public SubmitResult submit(String formCode, String status, Object data, Long userId,
+                       List<MobileFileRef> files, Long draftId) {
         FormDefinition fd = formDefinitionService.getByCode(formCode);
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
@@ -70,6 +78,7 @@ public class FormDataService {
         fd2.setCreatedBy(userId);
         mapper.insert(fd2);
         fileLinkService.append(fd2.getId(), files, userId);
+        if (draftId != null) draftService.deleteAfterSubmit(draftId, fd.getId(), userId);
         return new SubmitResult(fd2.getId(), fd2.getBusinessNo());
     }
 

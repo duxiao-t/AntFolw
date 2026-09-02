@@ -173,9 +173,11 @@ class MobileDraftServiceTest {
     void deleteAfterSubmitDeletesOnlyOwnedDraft() {
         Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
 
-        service.deleteAfterSubmit(101L, 7L);
+        service.deleteAfterSubmit(101L, 10L, 7L);
 
         Mockito.verify(formDataMapper).deleteById(101L);
+        assertThatThrownBy(() -> service.deleteAfterSubmit(101L, 11L, 7L))
+            .isInstanceOf(BizException.class).hasMessageContaining("requested form");
     }
 
     private static FormDefinition form(String code, String status) {
