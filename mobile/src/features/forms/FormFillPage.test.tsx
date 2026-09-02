@@ -190,6 +190,28 @@ describe('FormFillPage', () => {
     expect(await screen.findByLabelText('开始时间')).toHaveValue('2026-07-30');
   });
 
+  it('retries an existing draft update after one transport failure', async () => {
+    const fetchMock = vi.mocked(fetch);
+    const baseImplementation = fetchMock.getMockImplementation();
+    let updateAttempts = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes('/api/mobile/drafts/101') && init?.method === 'PUT'
+        && updateAttempts++ === 0) {
+        throw new TypeError('Failed to fetch');
+      }
+      if (!baseImplementation) throw new Error('missing fetch implementation');
+      return baseImplementation(input, init);
+    });
+
+    renderForm('/forms/leave?draftId=101');
+    await screen.findByLabelText('开始时间');
+    await userEvent.type(inputByLabel('请假事由'), '再次填写');
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    expect(await screen.findByText('草稿已保存')).toBeInTheDocument();
+    expect(updateAttempts).toBe(2);
+  });
+
   it('does not load an older-version draft and offers to discard it', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();

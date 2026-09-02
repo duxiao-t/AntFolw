@@ -7,7 +7,7 @@ import { safeReturnUrl, useAuthStore } from "./auth.store";
 import { apiRequest } from "../../shared/api/http";
 
 const REMEMBERED_USERNAME_KEY = "antflow-mobile-remembered-username";
-type WecomLoginState = 'loading' | 'enabled' | 'disabled' | 'unavailable';
+type WecomLoginState = 'loading' | 'enabled' | 'disabled' | 'unavailable' | 'redirecting';
 
 export function LoginPage() {
   const branding = useBranding();
@@ -64,6 +64,14 @@ export function LoginPage() {
     }
   }
 
+  function handleWecomLogin() {
+    if (wecomState !== 'enabled') return;
+    setWecomState('redirecting');
+    window.requestAnimationFrame(() => {
+      window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(externalReturnUrl)}`);
+    });
+  }
+
   return (
     <main className="login">
       <section className="login__hero">
@@ -102,11 +110,14 @@ export function LoginPage() {
             className="login__social login__social--wecom"
             type="button"
             disabled={wecomState !== 'enabled'}
-            aria-busy={wecomState === 'loading'}
-            onClick={() => { window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(externalReturnUrl)}`); }}
+            aria-busy={wecomState === 'loading' || wecomState === 'redirecting'}
+            aria-live="polite"
+            onClick={handleWecomLogin}
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg>
-            <span>{wecomState === 'loading' ? '正在检查企业微信' : '企业微信登录'}</span>
+            {wecomState === 'redirecting'
+              ? <span className="login__spinner" aria-hidden="true" />
+              : <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg>}
+            <span>{wecomState === 'loading' ? '正在检查企业微信' : wecomState === 'redirecting' ? '正在进入企业微信' : '企业微信登录'}</span>
           </button>
           {providers.map((provider) => <button key={provider.code} className="login__social login__social--oidc" type="button" onClick={() => { window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(externalReturnUrl)}`); }}><b aria-hidden="true">{provider.displayName.slice(0, 1)}</b><span>{provider.displayName}</span></button>)}
         </div>

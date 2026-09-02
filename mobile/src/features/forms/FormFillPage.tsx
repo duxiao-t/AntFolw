@@ -86,7 +86,10 @@ export function FormFillPage() {
       }
       return { draftId: await createMobileDraft(code, values), rework: false };
     },
-    async onSuccess(result) {
+    retry: (failureCount, errorValue) => failureCount < 1 && errorValue instanceof TypeError
+      && (draftId != null || reworkTaskId != null),
+    retryDelay: 300,
+    onSuccess(result) {
       if (!result.rework) setSavedDraftId(result.draftId);
       setInitialValues(values);
       setStatus(result.rework ? "原单已保存" : "草稿已保存");
@@ -96,16 +99,18 @@ export function FormFillPage() {
       }
       if (!result.rework && result.draftId != null) {
         queryClient.removeQueries({ queryKey: queryKeys.draft(result.draftId) });
-        await Promise.all([
+        void Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
           queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }),
-        ]);
+        ]).catch(() => undefined);
       }
     },
     onError(errorValue) {
       showToast({
         icon: "fail",
-        content: errorValue instanceof Error ? errorValue.message : "草稿保存失败",
+        content: errorValue instanceof TypeError
+          ? "网络连接异常，内容已保存在本机，请重试"
+          : errorValue instanceof Error ? errorValue.message : "草稿保存失败",
       });
     },
   });
@@ -322,7 +327,7 @@ export function FormFillPage() {
   }
 
   function saveDraft() {
-    void saveMutation.mutateAsync();
+    saveMutation.mutate();
   }
 
   function handleValueChange(fieldId: string, value: unknown) {

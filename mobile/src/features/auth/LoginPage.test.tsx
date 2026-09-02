@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -77,6 +77,11 @@ describe('LoginPage', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
+    let redirect: FrameRequestCallback | undefined;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      redirect = callback;
+      return 1;
+    });
     const user = userEvent.setup();
 
     renderLogin('/login?returnUrl=https%3A%2F%2Fevil.example');
@@ -87,6 +92,9 @@ describe('LoginPage', () => {
 
     await user.click(wecomLogin);
 
+    expect(screen.getByRole('button', { name: '正在进入企业微信' })).toBeDisabled();
+    expect(assign).not.toHaveBeenCalled();
+    act(() => redirect?.(0));
     expect(assign).toHaveBeenCalledWith(
       '/api/public/auth/wecom/authorize?returnUrl=%2Fmobile%2Fworkbench',
     );
