@@ -23,6 +23,7 @@ export function LoginPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [providers, setProviders] = useState<Array<{ code: string; displayName: string }>>([]);
   const [wecomState, setWecomState] = useState<WecomLoginState>('loading');
+  const externalReturnUrl = `/mobile${safeReturnUrl(params.get('returnUrl')) ?? '/workbench'}`;
 
   useEffect(() => {
     void apiRequest<Array<{ code: string; displayName: string }>>('/api/public/auth/providers')
@@ -102,12 +103,12 @@ export function LoginPage() {
             type="button"
             disabled={wecomState !== 'enabled'}
             aria-busy={wecomState === 'loading'}
-            onClick={() => { window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}
+            onClick={() => { window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(externalReturnUrl)}`); }}
           >
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg>
             <span>{wecomState === 'loading' ? '正在检查企业微信' : '企业微信登录'}</span>
           </button>
-          {providers.map((provider) => <button key={provider.code} className="login__social login__social--oidc" type="button" onClick={() => { window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}><b aria-hidden="true">{provider.displayName.slice(0, 1)}</b><span>{provider.displayName}</span></button>)}
+          {providers.map((provider) => <button key={provider.code} className="login__social login__social--oidc" type="button" onClick={() => { window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(externalReturnUrl)}`); }}><b aria-hidden="true">{provider.displayName.slice(0, 1)}</b><span>{provider.displayName}</span></button>)}
         </div>
         {wecomState === 'disabled' ? <p className="login__third-status">企业微信登录未启用，请联系管理员</p> : null}
         {wecomState === 'unavailable' ? <p className="login__third-status">企业微信登录暂不可用，请稍后重试</p> : null}

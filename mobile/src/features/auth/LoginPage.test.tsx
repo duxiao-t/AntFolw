@@ -88,7 +88,7 @@ describe('LoginPage', () => {
     await user.click(wecomLogin);
 
     expect(assign).toHaveBeenCalledWith(
-      '/api/public/auth/wecom/authorize?returnUrl=%2Fworkbench',
+      '/api/public/auth/wecom/authorize?returnUrl=%2Fmobile%2Fworkbench',
     );
   });
 
