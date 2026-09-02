@@ -136,7 +136,7 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
         return jsonResponse({ items: [], hasMore: false });
       }
       if (url.includes('/api/forms/data') && init?.method === 'POST') {
-        return jsonResponse({ dataId: 6001 });
+        return jsonResponse({ dataId: 6001, businessNo: 'DIRECT-20260902-0001' });
       }
       return jsonResponse({});
     }),

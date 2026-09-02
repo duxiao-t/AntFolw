@@ -51,10 +51,12 @@ public class SecurityAuthorizationController {
     }
 
     @GetMapping("/users")
-    public List<RoleAdminService.UserRoleView> users(
+    public RoleAdminService.UserRolePage users(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int size,
             @RequestParam(required = false) String keyword) {
         authorizationService.requireAdmin();
-        return roleAdminService.userAssignments(keyword);
+        return roleAdminService.userAssignments(page, size, keyword);
     }
 
     @GetMapping("/role-department-candidates")

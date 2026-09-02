@@ -222,7 +222,7 @@ export function MemberFormModal({
         initialValues={editing ? { ...editing, gender: normalizeGender(editing.gender) } : undefined}>
         <div className="ct-member-form__grid">
           <Form.Item label="姓名" name="displayName" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item label="工号" name="employeeNo" rules={[{ pattern: /^[0-9]{6}$/, message: '工号必须为 6 位数字' }]} extra="留空时自动生成"><Input inputMode="numeric" maxLength={6} /></Form.Item>
+          <Form.Item label="工号" name="employeeNo" rules={[{ pattern: /^\S{1,64}$/, message: '工号必须为 1 至 64 位且不能包含空白字符' }]} extra="留空时自动生成；企业微信成员使用企微账号"><Input maxLength={64} /></Form.Item>
           <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input disabled={!!editing} /></Form.Item>
           <Form.Item label="手机" name="phone"><Input /></Form.Item>
           <Form.Item label="邮箱" name="email"><Input /></Form.Item>

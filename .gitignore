@@ -63,6 +63,7 @@ frontend/frontend/
 
 # Local dev server logs (running processes hold these files)
 _perf/
+backups/
 /frontend-run.err
 /frontend/preview-*.err
 /frontend/preview-*.out

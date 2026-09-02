@@ -7,6 +7,7 @@ import {
   Empty,
   Input,
   List,
+  Pagination,
   Space,
   Tag,
   Tree,
@@ -14,7 +15,7 @@ import {
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import { request, useModel } from '@umijs/max';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import './Security.less';
 import { displayPermissionName } from './permissionLabels';
 
@@ -28,6 +29,7 @@ type EffectivePermission = {
   userId: number; roleCodes: string[]; permissions: string[]; departmentId?: number; admin: boolean;
   permissionScopes: Record<string, { modes: string[]; departmentIds: number[]; all: boolean }>;
 };
+type UserPage = { records: UserAssignment[]; total: number; page: number; size: number };
 
 function permissionTree(permissions: Permission[], checked: string[]): DataNode[] {
   const selected = new Set(checked);
@@ -57,28 +59,37 @@ export default function UserPermissionPage() {
   const [users, setUsers] = useState<UserAssignment[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [roleIds, setRoleIds] = useState<number[]>([]);
   const [effective, setEffective] = useState<EffectivePermission | null>(null);
   const [saving, setSaving] = useState(false);
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
 
-  const load = async () => {
-    const [roleRows, permissionRows, userRows] = await Promise.all([
+  const loadCatalog = useCallback(async () => {
+    const [roleRows, permissionRows] = await Promise.all([
       request<Role[]>('/api/security/roles'),
       request<Permission[]>('/api/security/permissions'),
-      request<UserAssignment[]>('/api/security/users'),
     ]);
-    setRoles(roleRows); setPermissions(permissionRows); setUsers(userRows);
-    if (selectedId === null && userRows[0]) setSelectedId(userRows[0].id);
-  };
-  useEffect(() => { if (isAdmin) load().catch(() => undefined); }, [isAdmin]);
-
-  const filteredUsers = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return users;
-    return users.filter((user) => `${user.displayName} ${user.username} ${user.employeeNo}`.toLowerCase().includes(query));
-  }, [users, search]);
+    setRoles(roleRows); setPermissions(permissionRows);
+  }, []);
+  const loadUsers = useCallback(async () => {
+    const result = await request<UserPage>('/api/security/users', {
+      params: { page, size: 50, keyword: keyword || undefined },
+    });
+    setUsers(result.records);
+    setTotal(result.total);
+    setSelectedId((current) => result.records.some((user: UserAssignment) => user.id === current)
+      ? current : result.records[0]?.id ?? null);
+  }, [keyword, page]);
+  useEffect(() => { if (isAdmin) void loadCatalog(); }, [isAdmin, loadCatalog]);
+  useEffect(() => { if (isAdmin) void loadUsers(); }, [isAdmin, loadUsers]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setKeyword(search.trim()); setPage(1); }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
   const selectedUser = users.find((user) => user.id === selectedId) ?? null;
   const roleMap = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
   const pagePermissions = permissions.filter((permission) => permission.kind === 'PAGE');
@@ -97,7 +108,7 @@ export default function UserPermissionPage() {
     try {
       await request(`/api/users/${selectedUser.id}/roles`, { method: 'PUT', data: roleIds });
       message.success('用户角色已更新');
-      await load();
+      await loadUsers();
     } finally {
       setSaving(false);
     }
@@ -110,12 +121,12 @@ export default function UserPermissionPage() {
       <div className="security-workspace security-user-workspace">
         <aside className="security-sidebar">
           <div className="security-sidebar__header">
-            <div><Typography.Title level={4}>用户权限</Typography.Title><Typography.Text type="secondary">{users.length} 个用户</Typography.Text></div>
+            <div><Typography.Title level={4}>用户权限</Typography.Title><Typography.Text type="secondary">共 {total} 个用户</Typography.Text></div>
           </div>
           <Input allowClear prefix={<SearchOutlined />} placeholder="搜索姓名、账号或工号" value={search} onChange={(event) => setSearch(event.target.value)} />
           <List
             className="security-role-list"
-            dataSource={filteredUsers}
+            dataSource={users}
             renderItem={(user) => (
               <List.Item className={`security-role-list__item${selectedId === user.id ? ' is-active' : ''}`} onClick={() => setSelectedId(user.id)}>
                 <div><Typography.Text strong>{user.displayName}</Typography.Text><Typography.Text type="secondary" className="security-role-list__code">{user.username} · {user.employeeNo}</Typography.Text></div>
@@ -123,6 +134,8 @@ export default function UserPermissionPage() {
               </List.Item>
             )}
           />
+          <Pagination simple current={page} pageSize={50} total={total}
+            onChange={setPage} style={{ marginTop: 12, textAlign: 'center' }} />
         </aside>
 
         <main className="security-editor">

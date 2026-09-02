@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class FormalNumberService {
-    private static final Pattern EMPLOYEE_NO = Pattern.compile("^[0-9]{6}$");
+    private static final Pattern EMPLOYEE_NO = Pattern.compile("^[^\\s\\p{Cntrl}]{1,64}$");
     private static final int MAX_GENERATION_ATTEMPTS = 100;
 
     private final JdbcTemplate jdbcTemplate;
@@ -18,7 +18,7 @@ public class FormalNumberService {
         String normalized = requested == null ? "" : requested.trim();
         if (!normalized.isEmpty()) {
             if (!EMPLOYEE_NO.matcher(normalized).matches()) {
-                throw new BizException("BAD_EMPLOYEE_NO", "工号必须为 6 位数字");
+                throw new BizException("BAD_EMPLOYEE_NO", "工号必须为 1 至 64 位且不能包含空白字符");
             }
             ensureEmployeeNoAvailable(normalized, excludedUserId);
             return normalized;

@@ -22,13 +22,16 @@ public class FormDataController {
     public Map<String, Object> submit(@RequestBody SubmitRequest body) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        Long id = service.submit(
+        FormDataService.SubmitResult result = service.submit(
             body.formCode(),
             body.status(),
             body.data(),
             p.userId(),
             body.files() == null ? List.of() : body.files());
-        return Map.of("dataId", id);
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("dataId", result.dataId());
+        response.put("businessNo", result.businessNo());
+        return response;
     }
 
     @GetMapping

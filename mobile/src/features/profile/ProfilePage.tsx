@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Toast } from "antd-mobile";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
@@ -8,6 +10,7 @@ import { useMobileBootstrap } from "../workbench/workbench.api";
 export function ProfilePage() {
   const bootstrapQuery = useMobileBootstrap();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const logout = useAuthStore((state) => state.logout);
   const [dark, setDark] = useState(() => document.documentElement.dataset.theme === "dark");
   if (bootstrapQuery.isPending) return <PageSkeleton rows={4} />;
@@ -27,7 +30,10 @@ export function ProfilePage() {
         <MenuRow icon={<LockIcon />} title="账号安全" hint="登录设备 · 密码 · 双因子" onClick={() => navigate("/profile/security")} />
         <MenuRow icon={<ClockIcon />} title="操作日志" hint="近 30 天" />
         <MenuRow icon={<MoonIcon />} title="外观" hint={dark ? "深色" : "跟随系统"} onClick={() => { const next = !dark; setDark(next); if (next) document.documentElement.dataset.theme = "dark"; else delete document.documentElement.dataset.theme; }} />
-        <MenuRow icon={<LogoutIcon />} title="退出登录" hint="退出当前设备" danger onClick={() => { void logout().finally(() => navigate("/login", { replace: true })); }} />
+        <MenuRow icon={<LogoutIcon />} title="退出登录" hint="退出当前设备" danger onClick={() => {
+          void logout().then(() => { queryClient.clear(); navigate("/login", { replace: true }); })
+            .catch(() => Toast.show({ icon: "fail", content: "退出失败，请重试" }));
+        }} />
       </div></section><div className="spacer-24" />
     </AppPage>
   );

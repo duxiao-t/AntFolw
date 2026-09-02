@@ -22,6 +22,8 @@ import {
   Switch,
   Tag,
   theme,
+  TreeSelect,
+  Typography,
 } from 'antd';
 import { useEffect, useMemo } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
@@ -38,6 +40,7 @@ import FormGrantUserPicker, {
   type GrantUser,
 } from './FormGrantUserPicker';
 import MobileFormPreview from './MobileFormPreview';
+import BusinessNumberEditor from './BusinessNumberEditor';
 
 type FormDefinition = {
   id: number;
@@ -71,8 +74,10 @@ type FormGrant = {
   version: number;
   userIds: number[];
   roleIds: number[];
+  departmentIds: number[];
   users: GrantUser[];
   roles: { id: number; code: string; name: string }[];
+  departments: GrantDepartment[];
 };
 type FormGrantCandidates = {
   roles: { id: number; code: string; name: string }[];
@@ -103,6 +108,20 @@ function getWorkflowEnabled(
 
 function getNodeLabel(node: SchemaNode) {
   return node.label || formRegistry[node.type]?.label || node.type;
+}
+
+function grantDepartmentTree(departments: GrantDepartment[]) {
+  const children = new Map<number | undefined, GrantDepartment[]>();
+  departments.forEach((department) => {
+    children.set(department.parentId,
+      [...(children.get(department.parentId) ?? []), department]);
+  });
+  const build = (parentId?: number): any[] => (children.get(parentId) ?? []).map((department) => ({
+    value: department.id,
+    title: department.name,
+    children: build(department.id),
+  }));
+  return build();
 }
 
 function enrichSchemaLabels(nodes: SchemaNode[]): SchemaNode[] {
@@ -219,6 +238,14 @@ export default function FormManagementWizard() {
       ),
     enabled: canManageGrants,
   });
+  const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'user')?.id;
+  const visibilitySummary = allCompanyRoleId && formGrant?.roleIds.includes(allCompanyRoleId)
+    ? '全公司'
+    : [
+        formGrant?.departmentIds.length ? `${formGrant.departmentIds.length} 个部门` : '',
+        formGrant?.roleIds.length ? `${formGrant.roleIds.length} 个角色` : '',
+        formGrant?.userIds.length ? `${formGrant.userIds.length} 名人员` : '',
+      ].filter(Boolean).join('、') || '仅创建人';
   const initialGrantUsers: GrantUser[] =
     formGrant?.users ??
     (currentUser?.id
@@ -346,12 +373,15 @@ export default function FormManagementWizard() {
         code: definition.code,
         name: definition.name,
         workflowEnabled: getWorkflowEnabled(definition.settings),
+        businessNumber: parseJsonValue<Record<string, any>>(definition.settings, {}).businessNumber,
       });
     }
     if (canManageGrants && formGrant) {
       form.setFieldsValue({
         userIds: formGrant.userIds,
-        roleIds: isAdmin ? formGrant.roleIds : [],
+        roleIds: isAdmin ? formGrant.roleIds.filter((id) => id !== allCompanyRoleId) : [],
+        allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
+        departmentIds: formGrant.departmentIds,
       });
     } else if (
       canManageGrants &&
@@ -361,9 +391,12 @@ export default function FormManagementWizard() {
       form.setFieldsValue({
         userIds: currentUser?.id ? [currentUser.id] : [],
         roleIds: [],
+        allCompany: false,
+        departmentIds: [],
       });
     }
   }, [
+    allCompanyRoleId,
     canManageGrants,
     currentUser?.id,
     definition,
@@ -384,6 +417,7 @@ export default function FormManagementWizard() {
       const settings = {
         ...parseJsonValue<Record<string, any>>(definition?.settings, {}),
         workflowEnabled: !!values.workflowEnabled,
+        businessNumber: values.businessNumber,
       };
       const saved = await request<FormDefinition>('/api/forms/definitions', {
         method: 'POST',
@@ -404,12 +438,20 @@ export default function FormManagementWizard() {
         const userIds = Array.isArray(values.userIds)
           ? values.userIds
           : latestGrant.userIds;
-        const roleIds = Array.isArray(values.roleIds)
+        let roleIds = Array.isArray(values.roleIds)
           ? values.roleIds
           : latestGrant.roleIds;
+        if (isAdmin && allCompanyRoleId) {
+          roleIds = values.allCompany
+            ? [...new Set([...roleIds, allCompanyRoleId])]
+            : roleIds.filter((id: number) => id !== allCompanyRoleId);
+        }
+        const departmentIds = Array.isArray(values.departmentIds)
+          ? values.departmentIds
+          : latestGrant.departmentIds;
         await request<FormGrant>(`/api/forms/${saved.id}/grants`, {
           method: 'PUT',
-          data: { userIds, roleIds, version: latestGrant.version },
+          data: { userIds, roleIds, departmentIds, version: latestGrant.version },
         });
       } catch (error: any) {
         const grantError =
@@ -590,7 +632,10 @@ export default function FormManagementWizard() {
               paddingTop: 20,
             }}
           >
-            <div style={{ fontWeight: 600, marginBottom: 16 }}>表单管理员</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>表单可见范围</div>
+            <Typography.Text type="secondary">
+              全公司、部门、角色和指定人员取并集；部门授权自动包含所有下级部门。
+            </Typography.Text>
             <div
               style={{
                 display: 'grid',
@@ -599,7 +644,7 @@ export default function FormManagementWizard() {
               }}
             >
               <Form.Item
-                label="用户管理员"
+                label="指定人员"
                 name="userIds"
                 style={{ marginBottom: 0 }}
               >
@@ -614,24 +659,32 @@ export default function FormManagementWizard() {
                 />
               </Form.Item>
               {isAdmin && (
-                <Form.Item
-                  label="角色管理员"
-                  name="roleIds"
-                  style={{ marginBottom: 0 }}
-                >
-                  <Select
-                    mode="multiple"
-                    showSearch={{ optionFilterProp: 'label' }}
-                    options={(grantCandidates?.roles ?? []).map((role) => ({
-                      value: role.id,
-                      label: `${role.name} · ${role.code}`,
-                    }))}
-                  />
-                </Form.Item>
+                <>
+                  <Form.Item label="全公司" style={{ marginBottom: 0 }}>
+                    <Form.Item name="allCompany" valuePropName="checked" noStyle>
+                      <Switch disabled={!allCompanyRoleId}
+                        checkedChildren="全公司可见" unCheckedChildren="未启用" />
+                    </Form.Item>
+                  </Form.Item>
+                  <Form.Item label="指定角色" name="roleIds" style={{ marginBottom: 0 }}>
+                    <Select mode="multiple" maxTagCount="responsive"
+                      showSearch={{ optionFilterProp: 'label' }}
+                      options={(grantCandidates?.roles ?? []).filter((role) => role.code !== 'user').map((role) => ({
+                        value: role.id, label: `${role.name} · ${role.code}`,
+                      }))} />
+                  </Form.Item>
+                </>
               )}
+              <Form.Item label="部门及下级部门" name="departmentIds" style={{ marginBottom: 0 }}>
+                <TreeSelect treeCheckable treeCheckStrictly={false} showCheckedStrategy={TreeSelect.SHOW_PARENT}
+                  maxTagCount="responsive" allowClear treeDefaultExpandAll
+                  treeData={grantDepartmentTree(grantCandidates?.departments ?? [])}
+                  placeholder="选择部门后自动包含其下级部门" />
+              </Form.Item>
             </div>
           </div>
         )}
+        <BusinessNumberEditor fields={processFormFields} />
       </Form>
       <Space>
         <Button
@@ -709,7 +762,7 @@ export default function FormManagementWizard() {
               <Descriptions.Item label="提交后行为">
                 {workflowEnabled ? '提交后进入审批' : '提交成功后直接完成'}
               </Descriptions.Item>
-              <Descriptions.Item label="可见范围">所有用户</Descriptions.Item>
+              <Descriptions.Item label="可见范围">{visibilitySummary}</Descriptions.Item>
               {workflowEnabled && (
                 <Descriptions.Item label="流程状态">
                   {processDefinition?.status ?? '未保存'}

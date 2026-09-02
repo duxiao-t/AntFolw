@@ -78,11 +78,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     applySession(set, payload);
   },
   async logout() {
-    try {
-      await authApi.logout();
-    } catch {
-      /* best-effort logout */
-    }
+    await authApi.logout();
     applyAnonymous(set);
   },
   authorizationHeader(): Record<string, string> {

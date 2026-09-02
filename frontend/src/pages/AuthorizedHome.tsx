@@ -16,7 +16,7 @@ const pageOrder: Array<[string, string]> = [
   ['page.settings.company', '/settings/company'],
   ['page.settings.s3', '/settings/s3'],
   ['page.settings.wecom', '/settings/wecom'],
-  ['page.settings.billing', '/settings/billing'],
+  ['page.settings.backup', '/settings/backup'],
 ];
 
 export function firstAccessiblePath(roles: string[], permissions: string[]) {

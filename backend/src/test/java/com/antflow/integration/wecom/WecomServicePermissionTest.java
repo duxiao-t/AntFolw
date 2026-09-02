@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import com.antflow.audit.AuditService;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
-import com.antflow.common.FormalNumberService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +26,7 @@ class WecomServicePermissionTest {
         authorization = mock(AuthorizationService.class);
         service = new WecomService(mock(JdbcTemplate.class), mock(WecomSecretCipher.class),
             mock(WecomClient.class), authorization, mock(AuditService.class), new ObjectMapper(),
-            mock(FormalNumberService.class), mock(PasswordEncoder.class),
+            mock(PasswordEncoder.class),
             mock(TransactionTemplate.class), mock(Executor.class));
     }
 

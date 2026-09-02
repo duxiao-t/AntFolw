@@ -89,7 +89,7 @@ export default [
       { name: 's3', icon: 'cloud', path: '/settings/s3', component: './settings/S3Storage', access: 'canManageS3' },
       { name: 'wecom', icon: 'wechat', path: '/settings/wecom', component: './settings/Wecom', access: 'canManageWecom' },
       { name: 'identityProviders', icon: 'safetyCertificate', path: '/settings/identity-providers', component: './settings/IdentityProviders', access: 'canManageIdentityProviders' },
-      { name: 'billing', icon: 'dollar', path: '/settings/billing', component: './settings/Billing', access: 'canManageBilling' },
+      { name: 'backup', icon: 'database', path: '/settings/backup', component: './settings/Backup', access: 'canManageBackup' },
     ],
   },
 

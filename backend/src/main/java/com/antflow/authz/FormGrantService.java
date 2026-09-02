@@ -32,8 +32,12 @@ public class FormGrantService {
                 SELECT subject_id FROM t_form_resource_grant
                 WHERE form_def_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
                 """, Long.class, formId);
-        return new FormGrantDto(version, userIds, roleIds,
-            selectedUsers(formId), selectedRoles(formId));
+        List<Long> departmentIds = jdbcTemplate.queryForList("""
+                SELECT subject_id FROM t_form_resource_grant
+                WHERE form_def_id = ? AND subject_type = 'DEPARTMENT' ORDER BY subject_id
+                """, Long.class, formId);
+        return new FormGrantDto(version, userIds, roleIds, departmentIds,
+            selectedUsers(formId), selectedRoles(formId), selectedDepartments(formId));
     }
 
     public FormGrantCandidates candidates(long formId) {
@@ -89,7 +93,7 @@ public class FormGrantService {
         if (request == null || request.version() == null) {
             throw new BizException("FORM_GRANT_VERSION_REQUIRED", "grant version is required");
         }
-        validateSubjects(request.userIds(), request.roleIds());
+        validateSubjects(request.userIds(), request.roleIds(), request.departmentIds());
         boolean admin = authorizationService.isAdmin();
         int updated = jdbcTemplate.update("""
             UPDATE t_form_definition SET authz_version = authz_version + 1
@@ -101,7 +105,7 @@ public class FormGrantService {
         }
         jdbcTemplate.update(admin
             ? "DELETE FROM t_form_resource_grant WHERE form_def_id = ?"
-            : "DELETE FROM t_form_resource_grant WHERE form_def_id = ? AND subject_type = 'USER'",
+            : "DELETE FROM t_form_resource_grant WHERE form_def_id = ? AND subject_type IN ('USER', 'DEPARTMENT')",
             formId);
         Long actorId = PrincipalHolder.current().orElseThrow().userId();
         request.userIds().forEach(userId -> jdbcTemplate.update("""
@@ -114,6 +118,10 @@ public class FormGrantService {
                 VALUES (?, 'ROLE', ?, ?)
                 """, formId, roleId, actorId));
         }
+        request.departmentIds().forEach(departmentId -> jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+            VALUES (?, 'DEPARTMENT', ?, ?)
+            """, formId, departmentId, actorId));
         List<Long> effectiveRoleIds = admin ? request.roleIds().stream().sorted().toList()
             : jdbcTemplate.queryForList("""
                 SELECT subject_id FROM t_form_resource_grant
@@ -121,12 +129,14 @@ public class FormGrantService {
                 """, Long.class, formId);
         auditService.success("form.authorization.update", "FORM", formId,
             AuditService.RiskLevel.HIGH,
-            java.util.Map.of("changedFields", List.of("userIds", "roleIds")),
+            java.util.Map.of("changedFields", List.of("userIds", "roleIds", "departmentIds")),
             java.util.Map.of("userCount", request.userIds().size(),
-                "roleCount", effectiveRoleIds.size()));
+                "roleCount", effectiveRoleIds.size(),
+                "departmentCount", request.departmentIds().size()));
         return new FormGrantDto(request.version() + 1,
             request.userIds().stream().sorted().toList(),
-            effectiveRoleIds, selectedUsers(formId), selectedRoles(formId));
+            effectiveRoleIds, request.departmentIds().stream().sorted().toList(),
+            selectedUsers(formId), selectedRoles(formId), selectedDepartments(formId));
     }
 
     @Transactional
@@ -138,7 +148,8 @@ public class FormGrantService {
             """, formId, creatorId, creatorId);
     }
 
-    private void validateSubjects(Set<Long> userIds, Set<Long> roleIds) {
+    private void validateSubjects(Set<Long> userIds, Set<Long> roleIds,
+                                  Set<Long> departmentIds) {
         AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
         if (!snapshot.admin() && !roleIds.isEmpty()) {
             throw new AuthorizationFailureException("MISSING_PERMISSION",
@@ -165,6 +176,20 @@ public class FormGrantService {
                 Long.class, roleId);
             if (count == null || count == 0) {
                 throw new BizException("ROLE_NOT_FOUND", "grant role not found");
+            }
+        }
+        Set<Long> manageable = snapshot.admin() ? Set.of()
+            : authorizationService.manageableDepartments(snapshot,
+                PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        for (Long departmentId : departmentIds) {
+            Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_department WHERE id = ?", Long.class, departmentId);
+            if (count == null || count == 0) {
+                throw new BizException("DEPARTMENT_NOT_FOUND", "grant department not found");
+            }
+            if (!snapshot.admin() && !manageable.contains(departmentId)) {
+                throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
+                    "grant department is outside the permitted data scope");
             }
         }
     }
@@ -281,6 +306,17 @@ public class FormGrantService {
                 rs.getString("name")), formId);
     }
 
+    private List<GrantDepartment> selectedDepartments(long formId) {
+        return jdbcTemplate.query("""
+            SELECT department.id, department.parent_id, department.name
+            FROM t_form_resource_grant form_grant
+            JOIN t_department department ON department.id = form_grant.subject_id
+            WHERE form_grant.form_def_id = ? AND form_grant.subject_type = 'DEPARTMENT'
+            ORDER BY department.path, department.id
+            """, (rs, row) -> new GrantDepartment(rs.getLong("id"),
+                nullableLong(rs, "parent_id"), rs.getString("name")), formId);
+    }
+
     private static GrantUser grantUser(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new GrantUser(rs.getLong("id"), rs.getString("username"),
             rs.getString("display_name"), rs.getString("employee_no"),
@@ -298,7 +334,9 @@ public class FormGrantService {
     }
 
     public record FormGrantDto(int version, List<Long> userIds, List<Long> roleIds,
-                               List<GrantUser> users, List<GrantRole> roles) { }
+                               List<Long> departmentIds, List<GrantUser> users,
+                               List<GrantRole> roles,
+                               List<GrantDepartment> departments) { }
     public record FormGrantCandidates(List<GrantRole> roles,
                                       List<GrantDepartment> departments) { }
     public record GrantUser(long id, String username, String displayName, String employeeNo,
@@ -309,10 +347,13 @@ public class FormGrantService {
     private record CandidateUser(long id, String username, String displayName,
                                  String employeeNo, Long departmentId) { }
     private record CandidateQuery(String fromWhere, List<Object> args) { }
-    public record FormGrantWriteRequest(Integer version, Set<Long> userIds, Set<Long> roleIds) {
+    public record FormGrantWriteRequest(Integer version, Set<Long> userIds,
+                                        Set<Long> roleIds, Set<Long> departmentIds) {
         public FormGrantWriteRequest {
             userIds = userIds == null ? Set.of() : new LinkedHashSet<>(userIds);
             roleIds = roleIds == null ? Set.of() : new LinkedHashSet<>(roleIds);
+            departmentIds = departmentIds == null
+                ? Set.of() : new LinkedHashSet<>(departmentIds);
         }
     }
 }

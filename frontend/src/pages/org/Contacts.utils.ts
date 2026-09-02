@@ -183,7 +183,7 @@ export function parseMembersCsv(content: string, deptId: number): MemberCsvParse
     const rowNumber = i + 1;
     if (!item.displayName) errors.push(`第 ${rowNumber} 行缺少姓名`);
     if (!item.username) errors.push(`第 ${rowNumber} 行缺少账号`);
-    if (item.employeeNo && !/^[0-9]{6}$/.test(item.employeeNo)) errors.push(`第 ${rowNumber} 行工号必须为 6 位数字`);
+    if (item.employeeNo && !/^\S{1,64}$/.test(item.employeeNo)) errors.push(`第 ${rowNumber} 行工号必须为 1 至 64 位且不能包含空白字符`);
     if (item.displayName && item.username) {
       rows.push({
         displayName: item.displayName,

@@ -31,7 +31,7 @@ class FormalNumberServiceTest {
 
     @Test
     void rejectsInvalidAndDuplicateEmployeeNumbers() {
-        assertThatThrownBy(() -> service.employeeNo("SC-246", null))
+        assertThatThrownBy(() -> service.employeeNo("SC 246", null))
             .isInstanceOf(BizException.class)
             .extracting(error -> ((BizException) error).getCode())
             .isEqualTo("BAD_EMPLOYEE_NO");

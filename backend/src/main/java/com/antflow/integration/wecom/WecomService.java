@@ -4,7 +4,6 @@ import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
-import com.antflow.common.FormalNumberService;
 import com.antflow.engine.BizException;
 import com.antflow.integration.wecom.WecomClient.WecomDepartment;
 import com.antflow.integration.wecom.WecomClient.WecomUser;
@@ -16,7 +15,6 @@ import java.security.MessageDigest;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -59,14 +57,13 @@ public class WecomService {
     private final AuthorizationService authorization;
     private final AuditService audit;
     private final ObjectMapper json;
-    private final FormalNumberService formalNumbers;
     private final PasswordEncoder passwords;
     private final TransactionTemplate transactions;
     private final Executor executor;
 
     public WecomService(JdbcTemplate jdbc, WecomSecretCipher cipher, WecomClient client,
                         AuthorizationService authorization, AuditService audit, ObjectMapper json,
-                        FormalNumberService formalNumbers, PasswordEncoder passwords,
+                        PasswordEncoder passwords,
                         TransactionTemplate transactions,
                         @Qualifier("wecomSyncExecutor") Executor executor) {
         this.jdbc = jdbc;
@@ -75,7 +72,6 @@ public class WecomService {
         this.authorization = authorization;
         this.audit = audit;
         this.json = json;
-        this.formalNumbers = formalNumbers;
         this.passwords = passwords;
         this.transactions = transactions;
         this.executor = executor;
@@ -310,20 +306,13 @@ public class WecomService {
             companyId, companyId);
         for (LocalUserState state : localUsers) {
             context.usernames.add(state.username());
-            if (state.employeeNo() != null) context.employeeNos.add(state.employeeNo());
+            if (state.employeeNo() != null) context.employeeNoOwners.put(state.employeeNo(), state.id());
             if (state.wecomUserId() != null) context.mappedIds.put(state.wecomUserId(), state.id());
             if (state.phone() != null) context.byPhone
                 .computeIfAbsent(state.phone(), ignored -> new ArrayList<>()).add(state.id());
             if (state.email() != null) context.byEmail
                 .computeIfAbsent(state.email().toLowerCase(), ignored -> new ArrayList<>()).add(state.id());
             context.byId.put(state.id(), state);
-        }
-        long need = Math.max(externalUsers.size(), 1) + 64;
-        List<String> candidates = jdbc.query(
-            "SELECT nextval('seq_employee_no') FROM generate_series(1, ?)",
-            (rs, rowNum) -> String.format("%06d", rs.getLong(1)), need);
-        for (String candidate : candidates) {
-            if (context.employeeNos.add(candidate)) context.employeeNoQueue.add(candidate);
         }
         for (WecomUser user : externalUsers) {
             if (full) {
@@ -338,6 +327,7 @@ public class WecomService {
 
     private static boolean changed(WecomUser external, LocalUserState local) {
         return !Objects.equals(trim(local.displayName()), displayName(external))
+            || !Objects.equals(local.employeeNo(), external.userId())
             || !Objects.equals(local.status(), external.status() == 1 ? "ACTIVE" : "DISABLED")
             || !Objects.equals(blankToNull(local.position()), blankToNull(external.position()))
             || !Objects.equals(blankToNull(local.phone()), blankToNull(external.phone()))
@@ -364,7 +354,7 @@ public class WecomService {
                 if (!context.usernames.add(username)) {
                     throw new SyncUserException("自动生成的账号已存在");
                 }
-                String employeeNo = nextEmployeeNo(context);
+                String employeeNo = wecomEmployeeNo(context, user.userId(), null);
                 String password = passwords.encode(UUID.randomUUID() + ":" + UUID.randomUUID());
                 inserts.add(new Object[]{departmentId, employeeNo, username, password,
                     displayName(user), blankToNull(user.email()), blankToNull(user.phone()),
@@ -376,7 +366,8 @@ public class WecomService {
             } else {
                 Long departmentId = departmentMappings.get(primaryDepartment(user));
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
-                updates.add(new Object[]{departmentId, displayName(user), trim(user.phone()),
+                String employeeNo = wecomEmployeeNo(context, user.userId(), localId);
+                updates.add(new Object[]{employeeNo, departmentId, displayName(user), trim(user.phone()),
                     trim(user.email()), blankToNull(user.position()), gender(user.gender()),
                     user.status() == 1 ? "ACTIVE" : "DISABLED", localId});
                 updated++;
@@ -420,7 +411,7 @@ public class WecomService {
             """, mappings);
         if (!updates.isEmpty()) {
             jdbc.batchUpdate("""
-                UPDATE t_user SET dept_id = ?, display_name = ?,
+                UPDATE t_user SET employee_no = ?, dept_id = ?, display_name = ?,
                     phone = COALESCE(NULLIF(?, ''), phone),
                     email = COALESCE(NULLIF(?, ''), email),
                     position = ?, gender = ?, status = ?
@@ -438,17 +429,18 @@ public class WecomService {
         return resolveMatch(phoneMatches, emailMatches);
     }
 
-    private String nextEmployeeNo(SyncContext context) {
-        if (context.employeeNoQueue.isEmpty()) {
-            List<String> candidates = jdbc.query(
-                "SELECT nextval('seq_employee_no') FROM generate_series(1, 64)",
-                (rs, rowNum) -> String.format("%06d", rs.getLong(1)));
-            for (String candidate : candidates) {
-                if (context.employeeNos.add(candidate)) context.employeeNoQueue.add(candidate);
-            }
+    private static String wecomEmployeeNo(SyncContext context, String userId, Long localId) {
+        String value = trim(userId);
+        if (value.isBlank() || value.length() > 64 || value.matches(".*[\\s\\p{Cntrl}].*")) {
+            throw new SyncUserException("企业微信账号不能作为工号");
         }
-        if (context.employeeNoQueue.isEmpty()) throw new SyncUserException("可用工号已耗尽");
-        return context.employeeNoQueue.poll();
+        Long owner = context.employeeNoOwners.get(value);
+        if (owner != null && !Objects.equals(owner, localId)) {
+            throw new SyncUserException("企业微信账号已被其他本地用户占用");
+        }
+        if (localId != null) context.employeeNoOwners.values().removeIf(id -> Objects.equals(id, localId));
+        context.employeeNoOwners.put(value, localId == null ? Long.MIN_VALUE : localId);
+        return value;
     }
 
     private void syncDepartmentLeaders(long companyId, List<WecomDepartment> departments,
@@ -852,8 +844,7 @@ public class WecomService {
         final Map<String, List<Long>> byPhone = new HashMap<>();
         final Map<String, List<Long>> byEmail = new HashMap<>();
         final Set<String> usernames = new HashSet<>();
-        final Set<String> employeeNos = new HashSet<>();
-        final ArrayDeque<String> employeeNoQueue = new ArrayDeque<>();
+        final Map<String, Long> employeeNoOwners = new HashMap<>();
         final Map<Long, LocalUserState> byId = new HashMap<>();
         long roleId;
         final List<WecomUser> pending = new ArrayList<>();

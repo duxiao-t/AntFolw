@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.antflow.process.DefinitionVersionRepository;
+import com.antflow.common.BusinessNumberService;
 
 import java.util.List;
 import java.util.Map;
@@ -24,6 +25,8 @@ public class FormDefinitionService {
     private final FormGrantService formGrantService;
     @Autowired(required = false)
     private DefinitionVersionRepository versions;
+    @Autowired(required = false)
+    private BusinessNumberService businessNumbers;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
@@ -145,6 +148,7 @@ public class FormDefinitionService {
         }
         if (!"DRAFT".equals(fd.getStatus())) return fd;
         validateSchema(fd.getSchema());
+        if (businessNumbers != null) businessNumbers.validate(fd);
         fd.setStatus("PUBLISHED");
         fd.setVersion(fd.getVersion() + 1);
         mapper.updateById(fd);

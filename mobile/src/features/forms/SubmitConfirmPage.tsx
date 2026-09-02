@@ -32,11 +32,11 @@ export function SubmitConfirmPage() {
       if (flow.reworkTaskId != null) {
         const result = await resubmitReworkTask(flow.reworkTaskId, flow.values,
           idempotencyKeyForPayload(currentPayload()));
-        return { mode: "workflow" as const, id: result.instanceId };
+        return { mode: "workflow" as const, id: result.instanceId, businessNo: result.businessNo };
       }
-      if (!workflowEnabled) { const result = await submitMobileFormData({ formCode: flow.formCode ?? code, values: flow.values }); return { mode: "direct" as const, id: result.dataId }; }
+      if (!workflowEnabled) { const result = await submitMobileFormData({ formCode: flow.formCode ?? code, values: flow.values }); return { mode: "direct" as const, id: result.dataId, businessNo: result.businessNo }; }
       const result = await startMobileInstance({ formCode: flow.formCode ?? code, values: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, idempotencyKey: idempotencyKeyForPayload(currentPayload()) });
-      return { mode: "workflow" as const, id: result.instanceId };
+      return { mode: "workflow" as const, id: result.instanceId, businessNo: result.businessNo };
     },
     async onSuccess(result) {
       if (result.mode === "workflow") {
@@ -49,7 +49,7 @@ export function SubmitConfirmPage() {
       if (user && flow.formCode) removeRecoveryDraft(user.id, flow.formCode,
         flow.reworkTaskId == null ? flow.draftId : -flow.reworkTaskId);
       resetFlow();
-      void navigate(`/forms/${encodeURIComponent(code)}/success/${result.id}?mode=${result.mode}`, { replace: true });
+      void navigate(`/forms/${encodeURIComponent(code)}/success/${result.id}?mode=${result.mode}&businessNo=${encodeURIComponent(result.businessNo)}`, { replace: true });
     },
     onError(errorValue) { setError(errorValue instanceof Error ? errorValue.message : "提交失败"); },
   });

@@ -82,16 +82,19 @@ export default function FormGrantUserPicker({
   return (
     <div>
       <Space size={[6, 6]} wrap>
-        {selectedUsers.map((user) => (
+        {selectedUsers.slice(0, 5).map((user) => (
           <Tag key={user.id} closable onClose={() => onChange?.(value.filter((id) => id !== user.id))}>
             {user.displayName}{user.employeeNo ? ` · ${user.employeeNo}` : ''}
           </Tag>
         ))}
-        <Button icon={<UserAddOutlined />} onClick={openPicker}>选择用户</Button>
+        {selectedUsers.length > 5 && <Tag>另有 {selectedUsers.length - 5} 人</Tag>}
+        <Button icon={<UserAddOutlined />} onClick={openPicker}>
+          {selectedUsers.length ? `管理指定人员（${selectedUsers.length}）` : '选择指定人员'}
+        </Button>
       </Space>
 
       <Modal
-        title="选择表单管理员"
+        title="选择可见人员"
         open={open}
         width={920}
         onCancel={() => setOpen(false)}

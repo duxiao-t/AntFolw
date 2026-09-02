@@ -169,8 +169,16 @@ public class AuthorizationService {
                     JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
                     WHERE ur.user_id = ?
                 ))
+                OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
+                    SELECT 1
+                    FROM t_user grant_user
+                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
+                    JOIN t_department grant_department ON grant_department.id = grant_row.subject_id
+                    WHERE grant_user.id = ?
+                      AND user_department.path <@ grant_department.path
+                ))
               )
-            """, Long.class, formId, userId, userId);
+            """, Long.class, formId, userId, userId, userId);
         return count != null && count > 0;
     }
 

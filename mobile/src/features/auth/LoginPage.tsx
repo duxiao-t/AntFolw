@@ -4,12 +4,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { isApiError } from "../../shared/api/errors";
 import { useBranding } from "../branding/BrandProvider";
 import { safeReturnUrl, useAuthStore } from "./auth.store";
-import { usePlatformAdapter } from "../../shared/platform/PlatformProvider";
 import { apiRequest } from "../../shared/api/http";
 
 const REMEMBERED_USERNAME_KEY = "antflow-mobile-remembered-username";
-const WECOM_SILENT_ATTEMPT_KEY = "antflow-wecom-silent-login-attempted";
-
 export function LoginPage() {
   const branding = useBranding();
   const navigate = useNavigate();
@@ -17,7 +14,6 @@ export function LoginPage() {
   const login = useAuthStore((state) => state.login);
   const status = useAuthStore((state) => state.status);
   const restore = useAuthStore((state) => state.restore);
-  const platform = usePlatformAdapter();
   const [submitting, setSubmitting] = useState(false);
   const [username, setUsername] = useState(readRememberedUsername);
   const [password, setPassword] = useState("");
@@ -25,24 +21,18 @@ export function LoginPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [providers, setProviders] = useState<Array<{ code: string; displayName: string }>>([]);
   const [wecomEnabled, setWecomEnabled] = useState(false);
-  const [wecomChecked, setWecomChecked] = useState(false);
 
   useEffect(() => {
     if (import.meta.env.MODE === 'test') return;
     void apiRequest<Array<{ code: string; displayName: string }>>('/api/public/auth/providers')
       .then(setProviders).catch(() => setProviders([]));
     void apiRequest<{ oauthEnabled: boolean }>('/api/public/auth/wecom/status')
-      .then((result) => setWecomEnabled(result.oauthEnabled)).catch(() => setWecomEnabled(false))
-      .finally(() => setWecomChecked(true));
+      .then((result) => setWecomEnabled(result.oauthEnabled)).catch(() => setWecomEnabled(false));
   }, []);
 
   useEffect(() => {
-    if (platform.kind !== 'wecom' || !wecomChecked || !wecomEnabled) return;
-    if (status === 'unknown') { void restore(); return; }
-    if (status !== 'anonymous' || sessionStorage.getItem(WECOM_SILENT_ATTEMPT_KEY)) return;
-    sessionStorage.setItem(WECOM_SILENT_ATTEMPT_KEY, '1');
-    void platform.trySilentLogin();
-  }, [platform, restore, status, wecomChecked, wecomEnabled]);
+    if (status === 'unknown') void restore();
+  }, [restore, status]);
 
   useEffect(() => {
     if (status === "authenticated") {

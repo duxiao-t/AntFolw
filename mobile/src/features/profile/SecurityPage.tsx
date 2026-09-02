@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Toast } from "antd-mobile";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { queryKeys } from "../../shared/api/queryKeys";
@@ -16,7 +17,7 @@ export function SecurityPage() {
   const sessionsQuery = useDeviceSessions();
   const [showSessions, setShowSessions] = useState(false);
   const revokeMutation = useMutation({ mutationFn: revokeSession, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: queryKeys.sessions }); } });
-  const logoutMutation = useMutation({ mutationFn: async () => { const sessions = sessionsQuery.data ?? []; await Promise.all(sessions.filter((session) => !session.isCurrent).map((session) => revokeSession(session.id))); await logout(); if (user) clearUserScopedRecovery(user.id); }, onSuccess: () => { queryClient.clear(); navigate("/login", { replace: true }); } });
+  const logoutMutation = useMutation({ mutationFn: async () => { const sessions = sessionsQuery.data ?? []; await Promise.all(sessions.filter((session) => !session.isCurrent).map((session) => revokeSession(session.id))); await logout(); if (user) clearUserScopedRecovery(user.id); }, onSuccess: () => { queryClient.clear(); navigate("/login", { replace: true }); }, onError: () => Toast.show({ icon: "fail", content: "退出失败，请重试" }) });
   if (sessionsQuery.isPending) return <PageSkeleton rows={4} />;
   if (sessionsQuery.isError) return <PageError title="设备会话加载失败" onRetry={() => void sessionsQuery.refetch()} />;
   const sessions = sessionsQuery.data ?? [];

@@ -1,6 +1,12 @@
 name: antflow-local
 
 services:
+  backup-init:
+    image: nginx:1.28-alpine
+    command: ["sh", "-c", "mkdir -p /backups && chown 10001:10001 /backups && chmod 700 /backups"]
+    volumes:
+      - ${BACKUP_DIRECTORY:-/www/antflow/backups}:/backups
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -61,13 +67,19 @@ services:
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
       ANTFLOW_OIDC_ALLOWED_HOSTS: ${ANTFLOW_OIDC_ALLOWED_HOSTS:-}
       ANTFLOW_OIDC_HTTPS_ONLY: ${ANTFLOW_OIDC_HTTPS_ONLY:-true}
+      BACKUP_DIRECTORY: /backups
+      BACKUP_ENCRYPTION_SECRET: ${BACKUP_ENCRYPTION_SECRET:?set BACKUP_ENCRYPTION_SECRET}
       ANTFLOW_TIME_ZONE: Asia/Shanghai
       JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m
     depends_on:
+      backup-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
+    volumes:
+      - ${BACKUP_DIRECTORY:-/www/antflow/backups}:/backups
 
   web:
     build:

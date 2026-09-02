@@ -36,7 +36,7 @@ export default {
   'menu.settings.s3': 'S3 存储',
   'menu.settings.wecom': '企业微信',
   'menu.settings.identityProviders': '身份提供方',
-  'menu.settings.billing': '订阅与账单',
+  'menu.settings.backup': '系统备份',
 
   // 异常页
   'menu.exception.403': '403',

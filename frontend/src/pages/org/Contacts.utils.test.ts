@@ -141,6 +141,12 @@ describe('Contacts CSV helpers', () => {
     ]);
   });
 
+  it('accepts an alphanumeric enterprise WeCom account as employee number', () => {
+    const result = parseMembersCsv('姓名,工号,账号\n安星州,AnXingZhou,anxingzhou', 7);
+    expect(result.errors).toEqual([]);
+    expect(result.rows[0]?.employeeNo).toBe('AnXingZhou');
+  });
+
   it('reports missing required member fields with row numbers', () => {
     const result = parseMembersCsv('姓名,账号,手机\n王五,,13900000000', 7);
 

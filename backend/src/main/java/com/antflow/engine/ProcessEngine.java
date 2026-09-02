@@ -6,6 +6,7 @@ import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.common.FormalNumberService;
+import com.antflow.common.BusinessNumberService;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.engine.handler.NodeContext;
@@ -78,6 +79,8 @@ public class ProcessEngine {
     /** Optional only so the legacy unit tests that construct this class directly keep working. */
     @Autowired(required = false)
     private WorkflowRuntimeV2 runtimeV2;
+    @Autowired(required = false)
+    private BusinessNumberService businessNumbers;
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
@@ -97,7 +100,8 @@ public class ProcessEngine {
         FormData fd2 = new FormData();
         fd2.setFormDefId(fd.getId());
         fd2.setFormDefVersion(fd.getVersion());
-        fd2.setBusinessNo(formalNumberService.businessNo());
+        fd2.setBusinessNo(businessNumbers == null
+            ? formalNumberService.businessNo() : businessNumbers.next(fd, visibleData));
         fd2.setData(writeJson(visibleData));
         fd2.setStatus("SUBMITTED");
         fd2.setCreatedBy(userId);

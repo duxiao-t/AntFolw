@@ -187,10 +187,17 @@ public class RoleAdminService {
             snapshot.departmentId(), snapshot.admin(), scopes);
     }
 
-    public List<UserRoleView> userAssignments(String keyword) {
+    public UserRolePage userAssignments(int page, int size, String keyword) {
         authorizationService.requirePermission(PermissionCodes.SECURITY_USER_ROLE_READ);
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
         String query = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
-        return jdbcTemplate.query("""
+        Long total = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_user u
+            WHERE (?::text IS NULL OR u.username ILIKE ? OR u.display_name ILIKE ?
+                OR u.employee_no ILIKE ?)
+            """, Long.class, query, query, query, query);
+        List<UserRoleView> records = jdbcTemplate.query("""
             SELECT u.id, u.username, u.display_name, u.employee_no, u.status, u.dept_id,
                    COALESCE(array_agg(ur.role_id ORDER BY ur.role_id)
                        FILTER (WHERE ur.role_id IS NOT NULL), '{}') AS role_ids,
@@ -200,12 +207,13 @@ public class RoleAdminService {
             WHERE (?::text IS NULL OR u.username ILIKE ? OR u.display_name ILIKE ?
                 OR u.employee_no ILIKE ?)
             GROUP BY u.id
-            ORDER BY u.display_name, u.id
+            ORDER BY u.display_name, u.id LIMIT ? OFFSET ?
             """, (rs, row) -> new UserRoleView(rs.getLong("id"), rs.getString("username"),
                 rs.getString("display_name"), rs.getString("employee_no"),
                 rs.getString("status"), nullableLong(rs, "dept_id"),
                 longArray(rs.getArray("role_ids")), rs.getLong("authz_version")),
-            query, query, query, query);
+            query, query, query, query, safeSize, (safePage - 1) * safeSize);
+        return new UserRolePage(records, total == null ? 0 : total, safePage, safeSize);
     }
 
     public List<DepartmentCandidate> departmentCandidates() {
@@ -401,6 +409,7 @@ public class RoleAdminService {
     public record UserRoleView(long id, String username, String displayName, String employeeNo,
                                String status, Long departmentId, List<Long> roleIds,
                                long authzVersion) { }
+    public record UserRolePage(List<UserRoleView> records, long total, int page, int size) { }
     private record RoleBase(long id, String code, String name, String description,
                             String dataScope, boolean enabled, boolean builtin, int version,
                             long userCount) { }

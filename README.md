@@ -51,6 +51,7 @@ AUDIT_ARCHIVE_ENCRYPTION_SECRET=replace-with-audit-encryption-secret
 ANTFLOW_INTEGRATION_ENCRYPTION_KEY=replace-with-integration-encryption-key
 ANTFLOW_PUBLIC_BASE_URL=https://approval.example.com
 ANTFLOW_OIDC_ALLOWED_HOSTS=id.example.com,login.example.com
+BACKUP_ENCRYPTION_SECRET=replace-with-at-least-32-random-characters
 ```
 
 ### 2. 构建生产产物
@@ -93,6 +94,13 @@ Invoke-RestMethod http://127.0.0.1:7070/actuator/health
 ```
 
 不要执行 `docker compose down -v`，除非明确需要删除 PostgreSQL 和 MinIO 的全部本地数据。
+
+系统设置中的“系统备份”每天默认 02:30 生成 PostgreSQL、附件和审计归档的
+AES-GCM 加密备份并保留 30 天，文件存放在宿主机 `backups/`。恢复必须停机执行：
+
+```bash
+BACKUP_ENCRYPTION_SECRET='与备份时相同的密钥' backend/backup/restore-backup.sh backups/antflow-YYYYMMDD-HHMMSS.afbackup --confirm
+```
 
 ## 源码开发
 

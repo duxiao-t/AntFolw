@@ -4,11 +4,13 @@ import type { MobileFormValues } from './schema/types';
 export type StartResult = {
   instanceId: number;
   formDataId: number;
+  businessNo: string;
   firstTaskIds: number[];
 };
 
 export type DirectSubmitResult = {
   dataId: number;
+  businessNo: string;
 };
 
 export async function startMobileInstance({

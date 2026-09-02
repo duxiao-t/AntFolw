@@ -95,6 +95,9 @@ antflow:
     connect-timeout: 5s
     request-timeout: 15s
     queue-capacity: ${ANTFLOW_WECOM_QUEUE_CAPACITY:20}
+  backup:
+    directory: ${BACKUP_DIRECTORY:/backups}
+    encryption-secret: ${BACKUP_ENCRYPTION_SECRET:}
   web:
     slow-request-threshold-ms: ${ANTFLOW_SLOW_REQUEST_THRESHOLD_MS:500}
 

@@ -1,6 +1,7 @@
 package com.antflow.form.runtime;
 
 import com.antflow.common.FormalNumberService;
+import com.antflow.common.BusinessNumberService;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
@@ -15,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +30,8 @@ public class FormDataService {
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper json;
     private final FormalNumberService formalNumberService;
+    @Autowired(required = false)
+    private BusinessNumberService businessNumbers;
     private final AuthorizationService authorizationService;
     private final UserMapper userMapper;
     private final FormDefinitionMapper formDefinitionMapper;
@@ -39,11 +43,11 @@ public class FormDataService {
      */
     @Transactional
     public Long submit(String formCode, String status, Object data, Long userId) {
-        return submit(formCode, status, data, userId, List.of());
+        return submit(formCode, status, data, userId, List.of()).dataId();
     }
 
     @Transactional
-    public Long submit(String formCode, String status, Object data, Long userId,
+    public SubmitResult submit(String formCode, String status, Object data, Long userId,
                        List<MobileFileRef> files) {
         FormDefinition fd = formDefinitionService.getByCode(formCode);
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
@@ -58,15 +62,18 @@ public class FormDataService {
         fd2.setFormDefId(fd.getId());
         fd2.setFormDefVersion(fd.getVersion());
         if (!"DRAFT".equals(normalizedStatus)) {
-            fd2.setBusinessNo(formalNumberService.businessNo());
+            fd2.setBusinessNo(businessNumbers == null
+                ? formalNumberService.businessNo() : businessNumbers.next(fd, storedData));
         }
         fd2.setData(writeJson(storedData));
         fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
         mapper.insert(fd2);
         fileLinkService.append(fd2.getId(), files, userId);
-        return fd2.getId();
+        return new SubmitResult(fd2.getId(), fd2.getBusinessNo());
     }
+
+    public record SubmitResult(Long dataId, String businessNo) { }
 
     public List<FormData> mySubmissions(Long userId, String formCode) {
         var q = new QueryWrapper<FormData>().eq("created_by", userId);

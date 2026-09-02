@@ -176,6 +176,41 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void customBusinessNumbersIncrementPerFormAndAppearInStartResult() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        jdbcTemplate.update("""
+            UPDATE t_form_definition SET settings = ?::jsonb WHERE id = ?
+            """, """
+            {"businessNumber":{"enabled":true,"namespace":"ITNUM","reset":"DAILY","parts":[
+              {"type":"LITERAL","value":"-"},
+              {"type":"DATE","pattern":"yyyyMMdd"},
+              {"type":"LITERAL","value":"-"},
+              {"type":"SEQUENCE","width":4}]}}
+            """, formId);
+        long processId = insertProcess(formId, "DRAFT", approvalFlow(bobId));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            publishService.publish(formId, processId);
+            String first = String.valueOf(processEngine.start(
+                new StartCmd(code, Map.of("subject", "first"), Map.of()), adminId)
+                .get("businessNo"));
+            String second = String.valueOf(processEngine.start(
+                new StartCmd(code, Map.of("subject", "second"), Map.of()), adminId)
+                .get("businessNo"));
+
+            assertThat(first).matches("ITNUM-[0-9]{8}-0001");
+            assertThat(second).matches("ITNUM-[0-9]{8}-0002");
+            assertThat(second.substring(0, 15)).isEqualTo(first.substring(0, 15));
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
     void v2AllSignWaitsForEveryoneBeforeCreatingDownstreamTask() {
         long adminId = userId("admin");
         long bobId = userId("bob");
@@ -769,6 +804,42 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(formGrantService.candidates(formId).departments()).isNotEmpty();
         } finally {
             PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void departmentFormGrantIncludesDescendantsAndUserAssignmentsArePaged() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        Long originalDepartment = jdbcTemplate.queryForObject(
+            "SELECT dept_id FROM t_user WHERE id = ?", Long.class, bobId);
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long parent = insertDepartment(companyId, "授权父部门");
+        String childPath = jdbcTemplate.queryForObject(
+            "SELECT path::text || '.child' FROM t_department WHERE id = ?", String.class, parent);
+        long child = jdbcTemplate.queryForObject("""
+            INSERT INTO t_department(company_id, parent_id, path, name)
+            VALUES (?, ?, CAST(? AS ltree), '授权子部门') RETURNING id
+            """, Long.class, companyId, parent, childPath);
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        try {
+            jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", child, bobId);
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'DEPARTMENT', ?, ?)
+                """, formId, parent, adminId);
+            assertThat(authorizationService.hasFormGrant(formId, bobId)).isTrue();
+            PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+            RoleAdminService.UserRolePage page = roleAdminService.userAssignments(1, 2, null);
+            assertThat(page.records()).hasSize(2);
+            assertThat(page.total()).isGreaterThanOrEqualTo(2);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", originalDepartment, bobId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id IN (?, ?)", child, parent);
         }
     }
 
