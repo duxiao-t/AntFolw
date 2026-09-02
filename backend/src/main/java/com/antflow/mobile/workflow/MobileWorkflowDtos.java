@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import com.antflow.process.ApprovalCommentPresets;
 
 record StartMobileInstanceRequest(String formCode, JsonNode data,
                                   Map<String, List<Long>> selfSelected,
@@ -15,7 +16,8 @@ record MobileStartResult(Long instanceId, Long formDataId, String businessNo,
 }
 
 record MobileFormDto(String code, String name, Integer version, JsonNode schema,
-                     JsonNode settings, JsonNode process) {
+                     JsonNode settings, JsonNode process,
+                     Map<String, String> starterFieldModes) {
 }
 
 record MobileTaskActionRequest(String comment, JsonNode data, String rejectToNodeId) {
@@ -63,7 +65,8 @@ record MobileTaskDetailDto(MobileTaskDto task, JsonNode schema,
                            boolean rejectDisabled,
                            List<RejectTargetDto> rejectTargets, List<MobileFileDto> files,
                            ApprovalSummaryDto approvalSummary,
-                           List<ApprovalRecordDto> approvalRecords) {
+                           List<ApprovalRecordDto> approvalRecords,
+                           ApprovalCommentPresets commentPresets) {
 }
 
 record MobileInstanceDto(Long id, String status, String formName, String businessNo,

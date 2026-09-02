@@ -259,6 +259,49 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void v2AnySignRejectsImmediatelyAndCancelsOtherApprovers() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        StartedV2 started = startV2(anySignFlow(adminId, bobId, adminId), adminId);
+        long adminTask = taskIdForAssignee(started.instanceId(), "a1", adminId);
+        long bobTask = taskIdForAssignee(started.instanceId(), "a1", bobId);
+
+        processEngine.reject(new CompleteCmd(adminTask, "REJECT", "no", null), adminId);
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE id = ?", String.class, bobTask))
+            .isEqualTo("CANCELLED");
+        assertThat(pendingReworkCount(started.instanceId())).isEqualTo(1L);
+        assertThat(pendingTaskCount(started.instanceId(), "a2")).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_workflow_outbox
+            WHERE aggregate_id = ? AND event_type = 'TASK_CANCELLED'
+              AND recipient_id = ?
+            """, Long.class, started.instanceId(), bobId)).isEqualTo(1L);
+    }
+
+    @Test
+    void v2AllSignKeepsOtherTasksAfterRejectAndRejectsOnlyAfterEveryoneActs() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        StartedV2 started = startV2(allSignFlow(adminId, bobId, adminId), adminId);
+        long adminTask = taskIdForAssignee(started.instanceId(), "a1", adminId);
+        long bobTask = taskIdForAssignee(started.instanceId(), "a1", bobId);
+
+        processEngine.reject(new CompleteCmd(adminTask, "REJECT", "no", "a2"), adminId);
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE id = ?", String.class, bobTask))
+            .isEqualTo("PENDING");
+        assertThat(pendingReworkCount(started.instanceId())).isZero();
+
+        processEngine.approve(new CompleteCmd(bobTask, "APPROVE", "ok", null), bobId);
+
+        assertThat(pendingReworkCount(started.instanceId())).isEqualTo(1L);
+        assertThat(pendingTaskCount(started.instanceId(), "a2")).isZero();
+    }
+
+    @Test
     void concurrentDuplicateApprovalsAdvanceSameTaskOnce() throws Exception {
         long adminId = userId("admin");
         long bobId = userId("bob");
@@ -377,7 +420,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void v2RatioSignPassesAtThresholdAndRejectsWhenThresholdBecomesImpossible() {
+    void v2RatioSignWaitsForEveryoneThenSettlesAgainstTheThreshold() {
         long adminId = userId("admin");
         List<Long> approvers = List.of(insertUser("ratio-a-" + UUID.randomUUID()),
             insertUser("ratio-b-" + UUID.randomUUID()),
@@ -386,31 +429,38 @@ class PostgresTransactionalIntegrityIntegrationTest {
             insertUser("ratio-e-" + UUID.randomUUID()));
 
         StartedV2 passed = startV2(multiSignFlow("RATIO", approvers, 60, adminId), adminId);
-        for (int index = 0; index < 2; index++) {
+        for (int index = 0; index < 3; index++) {
             long userId = approvers.get(index);
             processEngine.approve(new CompleteCmd(
                 taskIdForAssignee(passed.instanceId(), "a1", userId), "APPROVE", "ok", null),
                 userId);
             assertThat(pendingTaskCount(passed.instanceId(), "a2")).isZero();
         }
-        long thresholdUser = approvers.get(2);
-        processEngine.approve(new CompleteCmd(
-            taskIdForAssignee(passed.instanceId(), "a1", thresholdUser), "APPROVE", "ok", null),
-            thresholdUser);
+        for (int index = 3; index < 5; index++) {
+            long userId = approvers.get(index);
+            processEngine.reject(new CompleteCmd(
+                taskIdForAssignee(passed.instanceId(), "a1", userId), "REJECT", "no", null),
+                userId);
+            if (index == 3) assertThat(pendingTaskCount(passed.instanceId(), "a2")).isZero();
+        }
         assertThat(pendingTaskCount(passed.instanceId(), "a2")).isEqualTo(1L);
+        assertThat(pendingReworkCount(passed.instanceId())).isZero();
 
         StartedV2 rejected = startV2(multiSignFlow("RATIO", approvers, 60, adminId), adminId);
         for (int index = 0; index < 2; index++) {
             long userId = approvers.get(index);
-            processEngine.reject(new CompleteCmd(
-                taskIdForAssignee(rejected.instanceId(), "a1", userId), "REJECT", "no", null),
+            processEngine.approve(new CompleteCmd(
+                taskIdForAssignee(rejected.instanceId(), "a1", userId), "APPROVE", "ok", null),
                 userId);
             assertThat(pendingReworkCount(rejected.instanceId())).isZero();
         }
-        long decisiveUser = approvers.get(2);
-        processEngine.reject(new CompleteCmd(
-            taskIdForAssignee(rejected.instanceId(), "a1", decisiveUser), "REJECT", "no", null),
-            decisiveUser);
+        for (int index = 2; index < 5; index++) {
+            long userId = approvers.get(index);
+            processEngine.reject(new CompleteCmd(
+                taskIdForAssignee(rejected.instanceId(), "a1", userId), "REJECT", "no", null),
+                userId);
+            if (index < 4) assertThat(pendingReworkCount(rejected.instanceId())).isZero();
+        }
         assertThat(pendingReworkCount(rejected.instanceId())).isEqualTo(1L);
     }
 
@@ -421,7 +471,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long secondCreated = insertUser("sequential-b-" + UUID.randomUUID());
         long thirdCreated = insertUser("sequential-c-" + UUID.randomUUID());
         List<Long> configuredOrder = List.of(thirdCreated, firstCreated, secondCreated);
-        StartedV2 started = startV2(
+        StartedV2 started = startLegacyV2(
             multiSignFlow("SEQUENTIAL", configuredOrder, null, adminId), adminId);
 
         for (long approver : configuredOrder) {
@@ -1383,6 +1433,31 @@ class PostgresTransactionalIntegrityIntegrationTest {
             publishService.publish(formId, processId);
             Map<String, Object> result = processEngine.start(
                 new StartCmd(code, Map.of("subject", "v2"), Map.of()), starterId);
+            return new StartedV2(((Number) result.get("instanceId")).longValue(),
+                ((Number) result.get("formDataId")).longValue());
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    private StartedV2 startLegacyV2(String legacyFlow, long starterId) {
+        String publishableFlow = legacyFlow.replace(
+            "\"mode\":\"SEQUENTIAL\"", "\"mode\":\"ALL\"");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "DRAFT", publishableFlow);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(starterId, "admin", List.of("admin")));
+        try {
+            publishService.publish(formId, processId);
+            jdbcTemplate.update("""
+                UPDATE t_process_definition_version
+                SET process = ?::jsonb,
+                    checksum = encode(digest(?::jsonb::text, 'sha256'), 'hex')
+                WHERE process_definition_id = ?
+                """, legacyFlow, legacyFlow, processId);
+            Map<String, Object> result = processEngine.start(
+                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of()), starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());
         } finally {

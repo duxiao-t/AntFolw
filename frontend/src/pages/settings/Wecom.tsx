@@ -323,7 +323,7 @@ export default function WecomPage() {
   return (
     <PageContainer
       title="企业微信"
-      subTitle="按通讯录、免登、JS-SDK、应用消息的顺序完成审批入口配置"
+      subTitle="按通讯录、企业微信登录、JS-SDK、应用消息的顺序完成审批入口配置"
     >
       <Row gutter={[24, 24]} className={styles.grid}>
         <Col xs={24} xl={10}>
@@ -381,7 +381,8 @@ export default function WecomPage() {
                 <Input.Password prefix={<KeyOutlined />} maxLength={512} autoComplete="new-password"
                   placeholder={settings?.agentSecretConfigured ? '已配置（留空不修改）' : '请输入应用 Secret'} />
               </Form.Item>
-              <Form.Item name="oauthEnabled" label="企业微信内自动免登" valuePropName="checked">
+              <Form.Item name="oauthEnabled" label="企业微信登录" valuePropName="checked"
+                extra="启用后在移动端登录页显示企业微信登录按钮，不会自动跳转授权">
                 <Switch />
               </Form.Item>
               <Form.Item name="jsSdkEnabled" label="表单 JS-SDK 能力" valuePropName="checked">
@@ -488,7 +489,6 @@ export default function WecomPage() {
                       disabled={!canStart}
                       loading={startMutation.isPending}
                       onClick={() => startMutation.mutate(syncMode)}
-                      style={{ background: canStart ? WECOM_GREEN : undefined }}
                     >
                       {active(job) ? '同步进行中' : '开始同步'}
                     </Button>
@@ -516,7 +516,7 @@ export default function WecomPage() {
                       disabled={!canStart}
                       loading={startMutation.isPending}
                       onClick={() => startMutation.mutate(syncMode)}
-                      style={{ background: canStart ? WECOM_GREEN : undefined, marginTop: 10 }}
+                      style={{ marginTop: 10 }}
                     >
                       开始同步
                     </Button>
@@ -539,9 +539,9 @@ export default function WecomPage() {
             <div className={styles.accessGrid}>
               <Typography.Text type="secondary">可信域名</Typography.Text>
               <Typography.Text code copyable>{accessInfo.trustedDomain}</Typography.Text>
-              <Typography.Text type="secondary">移动端应用主页</Typography.Text>
+              <Typography.Text type="secondary">移动端应用主页（企微入口）</Typography.Text>
               <Typography.Text copyable>{accessInfo.mobileHomeUrl}</Typography.Text>
-              <Typography.Text type="secondary">OAuth 回调地址</Typography.Text>
+              <Typography.Text type="secondary">OAuth 回调地址（仅用于登录）</Typography.Text>
               <Typography.Text copyable>{accessInfo.oauthCallbackUrl}</Typography.Text>
               <Typography.Text type="secondary">域名验证文件</Typography.Text>
               <Space wrap>
@@ -558,7 +558,7 @@ export default function WecomPage() {
         <div className={styles.chain}>
           {[
             ['01 通讯录', settings?.secretConfigured, '同步成员并建立身份映射'],
-            ['02 免登', settings?.oauthEnabled, '企业微信内自动进入工作台'],
+            ['02 登录', settings?.oauthEnabled, '用户点击企业微信登录后进入系统'],
             ['03 JS-SDK', settings?.jsSdkEnabled, '选图、录音、扫码与定位'],
             ['04 应用消息', settings?.messageEnabled, '待办与结果可靠送达'],
           ].map(([label, enabled, detail]) => (

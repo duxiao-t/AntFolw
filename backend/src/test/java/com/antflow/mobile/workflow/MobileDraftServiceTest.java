@@ -12,6 +12,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -36,6 +37,20 @@ class MobileDraftServiceTest {
         authorizationService = Mockito.mock(AuthorizationService.class);
         service = new MobileDraftService(formDataMapper, formDefinitionService, objectMapper,
             authorizationService);
+        Mockito.when(formDefinitionService.canonicalizeStarterData(
+                Mockito.anyString(), Mockito.any(), Mockito.nullable(Object.class)))
+            .thenAnswer(invocation -> objectMapper.convertValue(
+                invocation.getArgument(1), Map.class));
+        Mockito.when(formDefinitionService.projectStarterSchema(
+                Mockito.any(), Mockito.nullable(Object.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        Mockito.when(formDefinitionService.projectStarterData(
+                Mockito.any(), Mockito.any(), Mockito.nullable(Object.class)))
+            .thenAnswer(invocation -> {
+                Object value = invocation.getArgument(0);
+                return value instanceof String text
+                    ? objectMapper.readTree(text) : objectMapper.valueToTree(value);
+            });
         Mockito.doAnswer(invocation -> {
             FormData draft = invocation.getArgument(0);
             draft.setId(100L);
@@ -128,6 +143,19 @@ class MobileDraftServiceTest {
         Mockito.verify(formDataMapper).selectList(captor.capture());
         assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("CREATED_BY");
         assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("STATUS");
+    }
+
+    @Test
+    void countUsesCurrentUserAndDraftStatus() {
+        Mockito.when(formDataMapper.selectCount(any(QueryWrapper.class))).thenReturn(3L);
+
+        assertThat(service.count(7L)).isEqualTo(3L);
+
+        ArgumentCaptor<QueryWrapper<FormData>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        Mockito.verify(formDataMapper).selectCount(captor.capture());
+        assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("CREATED_BY");
+        assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("STATUS");
+        assertThat(captor.getValue().getParamNameValuePairs()).containsValues(7L, "DRAFT");
     }
 
     @Test

@@ -23,9 +23,9 @@ import {
   Tag,
   theme,
   TreeSelect,
-  Typography,
 } from 'antd';
 import { useEffect, useMemo } from 'react';
+import { createStyles } from 'antd-style';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
@@ -90,6 +90,97 @@ const allSteps = [
   { key: 'process', title: '流程设计' },
   { key: 'publish', title: '预览发布' },
 ];
+
+const useWizardStyles = createStyles(({ token }) => ({
+  propertiesCard: {
+    overflow: 'hidden',
+    borderColor: token.colorBorderSecondary,
+    '& .ant-card-body': { padding: 0 },
+  },
+  propertiesForm: {
+    width: '100%',
+    maxWidth: 1120,
+    margin: '0 auto',
+  },
+  propertiesSection: {
+    padding: '26px 30px',
+    '@media (max-width: 960px)': { padding: '22px 20px' },
+  },
+  dividedSection: { borderTop: `1px solid ${token.colorSplit}` },
+  sectionHeader: {
+    display: 'grid',
+    gridTemplateColumns: '3px minmax(0, 1fr)',
+    gap: 12,
+    marginBottom: 20,
+  },
+  sectionMarker: {
+    width: 3,
+    minHeight: 38,
+    borderRadius: 2,
+    background: token.colorPrimary,
+  },
+  sectionTitle: {
+    margin: 0,
+    color: token.colorText,
+    fontSize: 16,
+    lineHeight: 1.35,
+    fontWeight: 650,
+  },
+  sectionDescription: {
+    display: 'block',
+    marginTop: 4,
+    color: token.colorTextSecondary,
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+  fieldGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '18px 24px',
+    '& .ant-form-item': { minWidth: 0, marginBottom: 0 },
+    '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  },
+  settingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 24,
+    marginTop: 20,
+    padding: '15px 16px',
+    border: `1px solid ${token.colorBorderSecondary}`,
+    borderRadius: token.borderRadiusLG,
+    background: token.colorFillAlter,
+    '@media (max-width: 680px)': { alignItems: 'flex-start', flexDirection: 'column', gap: 12 },
+  },
+  settingCopy: { minWidth: 0 },
+  settingLabel: { display: 'block', color: token.colorText, fontSize: 14, fontWeight: 600 },
+  settingHint: { display: 'block', marginTop: 3, color: token.colorTextSecondary, fontSize: 12 },
+  settingControl: {
+    display: 'flex',
+    flex: '0 0 auto',
+    alignItems: 'center',
+    gap: 10,
+    color: token.colorTextSecondary,
+    fontSize: 12,
+  },
+  grantGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '18px 24px',
+    marginTop: 20,
+    '& .ant-form-item': { minWidth: 0, marginBottom: 0 },
+    '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  },
+  fullWidth: { gridColumn: '1 / -1' },
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+    padding: '20px 30px 26px',
+    borderTop: `1px solid ${token.colorSplit}`,
+    '@media (max-width: 960px)': { padding: '18px 20px 22px' },
+  },
+}));
 
 function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
   if (typeof value !== 'string') return value ?? fallback;
@@ -180,6 +271,7 @@ function stepFromSearch(search: string, steps: typeof allSteps) {
 }
 
 export default function FormManagementWizard() {
+  const { styles } = useWizardStyles();
   const params = useParams();
   const location = useLocation();
   const { initialState } = useModel('@@initialState');
@@ -202,6 +294,7 @@ export default function FormManagementWizard() {
   });
 
   const watchedWorkflowEnabled = Form.useWatch('workflowEnabled', form);
+  const watchedAllCompany = Form.useWatch('allCompany', form);
   const workflowEnabled =
     watchedWorkflowEnabled ?? getWorkflowEnabled(definition?.settings);
   const steps = getSteps(!!workflowEnabled);
@@ -592,8 +685,9 @@ export default function FormManagementWizard() {
   };
 
   const renderBasic = () => (
-    <Card>
+    <Card className={styles.propertiesCard}>
       <Form
+        className={styles.propertiesForm}
         form={form}
         layout="vertical"
         initialValues={{
@@ -602,51 +696,71 @@ export default function FormManagementWizard() {
           workflowEnabled: getWorkflowEnabled(definition?.settings),
         }}
       >
-        <Form.Item
-          label="表单名称"
-          name="name"
-          rules={[{ required: true, message: '请输入表单名称' }]}
-        >
-          <Input placeholder="例如：请假申请" />
-        </Form.Item>
-        <Form.Item
-          label="表单编码"
-          name="code"
-          rules={[{ required: true, message: '请输入表单编码' }]}
-        >
-          <Input disabled={!!formId} placeholder="例如：leave_request" />
-        </Form.Item>
-        <Form.Item
-          label="是否启用审批流程"
-          name="workflowEnabled"
-          valuePropName="checked"
-        >
-          <Switch onChange={handleWorkflowEnabledChange} />
-        </Form.Item>
-        {canManageGrants && (
-          <div
-            style={{
-              borderTop: `1px solid ${token.colorBorderSecondary}`,
-              marginBottom: 16,
-              marginTop: 8,
-              paddingTop: 20,
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>表单可见范围</div>
-            <Typography.Text type="secondary">
-              全公司、部门、角色和指定人员取并集；部门授权自动包含所有下级部门。
-            </Typography.Text>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                gap: 16,
-              }}
+        <section className={styles.propertiesSection}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionMarker} aria-hidden="true" />
+            <div>
+              <h2 className={styles.sectionTitle}>基础信息</h2>
+              <span className={styles.sectionDescription}>维护表单名称、唯一编码和提交后的处理方式。</span>
+            </div>
+          </div>
+          <div className={styles.fieldGrid}>
+            <Form.Item
+              label="表单名称"
+              name="name"
+              rules={[{ required: true, message: '请输入表单名称' }]}
             >
+              <Input placeholder="例如：请假申请" />
+            </Form.Item>
+            <Form.Item
+              label="表单编码"
+              name="code"
+              rules={[{ required: true, message: '请输入表单编码' }]}
+            >
+              <Input disabled={!!formId} placeholder="例如：leave_request" />
+            </Form.Item>
+          </div>
+          <div className={styles.settingRow}>
+            <div className={styles.settingCopy}>
+              <span className={styles.settingLabel}>审批流程</span>
+              <span className={styles.settingHint}>启用后，表单提交将进入已配置的审批流程。</span>
+            </div>
+            <div className={styles.settingControl}>
+              <span>{workflowEnabled ? '已启用' : '未启用'}</span>
+              <Form.Item name="workflowEnabled" valuePropName="checked" noStyle>
+                <Switch aria-label="是否启用审批流程" onChange={handleWorkflowEnabledChange} />
+              </Form.Item>
+            </div>
+          </div>
+        </section>
+        {canManageGrants && (
+          <section className={`${styles.propertiesSection} ${styles.dividedSection}`}>
+            <div className={styles.sectionHeader}>
+              <span className={styles.sectionMarker} aria-hidden="true" />
+              <div>
+                <h2 className={styles.sectionTitle}>表单可见范围</h2>
+                <span className={styles.sectionDescription}>全公司、部门、角色和指定人员取并集；部门授权包含所有下级部门。</span>
+              </div>
+            </div>
+            {isAdmin && (
+              <div className={styles.settingRow} style={{ marginTop: 0 }}>
+                <div className={styles.settingCopy}>
+                  <span className={styles.settingLabel}>全公司可见</span>
+                  <span className={styles.settingHint}>允许所有有效成员查看并发起此表单。</span>
+                </div>
+                <div className={styles.settingControl}>
+                  <span>{!allCompanyRoleId ? '不可用' : watchedAllCompany ? '已启用' : '未启用'}</span>
+                  <Form.Item name="allCompany" valuePropName="checked" noStyle>
+                    <Switch aria-label="全公司可见" disabled={!allCompanyRoleId} />
+                  </Form.Item>
+                </div>
+              </div>
+            )}
+            <div className={styles.grantGrid}>
               <Form.Item
+                className={styles.fullWidth}
                 label="指定人员"
                 name="userIds"
-                style={{ marginBottom: 0 }}
               >
                 <FormGrantUserPicker
                   users={initialGrantUsers}
@@ -659,34 +773,36 @@ export default function FormManagementWizard() {
                 />
               </Form.Item>
               {isAdmin && (
-                <>
-                  <Form.Item label="全公司" style={{ marginBottom: 0 }}>
-                    <Form.Item name="allCompany" valuePropName="checked" noStyle>
-                      <Switch disabled={!allCompanyRoleId}
-                        checkedChildren="全公司可见" unCheckedChildren="未启用" />
-                    </Form.Item>
-                  </Form.Item>
-                  <Form.Item label="指定角色" name="roleIds" style={{ marginBottom: 0 }}>
-                    <Select mode="multiple" maxTagCount="responsive"
-                      showSearch={{ optionFilterProp: 'label' }}
-                      options={(grantCandidates?.roles ?? []).filter((role) => role.code !== 'user').map((role) => ({
-                        value: role.id, label: `${role.name} · ${role.code}`,
-                      }))} />
-                  </Form.Item>
-                </>
+                <Form.Item label="指定角色" name="roleIds">
+                  <Select mode="multiple" maxTagCount="responsive"
+                    showSearch={{ optionFilterProp: 'label' }}
+                    placeholder="选择可查看表单的角色"
+                    options={(grantCandidates?.roles ?? []).filter((role) => role.code !== 'user').map((role) => ({
+                      value: role.id, label: `${role.name} · ${role.code}`,
+                    }))} />
+                </Form.Item>
               )}
-              <Form.Item label="部门及下级部门" name="departmentIds" style={{ marginBottom: 0 }}>
+              <Form.Item label="部门及下级部门" name="departmentIds">
                 <TreeSelect treeCheckable treeCheckStrictly={false} showCheckedStrategy={TreeSelect.SHOW_PARENT}
                   maxTagCount="responsive" allowClear treeDefaultExpandAll
                   treeData={grantDepartmentTree(grantCandidates?.departments ?? [])}
                   placeholder="选择部门后自动包含其下级部门" />
               </Form.Item>
             </div>
-          </div>
+          </section>
         )}
-        <BusinessNumberEditor fields={processFormFields} />
+        <section className={`${styles.propertiesSection} ${styles.dividedSection}`}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionMarker} aria-hidden="true" />
+            <div>
+              <h2 className={styles.sectionTitle}>业务单号</h2>
+              <span className={styles.sectionDescription}>使用默认编号，或按业务需要组合专属流水号。</span>
+            </div>
+          </div>
+          <BusinessNumberEditor fields={processFormFields} />
+        </section>
       </Form>
-      <Space>
+      <div className={styles.actions}>
         <Button
           type="primary"
           loading={saveBasic.isPending}
@@ -697,7 +813,7 @@ export default function FormManagementWizard() {
         <Button onClick={() => history.push('/approval/forms')}>
           返回列表
         </Button>
-      </Space>
+      </div>
     </Card>
   );
 

@@ -34,6 +34,7 @@ function renderLogin(initialPath: string) {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/workbench" element={<div>工作台目标页</div>} />
+            <Route path="/tasks" element={<div>待办目标页</div>} />
           </Routes>
         </MemoryRouter>
       </AppProviders>
@@ -48,6 +49,79 @@ afterEach(() => {
 });
 
 describe('LoginPage', () => {
+  it('restores a valid cookie session and opens the safe return URL', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return jsonResponse(200, { accessToken: 'restored', user: SAMPLE_USER });
+      }
+      if (url.includes('/api/public/auth/providers')) return jsonResponse(200, []);
+      if (url.includes('/api/public/auth/wecom/status')) return jsonResponse(200, { oauthEnabled: false });
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderLogin('/login?returnUrl=%2Ftasks%3Fview%3Dpending');
+
+    expect(await screen.findByText('待办目标页')).toBeInTheDocument();
+    expect(useAuthStore.getState().status).toBe('authenticated');
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/authorize'))).toBe(false);
+  });
+
+  it('shows WeCom login without starting authorization before the user clicks it', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/public/auth/providers')) return jsonResponse(200, []);
+      if (url.includes('/api/public/auth/wecom/status')) return jsonResponse(200, { oauthEnabled: true });
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+
+    renderLogin('/login?returnUrl=https%3A%2F%2Fevil.example');
+
+    const wecomLogin = await screen.findByRole('button', { name: '企业微信登录' });
+    expect(assign).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/authorize'))).toBe(false);
+
+    await user.click(wecomLogin);
+
+    expect(assign).toHaveBeenCalledWith(
+      '/api/public/auth/wecom/authorize?returnUrl=%2Fworkbench',
+    );
+  });
+
+  it('keeps the WeCom entry visible but disabled when OAuth is not enabled', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/public/auth/providers')) return jsonResponse(200, []);
+      if (url.includes('/api/public/auth/wecom/status')) return jsonResponse(200, { oauthEnabled: false });
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderLogin('/login');
+
+    expect(await screen.findByRole('button', { name: '企业微信登录' })).toBeDisabled();
+    expect(screen.getByText('企业微信登录未启用，请联系管理员')).toBeInTheDocument();
+  });
+
+  it('explains when the WeCom status cannot be loaded', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/public/auth/providers')) return jsonResponse(200, []);
+      if (url.includes('/api/public/auth/wecom/status')) throw new Error('network unavailable');
+      return jsonResponse(401, { code: 'UNAUTHORIZED', message: 'no session' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderLogin('/login');
+
+    expect(await screen.findByRole('button', { name: '企业微信登录' })).toBeDisabled();
+    expect(screen.getByText('企业微信登录暂不可用，请稍后重试')).toBeInTheDocument();
+  });
+
   it('uses brand title from BrandProvider and sets autocomplete attributes', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

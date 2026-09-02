@@ -4,6 +4,7 @@ import { usePlatformAdapter } from '../../../shared/platform/PlatformProvider';
 import type { PlatformLocation } from '../../../shared/platform/PlatformAdapter';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
+import { NativeActionContent } from './NativeActionContent';
 
 export function LocationField(props: MobileFieldProps) {
   const platform = usePlatformAdapter();
@@ -18,12 +19,20 @@ export function LocationField(props: MobileFieldProps) {
   return (
     <FieldShell node={props.node} label={label} required={isRequired(props.node)} error={localError || fieldError(props)}>
       {location ? <div className="af-location-value"><EnvironmentOutline /><span><strong>{summary}</strong><small>{location.coordinateSystem ?? '坐标系未知'}{location.accuracy ? ` · 精度约 ${Math.round(location.accuracy)} 米` : ''}</small></span></div> : null}
-      <button type="button" className="btn btn--secondary btn--block" disabled={locating} onClick={() => {
-        setLocalError(''); setLocating(true);
-        void currentLocation(platform.getLocation).then((value) => props.onValueChange(props.node.id, value))
-          .catch((error) => setLocalError(error instanceof Error ? error.message : '定位失败'))
-          .finally(() => setLocating(false));
-      }}><EnvironmentOutline /> {locating ? '定位中...' : location ? '重新定位' : '获取当前位置'}</button>
+      <div className="upload-control af-upload-control">
+        <button type="button" className="upload-trigger upload-trigger--platform" disabled={locating} onClick={() => {
+          setLocalError(''); setLocating(true);
+          void currentLocation(platform.getLocation).then((value) => props.onValueChange(props.node.id, value))
+            .catch((error) => setLocalError(error instanceof Error ? error.message : '定位失败'))
+            .finally(() => setLocating(false));
+        }}>
+          <NativeActionContent
+            icon={<EnvironmentOutline aria-hidden="true" />}
+            title={locating ? '定位中…' : location ? '重新定位' : '获取当前位置'}
+            hint={location ? '更新当前经纬度和定位精度' : '获取当前经纬度并保存到表单'}
+          />
+        </button>
+      </div>
       {location ? <div className="af-location-actions">
         <button type="button" className="af-link-button" onClick={() => void platform.openLocation?.(location)}>在地图中打开</button>
         <button type="button" className="af-link-button" onClick={() => props.onValueChange(props.node.id, undefined)}>清除位置</button>

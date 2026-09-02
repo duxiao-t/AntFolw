@@ -22,7 +22,6 @@ export type PlatformAudio = {
 
 export interface PlatformAdapter {
   readonly kind: 'browser' | 'wecom';
-  trySilentLogin(): Promise<null>;
   chooseImages?(maxCount: number, source?: 'camera' | 'album' | 'both'): Promise<MobileFile[]>;
   recordAudio?(): Promise<PlatformAudio>;
   startAudioRecording?(): Promise<void>;

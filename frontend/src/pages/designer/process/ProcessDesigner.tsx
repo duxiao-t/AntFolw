@@ -233,7 +233,9 @@ export function ProcessDesignerSurface({
         title={selected?.name}
         destroyOnHidden
       >
-        {selected?.type === 'ROOT' && <RootNodeConfig node={selected} />}
+        {selected?.type === 'ROOT' && (
+          <RootNodeConfig node={selected} formFields={formFields} />
+        )}
         {selected?.type === 'APPROVAL' && (
           <ApprovalNodeConfig
             node={selected}

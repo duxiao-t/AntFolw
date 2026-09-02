@@ -6,6 +6,8 @@ import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
 import { ReadonlyMediaList } from '../components/MediaPreview';
 import { usePlatformAdapter } from '../../../shared/platform/PlatformProvider';
+import { createClientId } from '../../../shared/clientId';
+import { NativeActionContent } from './NativeActionContent';
 
 export type UploadItem = {
   localId: string;
@@ -243,7 +245,7 @@ export function FileUploadField(props: MobileFieldProps) {
             })}
           </div>
           {previewImages && platform.chooseImages ? (
-            <button type="button" className="upload-trigger" onClick={() => {
+            <button type="button" className="upload-trigger upload-trigger--platform" onClick={() => {
               setLocalError(null);
               const remaining = Math.max(1, (maxCount ?? 20) - readyFiles(itemsRef.current).length);
               const configuredSource = props.node.props?.source;
@@ -261,8 +263,11 @@ export function FileUploadField(props: MobileFieldProps) {
                 commitItems(nextItems);
               }).catch((error) => setLocalError(error instanceof Error ? error.message : '选择图片失败'));
             }}>
-              <UploadOutline aria-hidden="true" />
-              <span><strong>{addLabel}</strong><small>从相册选择或拍照</small></span>
+              <NativeActionContent
+                icon={<UploadOutline aria-hidden="true" />}
+                title={addLabel}
+                hint="从相册选择或拍照"
+              />
             </button>
           ) : <label className="upload-trigger">
             <input
@@ -280,11 +285,11 @@ export function FileUploadField(props: MobileFieldProps) {
                 }
               }}
             />
-            <UploadOutline aria-hidden="true" />
-            <span>
-              <strong>{addLabel}</strong>
-              <small>{uploadHint(accept, multiple)}</small>
-            </span>
+            <NativeActionContent
+              icon={<UploadOutline aria-hidden="true" />}
+              title={addLabel}
+              hint={uploadHint(accept, multiple)}
+            />
           </label>}
         </div>
       )}
@@ -651,9 +656,7 @@ function wait(ms: number) {
 }
 
 function createLocalId() {
-  return typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return createClientId('local');
 }
 
 function defaultMaxCount(node: MobileSchemaNode): number | undefined {

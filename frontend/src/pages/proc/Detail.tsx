@@ -18,6 +18,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
 import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
+import {
+  ApprovalCommentEditor,
+  fetchApprovalCommentPresets,
+} from '../../components/ApprovalCommentEditor';
 import type { FieldMode } from '../../registry/types';
 import { pickEditableValues } from './fieldPermissions';
 
@@ -117,6 +121,8 @@ export default function DetailPage() {
     { taskId: number; targetNodeId: string | null } | null
   >(null);
   const [rejectComment, setRejectComment] = useState('');
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [approveComment, setApproveComment] = useState('');
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideAction, setOverrideAction] = useState<'APPROVE' | 'REJECT'>('APPROVE');
@@ -181,6 +187,16 @@ export default function DetailPage() {
     return modes;
   }, [snapshotObj, myPending]);
   const hasEditableFields = Object.values(currentFormModes).includes('runtime-fill');
+  const presetTaskId = approveOpen ? myPending?.id : rejectFor?.taskId;
+  const presetsQuery = useQuery({
+    queryKey: ['task-comment-presets', presetTaskId],
+    queryFn: () => {
+      if (presetTaskId == null) throw new Error('请选择审批任务');
+      return fetchApprovalCommentPresets(presetTaskId);
+    },
+    enabled: presetTaskId != null,
+    retry: 0,
+  });
 
   if (isFetching || !data) return <Spin />;
   const { instance, tasks, history: historyRows } = data as any;
@@ -194,17 +210,34 @@ export default function DetailPage() {
   const isRework = instance.currentNodeId === '__rework__';
   const rejectTargets = snapshotObj ? findApproverNodes(snapshotObj) : [];
   const pendingTask = (tasks ?? []).find((task: any) => task.status === 'PENDING' && task.taskType !== 'REWORK');
+  const rejectTask = rejectFor
+    ? (tasks ?? []).find((task: any) => task.id === rejectFor.taskId)
+    : undefined;
+  const fixedRejectTarget = ['AND', 'ALL', 'RATIO'].includes(
+    rejectTask?.approvalMode,
+  );
   const fullVisibility = (data as any).visibility !== 'SUMMARY';
 
   async function doApprove(taskId: number) {
     try {
       await request(`/api/tasks/${taskId}/approve`, {
         method: 'POST',
-        data: hasEditableFields
-          ? pickEditableValues(editableValues, currentFormModes, formSchema)
-          : {},
+        data: {
+          comment: approveComment.trim() || undefined,
+          ...(hasEditableFields
+            ? {
+                data: pickEditableValues(
+                  editableValues,
+                  currentFormModes,
+                  formSchema,
+                ),
+              }
+            : {}),
+        },
       });
       message.success('已同意');
+      setApproveOpen(false);
+      setApproveComment('');
       qc.invalidateQueries({ queryKey: ['instance', id] });
     } catch (e: any) {
       message.error(e?.message ?? '操作失败');
@@ -213,21 +246,22 @@ export default function DetailPage() {
 
   async function doReject() {
     if (!rejectFor) return;
+    const comment = rejectComment.trim();
+    if (!comment) {
+      message.error('请填写驳回原因');
+      return;
+    }
     try {
       await request(`/api/tasks/${rejectFor.taskId}/reject`, {
         method: 'POST',
         data: {
-          comment: rejectComment,
-          ...(rejectFor.targetNodeId
+          comment,
+          ...(!fixedRejectTarget && rejectFor.targetNodeId
             ? { rejectToNodeId: rejectFor.targetNodeId }
             : {}),
         },
       });
-      message.success(
-        rejectFor.targetNodeId
-          ? `已驳回到 ${rejectFor.targetNodeId}`
-          : '已驳回，流程结束',
-      );
+      message.success('已提交驳回意见');
       setRejectFor(null);
       setRejectComment('');
       qc.invalidateQueries({ queryKey: ['instance', id] });
@@ -304,7 +338,10 @@ export default function DetailPage() {
               {canApprove && (
               <Button
                 type="primary"
-                onClick={() => doApprove(myPending.id)}
+                onClick={() => {
+                  setApproveComment('');
+                  setApproveOpen(true);
+                }}
               >
                 同意
               </Button>
@@ -527,6 +564,21 @@ export default function DetailPage() {
       )}
 
       <Modal
+        title="同意审批"
+        open={approveOpen}
+        onCancel={() => setApproveOpen(false)}
+        onOk={() => myPending && doApprove(myPending.id)}
+        okText="确认同意"
+      >
+        <ApprovalCommentEditor
+          action="approve"
+          presets={presetsQuery.data}
+          value={approveComment}
+          onChange={setApproveComment}
+        />
+      </Modal>
+
+      <Modal
         title="驳回"
         open={!!rejectFor}
         onCancel={() => setRejectFor(null)}
@@ -534,37 +586,40 @@ export default function DetailPage() {
         okText="确定驳回"
         okButtonProps={{ danger: true }}
       >
-        <div style={{ marginBottom: 12 }}>
-          <div>驳回到</div>
-          <Select
-            style={{ width: '100%' }}
-            value={rejectFor?.targetNodeId ?? '__END__'}
-            onChange={(v) =>
-              setRejectFor(
-                rejectFor
-                  ? {
-                      ...rejectFor,
-                      targetNodeId: v === '__END__' ? null : v,
-                    }
-                  : null,
-              )
-            }
-            options={[
-              { value: '__END__', label: '结束流程（驳回=终止）' },
-              ...rejectTargets.map((t: any) => ({
-                value: t.id,
-                label: `${t.name} (${t.id})`,
-              })),
-            ]}
-          />
-        </div>
+        {!fixedRejectTarget && (
+          <div style={{ marginBottom: 12 }}>
+            <div>驳回到</div>
+            <Select
+              style={{ width: '100%' }}
+              value={rejectFor?.targetNodeId ?? '__END__'}
+              onChange={(v) =>
+                setRejectFor(
+                  rejectFor
+                    ? {
+                        ...rejectFor,
+                        targetNodeId: v === '__END__' ? null : v,
+                      }
+                    : null,
+                )
+              }
+              options={[
+                { value: '__END__', label: '结束流程（驳回=终止）' },
+                ...rejectTargets.map((t: any) => ({
+                  value: t.id,
+                  label: `${t.name} (${t.id})`,
+                })),
+              ]}
+            />
+          </div>
+        )}
         <div>
           <div>意见</div>
-          <Input.TextArea
+          <ApprovalCommentEditor
+            action="reject"
+            presets={presetsQuery.data}
             rows={3}
             value={rejectComment}
-            onChange={(e) => setRejectComment(e.target.value)}
-            placeholder="请说明驳回原因"
+            onChange={setRejectComment}
           />
         </div>
       </Modal>

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
+import { createClientId } from "../../shared/clientId";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
@@ -79,7 +80,7 @@ function normalizeValues(data?: Record<string, unknown> | null): MobileFormValue
 function statusLabel(status: string) { return ({ RUNNING: "审批中", APPROVED: "已通过", REJECTED: "已驳回", WITHDRAWN: "已撤回" } as Record<string, string>)[status] ?? status; }
 function formatDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false }); }
 function fallbackApprovalSummary(flowedCount: number) { return { flowedCount, completedCount: flowedCount, processingCount: 0, complete: false }; }
-function createIdempotencyKey() { return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `withdraw-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function createIdempotencyKey() { return createClientId("withdraw"); }
 function avatarText(name?: string | null) { return name?.trim().slice(0, 1) || "—"; }
 function shareProcess(title: string) { if (typeof navigator.share === "function") void navigator.share({ title, url: window.location.href }).catch(() => undefined); }
 function ShareIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" /></svg>; }

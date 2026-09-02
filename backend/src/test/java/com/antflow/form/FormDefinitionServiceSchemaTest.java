@@ -2,6 +2,7 @@ package com.antflow.form;
 
 import com.antflow.authz.FormGrantService;
 import com.antflow.engine.BizException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -363,6 +364,68 @@ class FormDefinitionServiceSchemaTest {
         assertThat(service.filterVisibleSubmission(schema, Map.of(
             "level1", "hide", "level2", "show", "level3", "保留值")))
             .containsExactly(Map.entry("level1", "hide"));
+    }
+
+    @Test void starterPermissionsCanonicalizeDraftAndSubmission() {
+        String schema = """
+            [{"id":"subject","type":"text","label":"主题","props":{"required":true}},
+             {"id":"department","type":"text","label":"部门","props":{
+               "required":true,"defaultValue":"研发部"}},
+             {"id":"secret","type":"text","label":"内部字段","props":{"required":true}}]
+            """;
+        String process = """
+            {"id":"root","type":"ROOT","props":{"formPerms":[
+              {"fieldId":"department","mode":"READONLY"},
+              {"fieldId":"secret","mode":"HIDDEN"}]}}
+            """;
+
+        assertThat(service.canonicalizeStarterData(schema, Map.of(), process))
+            .containsExactly(Map.entry("department", "研发部"));
+        assertThatThrownBy(() -> service.canonicalizeStarterSubmission(
+            schema, Map.of(), process))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("主题");
+
+        Map<String, Object> submitted = service.canonicalizeStarterSubmission(schema,
+            Map.of("subject", "采购申请", "department", "篡改部门", "secret", "篡改内容"),
+            process);
+        assertThat(submitted).containsExactly(
+            Map.entry("subject", "采购申请"), Map.entry("department", "研发部"));
+    }
+
+    @Test void starterPermissionsApplyInsideTableRowsAndPreserveRestrictedReworkValues()
+            throws Exception {
+        String schema = """
+            [{"id":"lines","type":"table_list","label":"采购明细","props":{"minRows":1},
+              "children":[
+                {"id":"item","type":"text","label":"物品","props":{"required":true}},
+                {"id":"approvedPrice","type":"number","label":"核定价"},
+                {"id":"internalNote","type":"text","label":"内部备注"}]}]
+            """;
+        String process = """
+            {"id":"root","type":"ROOT","props":{"formPerms":[
+              {"fieldId":"approvedPrice","mode":"READONLY"},
+              {"fieldId":"internalNote","mode":"HIDDEN"}]}}
+            """;
+        Map<String, Object> incoming = Map.of("lines", List.of(Map.of(
+            "item", "显示器", "approvedPrice", 1, "internalNote", "篡改")));
+        Map<String, Object> existing = Map.of("lines", List.of(Map.of(
+            "item", "旧物品", "approvedPrice", 2600, "internalNote", "审批人备注")));
+
+        Map<String, Object> revised = service.canonicalizeStarterRevision(
+            schema, incoming, existing, process);
+        JsonNode revisedJson = json.valueToTree(revised);
+        assertThat(revisedJson.at("/lines/0/item").asText()).isEqualTo("显示器");
+        assertThat(revisedJson.at("/lines/0/approvedPrice").asInt()).isEqualTo(2600);
+        assertThat(revisedJson.at("/lines/0/internalNote").asText()).isEqualTo("审批人备注");
+        assertThatCode(() -> service.validateStarterSubmission(schema, revised, process))
+            .doesNotThrowAnyException();
+
+        JsonNode projectedSchema = service.projectStarterSchema(schema, process);
+        JsonNode projectedData = service.projectStarterData(revised, schema, process);
+        assertThat(projectedSchema.at("/0/children")).hasSize(2);
+        assertThat(projectedData.at("/lines/0/internalNote").isMissingNode()).isTrue();
+        assertThat(projectedData.at("/lines/0/approvedPrice").asInt()).isEqualTo(2600);
     }
 
     private String matrixSchema(String cellType, String extraProps) {

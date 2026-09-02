@@ -7,6 +7,7 @@ import { useAuthStore } from '../auth/auth.store';
 import type { MobileUser } from '../../shared/api/types';
 import { writeRecoveryDraft } from './recoveryDraft.store';
 import { FormFillPage } from './FormFillPage';
+import { queryKeys } from '../../shared/api/queryKeys';
 
 const AUTH_USER: MobileUser = {
   id: 7,
@@ -42,6 +43,17 @@ function setupFetch() {
           formVersion: 3,
           data: { start: '2026-07-30', end: '2026-07-31' },
           updatedAt: '2026-07-21T03:00:00+08:00',
+          readOnly: false,
+        });
+      }
+      if (url.includes('/api/mobile/drafts/102') && init?.method !== 'PUT') {
+        return jsonResponse({
+          id: 102,
+          formCode: 'leave',
+          formName: '请假申请',
+          formVersion: 3,
+          data: { start: '2026-07-30', end: '2026-07-31', reason: '回家探亲' },
+          updatedAt: '2026-07-21T03:05:00+08:00',
           readOnly: false,
         });
       }
@@ -82,11 +94,12 @@ function renderForm(initialPath = '/forms/leave') {
     ],
     { initialEntries: [initialPath] },
   );
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { ...view, queryClient, router };
 }
 
 function inputByLabel(label: string) {
@@ -110,7 +123,9 @@ beforeEach(() => {
 
 describe('FormFillPage', () => {
   it('loads a form, validates required fields and creates a server draft', async () => {
-    renderForm();
+    const { queryClient, router } = renderForm();
+    queryClient.setQueryData(queryKeys.drafts, []);
+    queryClient.setQueryData(queryKeys.bootstrap, { draftCount: 0 });
 
     const startInput = await screen.findByLabelText('开始时间');
     await userEvent.click(screen.getByRole('button', { name: '提交' }));
@@ -130,7 +145,43 @@ describe('FormFillPage', () => {
         && String((init as RequestInit).body).includes('回家探亲'),
       )).toBe(true);
     });
-    expect(screen.getByText((text) => text.includes('草稿已保存'))).toBeInTheDocument();
+    expect(await screen.findByText((text) => text.includes('草稿已保存'))).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.search).toBe('?draftId=102'));
+    expect(queryClient.getQueryState(queryKeys.drafts)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(queryKeys.bootstrap)?.isInvalidated).toBe(true);
+  });
+
+  it('renders initiator editable, readonly and hidden field permissions', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/mobile/forms/leave')) {
+        return jsonResponse({
+          code: 'leave',
+          name: '采购申请',
+          version: 1,
+          schema: [
+            { id: 'subject', type: 'text', label: '主题' },
+            { id: 'department', type: 'text', label: '部门', props: { defaultValue: '研发部' } },
+            { id: 'secret', type: 'text', label: '内部字段' },
+          ],
+          starterFieldModes: {
+            department: 'READONLY',
+            secret: 'HIDDEN',
+          },
+        });
+      }
+      if (url.includes('/api/mobile/drafts') && init?.method === 'POST') {
+        return jsonResponse(102);
+      }
+      return jsonResponse({});
+    });
+
+    renderForm();
+
+    expect(await screen.findByLabelText('主题')).toBeInTheDocument();
+    expect(screen.getByText('研发部')).toBeInTheDocument();
+    expect(screen.queryByLabelText('部门')).not.toBeInTheDocument();
+    expect(screen.queryByText('内部字段')).not.toBeInTheDocument();
   });
 
   it('loads an existing draft into the form values', async () => {

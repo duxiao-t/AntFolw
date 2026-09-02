@@ -1,6 +1,8 @@
 package com.antflow.process;
 
 import com.antflow.engine.BizException;
+import com.antflow.form.FormDefinition;
+import com.antflow.form.FormDefinitionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +29,17 @@ class ProcessDefinitionServiceValidationTest {
 
     private final ProcessDefinitionService service =
         new ProcessDefinitionService(null, null, new ObjectMapper());
+
+    @Test void validate_rejects_sequential_approval_mode_for_new_definitions() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF","mode":"SEQUENTIAL"},"children":null}}
+            """;
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("多人审批方式无效");
+    }
 
     @Test void normalize_condition_keeps_numeric_option_value() throws Exception {
         String normalized = service.normalizeConditionValues(
@@ -440,6 +453,71 @@ class ProcessDefinitionServiceValidationTest {
 
         assertThat(result.getStatus()).isEqualTo("DRAFT");
         verify(mapper).updateById(published);
+    }
+
+    @Test void validatesAndReadsApprovalCommentPresets() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF","commentPresets":{
+                "approve":[" 同意 ","资料齐全"],"reject":["请补充附件"]}}}}
+            """;
+
+        assertThatCode(() -> service.validateProcessTree(tree))
+            .doesNotThrowAnyException();
+        ApprovalCommentPresets presets = service.commentPresets(tree, "a1");
+        assertThat(presets.approve()).containsExactly("同意", "资料齐全");
+        assertThat(presets.reject()).containsExactly("请补充附件");
+
+        String duplicate = tree.replace("[\" 同意 \",\"资料齐全\"]",
+            "[\"同意\",\" 同意 \"]");
+        assertThatThrownBy(() -> service.validateProcessTree(duplicate))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不能重复");
+    }
+
+    @Test void rejectsMoreThanTenApprovalCommentPresets() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF","commentPresets":{"approve":[
+                "1","2","3","4","5","6","7","8","9","10","11"]}}}}
+            """;
+
+        assertThatThrownBy(() -> service.validateProcessTree(tree))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("最多 10 条");
+    }
+
+    @Test void publishRejectsRequiredReadonlyStarterFieldWithoutDefault() {
+        ProcessDefinitionMapper mapper = Mockito.mock(ProcessDefinitionMapper.class);
+        FormDefinitionService formService = Mockito.mock(FormDefinitionService.class);
+        ProcessDefinitionService publishService =
+            new ProcessDefinitionService(mapper, formService, new ObjectMapper());
+        FormDefinition form = new FormDefinition();
+        form.setId(7L);
+        form.setStatus("PUBLISHED");
+        form.setSchema("""
+            [{"id":"subject","type":"text","props":{"required":true}}]
+            """);
+        ProcessDefinition draft = new ProcessDefinition();
+        draft.setId(12L);
+        draft.setFormDefId(7L);
+        draft.setVersion(1);
+        draft.setStatus("DRAFT");
+        draft.setProcess("""
+            {"id":"root","type":"ROOT","props":{"formPerms":[
+              {"fieldId":"subject","mode":"READONLY"}]},
+             "children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF"}}}
+            """);
+        when(mapper.selectById(12L)).thenReturn(draft);
+        when(formService.getById(7L)).thenReturn(form);
+        when(formService.leafFieldTypes(form.getSchema()))
+            .thenReturn(Map.of("subject", "text"));
+
+        assertThatThrownBy(() -> publishService.publish(12L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("只读必填字段 subject")
+            .hasMessageContaining("默认值");
     }
 
     private static String conditionalTree(String value) {

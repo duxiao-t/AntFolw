@@ -66,6 +66,10 @@ const TASK_DETAIL: MobileTaskDetail = {
   allowedActions: ['APPROVE', 'REJECT'],
   rejectDisabled: false,
   rejectTargets: [{ nodeId: 'root', name: '发起人' }],
+  commentPresets: {
+    approve: ['资料齐全'],
+    reject: ['请补充附件'],
+  },
   files: [
     {
       id: 'd2cecb38-11a8-4d2e-9f43-96ce6f4a7e60',
@@ -401,6 +405,18 @@ describe('TaskDetailPage', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '确认驳回' }));
 
     expect(await screen.findByRole('heading', { name: '需要你处理的审批' })).toBeInTheDocument();
+  });
+
+  it('replaces the approval comment with a preset and keeps it editable', async () => {
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: '同意' }));
+    const dialog = await screen.findByRole('dialog', { name: '同意审批' });
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '资料齐全' }));
+    const textarea = within(dialog).getByPlaceholderText('请输入审批意见');
+    expect(textarea).toHaveValue('资料齐全');
+    await userEvent.type(textarea, '，同意');
+    expect(textarea).toHaveValue('资料齐全，同意');
   });
 
   it('handles 409 by showing notice and refetching readonly state', async () => {

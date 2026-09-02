@@ -22,6 +22,7 @@ import {
   OfflineBanner,
   VersionDropdown,
 } from '@/components';
+import { WorkflowEventsSubscriber } from '@/components/WorkflowEventsSubscriber';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -193,6 +194,7 @@ export const layout: RunTimeLayoutConfig = ({
       return (
         <>
           <AuthzRefresh />
+          <WorkflowEventsSubscriber enabled={!!initialState?.currentUser} />
           {children}
           <SettingDrawer
             disableUrlParams

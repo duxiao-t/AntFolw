@@ -1,5 +1,6 @@
 import type { MobileFile } from '../api/types';
 import { apiRequest } from '../api/http';
+import { createClientId } from '../clientId';
 import type { PlatformAdapter, PlatformAudio, PlatformLocation } from './PlatformAdapter';
 import { browserAdapter } from './BrowserAdapter';
 
@@ -93,7 +94,7 @@ function failure(reject: (error: Error) => void) {
 async function importMedia(serverId: string, mediaType: string): Promise<MobileFile> {
   return apiRequest<MobileFile>('/api/mobile/wecom/media/import', {
     method: 'POST',
-    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    headers: { 'Idempotency-Key': createClientId('wecom-media') },
     body: JSON.stringify({ serverId, mediaType }),
   });
 }
@@ -196,11 +197,6 @@ function uploadVoice(current: NonNullable<typeof voiceRecording>): Promise<Platf
 
 export const wecomAdapter: PlatformAdapter = {
   kind: 'wecom',
-  async trySilentLogin() {
-    const returnUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(returnUrl)}`);
-    return null;
-  },
   chooseImages,
   recordAudio,
   startAudioRecording,

@@ -370,6 +370,7 @@ body {
 .searchbar input::placeholder { color: var(--af-color-muted); }
 .chip-row {
   display: flex; gap: 8px; overflow-x: auto; padding: 0 2px;
+  min-width: 0; border: 0;
   scrollbar-width: none; -ms-overflow-style: none;
   margin: 0 0 12px;
 }
@@ -1363,9 +1364,6 @@ body {
 }
 .profile-hero h2 { font-size: 20px; font-weight: 800; margin: 12px 0 2px; }
 .profile-hero small { font-size: 12px; color: var(--af-color-muted); }
-.profile-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
-.profile-stats b { display: block; font-size: 18px; font-weight: 800; color: var(--af-color-primary); }
-.profile-stats span { display: block; font-size: 11px; color: var(--af-color-muted); margin-top: 2px; text-align: center; }
 
 .badge-soft {
   display: inline-flex; align-items: center;
@@ -1471,40 +1469,20 @@ body {
 
 
 /* ─ 33. Login 专用样式 ──────────────────────────── */
-.login { padding: 0 0 32px; }
+.login { padding: 0 0 calc(24px + var(--af-safe-bottom)); }
 .login__hero {
-  position: relative; padding: 8px 22px 40px;
-
-  background:
-    radial-gradient(120% 80% at 80% -10%, rgba(33,166,122,.22), transparent 55%),
-    var(--af-gradient-hero);
+  position: relative;
+  padding: calc(22px + var(--af-safe-top)) 22px 38px;
+  background: var(--af-gradient-hero);
   color: #fff; overflow: hidden;
 }
-.login__eyebrow { font-size: 12px; opacity: .88; letter-spacing: .12em; text-transform: uppercase; }
-.login__title { font-size: var(--af-type-display-xl); font-weight: 800; margin: 6px 0 0; letter-spacing: -.02em; }
-.login__subtitle { font-size: 13px; opacity: .85; margin: 8px 0 0; }
-.login__art {
-  margin: 18px 6px 0; height: 160px; border-radius: 14px;
-  background:
-    radial-gradient(circle at 78% 30%, rgba(255,255,255,.16), transparent 38%),
-    linear-gradient(140deg, rgba(255,255,255,.10), rgba(255,255,255,.02));
-  border: 1px solid rgba(255,255,255,.18);
-  position: relative; overflow: hidden;
-}
-.login__art::before {
-  content: ""; position: absolute; right: 24px; top: 24px; width: 60px; height: 60px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff 0%, #21a67a 60%, #0b57d0 100%);
-  box-shadow: 0 0 38px rgba(33,166,122,.55);
-}
-.login__art::after {
-  content: ""; position: absolute; left: 18px; bottom: 18px; width: 90px; height: 90px; border-radius: 18px;
-  background: linear-gradient(160deg, rgba(255,255,255,.95), rgba(255,255,255,.75));
-  box-shadow: 0 12px 30px rgba(0,0,0,.18);
-  clip-path: polygon(0 30%, 65% 0, 100% 24%, 100% 100%, 0 100%);
-}
+.login__hero::after { content: ""; position: absolute; inset: auto 0 0; height: 3px; background: var(--af-gradient-brand); }
+.login__eyebrow { margin: 0; font-size: 11px; font-weight: 700; opacity: .84; letter-spacing: .1em; text-transform: uppercase; }
+.login__title { margin: 8px 0 0; font-size: 30px; font-weight: 800; letter-spacing: 0; line-height: 1.18; }
+.login__subtitle { margin: 7px 0 0; font-size: 13px; opacity: .85; }
 .login__panel {
   position: relative;
-  margin: 20px 14px 0; padding: 18px;
+  margin: -18px 14px 0; padding: 18px;
   background: var(--af-color-surface); border-radius: var(--af-radius-card-lg);
   box-shadow: var(--af-shadow-card-strong); border: 1px solid var(--af-color-line);
 }
@@ -1520,17 +1498,32 @@ body {
 .login__row a { color: var(--af-color-primary-action); text-decoration: none; }
 .login__row label { display: inline-flex; gap: 6px; align-items: center; }
 .login__error { display: flex; align-items: center; gap: 8px; background: var(--af-color-danger-soft); color: var(--af-color-danger); padding: 8px 12px; border-radius: 10px; font-size: 12px; margin-bottom: 10px; }
-.login__third { margin: 18px 14px 0; text-align: center; }
-.login__third > span { font-size: 11px; color: var(--af-color-muted); letter-spacing: .12em; text-transform: uppercase; }
-.login__socials { display: flex; gap: 14px; justify-content: center; margin-top: 12px; }
-.login__social { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--af-color-line); background: #fff; display: grid; place-items: center; cursor: pointer; }
+.login__third { margin: 16px 14px 0; text-align: center; }
+.login__third > span { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--af-color-muted); }
+.login__third > span::before,
+.login__third > span::after { content: ""; height: 1px; flex: 1; background: var(--af-color-line); }
+.login__socials { display: grid; grid-template-columns: repeat(auto-fit, minmax(142px, 1fr)); gap: 10px; margin-top: 12px; }
+.login__social { min-width: 0; height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--af-color-line); background: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--af-color-text-secondary); cursor: pointer; }
 .login__social svg { width: 20px; height: 20px; }
+.login__social--wecom { color: #117a37; }
+.login__social:disabled { border-color: var(--af-color-line); background: var(--af-color-bg-soft); color: var(--af-color-muted); cursor: not-allowed; opacity: .78; }
 .login__social--oidc { color: var(--af-color-primary); font-weight: 800; }
+.login__social--oidc b { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; background: var(--af-color-primary-soft); }
+.login__third-status { margin: 8px 0 0; color: var(--af-color-muted); font-size: 11px; line-height: 1.45; }
+.login:focus-within .login__hero { padding-top: calc(10px + var(--af-safe-top)); padding-bottom: 28px; }
+.login:focus-within .login__title { margin-top: 3px; font-size: 22px; }
+.login:focus-within .login__subtitle { display: none; }
 
-.af-platform-field-row { display: flex; gap: 8px; align-items: stretch; }
-.af-platform-field-row .af-input { flex: 1; min-width: 0; }
-.af-platform-field-row .btn { flex: 0 0 auto; }
-.af-platform-record { width: 100%; border: 1px dashed var(--af-color-border); background: var(--af-color-surface); }
+@media (max-height: 700px) {
+  .login__hero { padding-top: calc(12px + var(--af-safe-top)); padding-bottom: 28px; }
+  .login__title { margin-top: 4px; font-size: 24px; }
+  .login__subtitle { display: none; }
+  .login__panel { padding-block: 14px; }
+  .login__field { margin-bottom: 10px; }
+}
+
+.af-scan-field { display: grid; gap: 8px; }
+.af-platform-record { width: 100%; }
 .af-location-value { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px 12px; border-radius: var(--af-radius-control); background: var(--af-color-fill); color: var(--af-color-text); }
 .af-location-value > span { display: grid; gap: 2px; min-width: 0; }
 .af-location-value small { color: var(--af-color-muted); font-size: 12px; }
@@ -2742,6 +2735,21 @@ body {
   color: var(--af-color-muted);
   font-size: 9.5px;
   line-height: 1.35;
+}
+.upload-trigger--platform {
+  width: 100%;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.upload-trigger--platform:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+.upload-trigger--platform:focus-visible {
+  outline: 2px solid var(--af-color-primary);
+  outline-offset: -2px;
 }
 
 /* 明细表在移动端按行卡片化，保留列式汇总关系 */

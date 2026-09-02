@@ -33,7 +33,7 @@ test.describe('key pages visual regression', () => {
 
     // 1 login
     await page.goto('/mobile/login');
-    await expect(page.getByRole('heading', { name: 'Hello!' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '移动审批' })).toBeVisible();
     await capture(page, '01-login');
 
     // 2 workbench
@@ -106,7 +106,7 @@ test.describe('key pages visual regression', () => {
 
     // 14 process detail
     await page.goto(`/mobile/processes/${instanceId}`);
-    await expect(page.locator('.app-bar__title')).toHaveText('流程进度');
+    await expect(page.locator('.app-bar__title')).toHaveText('审批详情');
     await capture(page, '14-process-detail');
 
     // 15 done

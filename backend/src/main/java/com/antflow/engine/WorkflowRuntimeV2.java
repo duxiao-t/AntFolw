@@ -284,13 +284,19 @@ public class WorkflowRuntimeV2 {
             Long nextTask = activateNext(task);
             return Decision.waitFor(nextTask == null ? List.of() : List.of(nextTask));
         }
-        int required = "RATIO".equals(mode) ? required(counts.total(), node) : counts.total();
-        boolean passed = "ANY".equals(mode) || "SEQUENTIAL".equals(mode)
-            || ("RATIO".equals(mode) ? counts.approved() >= required : counts.pending() == 0);
-        if (!passed) return Decision.waitFor(List.of());
-        cancelPending(task, "decision completed");
-        completeNode(task.getNodeInstanceId(), "PASSED");
-        return Decision.advanceNode();
+        if ("ANY".equals(mode) || "SEQUENTIAL".equals(mode)) {
+            cancelPending(task, "decision completed");
+            completeNode(task.getNodeInstanceId(), "PASSED");
+            return Decision.advanceNode();
+        }
+        if (counts.pending() > 0 || counts.waiting() > 0) {
+            return Decision.waitFor(List.of());
+        }
+        boolean passed = "RATIO".equals(mode)
+            ? counts.approved() >= required(counts.total(), node)
+            : counts.rejected() == 0;
+        completeNode(task.getNodeInstanceId(), passed ? "PASSED" : "REJECTED");
+        return passed ? Decision.advanceNode() : Decision.rejectNode();
     }
 
     public Decision rejectVote(TaskEntity task, JsonNode node, long operatorId) {
@@ -303,15 +309,18 @@ public class WorkflowRuntimeV2 {
             """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
         Counts counts = counts(task.getNodeInstanceId());
         String mode = mode(node);
-        boolean rejected = switch (mode) {
-            case "ANY" -> counts.pending() == 0 && counts.approved() == 0;
-            case "RATIO" -> counts.approved() + counts.pending() < required(counts.total(), node);
-            default -> true;
-        };
-        if (!rejected) return Decision.waitFor(List.of());
-        cancelPending(task, "node rejected");
-        completeNode(task.getNodeInstanceId(), "REJECTED");
-        return Decision.rejectNode();
+        if ("ANY".equals(mode) || "SEQUENTIAL".equals(mode)) {
+            cancelPending(task, "node rejected");
+            completeNode(task.getNodeInstanceId(), "REJECTED");
+            return Decision.rejectNode();
+        }
+        if (counts.pending() > 0 || counts.waiting() > 0) {
+            return Decision.waitFor(List.of());
+        }
+        boolean passed = "RATIO".equals(mode)
+            && counts.approved() >= required(counts.total(), node);
+        completeNode(task.getNodeInstanceId(), passed ? "PASSED" : "REJECTED");
+        return passed ? Decision.advanceNode() : Decision.rejectNode();
     }
 
     public Decision rejectAdditional(TaskEntity task, long operatorId) {

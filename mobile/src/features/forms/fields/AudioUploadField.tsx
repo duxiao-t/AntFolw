@@ -7,6 +7,7 @@ import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
 import { createFileUploadValue } from './FileUploadField';
 import { AudioAttachmentRow, ReadonlyMediaList } from '../components/MediaPreview';
+import { NativeActionContent } from './NativeActionContent';
 
 export function AudioUploadField(props: MobileFieldProps) {
   const platform = usePlatformAdapter();
@@ -32,34 +33,42 @@ export function AudioUploadField(props: MobileFieldProps) {
   }
   return (
     <FieldShell node={props.node} label={label} required={isRequired(props.node)} error={localError || fieldError(props)}>
-      <div className="af-upload-list">
-        {files.map((file) => (
-          <div className="af-audio-edit-row" key={file.id}>
-            <AudioAttachmentRow file={file} />
-            <button type="button" className="af-link-button" aria-label={`删除 ${file.name}`} onClick={() => {
-              const next = files.filter((item) => item.id !== file.id);
-              props.onValueChange(props.node.id, next);
-              if (createdIds.current.delete(file.id)) void deleteMobileFile(file.id).catch(() => undefined);
-            }}><DeleteOutline /></button>
-          </div>
-        ))}
+      <div className="upload-control af-upload-control">
+        <div className="af-upload-list">
+          {files.map((file) => (
+            <div className="af-audio-edit-row af-upload-list__item" key={file.id}>
+              <AudioAttachmentRow file={file} />
+              <button type="button" className="af-link-button" aria-label={`删除 ${file.name}`} onClick={() => {
+                const next = files.filter((item) => item.id !== file.id);
+                props.onValueChange(props.node.id, next);
+                if (createdIds.current.delete(file.id)) void deleteMobileFile(file.id).catch(() => undefined);
+              }}><DeleteOutline /></button>
+            </div>
+          ))}
+        </div>
+        <button type="button" className="upload-trigger upload-trigger--platform af-platform-record" disabled={uploading || (!recording && files.length >= maxCount)} onClick={() => {
+          setLocalError('');
+          if (recording) {
+            if (timerRef.current) window.clearTimeout(timerRef.current);
+            void finishRecording();
+            return;
+          }
+          if (platform.startAudioRecording && platform.stopAudioRecording) {
+            void platform.startAudioRecording().then(() => {
+              recordingRef.current = true; setRecording(true); setElapsed(0);
+              intervalRef.current = window.setInterval(() => setElapsed((value) => Math.min(maxDuration, value + 1)), 1000);
+              timerRef.current = window.setTimeout(() => void finishRecording(), maxDuration * 1000);
+            }).catch((error) => setLocalError(error instanceof Error ? error.message : '录音失败'));
+            return;
+          }
+        }}>
+          <NativeActionContent
+            icon={<SoundOutline aria-hidden="true" />}
+            title={uploading ? '录音上传中…' : recording ? `停止并上传 ${formatDuration(elapsed)}` : files.length >= maxCount ? `已达到 ${maxCount} 段上限` : '开始录音'}
+            hint={recording ? `最长 ${maxDuration} 秒，到时自动结束` : `直接录制，不选择本地音频 · 最多 ${maxCount} 段`}
+          />
+        </button>
       </div>
-      <button type="button" className="upload-trigger af-platform-record" disabled={uploading || (!recording && files.length >= maxCount)} onClick={() => {
-        setLocalError('');
-        if (recording) {
-          if (timerRef.current) window.clearTimeout(timerRef.current);
-          void finishRecording();
-          return;
-        }
-        if (platform.startAudioRecording && platform.stopAudioRecording) {
-          void platform.startAudioRecording().then(() => {
-            recordingRef.current = true; setRecording(true); setElapsed(0);
-            intervalRef.current = window.setInterval(() => setElapsed((value) => Math.min(maxDuration, value + 1)), 1000);
-            timerRef.current = window.setTimeout(() => void finishRecording(), maxDuration * 1000);
-          }).catch((error) => setLocalError(error instanceof Error ? error.message : '录音失败'));
-          return;
-        }
-      }}><SoundOutline /><span><strong>{uploading ? '录音上传中…' : recording ? `停止并上传 ${formatDuration(elapsed)}` : files.length >= maxCount ? `已达到 ${maxCount} 段上限` : '开始录音'}</strong><small>{recording ? `最长 ${maxDuration} 秒，到时自动结束` : `直接录制，不选择本地音频 · 最多 ${maxCount} 段`}</small></span></button>
       {retryFile ? <button type="button" className="btn btn--secondary btn--block" disabled={uploading} onClick={() => void uploadRecording(retryFile.file, retryFile.durationSeconds)}>重试上传</button> : null}
     </FieldShell>
   );

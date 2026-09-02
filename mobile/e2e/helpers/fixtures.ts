@@ -541,6 +541,14 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         return json(route, BRANDING);
       }
 
+      if (path === '/api/public/auth/providers' && method === 'GET') {
+        return json(route, []);
+      }
+
+      if (path === '/api/public/auth/wecom/status' && method === 'GET') {
+        return json(route, { oauthEnabled: false });
+      }
+
       if (path === '/api/auth/login' && method === 'POST') {
         const body = request.postDataJSON() as { username?: string; password?: string };
         const user = Object.values(USERS).find((entry) => entry.username === body.username);

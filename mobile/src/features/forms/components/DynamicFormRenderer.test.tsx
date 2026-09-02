@@ -106,4 +106,34 @@ describe('DynamicFormRenderer', () => {
     expect(screen.queryByText('隐藏')).not.toBeInTheDocument();
     expect(screen.queryByText('c')).not.toBeInTheDocument();
   });
+
+  it('applies per-field modes inside table rows', () => {
+    const schema: MobileSchemaNode[] = [{
+      id: 'lines',
+      type: 'table_list',
+      label: '采购明细',
+      children: [
+        { id: 'item', type: 'text', label: '物品' },
+        { id: 'price', type: 'number', label: '核定价' },
+        { id: 'secret', type: 'text', label: '内部备注' },
+      ],
+    }];
+
+    render(
+      <DynamicFormRenderer
+        mode="fill"
+        modeOverride={{ price: 'readonly', secret: 'hidden' }}
+        schema={schema}
+        values={{ lines: [{ item: '显示器', price: 2600, secret: '内部信息' }] }}
+        onValueChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '展开 第1行' }));
+    expect(screen.getByLabelText('物品')).toHaveValue('显示器');
+    expect(screen.getByText('2600')).toBeInTheDocument();
+    expect(screen.queryByLabelText('核定价')).not.toBeInTheDocument();
+    expect(screen.queryByText('内部备注')).not.toBeInTheDocument();
+    expect(screen.queryByText('内部信息')).not.toBeInTheDocument();
+  });
 });

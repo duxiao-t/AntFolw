@@ -1,5 +1,5 @@
 import { App, Button, Card, Modal, Space, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, history } from '@umijs/max';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { request } from '@umijs/max';
@@ -9,7 +9,7 @@ import {
   collectVisibleValues,
   firstVisibleValidationError,
 } from '../../../registry/displayConditions';
-import type { SchemaNode } from '../../../registry/types';
+import type { FieldMode, SchemaNode } from '../../../registry/types';
 
 type TreeNode = {
   id: string;
@@ -75,9 +75,23 @@ export default function Fill() {
   const [pendingSubmissionData, setPendingSubmissionData] = useState<Record<string, any>>({});
 
   const { data: fd, isFetching } = useQuery<any>({
-    queryKey: ['form-def', code],
-    queryFn: () => request(`/api/forms/definitions/by-code/${code}`),
+    queryKey: ['mobile-form', code],
+    queryFn: () => request(`/api/mobile/forms/${encodeURIComponent(code)}`),
   });
+  const fieldModes = useMemo<Record<string, FieldMode>>(
+    () =>
+      Object.fromEntries(
+        Object.entries(fd?.starterFieldModes ?? {}).map(([fieldId, mode]) => [
+          fieldId,
+          mode === 'HIDDEN'
+            ? 'hidden'
+            : mode === 'READONLY'
+              ? 'readonly'
+              : 'runtime-fill',
+        ]),
+      ),
+    [fd?.starterFieldModes],
+  );
 
   const startInstance = useMutation({
     mutationFn: (payload: { selfSelected: Record<string, number[]>; data: Record<string, any> }) =>
@@ -130,29 +144,17 @@ export default function Fill() {
       submitFormData.mutate(submissionData);
       return;
     }
-    const formDefId = fd?.id;
-    if (!formDefId) {
-      message.error('表单定义未就绪');
+    const tree: TreeNode | undefined = parseJsonValue(fd?.process, undefined);
+    const nodes: SelfSelectNode[] = [];
+    if (tree) collectSelfSelectNodes(tree, nodes);
+    if (nodes.length === 0) {
+      doStart({}, submissionData);
       return;
     }
-    try {
-      const procRes: any = await request(
-        `/api/processes/definitions/by-form/${formDefId}`,
-      );
-      const tree: TreeNode | undefined = parseJsonValue(procRes?.process, undefined);
-      const nodes: SelfSelectNode[] = [];
-      if (tree) collectSelfSelectNodes(tree, nodes);
-      if (nodes.length === 0) {
-        doStart({}, submissionData);
-        return;
-      }
-      setPendingSubmissionData(submissionData);
-      setPendingSelfSelect(nodes);
-      setSelfSelected({});
-      setPickerOpen(true);
-    } catch (_error) {
-      message.error('获取流程定义失败');
-    }
+    setPendingSubmissionData(submissionData);
+    setPendingSelfSelect(nodes);
+    setSelfSelected({});
+    setPickerOpen(true);
   };
 
   if (isFetching) return <Card loading />;
@@ -162,6 +164,7 @@ export default function Fill() {
       <FormRenderer
         schema={parseJsonValue(fd.schema, [])}
         mode="runtime-fill"
+        fieldModes={fieldModes}
         value={val}
         onChange={setVal}
       />

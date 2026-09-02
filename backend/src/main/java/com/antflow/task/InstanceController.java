@@ -111,8 +111,18 @@ public class InstanceController {
             result.put("automationJobs", workflowJobService.listViews(id));
             String schema = pi.getCurrentFormRevisionId() != null && definitionVersions != null
                 ? definitionVersions.revisionSchema(pi.getCurrentFormRevisionId()) : null;
-            result.put("schema", schema != null ? schema : form == null ? null : form.getSchema());
-            result.put("formData", formData == null ? null : formData.getData());
+            Object responseSchema = schema != null ? schema : form == null ? null : form.getSchema();
+            Object responseData = formData == null ? null : formData.getData();
+            if (!principal.isAdmin()
+                && java.util.Objects.equals(pi.getStartedBy(), principal.userId())
+                && responseSchema != null) {
+                responseData = formDefinitionService.projectStarterData(
+                    responseData, responseSchema, pi.getProcessSnapshot());
+                responseSchema = formDefinitionService.projectStarterSchema(
+                    responseSchema, pi.getProcessSnapshot());
+            }
+            result.put("schema", responseSchema);
+            result.put("formData", responseData);
             result.put("formRevisions", definitionVersions == null
                 ? List.of() : definitionVersions.revisions(id));
             result.put("nodeInstances", definitionVersions == null

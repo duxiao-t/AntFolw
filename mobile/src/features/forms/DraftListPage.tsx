@@ -16,8 +16,8 @@ export function DraftListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [deletedIds, setDeletedIds] = useState<number[]>([]);
-  const draftsQuery = useQuery({ queryKey: queryKeys.drafts, queryFn: fetchMobileDrafts, retry: 0 });
-  const deleteMutation = useMutation({ mutationFn: deleteMobileDraft, onSuccess: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.drafts }); } });
+  const draftsQuery = useQuery({ queryKey: queryKeys.drafts, queryFn: fetchMobileDrafts, retry: 0, refetchOnMount: "always" });
+  const deleteMutation = useMutation({ mutationFn: deleteMobileDraft, async onSuccess() { await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.drafts }), queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap })]); } });
   const drafts = useMemo(() => (draftsQuery.data ?? []).filter((draft) => !deletedIds.includes(draft.id)), [deletedIds, draftsQuery.data]);
 
   if (draftsQuery.isPending) return <PageSkeleton rows={4} />;

@@ -48,6 +48,7 @@ export interface RecentProcess {
 export interface MobileBootstrap {
   user: MobileUser;
   pendingCount: number;
+  draftCount?: number;
   unreadNotificationCount?: number;
   favoriteApps: MobileApp[];
   recentProcesses: RecentProcess[];

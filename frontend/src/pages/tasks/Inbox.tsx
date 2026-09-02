@@ -1,16 +1,35 @@
 import { ProTable } from '@ant-design/pro-components';
 import type { ActionType } from '@ant-design/pro-components';
-import { Button, Modal, Input, message } from 'antd';
-import { useRef, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { Button, Modal, message } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@umijs/max';
 import { request } from '@umijs/max';
+import {
+  ApprovalCommentEditor,
+  fetchApprovalCommentPresets,
+} from '../../components/ApprovalCommentEditor';
+import { TASKS_CHANGED_EVENT } from '../../components/WorkflowEventsSubscriber';
 
 export default function Inbox() {
   const navigate = useNavigate();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [pending, setPending] = useState<{ id: number; action: 'approve' | 'reject' } | null>(null);
   const [comment, setComment] = useState('');
+  useEffect(() => {
+    const reload = () => actionRef.current?.reload();
+    window.addEventListener(TASKS_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(TASKS_CHANGED_EVENT, reload);
+  }, []);
+  const presetsQuery = useQuery({
+    queryKey: ['task-comment-presets', pending?.id],
+    queryFn: () => {
+      if (!pending) throw new Error('请选择审批操作');
+      return fetchApprovalCommentPresets(pending.id);
+    },
+    enabled: pending != null,
+    retry: 0,
+  });
   const act = useMutation({
     mutationFn: () => {
       if (!pending) {
@@ -18,7 +37,7 @@ export default function Inbox() {
       }
       return request(`/api/tasks/${pending.id}/${pending.action}`, {
         method: 'POST',
-        data: { comment },
+        data: { comment: comment.trim() || undefined },
       });
     },
     onSuccess: () => {
@@ -98,11 +117,12 @@ export default function Inbox() {
           return act.mutateAsync();
         }}
       >
-        <Input.TextArea
+        <ApprovalCommentEditor
+          action={pending?.action ?? 'approve'}
+          presets={presetsQuery.data}
           rows={3}
           value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder={pending?.action === 'approve' ? '可填意见' : '请说明驳回原因'}
+          onChange={setComment}
         />
       </Modal>
     </>

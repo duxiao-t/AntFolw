@@ -38,4 +38,25 @@ describe('FieldPermissionEditor', () => {
     const editableButtons = screen.getAllByRole('radio', { name: '可编辑' });
     expect(editableButtons[1]).toBeDisabled();
   });
+
+  it('uses editable as the initiator default and allows attachment permissions', () => {
+    const onChange = vi.fn();
+    render(
+      <FieldPermissionEditor
+        formFields={FIELDS}
+        value={[]}
+        defaultMode="EDITABLE"
+        allowComplexEditable
+        onChange={onChange}
+      />,
+    );
+
+    const editableButtons = screen.getAllByRole('radio', { name: '可编辑' });
+    expect(editableButtons).toHaveLength(2);
+    expect(editableButtons[1]).not.toBeDisabled();
+    fireEvent.click(screen.getAllByRole('radio', { name: '隐藏' })[0]);
+    expect(onChange).toHaveBeenCalledWith([
+      { fieldId: 'amount', mode: 'HIDDEN' },
+    ]);
+  });
 });

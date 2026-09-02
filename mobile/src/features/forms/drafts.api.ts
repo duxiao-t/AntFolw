@@ -9,6 +9,7 @@ export type MobileFormDetail = {
   schema: MobileSchemaNode[];
   settings?: Record<string, unknown>;
   process?: MobileFlowNode | null;
+  starterFieldModes?: Record<string, 'EDITABLE' | 'READONLY' | 'HIDDEN'>;
 };
 
 export type MobileDraft = {

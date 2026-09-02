@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createClientId } from '../../shared/clientId';
 import type { MobileFlowNode, MobileFormValues, MobileSchemaNode } from './schema/types';
 
 export type SubmitFlowState = {
@@ -69,11 +70,7 @@ export function idempotencyKeyForPayload(payload: string) {
   if (!idempotencyState || idempotencyState.payload !== payload) {
     idempotencyState = {
       payload,
-      // crypto.randomUUID 仅在安全上下文可用，局域网 HTTP 访问时需要回退
-      key:
-        typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : 'submit-' + Date.now() + '-' + Math.random().toString(16).slice(2),
+      key: createClientId('submit'),
     };
   }
   return idempotencyState.key;

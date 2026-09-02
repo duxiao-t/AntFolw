@@ -42,6 +42,10 @@ export function SubmitConfirmPage() {
       if (result.mode === "workflow") {
         clearIdempotencyKeyForPayload(currentPayload());
         queryClient.removeQueries({ queryKey: queryKeys.taskRoot });
+        queryClient.removeQueries({ queryKey: queryKeys.drafts });
+        if (flow.draftId != null) {
+          queryClient.removeQueries({ queryKey: queryKeys.draft(flow.draftId) });
+        }
         if (flow.reworkTaskId != null) queryClient.removeQueries({ queryKey: queryKeys.reworkTask(flow.reworkTaskId) });
         queryClient.removeQueries({ queryKey: queryKeys.instance(result.id) });
         await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });

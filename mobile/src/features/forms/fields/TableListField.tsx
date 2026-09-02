@@ -20,7 +20,8 @@ export function TableListField(props: MobileFieldProps) {
     setRows((current) => reconcileRows(current, props.value, minRows));
   }, [minRows, props.value]);
 
-  const canAdd = rows.length < maxRows;
+  const canEditRows = props.mode === 'fill';
+  const canAdd = canEditRows && rows.length < maxRows;
 
   return (
     <FieldShell node={props.node} label={label} error={props.error} className="af-field--table">
@@ -35,7 +36,9 @@ export function TableListField(props: MobileFieldProps) {
           </button>
         </div>
         {rows.map((row, index) => {
-          const children = props.node.children ?? [];
+          const children = (props.node.children ?? []).filter(
+            (child) => props.modeOverride?.[child.id] !== 'hidden',
+          );
           const rowMode = props.mode;
           return (
             <article key={row.key} className={`detail-entry${expanded.includes(row.key) ? ' detail-entry--expanded' : ''}`}>
@@ -50,12 +53,12 @@ export function TableListField(props: MobileFieldProps) {
                     {expanded.includes(row.key) ? `收起 第${index + 1}行` : `展开 第${index + 1}行`}
                   </button>
                   <button type="button" onClick={() => expand(row.key)}>
-                    编辑 第{index + 1}行
+                    {canEditRows ? '编辑' : '查看'} 第{index + 1}行
                   </button>
                   <button
                     type="button"
                     aria-label={`删除 第${index + 1}行`}
-                    disabled={rows.length <= minRows}
+                    disabled={!canEditRows || rows.length <= minRows}
                     onClick={() => deleteRow(row.key)}
                   >
                     删除
@@ -108,6 +111,8 @@ export function TableListField(props: MobileFieldProps) {
   }
 
   function renderChild(child: MobileSchemaNode, row: RowValue, rowIndex: number, mode: MobileFieldProps['mode']) {
+    const effectiveMode = props.modeOverride?.[child.id] ?? mode;
+    if (effectiveMode === 'hidden') return null;
     const definition = getFieldDefinition(child.type);
     const value = row[child.id];
     const values: MobileFormValues = row;
@@ -126,10 +131,11 @@ export function TableListField(props: MobileFieldProps) {
         node={child}
         value={value}
         values={values}
-        mode={mode}
+        mode={effectiveMode}
+        modeOverride={props.modeOverride}
         onValueChange={updateRow}
         renderChildren={(nestedChildren) =>
-          nestedChildren.map((nestedChild) => renderChild(nestedChild, row, rowIndex, mode))
+          nestedChildren.map((nestedChild) => renderChild(nestedChild, row, rowIndex, effectiveMode))
         }
       />
     );

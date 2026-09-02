@@ -17,12 +17,10 @@ export function ProfilePage() {
   if (bootstrapQuery.isError) return <PageError title="个人中心加载失败" message="请稍后重试。" onRetry={() => void bootstrapQuery.refetch()} />;
   const data = bootstrapQuery.data;
   const user = data.user;
-  const approvedCount = data.recentProcesses.filter((process) => process.status === "APPROVED").length;
 
   return (
     <AppPage title="我的" back={false} tabbar brandHeader contentStyle={{ paddingTop: 0 }} action={<button className="app-bar__action" type="button" aria-label="设置" onClick={() => navigate("/profile/security")}><SettingsIcon /></button>}>
       <section className="profile-hero"><div className="avatar-lg">{user.displayName.slice(0, 1)}</div><h2>{user.displayName}</h2><small>{user.department || "未设置部门"} · {user.roles.join("、") || "成员"} · {user.username}</small></section>
-      <div className="profile-stats"><div><b>{data.recentProcesses.length}</b><span>已发起</span></div><div style={{ borderLeft: "1px solid var(--af-color-line)", borderRight: "1px solid var(--af-color-line)" }}><b>{approvedCount}</b><span>已处理</span></div><div><b>{data.pendingCount}</b><span>待办</span></div></div>
       <section className="section"><div className="list-card">
         <MenuRow icon={<FileIcon />} title="我的草稿" hint="未提交的表单" onClick={() => navigate("/forms/drafts")} />
         <MenuRow icon={<MessageIcon />} title="消息中心" hint="审批结果与通知" badge={data.unreadNotificationCount || undefined} onClick={() => navigate("/profile/notifications")} />

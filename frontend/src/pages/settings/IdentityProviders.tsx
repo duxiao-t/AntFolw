@@ -112,13 +112,13 @@ export default function IdentityProvidersPage() {
             { value: 'BASIC', label: 'client_secret_basic' }, { value: 'POST', label: 'client_secret_post' },
           ]} /></Form.Item>
           <Form.Item name="scopes" label="Scopes"><Input /></Form.Item>
-          <Space align="start" style={{ width: '100%' }}>
-            <Form.Item name="matchClaim" label="外部 Claim" rules={[{ required: true }]}><Input style={{ width: 240 }} /></Form.Item>
-            <Form.Item name="matchField" label="本地字段"><Select style={{ width: 220 }} options={[
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            <Form.Item name="matchClaim" label="外部 Claim" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item name="matchField" label="本地字段"><Select options={[
               { value: 'username', label: '用户名' }, { value: 'email', label: '邮箱（要求已验证）' },
               { value: 'employeeNo', label: '员工编号' },
             ]} /></Form.Item>
-          </Space>
+          </div>
           <Form.Item name="enabled" label="允许登录" valuePropName="checked"><Switch /></Form.Item>
         </Form>
       </Drawer>

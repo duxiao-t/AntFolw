@@ -4,6 +4,13 @@ import { NodeCard } from './NodeCard';
 
 export function ApprovalNode({ node }: { node: TreeNode }) {
   const props = node.props ?? {};
+  const modeLabel = {
+    OR: '或签',
+    ANY: '或签',
+    AND: '会签',
+    ALL: '会签',
+    RATIO: '比例签',
+  }[props.mode as string] ?? '审批方式待配置';
   const summary =
     props.assignedType === 'ASSIGN_USER'
       ? `指定成员 ${props.assignedUser?.length ?? 0} 人`
@@ -21,7 +28,7 @@ export function ApprovalNode({ node }: { node: TreeNode }) {
       node={node}
       kind="approval"
       icon={<UserSwitchOutlined />}
-      summary={`${summary} · ${{ AND: '会签', ALL: '会签', RATIO: '比例签', SEQUENTIAL: '顺签' }[props.mode as string] ?? '或签'}`}
+      summary={`${summary} · ${modeLabel}`}
     />
   );
 }

@@ -4,7 +4,7 @@ export const FALLBACK_BRANDING: PublicBranding = {
   version: 'builtin-1',
   appName: 'AntFlow 审批',
   companyName: 'AntFlow',
-  primaryColor: '#1677ff',
+  primaryColor: '#0b57d0',
   mobileHeaderTitle: '工作台',
   loginTitle: '登录 AntFlow',
   showLoginFooter: true,
@@ -46,7 +46,7 @@ export function readDocumentHead(): {
  * is ignored so an attacker cannot smuggle arbitrary CSS through branding.
  */
 export function applyBrandTokens(branding: PublicBranding): void {
-  const primary = isHexColor(branding.primaryColor) ? branding.primaryColor : '#1677ff';
+  const primary = isHexColor(branding.primaryColor) ? branding.primaryColor : '#0b57d0';
   const root = document.documentElement;
   root.style.setProperty('--af-color-primary', primary);
   root.style.setProperty('--adm-color-primary', primary);

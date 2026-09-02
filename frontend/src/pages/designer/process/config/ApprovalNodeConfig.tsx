@@ -19,6 +19,12 @@ export function ApprovalNodeConfig({
   const set = (patch: Record<string, any>): void => {
     updateProps(node.id, { ...p, ...patch });
   };
+  const presets = (p.commentPresets as {
+    approve?: string[];
+    reject?: string[];
+  } | undefined) ?? { approve: [], reject: [] };
+  const approvalMode = (p.mode as string | undefined) ?? 'OR';
+  const fixedRejectTarget = ['AND', 'ALL', 'RATIO'].includes(approvalMode);
 
   return (
     <Form layout="vertical" style={{ padding: 16 }}>
@@ -116,13 +122,19 @@ export function ApprovalNodeConfig({
       <Divider />
       <Form.Item label="多人审批方式">
         <Radio.Group
-          value={p.mode as string}
-          onChange={(e) => set({ mode: e.target.value })}
+          value={approvalMode}
+          onChange={(e) =>
+            set({
+              mode: e.target.value,
+              ...(['AND', 'ALL', 'RATIO'].includes(e.target.value)
+                ? { rejectTargets: undefined }
+                : {}),
+            })
+          }
           options={[
-            { value: 'OR', label: '或签（一人通过即可）' },
-            { value: 'AND', label: '会签（须全部通过）' },
-            { value: 'RATIO', label: '比例签' },
-            { value: 'SEQUENTIAL', label: '顺签' },
+            { value: 'OR', label: '或签（任一人操作即完成）' },
+            { value: 'AND', label: '会签（全员操作后判定）' },
+            { value: 'RATIO', label: '比例签（全员操作后判定）' },
           ]}
         />
       </Form.Item>
@@ -201,7 +213,7 @@ export function ApprovalNodeConfig({
           style={{ marginBottom: 16 }}
         />
       )}
-      {rejectTargets && rejectTargets.length > 0 && (
+      {!fixedRejectTarget && rejectTargets && rejectTargets.length > 0 && (
         <Form.Item label="允许驳回到">
           <Select
             mode="multiple"
@@ -225,6 +237,54 @@ export function ApprovalNodeConfig({
           onChange={(formPerms) => set({ formPerms })}
         />
       </Form.Item>
+      <Divider />
+      <Form.Item
+        label="同意意见预设"
+        extra="最多 10 条，每条不超过 100 字；审批人点选后仍可修改。"
+      >
+        <Select
+          mode="tags"
+          maxCount={10}
+          maxTagTextLength={24}
+          tokenSeparators={[',', '，']}
+          placeholder="输入意见后按回车添加"
+          value={presets.approve ?? []}
+          onChange={(approve) =>
+            set({
+              commentPresets: {
+                ...presets,
+                approve: normalizeCommentPresets(approve),
+              },
+            })
+          }
+        />
+      </Form.Item>
+      <Form.Item label="驳回意见预设" extra="驳回时仍必须提供原因。">
+        <Select
+          mode="tags"
+          maxCount={10}
+          maxTagTextLength={24}
+          tokenSeparators={[',', '，']}
+          placeholder="输入原因后按回车添加"
+          value={presets.reject ?? []}
+          onChange={(reject) =>
+            set({
+              commentPresets: {
+                ...presets,
+                reject: normalizeCommentPresets(reject),
+              },
+            })
+          }
+        />
+      </Form.Item>
     </Form>
   );
+}
+
+function normalizeCommentPresets(values: string[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  )
+    .slice(0, 10)
+    .map((value) => value.slice(0, 100));
 }

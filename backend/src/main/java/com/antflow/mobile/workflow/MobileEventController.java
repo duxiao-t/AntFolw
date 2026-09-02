@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
-@RequestMapping("/api/mobile/events")
+@RequestMapping({"/api/mobile/events", "/api/workflow/events"})
 @RequiredArgsConstructor
 public class MobileEventController {
 

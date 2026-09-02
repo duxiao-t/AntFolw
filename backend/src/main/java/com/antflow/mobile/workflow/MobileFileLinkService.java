@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -27,6 +28,29 @@ public class MobileFileLinkService {
         workflowMapper.deleteFileLinks(formDataId);
         for (MobileFileRef ref : normalized) {
             workflowMapper.insertFileLink(formDataId, ref.fileId(), ref.fieldId(), ref.sortOrder());
+        }
+    }
+
+    public void reconcileEditable(Long formDataId, List<MobileFileRef> refs, long userId,
+                                  Map<String, String> fieldModes) {
+        List<MobileFileRef> editable = normalized((refs == null ? List.<MobileFileRef>of() : refs)
+            .stream()
+            .filter(ref -> ref != null && "EDITABLE".equals(
+                fieldModes.getOrDefault(ref.fieldId(), "EDITABLE")))
+            .toList(), userId);
+        List<MobileWorkflowMapper.FormDataFileLink> restricted =
+            workflowMapper.selectFileLinks(formDataId).stream()
+                .filter(link -> !"EDITABLE".equals(
+                    fieldModes.getOrDefault(link.fieldId(), "EDITABLE")))
+                .toList();
+        workflowMapper.deleteFileLinks(formDataId);
+        for (MobileWorkflowMapper.FormDataFileLink link : restricted) {
+            workflowMapper.insertFileLink(formDataId, link.fileId(), link.fieldId(),
+                link.sortOrder());
+        }
+        for (MobileFileRef ref : editable) {
+            workflowMapper.insertFileLink(formDataId, ref.fileId(), ref.fieldId(),
+                ref.sortOrder());
         }
     }
 

@@ -1,9 +1,16 @@
 import { Alert, Divider, Form, Input, Radio, Switch } from 'antd';
 import { AssigneePicker } from '../../../../components/AssigneePicker';
-import type { TreeNode } from '../types';
+import type { FieldPerm, FormFieldOption, TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
+import { FieldPermissionEditor } from './FieldPermissionEditor';
 
-export function RootNodeConfig({ node }: { node: TreeNode }) {
+export function RootNodeConfig({
+  node,
+  formFields,
+}: {
+  node: TreeNode;
+  formFields: FormFieldOption[];
+}) {
   const updateProps = useProcessDesignerStore((s) => s.updateProps);
   const updateName = useProcessDesignerStore((s) => s.updateName);
   const p: Record<string, any> = node.props ?? {};
@@ -64,6 +71,16 @@ export function RootNodeConfig({ node }: { node: TreeNode }) {
           mode="user"
           value={(p.fallbackAssignee as { ids?: number[] })?.ids ?? []}
           onChange={(ids) => set({ fallbackAssignee: { type: 'USER', ids } })}
+        />
+      </Form.Item>
+      <Divider />
+      <Form.Item label="发起人字段权限">
+        <FieldPermissionEditor
+          formFields={formFields}
+          value={p.formPerms as FieldPerm[] | undefined}
+          defaultMode="EDITABLE"
+          allowComplexEditable
+          onChange={(formPerms) => set({ formPerms })}
         />
       </Form.Item>
     </Form>

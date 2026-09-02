@@ -1,33 +1,96 @@
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Input, InputNumber, Select, Space, Switch, Typography } from 'antd';
+import { Button, Form, Input, InputNumber, Select, Switch, Typography } from 'antd';
+import { createStyles } from 'antd-style';
 import type { FormFieldOption } from '../designer/process/types';
 
 const fieldTypes = new Set(['text', 'number', 'money', 'radio', 'select', 'search',
   'date', 'time', 'user_picker', 'dept_picker', 'scan_code']);
 
+const useStyles = createStyles(({ token }) => ({
+  settingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 24,
+    padding: '15px 16px',
+    border: `1px solid ${token.colorBorderSecondary}`,
+    borderRadius: token.borderRadiusLG,
+    background: token.colorFillAlter,
+    '@media (max-width: 680px)': { alignItems: 'flex-start', flexDirection: 'column', gap: 12 },
+  },
+  settingCopy: { minWidth: 0 },
+  settingLabel: { display: 'block', color: token.colorText, fontSize: 14, fontWeight: 600 },
+  settingHint: { display: 'block', marginTop: 3, color: token.colorTextSecondary, fontSize: 12 },
+  settingControl: {
+    display: 'flex',
+    flex: '0 0 auto',
+    alignItems: 'center',
+    gap: 10,
+    color: token.colorTextSecondary,
+    fontSize: 12,
+  },
+  configGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '18px 24px',
+    marginTop: 20,
+    '& > .ant-form-item': { minWidth: 0, marginBottom: 0 },
+    '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  },
+  parts: { display: 'grid', gridColumn: '1 / -1', gap: 12 },
+  partRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    border: `1px solid ${token.colorBorderSecondary}`,
+    borderRadius: token.borderRadiusLG,
+    background: token.colorBgContainer,
+    '& .ant-form-item': { marginBottom: 0 },
+  },
+  preview: {
+    padding: '10px 12px',
+    borderRadius: token.borderRadiusLG,
+    background: token.colorFillAlter,
+    overflowWrap: 'anywhere',
+  },
+}));
+
 export default function BusinessNumberEditor({ fields }: { fields: FormFieldOption[] }) {
-  const enabled = Form.useWatch(['businessNumber', 'enabled']);
+  const { styles } = useStyles();
+  const form = Form.useFormInstance();
+  const enabled = Form.useWatch(['businessNumber', 'enabled'], form);
   return (
-    <div style={{ borderTop: '1px solid #edf0f2', marginTop: 20, paddingTop: 20 }}>
-      <Form.Item label="自定义流水号" name={['businessNumber', 'enabled']} valuePropName="checked">
-        <Switch checkedChildren="已启用" unCheckedChildren="使用默认12位单号" />
-      </Form.Item>
-      {enabled && <>
+    <div>
+      <div className={styles.settingRow}>
+        <div className={styles.settingCopy}>
+          <span className={styles.settingLabel}>自定义流水号</span>
+          <span className={styles.settingHint}>关闭时使用系统默认的 12 位业务单号。</span>
+        </div>
+        <div className={styles.settingControl}>
+          <span>{enabled ? '已启用' : '使用默认编号'}</span>
+          <Form.Item name={['businessNumber', 'enabled']} valuePropName="checked" noStyle>
+            <Switch aria-label="自定义流水号" />
+          </Form.Item>
+        </div>
+      </div>
+      {enabled && <div className={styles.configGrid}>
         <Form.Item label="全系统唯一前缀" name={['businessNumber', 'namespace']}
           rules={[{ required: true }, { pattern: /^[A-Za-z][A-Za-z0-9_-]{0,31}$/, message: '字母开头，最多32位' }]}
           extra="例如 BX、LEAVE；不同表单不能重复。">
-          <Input maxLength={32} style={{ maxWidth: 320 }} />
+          <Input maxLength={32} />
         </Form.Item>
         <Form.Item label="序号重置" name={['businessNumber', 'reset']} initialValue="NONE">
-          <Select style={{ width: 220 }} options={[
+          <Select options={[
             { value: 'NONE', label: '永不重置' }, { value: 'DAILY', label: '每日重置' },
             { value: 'MONTHLY', label: '每月重置' }, { value: 'YEARLY', label: '每年重置' },
           ]} />
         </Form.Item>
         <Form.List name={['businessNumber', 'parts']}>
-          {(parts, { add, remove, move }) => <Space orientation="vertical" style={{ width: '100%' }}>
+          {(parts, { add, remove, move }) => <div className={styles.parts}>
             <Typography.Text strong>编号部件（唯一前缀会自动放在最前）</Typography.Text>
-            {parts.map((part, index) => <Space key={part.key} align="start" wrap>
+            {parts.map((part, index) => <div className={styles.partRow} key={part.key}>
               <Form.Item name={[part.name, 'type']} rules={[{ required: true }]}>
                 <Select style={{ width: 120 }} options={[
                   { value: 'LITERAL', label: '固定文本' }, { value: 'FIELD', label: '表单字段' },
@@ -55,16 +118,16 @@ export default function BusinessNumberEditor({ fields }: { fields: FormFieldOpti
               <Button aria-label="上移" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => move(index, index - 1)} />
               <Button aria-label="下移" icon={<ArrowDownOutlined />} disabled={index === parts.length - 1} onClick={() => move(index, index + 1)} />
               <Button danger aria-label="删除" icon={<DeleteOutlined />} onClick={() => remove(part.name)} />
-            </Space>)}
+            </div>)}
             <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ type: 'LITERAL', value: '-' })}>添加编号部件</Button>
             <Form.Item noStyle shouldUpdate>
-              {({ getFieldValue }) => <Typography.Text type="secondary">
-                预览：{preview(getFieldValue('businessNumber'), fields)}
-              </Typography.Text>}
+              {({ getFieldValue }) => <div className={styles.preview}>
+                <Typography.Text type="secondary">预览：{preview(getFieldValue('businessNumber'), fields)}</Typography.Text>
+              </div>}
             </Form.Item>
-          </Space>}
+          </div>}
         </Form.List>
-      </>}
+      </div>}
     </div>
   );
 }

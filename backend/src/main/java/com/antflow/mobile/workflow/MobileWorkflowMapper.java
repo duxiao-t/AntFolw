@@ -187,6 +187,7 @@ public interface MobileWorkflowMapper {
                t.assignee_id,
                t.parallel_id,
                t.node_instance_id,
+               t.approval_mode,
                COALESCE(t.task_type, 'APPROVAL') AS task_type,
                t.status AS task_status,
                t.created_at AS task_created_at,
@@ -208,12 +209,13 @@ public interface MobileWorkflowMapper {
                dept.name AS applicant_department
         FROM (
           SELECT task.id, task.proc_inst_id, task.node_id, task.assignee_id,
-                 task.parallel_id, task.node_instance_id, task.task_type, task.status,
+                 task.parallel_id, task.node_instance_id, task.approval_mode,
+                 task.task_type, task.status,
                  task.created_at, task.read_at
           FROM t_task task
           UNION ALL
           SELECT 8000000000000000 + cc.id, cc.proc_inst_id, node.node_id, cc.recipient_id,
-                 NULL, cc.node_instance_id, 'CC', 'CC', cc.created_at, cc.read_at
+                 NULL, cc.node_instance_id, NULL, 'CC', 'CC', cc.created_at, cc.read_at
           FROM t_cc_record cc
           LEFT JOIN t_process_node_instance node ON node.id = cc.node_instance_id
         ) t
@@ -317,6 +319,14 @@ public interface MobileWorkflowMapper {
     void deleteFileLinks(@Param("formDataId") Long formDataId);
 
     @Select("""
+        SELECT file_id AS fileId, field_id AS fieldId, sort_order AS sortOrder
+        FROM t_form_data_file
+        WHERE form_data_id = #{formDataId}
+        ORDER BY field_id, sort_order, file_id
+        """)
+    List<FormDataFileLink> selectFileLinks(@Param("formDataId") Long formDataId);
+
+    @Select("""
         SELECT mf.*
         FROM t_mobile_file mf
         JOIN t_form_data_file fdf ON fdf.file_id = mf.id
@@ -326,6 +336,9 @@ public interface MobileWorkflowMapper {
         ORDER BY fdf.field_id, fdf.sort_order, mf.created_at
         """)
     List<MobileFile> selectFilesByFormDataId(@Param("formDataId") Long formDataId);
+
+    record FormDataFileLink(java.util.UUID fileId, String fieldId, int sortOrder) {
+    }
 
     record TaskRow(Long id, Long instanceId, String nodeId, String formCode,
                    String formName, String businessNo, String applicantName,
@@ -350,7 +363,8 @@ public interface MobileWorkflowMapper {
 
     record TaskDetailRow(Long taskId, Long instanceId, String nodeId, Long assigneeId,
                           String parallelId, Long nodeInstanceId,
-                          String taskType, String taskStatus, OffsetDateTime taskCreatedAt,
+                          String approvalMode, String taskType, String taskStatus,
+                         OffsetDateTime taskCreatedAt,
                          OffsetDateTime readAt, String instanceStatus, String currentNodeId,
                          String processSnapshot, Long startedBy, OffsetDateTime startedAt,
                          OffsetDateTime finishedAt, Long formDataId, String businessNo,

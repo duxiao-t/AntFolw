@@ -151,7 +151,10 @@ function pruneMissingFormPerms(node: TreeNode, allowedIds: Set<string>): TreeNod
     ? pruneMissingFormPerms(node.children, allowedIds)
     : node.children;
   let props = node.props;
-  if (node.type === 'APPROVAL' && Array.isArray(node.props?.formPerms)) {
+  if (
+    (node.type === 'APPROVAL' || node.type === 'ROOT') &&
+    Array.isArray(node.props?.formPerms)
+  ) {
     const formPerms = node.props.formPerms.filter((entry: any) => {
       const fieldId = entry?.fieldId;
       return (

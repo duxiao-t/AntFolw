@@ -1,4 +1,5 @@
 import type { MobileSchemaNode } from './types';
+import { createClientId } from '../../../shared/clientId';
 
 export type MatrixAxis = 'row' | 'column';
 
@@ -180,9 +181,7 @@ export function summarizeMatrix(node: MobileSchemaNode, value: unknown) {
 }
 
 export function createRuntimeAxisId(axis: MatrixAxis) {
-  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID().replaceAll('-', '').slice(0, 12)
-    : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const random = createClientId('matrix').replaceAll('-', '').slice(0, 12);
   return `runtime_${axis}_${random}`;
 }
 

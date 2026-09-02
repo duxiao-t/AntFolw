@@ -15,6 +15,9 @@ import com.antflow.common.BusinessNumberService;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 @Service
 @RequiredArgsConstructor
@@ -206,6 +209,241 @@ public class FormDefinitionService {
         return output;
     }
 
+    /**
+     * Applies the ROOT node field policy before a draft or workflow submission is persisted.
+     * Missing ROOT permissions are intentionally treated as editable for old definitions.
+     */
+    public Map<String, Object> canonicalizeStarterSubmission(String schema, Object data,
+                                                              Object process) {
+        Map<String, Object> projected = canonicalizeStarterData(schema, data, process);
+        validateStarterSubmission(schema, projected, process);
+        return filterVisibleSubmission(schema, projected);
+    }
+
+    /** Applies ROOT permissions without requiring an incomplete draft to pass validation. */
+    public Map<String, Object> canonicalizeStarterData(String schema, Object data,
+                                                        Object process) {
+        return canonicalizeStarterData(schema, data, Map.of(), process, false);
+    }
+
+    /**
+     * Applies ROOT permissions to a rework edit. Restricted values are retained from the
+     * persisted revision, while editable values come from the initiator's request.
+     */
+    public Map<String, Object> canonicalizeStarterRevision(String schema, Object data,
+                                                            Object existingData,
+                                                            Object process) {
+        return canonicalizeStarterData(schema, data, valueMap(existingData), process, true);
+    }
+
+    /** Validates already-canonical initiator data while skipping ROOT-hidden fields. */
+    public void validateStarterSubmission(String schema, Object data, Object process) {
+        Map<String, String> modes = starterFieldModes(process);
+        Set<String> acceptedIds = new java.util.LinkedHashSet<>(leafFieldIds(schema));
+        acceptedIds.removeIf(id -> "HIDDEN".equals(modes.get(id)));
+        validateSubmission(schema, data, acceptedIds);
+    }
+
+    private Map<String, Object> canonicalizeStarterData(String schema, Object data,
+                                                         Map<?, ?> existing,
+                                                         Object process,
+                                                         boolean preserveRestricted) {
+        Map<?, ?> incoming = valueMap(data);
+        Map<String, String> modes = starterFieldModes(process);
+        var projected = new java.util.LinkedHashMap<String, Object>();
+        for (var node : parseSchema(schema)) {
+            collectStarterValues(node, incoming, existing, projected, modes,
+                preserveRestricted);
+        }
+        return filterVisibleSubmission(schema, projected);
+    }
+
+    /** ROOT formPerms as field id -> mode. Unlisted fields default to EDITABLE. */
+    public Map<String, String> starterFieldModes(Object process) {
+        JsonNode root = readTree(process);
+        var result = new java.util.LinkedHashMap<String, String>();
+        JsonNode perms = root.path("props").path("formPerms");
+        if (perms.isArray()) {
+            for (var entry : perms) {
+                String id = entry.path("fieldId").asText("").trim();
+                String mode = entry.path("mode").asText("");
+                if (!id.isBlank() && Set.of("EDITABLE", "READONLY", "HIDDEN").contains(mode)) {
+                    result.put(id, mode);
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    /** Removes ROOT-hidden fields from starter-facing schema responses. */
+    public JsonNode projectStarterSchema(Object schema, Object process) {
+        JsonNode source = readTree(schema);
+        if (!source.isArray()) return json.createArrayNode();
+        Map<String, String> modes = starterFieldModes(process);
+        ArrayNode output = json.createArrayNode();
+        source.forEach(node -> {
+            JsonNode projected = projectSchemaNode(node, modes);
+            if (projected != null) output.add(projected);
+        });
+        return output;
+    }
+
+    /** Removes ROOT-hidden fields from starter-facing form data responses. */
+    public JsonNode projectStarterData(Object data, Object schema, Object process) {
+        JsonNode source = readTree(data);
+        if (!source.isObject()) return json.createObjectNode();
+        JsonNode schemaTree = readTree(schema);
+        Map<String, String> modes = starterFieldModes(process);
+        ObjectNode output = ((ObjectNode) source).deepCopy();
+        if (schemaTree.isArray()) {
+            schemaTree.forEach(node -> removeHiddenData(node, output, modes));
+        }
+        return output;
+    }
+
+    private void collectStarterValues(JsonNode node, Map<?, ?> incoming,
+                                      Map<?, ?> existing, Map<String, Object> output,
+                                      Map<String, String> modes,
+                                      boolean preserveRestricted) {
+        String type = node.path("type").asText("");
+        if (CONTAINER_TYPES.contains(type)) {
+            node.path("children").forEach(child ->
+                collectStarterValues(child, incoming, existing, output, modes,
+                    preserveRestricted));
+            return;
+        }
+        if ("table_list".equals(type)) {
+            collectStarterTable(node, incoming, existing, output, modes,
+                preserveRestricted);
+            return;
+        }
+        String id = node.path("id").asText();
+        String mode = modes.getOrDefault(id, "EDITABLE");
+        if ("description".equals(type)) return;
+        if (preserveRestricted && !"EDITABLE".equals(mode)) {
+            if (existing.containsKey(id)) output.put(id, existing.get(id));
+            return;
+        }
+        if ("HIDDEN".equals(mode)) return;
+        if ("READONLY".equals(mode)) {
+            JsonNode defaultValue = node.path("props").path("defaultValue");
+            if (!defaultValue.isMissingNode() && !defaultValue.isNull()) {
+                output.put(id, json.convertValue(defaultValue, Object.class));
+            }
+            return;
+        }
+        if (incoming.containsKey(id)) output.put(id, incoming.get(id));
+    }
+
+    private void collectStarterTable(JsonNode node, Map<?, ?> incoming,
+                                     Map<?, ?> existing, Map<String, Object> output,
+                                     Map<String, String> modes,
+                                     boolean preserveRestricted) {
+        JsonNode children = node.path("children");
+        if (!children.isArray() || !hasStarterVisibleField(children, modes)) return;
+        String id = node.path("id").asText();
+        Object rawRows = incoming.get(id);
+        if (rawRows == null) return;
+        if (!(rawRows instanceof List<?> rows)) {
+            throw new BizException("FORM_DATA_INVALID",
+                node.path("label").asText(id) + " must be a row list");
+        }
+        List<?> existingRows = existing.get(id) instanceof List<?> values
+            ? values : List.of();
+        var projectedRows = new java.util.ArrayList<Map<String, Object>>();
+        for (int index = 0; index < rows.size(); index++) {
+            Object rawRow = rows.get(index);
+            if (!(rawRow instanceof Map<?, ?> row)) {
+                throw new BizException("FORM_DATA_INVALID",
+                    node.path("label").asText(id) + " contains an invalid row");
+            }
+            Map<?, ?> existingRow = index < existingRows.size()
+                && existingRows.get(index) instanceof Map<?, ?> value ? value : Map.of();
+            var projectedRow = new java.util.LinkedHashMap<String, Object>();
+            children.forEach(child -> collectStarterValues(child, row, existingRow,
+                projectedRow, modes, preserveRestricted));
+            Set<String> visibleIds = visibleNodeIds(children, projectedRow);
+            var visibleRow = new java.util.LinkedHashMap<String, Object>();
+            children.forEach(child -> collectVisibleValues(child, projectedRow, visibleRow,
+                visibleIds));
+            projectedRows.add(visibleRow);
+        }
+        output.put(id, projectedRows);
+    }
+
+    private boolean hasStarterVisibleField(JsonNode nodes, Map<String, String> modes) {
+        for (var node : nodes) {
+            String type = node.path("type").asText("");
+            if (CONTAINER_TYPES.contains(type) || "table_list".equals(type)) {
+                if (hasStarterVisibleField(node.path("children"), modes)) return true;
+            } else if (!"description".equals(type)
+                && !"HIDDEN".equals(modes.get(node.path("id").asText()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private JsonNode projectSchemaNode(JsonNode node, Map<String, String> modes) {
+        String type = node.path("type").asText("");
+        String id = node.path("id").asText("");
+        if (!CONTAINER_TYPES.contains(type) && "HIDDEN".equals(modes.get(id))) return null;
+        ObjectNode copy = node.deepCopy();
+        JsonNode children = node.path("children");
+        if (children.isArray()) {
+            ArrayNode projectedChildren = json.createArrayNode();
+            children.forEach(child -> {
+                JsonNode projected = projectSchemaNode(child, modes);
+                if (projected != null) projectedChildren.add(projected);
+            });
+            copy.set("children", projectedChildren);
+            if ((CONTAINER_TYPES.contains(type) || "table_list".equals(type))
+                && projectedChildren.isEmpty()) return null;
+        }
+        return copy;
+    }
+
+    private void removeHiddenData(JsonNode node, ObjectNode data,
+                                  Map<String, String> modes) {
+        String type = node.path("type").asText("");
+        if (CONTAINER_TYPES.contains(type)) {
+            node.path("children").forEach(child -> removeHiddenData(child, data, modes));
+            return;
+        }
+        String id = node.path("id").asText("");
+        if ("table_list".equals(type)) {
+            if (!hasStarterVisibleField(node.path("children"), modes)) {
+                data.remove(id);
+                return;
+            }
+            JsonNode rows = data.path(id);
+            if (rows.isArray()) {
+                rows.forEach(row -> {
+                    if (row instanceof ObjectNode rowObject) {
+                        node.path("children").forEach(child ->
+                            removeHiddenData(child, rowObject, modes));
+                    }
+                });
+            }
+            return;
+        }
+        if ("HIDDEN".equals(modes.get(id))) data.remove(id);
+    }
+
+    private JsonNode readTree(Object value) {
+        if (value == null) return json.createObjectNode();
+        if (value instanceof JsonNode node) return node;
+        if (value instanceof String string) {
+            if (string.isBlank()) return json.createObjectNode();
+            try {
+                return json.readTree(string);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new BizException("BAD_JSON", error.getMessage());
+            }
+        }
+        return json.valueToTree(value);
+    }
+
     /** 返回可配置字段权限的叶子字段 id（排除分栏/明细表/说明等展示型节点，含嵌套子字段）。 */
     public Set<String> leafFieldIds(String schema) {
         return leafFieldTypes(schema).keySet();
@@ -247,6 +485,19 @@ public class FormDefinitionService {
             return;
         }
         String id = node.path("id").asText();
+        if ("table_list".equals(type) && values.get(id) instanceof List<?> rows) {
+            var visibleRows = new java.util.ArrayList<Map<String, Object>>();
+            for (Object rawRow : rows) {
+                if (!(rawRow instanceof Map<?, ?> row)) continue;
+                Set<String> rowVisibleIds = visibleNodeIds(node.path("children"), row);
+                var visibleRow = new java.util.LinkedHashMap<String, Object>();
+                node.path("children").forEach(child ->
+                    collectVisibleValues(child, row, visibleRow, rowVisibleIds));
+                visibleRows.add(visibleRow);
+            }
+            output.put(id, visibleRows);
+            return;
+        }
         if (!"description".equals(type) && values.containsKey(id)) {
             output.put(id, values.get(id));
         }
@@ -259,10 +510,16 @@ public class FormDefinitionService {
             return;
         }
         String type = node.path("type").asText("");
-        if (CONTAINER_TYPES.contains(type) || "table_list".equals(type)) {
+        if (CONTAINER_TYPES.contains(type)) {
             var containerChildren = node.path("children");
             if (containerChildren.isArray()) {
                 containerChildren.forEach(child -> validateNodeValue(child, values, fieldIds, visibleIds));
+            }
+            return;
+        }
+        if ("table_list".equals(type)) {
+            if (containsAcceptedField(node.path("children"), fieldIds)) {
+                validateTableValue(node, values.get(node.path("id").asText()), fieldIds);
             }
             return;
         }
@@ -345,6 +602,10 @@ public class FormDefinitionService {
         }
         Object value = values.get(node.path("id").asText());
         String type = node.path("type").asText();
+        if ("table_list".equals(type)) {
+            validateTableValue(node, value, null);
+            return;
+        }
         var props = node.path("props");
         var rules = node.path("rules");
         if ("matrix_fill".equals(node.path("type").asText())) {
@@ -425,6 +686,54 @@ public class FormDefinitionService {
             if (max.isNumber() && number.compareTo(max.decimalValue()) > 0) {
                 throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " exceeds max");
             }
+        }
+    }
+
+    private boolean containsAcceptedField(JsonNode nodes, Set<String> fieldIds) {
+        if (!nodes.isArray()) return false;
+        for (var child : nodes) {
+            String type = child.path("type").asText("");
+            if (CONTAINER_TYPES.contains(type) || "table_list".equals(type)) {
+                if (containsAcceptedField(child.path("children"), fieldIds)) return true;
+            } else if (fieldIds.contains(child.path("id").asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void validateTableValue(JsonNode node, Object value, Set<String> fieldIds) {
+        String label = node.path("label").asText(node.path("id").asText());
+        if (value != null && !(value instanceof List<?>)) {
+            throw new BizException("FORM_DATA_INVALID", label + " must be a row list");
+        }
+        List<?> rows = value instanceof List<?> list ? list : List.of();
+        JsonNode props = node.path("props");
+        JsonNode rules = node.path("rules");
+        boolean required = rules.path("required").asBoolean(
+            props.path("required").asBoolean(false));
+        int minRows = Math.max(0, props.path("minRows").asInt(required ? 1 : 0));
+        int maxRows = props.path("maxRows").canConvertToInt()
+            ? props.path("maxRows").asInt() : Integer.MAX_VALUE;
+        if (rows.size() < minRows) {
+            throw new BizException("FORM_DATA_INVALID", label + " below minRows");
+        }
+        if (rows.size() > maxRows) {
+            throw new BizException("FORM_DATA_INVALID", label + " exceeds maxRows");
+        }
+        JsonNode children = node.path("children");
+        for (Object rawRow : rows) {
+            if (!(rawRow instanceof Map<?, ?> row)) {
+                throw new BizException("FORM_DATA_INVALID", label + " contains an invalid row");
+            }
+            Set<String> rowVisibleIds = visibleNodeIds(children, row);
+            children.forEach(child -> {
+                if (fieldIds == null) {
+                    validateNodeValue(child, row, rowVisibleIds);
+                } else {
+                    validateNodeValue(child, row, fieldIds, rowVisibleIds);
+                }
+            });
         }
     }
 
@@ -686,6 +995,12 @@ public class FormDefinitionService {
             }
         });
         return visible;
+    }
+
+    private Set<String> visibleNodeIds(JsonNode roots, Map<?, ?> values) {
+        var nodes = new java.util.ArrayList<JsonNode>();
+        if (roots.isArray()) roots.forEach(nodes::add);
+        return visibleNodeIds(nodes, values);
     }
 
     private void collectNodes(com.fasterxml.jackson.databind.JsonNode node, String parentId,

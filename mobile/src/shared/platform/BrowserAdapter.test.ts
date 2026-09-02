@@ -42,10 +42,6 @@ describe('browserAdapter', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('returns null for silent login in the browser', async () => {
-    await expect(browserAdapter.trySilentLogin()).resolves.toBeNull();
-  });
-
   it('opens same-origin signed file URLs with noopener and noreferrer', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
 

@@ -43,6 +43,7 @@ export function DynamicFormRenderer({
             value={values[node.id]}
             values={values}
             mode={effectiveMode}
+            modeOverride={modeOverride}
             error={errors[node.id]}
             onValueChange={onValueChange}
             renderChildren={renderNodes}

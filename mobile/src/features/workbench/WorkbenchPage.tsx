@@ -27,6 +27,7 @@ export function WorkbenchPage() {
   const processes = useMemo(() => capRecents(query.data?.recentProcesses ?? []), [query.data]);
   const userName = query.data?.user.displayName ?? "";
   const pendingCount = query.data?.pendingCount ?? 0;
+  const draftCount = query.data?.draftCount ?? 0;
 
   if (query.isPending) return <PageSkeleton rows={5} />;
   if (query.isError) return <PageError title="工作台加载失败" message="请检查网络连接后重试。" onRetry={() => void query.refetch()} />;
@@ -41,7 +42,7 @@ export function WorkbenchPage() {
       <section className="kpis" aria-label="快捷统计">
         <button className="stat-card stat-card--accent" type="button" onClick={() => navigate("/tasks")}><b>{pendingCount}</b><span>待办</span></button>
         <button className="stat-card" type="button" onClick={() => navigate("/tasks?view=process")}><b>{processes.length}</b><span>最近流程</span></button>
-        <button className="stat-card" type="button" onClick={() => navigate("/forms/drafts")}><b>0</b><span>草稿</span></button>
+        <button className="stat-card" type="button" onClick={() => navigate("/forms/drafts")}><b>{draftCount}</b><span>草稿</span></button>
       </section>
 
       <section className="section">

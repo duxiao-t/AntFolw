@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
@@ -70,10 +71,13 @@ public class MobileWorkflowService {
         }
         authorizationService.requireFormAction(form.getId(), PermissionCodes.FORM_RUNTIME_READ);
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
+        JsonNode processTree = readJsonObject(
+            process == null ? null : process.getProcess(), "BAD_FLOW_JSON");
+        JsonNode schema = readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON");
         return new MobileFormDto(form.getCode(), form.getName(), form.getVersion(),
-            readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON"),
+            formDefinitionService.projectStarterSchema(schema, processTree),
             readJsonObject(form.getSettings(), "BAD_SETTINGS_JSON"),
-            readJsonObject(process == null ? null : process.getProcess(), "BAD_FLOW_JSON"));
+            processTree, formDefinitionService.starterFieldModes(processTree));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -108,7 +112,12 @@ public class MobileWorkflowService {
         String businessNo = Objects.toString(result.get("businessNo"), null);
         List<Long> firstTaskIds = asLongList(result.get("firstTaskIds"));
 
-        fileLinkService.append(formDataId, filesOf(request), userId);
+        ProcessDefinition currentProcess =
+            processDefinitionService.latestPublishedForForm(currentForm.getId());
+        Map<String, String> starterModes = formDefinitionService.starterFieldModes(
+            currentProcess == null ? null : currentProcess.getProcess());
+        fileLinkService.append(formDataId,
+            starterEditableFiles(filesOf(request), starterModes), userId);
         if (definitionVersions != null) {
             ProcessInstance started = instanceMapper.selectById(instanceId);
             if (started != null && started.getCurrentFormRevisionId() != null) {
@@ -160,6 +169,13 @@ public class MobileWorkflowService {
                 row.startedAt(), nodeName(snapshot, row.currentNodeId()), null, null, null,
                 history(row.instanceId()), false, List.of(), approvalSummary(instance, records), records);
         }
+        JsonNode formSchema = readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON");
+        JsonNode formData = readJsonObject(row.formDataJson(), "BAD_JSON");
+        boolean starterView = Objects.equals(row.startedBy(), userId) && !roles.contains(ADMIN_ROLE);
+        if (starterView) {
+            formData = formDefinitionService.projectStarterData(formData, formSchema, snapshot);
+            formSchema = formDefinitionService.projectStarterSchema(formSchema, snapshot);
+        }
         return new MobileInstanceDetailDto(
             visibility.name(),
             row.instanceId(),
@@ -171,12 +187,12 @@ public class MobileWorkflowService {
             row.applicantDepartment(),
             row.startedAt(),
             nodeName(snapshot, row.currentNodeId()),
-            readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON"),
-            readJsonObject(row.formDataJson(), "BAD_JSON"),
+            formSchema,
+            formData,
             snapshot,
             history(row.instanceId()),
             canWithdraw(instance, userId),
-            files(row.formDataId()),
+            starterView ? starterFiles(row.formDataId(), snapshot) : files(row.formDataId()),
             approvalSummary(instance, records),
             records
         );
@@ -214,10 +230,16 @@ public class MobileWorkflowService {
             row.applicantName(), row.applicantEmployeeNo(), row.applicantDepartment(),
             row.startedAt());
         Set<String> permissions = authorizationService.snapshot(userId).permissions();
+        JsonNode formSchema = readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON");
+        JsonNode formData = readJsonObject(row.formDataJson(), "BAD_JSON");
+        if (Objects.equals(row.startedBy(), userId) && !roles.contains(ADMIN_ROLE)) {
+            formData = formDefinitionService.projectStarterData(formData, formSchema, snapshot);
+            formSchema = formDefinitionService.projectStarterSchema(formSchema, snapshot);
+        }
         return new MobileTaskDetailDto(
             toTaskDto(row, snapshot),
-            readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON"),
-            readJsonObject(row.formDataJson(), "BAD_JSON"),
+            formSchema,
+            formData,
             snapshot,
             history(row.instanceId()),
             allowedActions(task, userId, permissions),
@@ -226,11 +248,13 @@ public class MobileWorkflowService {
                 && PENDING_STATUS.equals(task.getStatus())
                 && Objects.equals(task.getAssigneeId(), userId)
                 && permissions.contains(PermissionCodes.WORKFLOW_TASK_REJECT),
-            task.getParallelId() == null
+            task.getParallelId() == null && !fixedRejectTarget(task)
                 ? rejectTargets(snapshot, task.getNodeId()) : List.of(),
-            files(row.formDataId()),
+            Objects.equals(row.startedBy(), userId) && !roles.contains(ADMIN_ROLE)
+                ? starterFiles(row.formDataId(), snapshot) : files(row.formDataId()),
             approvalSummary(instance, records),
-            records
+            records,
+            processDefinitionService.commentPresets(snapshot, task.getNodeId())
         );
     }
 
@@ -275,12 +299,15 @@ public class MobileWorkflowService {
         }
         String schema = instance.getCurrentFormRevisionId() != null && definitionVersions != null
             ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
+        String effectiveSchema = schema == null ? form.getSchema() : schema;
+        JsonNode schemaTree = readJsonArray(effectiveSchema, "BAD_SCHEMA_JSON");
+        JsonNode snapshot = readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON");
         return new ReworkTaskDto(task.getId(), instance.getId(), form.getCode(), form.getName(),
             formData.getBusinessNo(),
-            readJsonArray(schema == null ? form.getSchema() : schema, "BAD_SCHEMA_JSON"),
-            readJsonObject(formData.getData(), "BAD_JSON"),
-            readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON"),
-            files(formData.getId()));
+            formDefinitionService.projectStarterSchema(schemaTree, snapshot),
+            formDefinitionService.projectStarterData(formData.getData(), schemaTree, snapshot),
+            snapshot,
+            starterFiles(formData.getId(), snapshot));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -331,22 +358,29 @@ public class MobileWorkflowService {
         ProcessInstance instance = requireExistingInstance(task.getProcInstId());
         FormData formData = requireFormData(instance.getFormDataId());
         JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
-        if (validate) {
-            FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
-            if (form == null) {
-                throw new BizException("NOT_FOUND", "form definition not found");
-            }
-            String schema = instance.getCurrentFormRevisionId() != null
-                && definitionVersions != null
-                ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
-            formDefinitionService.validateSubmission(schema == null ? form.getSchema() : schema,
-                data);
+        FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
+        if (form == null) {
+            throw new BizException("NOT_FOUND", "form definition not found");
         }
-        formData.setData(writeJson(data));
+        String schema = instance.getCurrentFormRevisionId() != null
+            && definitionVersions != null
+            ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
+        String effectiveSchema = schema == null ? form.getSchema() : schema;
+        Map<String, Object> canonicalData =
+            formDefinitionService.canonicalizeStarterRevision(effectiveSchema, data,
+                formData.getData(), instance.getProcessSnapshot());
+        if (validate) {
+            formDefinitionService.validateStarterSubmission(effectiveSchema, canonicalData,
+                instance.getProcessSnapshot());
+        }
+        formData.setData(writeJson(objectMapper.valueToTree(canonicalData)));
         formData.setStatus("NEEDS_REVISION");
         formDataMapper.updateById(formData);
         if (request.files() != null) {
-            fileLinkService.reconcile(formData.getId(), request.files(), userId);
+            Map<String, String> starterModes = formDefinitionService.starterFieldModes(
+                instance.getProcessSnapshot());
+            fileLinkService.reconcileEditable(formData.getId(), request.files(), userId,
+                starterModes);
         }
         return formData;
     }
@@ -426,6 +460,7 @@ public class MobileWorkflowService {
         task.setAssigneeId(row.assigneeId());
         task.setParallelId(row.parallelId());
         task.setNodeInstanceId(row.nodeInstanceId());
+        task.setApprovalMode(row.approvalMode());
         task.setTaskType(row.taskType());
         task.setStatus(row.taskStatus());
         task.setCreatedAt(row.taskCreatedAt());
@@ -540,6 +575,21 @@ public class MobileWorkflowService {
             .toList();
     }
 
+    private List<MobileFileDto> starterFiles(Long formDataId, JsonNode processSnapshot) {
+        Map<String, String> modes = formDefinitionService.starterFieldModes(processSnapshot);
+        Set<UUID> visibleFileIds = new LinkedHashSet<>();
+        for (MobileWorkflowMapper.FormDataFileLink link
+                : workflowMapper.selectFileLinks(formDataId)) {
+            if (!"HIDDEN".equals(modes.get(link.fieldId()))) {
+                visibleFileIds.add(link.fileId());
+            }
+        }
+        return workflowMapper.selectFilesByFormDataId(formDataId).stream()
+            .filter(file -> visibleFileIds.contains(file.getId()))
+            .map(MobileWorkflowService::toFileDto)
+            .toList();
+    }
+
     private List<String> allowedActions(TaskEntity task, long userId,
                                         Set<String> permissions) {
         if ("CC".equals(task.getStatus()) && task.getReadAt() == null
@@ -571,6 +621,11 @@ public class MobileWorkflowService {
         Set<String> allowed = new LinkedHashSet<>();
         configured.forEach(value -> allowed.add(value.asText()));
         return targets.stream().filter(target -> allowed.contains(target.nodeId())).toList();
+    }
+
+    private static boolean fixedRejectTarget(TaskEntity task) {
+        String mode = task.getApprovalMode();
+        return "AND".equals(mode) || "ALL".equals(mode) || "RATIO".equals(mode);
     }
 
     private boolean collectRejectTargets(JsonNode node, String currentNodeId,
@@ -649,6 +704,13 @@ public class MobileWorkflowService {
 
     private static List<MobileFileRef> filesOf(StartMobileInstanceRequest request) {
         return request.files() == null ? List.of() : request.files();
+    }
+
+    private static List<MobileFileRef> starterEditableFiles(
+        List<MobileFileRef> files, Map<String, String> modes) {
+        return files.stream()
+            .filter(file -> "EDITABLE".equals(modes.getOrDefault(file.fieldId(), "EDITABLE")))
+            .toList();
     }
 
     private static boolean isAdmin(java.util.Collection<String> roles) {

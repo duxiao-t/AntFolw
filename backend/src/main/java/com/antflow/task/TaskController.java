@@ -7,7 +7,10 @@ import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
+import com.antflow.process.ApprovalCommentPresets;
+import com.antflow.process.ProcessDefinitionService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,6 +26,21 @@ public class TaskController {
     private final TaskMapper taskMapper;
     private final ProcessInstanceMapper instanceMapper;
     private final AuditService auditService;
+    @Autowired(required = false)
+    private ProcessDefinitionService processDefinitionService;
+
+    @GetMapping("/{id}/comment-presets")
+    public ApprovalCommentPresets commentPresets(@PathVariable Long id) {
+        authorizationService.requireReadableTask(id);
+        TaskEntity task = taskMapper.selectById(id);
+        if (task == null) throw new BizException("NOT_FOUND", "task not found");
+        ProcessInstance instance = instanceMapper.selectById(task.getProcInstId());
+        if (instance == null || processDefinitionService == null) {
+            return ApprovalCommentPresets.empty();
+        }
+        return processDefinitionService.commentPresets(
+            instance.getProcessSnapshot(), task.getNodeId());
+    }
 
     @GetMapping
     public WorkflowPage<TaskEntity> myInbox(

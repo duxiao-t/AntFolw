@@ -69,6 +69,8 @@ export type FormFieldOption = {
   id: string;
   label: string;
   type: string;
+  required?: boolean;
+  defaultValue?: unknown;
   options?: Array<{
     label: string;
     value: string | number;
@@ -85,6 +87,7 @@ export const APPROVAL_PROPS = () => ({
   manager: { level: 1 },
   selfSelect: { multiple: false },
   nobody: { handler: 'TO_PASS' },
+  commentPresets: { approve: [] as string[], reject: [] as string[] },
 });
 
 export const CC_PROPS = () => ({

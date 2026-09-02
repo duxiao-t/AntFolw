@@ -20,16 +20,20 @@ export function FieldPermissionEditor({
   formFields,
   value,
   onChange,
+  defaultMode = 'READONLY',
+  allowComplexEditable = false,
 }: {
   formFields: FormFieldOption[];
   value?: FieldPerm[];
   onChange(perms: FieldPerm[]): void;
+  defaultMode?: FieldPermMode;
+  allowComplexEditable?: boolean;
 }) {
   const perms = new Map((value ?? []).map((entry) => [entry.fieldId, entry.mode]));
 
   const update = (fieldId: string, mode: FieldPermMode) => {
     const next = new Map(perms);
-    if (mode === 'READONLY') {
+    if (mode === defaultMode) {
       next.delete(fieldId);
     } else {
       next.set(fieldId, mode);
@@ -48,7 +52,8 @@ export function FieldPermissionEditor({
         <Typography.Text type="secondary">表单还没有可配置的字段</Typography.Text>
       ) : (
         formFields.map((field) => {
-          const editableDisabled = EDITABLE_FORBIDDEN_TYPES.has(field.type);
+          const editableDisabled =
+            !allowComplexEditable && EDITABLE_FORBIDDEN_TYPES.has(field.type);
           return (
             <div
               key={field.id}
@@ -77,7 +82,7 @@ export function FieldPermissionEditor({
               </span>
               <Radio.Group
                 size="small"
-                value={perms.get(field.id) ?? 'READONLY'}
+                value={perms.get(field.id) ?? defaultMode}
                 onChange={(event) => update(field.id, event.target.value)}
               >
                 {MODE_OPTIONS.map((option) => (
@@ -95,7 +100,8 @@ export function FieldPermissionEditor({
         })
       )}
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        未配置的字段默认只读；附件/图片/视频/检查项暂不支持编辑。
+        未配置的字段默认{defaultMode === 'EDITABLE' ? '可编辑' : '只读'}；
+        {!allowComplexEditable ? '附件/图片/视频/检查项暂不支持审批时编辑。' : ''}
       </Typography.Text>
     </div>
   );

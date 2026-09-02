@@ -102,6 +102,7 @@ public class ProcessDefinitionService {
         pd.setProcess(normalizeConditionValuesForPublish(pd.getProcess(), fd.getSchema()));
         validateProcessTree(pd.getProcess(),
             formDefinitionService.leafFieldTypes(fd.getSchema()));
+        validateStarterReadonlyDefaults(pd.getProcess(), fd.getSchema());
 
         pd.setStatus("PUBLISHED");
         pd.setVersion(pd.getVersion() + 1);
@@ -204,7 +205,8 @@ public class ProcessDefinitionService {
     private void pruneMissingFormPerms(JsonNode node, Set<String> formFieldIds) {
         JsonNode props = node.path("props");
         JsonNode perms = props.path("formPerms");
-        if (!"APPROVAL".equals(node.path("type").asText())
+        if (!("APPROVAL".equals(node.path("type").asText())
+            || "ROOT".equals(node.path("type").asText()))
             || !(props instanceof ObjectNode propsObject) || !perms.isArray()) {
             return;
         }
@@ -322,6 +324,7 @@ public class ProcessDefinitionService {
                 throw new BizException("BAD_FLOW", "审批流程至少需要 1 个审批节点");
             }
             validateRootSettings(root);
+            validateFormPerms(root, fieldTypes, true);
             validateRejectTargets(root, root);
         } catch (BizException e) {
             throw e;
@@ -603,7 +606,7 @@ public class ProcessDefinitionService {
             }
         }
         String mode = p.path("mode").asText("ANY");
-        if (!Set.of("OR", "AND", "ANY", "ALL", "RATIO", "SEQUENTIAL").contains(mode)) {
+        if (!Set.of("OR", "AND", "ANY", "ALL", "RATIO").contains(mode)) {
             throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
                 + " 的多人审批方式无效");
         }
@@ -614,7 +617,8 @@ public class ProcessDefinitionService {
             }
         }
         validateTimeout(n);
-        validateFormPerms(n, fieldTypes);
+        validateFormPerms(n, fieldTypes, false);
+        validateCommentPresets(n);
     }
 
     private void validateTimeout(com.fasterxml.jackson.databind.JsonNode node) {
@@ -672,13 +676,14 @@ public class ProcessDefinitionService {
 
     /** 校验节点级字段权限：字段必须存在于表单、模式合法、无重复；附件/检查项不可编辑。 */
     private void validateFormPerms(com.fasterxml.jackson.databind.JsonNode n,
-                                   Map<String, String> fieldTypes) {
+                                   Map<String, String> fieldTypes,
+                                   boolean allowComplexEditable) {
         com.fasterxml.jackson.databind.JsonNode perms = n.path("props").path("formPerms");
         if (perms.isMissingNode() || perms.isNull()) {
             return;
         }
         if (!perms.isArray()) {
-            throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+            throw new BizException("BAD_FLOW", nodeLabel(n) + " " + n.path("id").asText()
                 + " 的 formPerms 必须是数组");
         }
         Set<String> seen = new HashSet<>();
@@ -686,27 +691,128 @@ public class ProcessDefinitionService {
             String fieldId = entry.path("fieldId").asText("").trim();
             String mode = entry.path("mode").asText("");
             if (fieldId.isBlank()) {
-                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                throw new BizException("BAD_FLOW", nodeLabel(n) + " " + n.path("id").asText()
                     + " 存在缺少字段 id 的权限配置");
             }
             if (!Set.of("HIDDEN", "READONLY", "EDITABLE").contains(mode)) {
-                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                throw new BizException("BAD_FLOW", nodeLabel(n) + " " + n.path("id").asText()
                     + " 字段 " + fieldId + " 的权限模式非法: " + mode);
             }
             if (!seen.add(fieldId)) {
-                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                throw new BizException("BAD_FLOW", nodeLabel(n) + " " + n.path("id").asText()
                     + " 字段 " + fieldId + " 重复配置权限");
             }
             String type = fieldTypes.get(fieldId);
             if (type == null) {
-                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+                throw new BizException("BAD_FLOW", nodeLabel(n) + " " + n.path("id").asText()
                     + " 字段 " + fieldId + " 不存在于当前表单");
             }
-            if ("EDITABLE".equals(mode) && EDITABLE_FORBIDDEN_TYPES.contains(type)) {
-                throw new BizException("BAD_FLOW", "审批节点 " + n.path("id").asText()
+            if (!allowComplexEditable && "EDITABLE".equals(mode)
+                && EDITABLE_FORBIDDEN_TYPES.contains(type)) {
+                throw new BizException("BAD_FLOW", nodeLabel(n) + " " + n.path("id").asText()
                     + " 字段 " + fieldId + "（" + type + "）暂不支持编辑");
             }
         }
+    }
+
+    private void validateCommentPresets(com.fasterxml.jackson.databind.JsonNode node) {
+        var presets = node.path("props").path("commentPresets");
+        if (presets.isMissingNode() || presets.isNull()) return;
+        if (!presets.isObject()) {
+            throw new BizException("BAD_FLOW", "审批意见预设必须是对象");
+        }
+        validateCommentPresetList(presets.path("approve"), "同意");
+        validateCommentPresetList(presets.path("reject"), "驳回");
+    }
+
+    private void validateCommentPresetList(com.fasterxml.jackson.databind.JsonNode values,
+                                           String action) {
+        if (values.isMissingNode() || values.isNull()) return;
+        if (!values.isArray() || values.size() > 10) {
+            throw new BizException("BAD_FLOW", action + "意见预设最多 10 条");
+        }
+        Set<String> seen = new HashSet<>();
+        for (var value : values) {
+            String normalized = value.isTextual() ? value.asText().trim() : "";
+            if (normalized.isBlank() || normalized.length() > 100) {
+                throw new BizException("BAD_FLOW", action + "意见预设须为 1 到 100 字");
+            }
+            if (!seen.add(normalized)) {
+                throw new BizException("BAD_FLOW", action + "意见预设不能重复");
+            }
+        }
+    }
+
+    public ApprovalCommentPresets commentPresets(Object process, String nodeId) {
+        if (process == null || nodeId == null || nodeId.isBlank()) {
+            return ApprovalCommentPresets.empty();
+        }
+        try {
+            var root = process instanceof com.fasterxml.jackson.databind.JsonNode node
+                ? node : process instanceof String string
+                    ? json.readTree(string) : json.valueToTree(process);
+            var current = com.antflow.engine.tree.ProcessTreeNav.findById(root, nodeId);
+            if (current == null) return ApprovalCommentPresets.empty();
+            var presets = current.path("props").path("commentPresets");
+            return new ApprovalCommentPresets(
+                normalizedPresets(presets.path("approve")),
+                normalizedPresets(presets.path("reject")));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+            throw new BizException("BAD_FLOW_JSON", error.getMessage());
+        }
+    }
+
+    private List<String> normalizedPresets(com.fasterxml.jackson.databind.JsonNode values) {
+        if (!values.isArray()) return List.of();
+        var result = new java.util.LinkedHashSet<String>();
+        for (var value : values) {
+            String normalized = value.isTextual() ? value.asText().trim() : "";
+            if (!normalized.isBlank() && normalized.length() <= 100 && result.size() < 10) {
+                result.add(normalized);
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private void validateStarterReadonlyDefaults(String processJson, String schemaJson) {
+        try {
+            var root = json.readTree(processJson);
+            var schema = json.readTree(schemaJson);
+            for (var permission : root.path("props").path("formPerms")) {
+                if (!"READONLY".equals(permission.path("mode").asText())) continue;
+                String fieldId = permission.path("fieldId").asText();
+                var field = findSchemaField(schema, fieldId);
+                if (field == null) continue;
+                boolean required = field.path("rules").path("required").asBoolean(
+                    field.path("props").path("required").asBoolean(false));
+                var defaultValue = field.path("props").path("defaultValue");
+                if (required && (defaultValue.isMissingNode() || defaultValue.isNull()
+                    || (defaultValue.isTextual() && defaultValue.asText().isBlank())
+                    || (defaultValue.isArray() && defaultValue.isEmpty()))) {
+                    throw new BizException("BAD_FLOW", "发起人只读必填字段 " + fieldId
+                        + " 必须配置默认值");
+                }
+            }
+        } catch (BizException error) {
+            throw error;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+            throw new BizException("BAD_FLOW_JSON", error.getMessage());
+        }
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode findSchemaField(
+        com.fasterxml.jackson.databind.JsonNode nodes, String fieldId) {
+        if (!nodes.isArray()) return null;
+        for (var node : nodes) {
+            if (fieldId.equals(node.path("id").asText())) return node;
+            var nested = findSchemaField(node.path("children"), fieldId);
+            if (nested != null) return nested;
+        }
+        return null;
+    }
+
+    private String nodeLabel(com.fasterxml.jackson.databind.JsonNode node) {
+        return "ROOT".equals(node.path("type").asText()) ? "发起人节点" : "审批节点";
     }
 
     private String writeJson(Object o) {

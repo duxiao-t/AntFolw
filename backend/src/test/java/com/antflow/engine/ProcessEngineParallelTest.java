@@ -113,6 +113,9 @@ class ProcessEngineParallelTest {
         formDefinitionService = Mockito.mock(FormDefinitionService.class);
         Mockito.when(formDefinitionService.filterVisibleSubmission(Mockito.anyString(), Mockito.any()))
             .thenAnswer(invocation -> invocation.getArgument(1));
+        Mockito.when(formDefinitionService.canonicalizeStarterSubmission(
+                Mockito.anyString(), Mockito.any(), Mockito.any()))
+            .thenAnswer(invocation -> invocation.getArgument(1));
         formDataMapper = Mockito.mock(FormDataMapper.class);
         processDefinitionService = Mockito.mock(ProcessDefinitionService.class);
         taskMapper = Mockito.mock(TaskMapper.class);

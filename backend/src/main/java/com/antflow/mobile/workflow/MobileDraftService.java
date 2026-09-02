@@ -7,6 +7,8 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.ProcessDefinition;
+import com.antflow.process.ProcessDefinitionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -15,6 +17,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +32,8 @@ public class MobileDraftService {
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    @Autowired(required = false)
+    private ProcessDefinitionService processDefinitionService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(String formCode, JsonNode data, long userId) {
@@ -38,7 +43,7 @@ public class MobileDraftService {
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
-        draft.setData(writeJson(data));
+        draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setStatus(DRAFT_STATUS);
         draft.setCreatedBy(userId);
         draft.setUpdatedAt(OffsetDateTime.now());
@@ -52,7 +57,7 @@ public class MobileDraftService {
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
         authorizationService.requireFormAction(formDefinition.getId(),
             PermissionCodes.FORM_RUNTIME_READ);
-        draft.setData(writeJson(data));
+        draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.updateById(draft);
         return draft;
@@ -70,6 +75,12 @@ public class MobileDraftService {
             .eq("status", DRAFT_STATUS)
             .orderByDesc("updated_at"));
         return drafts.stream().map(this::toDto).toList();
+    }
+
+    public long count(long userId) {
+        return formDataMapper.selectCount(new QueryWrapper<FormData>()
+            .eq("created_by", userId)
+            .eq("status", DRAFT_STATUS));
     }
 
     public MobileDraftDto get(long draftId, long userId) {
@@ -115,18 +126,31 @@ public class MobileDraftService {
         FormDefinition formDefinition = formDefinitionService.getById(draft.getFormDefId());
         boolean readOnly = formDefinition == null
             || !PUBLISHED_STATUS.equals(formDefinition.getStatus());
+        Object process = processOf(draft.getFormDefId());
+        JsonNode schema = readJsonArray(formDefinition == null ? null : formDefinition.getSchema());
         return new MobileDraftDto(
             draft.getId(),
             draft.getFormDefId(),
             formDefinition == null ? null : formDefinition.getCode(),
             formDefinition == null ? null : formDefinition.getName(),
             draft.getFormDefVersion(),
-            readJsonObject(draft.getData()),
-            readJsonArray(formDefinition == null ? null : formDefinition.getSchema()),
+            formDefinitionService.projectStarterData(draft.getData(), schema, process),
+            formDefinitionService.projectStarterSchema(schema, process),
             readOnly,
             draft.getCreatedAt(),
             draft.getUpdatedAt()
         );
+    }
+
+    private JsonNode canonicalData(FormDefinition formDefinition, JsonNode data) {
+        return objectMapper.valueToTree(formDefinitionService.canonicalizeStarterData(
+            formDefinition.getSchema(), data, processOf(formDefinition.getId())));
+    }
+
+    private Object processOf(Long formDefId) {
+        if (processDefinitionService == null || formDefId == null) return null;
+        ProcessDefinition process = processDefinitionService.latestPublishedForForm(formDefId);
+        return process == null ? null : process.getProcess();
     }
 
     private String writeJson(JsonNode data) {

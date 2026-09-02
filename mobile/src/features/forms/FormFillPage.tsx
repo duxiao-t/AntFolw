@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, Toast } from "antd-mobile";
 import { useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppPage } from "../../shared/ui/AppPage";
@@ -29,13 +29,14 @@ import {
 import { applySchemaDefaults } from "./schema/defaults";
 import { validateSchemaValues } from "./schema/fieldRegistry";
 import { collectVisibleValues } from "./schema/validators";
-import type { FieldValidationErrors, MobileFormValues } from "./schema/types";
+import type { FieldMode, FieldValidationErrors, MobileFormValues } from "./schema/types";
 import { fetchReworkTask, saveReworkTask } from "./rework.api";
 
 export function FormFillPage() {
   const { code = "" } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const draftIdFromUrl = numberParam(searchParams.get("draftId"));
   const reworkTaskId = numberParam(searchParams.get("reworkTaskId"));
@@ -85,13 +86,20 @@ export function FormFillPage() {
       }
       return { draftId: await createMobileDraft(code, values), rework: false };
     },
-    onSuccess(result) {
+    async onSuccess(result) {
       if (!result.rework) setSavedDraftId(result.draftId);
       setInitialValues(values);
       setStatus(result.rework ? "原单已保存" : "草稿已保存");
       showToast({ icon: "success", content: result.rework ? "原单已保存" : "草稿已保存" });
       if (user) {
         removeRecoveryDraft(user.id, code, recoveryId(reworkTaskId, draftId));
+      }
+      if (!result.rework && result.draftId != null) {
+        queryClient.removeQueries({ queryKey: queryKeys.draft(result.draftId) });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }),
+        ]);
       }
     },
     onError(errorValue) {
@@ -101,6 +109,13 @@ export function FormFillPage() {
       });
     },
   });
+
+  useEffect(() => {
+    if (reworkTaskId != null || draftIdFromUrl != null || savedDraftId == null) return;
+    void navigate(`/forms/${encodeURIComponent(code)}?draftId=${savedDraftId}`, {
+      replace: true,
+    });
+  }, [code, draftIdFromUrl, navigate, reworkTaskId, savedDraftId]);
 
   useEffect(() => {
     if (!formQuery.data || (draftIdFromUrl != null && draftQuery.isPending)
@@ -174,12 +189,27 @@ export function FormFillPage() {
     void navigate(pendingSubmitPath);
   }, [navigate, pendingSubmitPath]);
 
-  const schema = formQuery.data?.schema ?? [];
-  const process = formQuery.data?.process;
+  const schema = (reworkTaskId != null && Array.isArray(reworkQuery.data?.schema)
+    ? reworkQuery.data.schema : formQuery.data?.schema) ?? [];
+  const process = reworkTaskId != null
+    ? reworkQuery.data?.processSnapshot : formQuery.data?.process;
   const formSchema = formSchemaWithoutSelfSelectRules(schema);
   const title = formQuery.data?.name ?? "表单填写";
   const description = typeof formQuery.data?.description === "string" ? formQuery.data.description : "";
   const fieldMode = draftQuery.data?.readOnly ? "readonly" : "fill";
+  const starterModeOverride = useMemo<Record<string, FieldMode>>(() => {
+    if (draftQuery.data?.readOnly) return {};
+    const modes = reworkTaskId != null
+      ? starterModesFromProcess(reworkQuery.data?.processSnapshot)
+      : (formQuery.data?.starterFieldModes ?? {});
+    const result: Record<string, FieldMode> = {};
+    for (const [fieldId, mode] of Object.entries(modes)) {
+      result[fieldId] = mode === "HIDDEN"
+        ? "hidden" : mode === "READONLY" ? "readonly" : "fill";
+    }
+    return result;
+  }, [draftQuery.data?.readOnly, formQuery.data?.starterFieldModes,
+    reworkQuery.data?.processSnapshot, reworkTaskId]);
 
   if (formQuery.isPending || (draftIdFromUrl != null && draftQuery.isPending)
     || (reworkTaskId != null && reworkQuery.isPending)) {
@@ -219,6 +249,7 @@ export function FormFillPage() {
           schema={formSchema}
           values={values}
           mode={fieldMode}
+          modeOverride={starterModeOverride}
           errors={errors}
           onValueChange={handleValueChange}
         />
@@ -280,6 +311,10 @@ export function FormFillPage() {
       setValues({});
       setInitialValues({});
       setStatus("草稿已丢弃");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.drafts }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }),
+      ]);
       void navigate(`/forms/${encodeURIComponent(code)}`, { replace: true });
     } catch {
       showToast({ icon: "fail", content: "丢弃草稿失败" });
@@ -318,6 +353,27 @@ export function FormFillPage() {
     setSubmitNavigationAllowed(true);
     setPendingSubmitPath(nextPath);
   }
+}
+
+function starterModesFromProcess(
+  process: unknown,
+): Record<string, "EDITABLE" | "READONLY" | "HIDDEN"> {
+  if (!process || typeof process !== "object") return {};
+  const props = (process as { props?: unknown }).props;
+  if (!props || typeof props !== "object") return {};
+  const formPerms = (props as { formPerms?: unknown }).formPerms;
+  if (!Array.isArray(formPerms)) return {};
+  const result: Record<string, "EDITABLE" | "READONLY" | "HIDDEN"> = {};
+  for (const entry of formPerms) {
+    if (!entry || typeof entry !== "object") continue;
+    const fieldId = (entry as { fieldId?: unknown }).fieldId;
+    const mode = (entry as { mode?: unknown }).mode;
+    if (typeof fieldId === "string"
+      && (mode === "EDITABLE" || mode === "READONLY" || mode === "HIDDEN")) {
+      result[fieldId] = mode;
+    }
+  }
+  return result;
 }
 
 function scrollToFirstError(errors: FieldValidationErrors) {

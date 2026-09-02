@@ -64,7 +64,7 @@
 .login-brand h1 {
   max-width: 520px;
   margin: 0;
-  font-size: 48px;
+  font-size: clamp(38px, 3.05vw, 48px);
   line-height: 1.14;
   font-weight: 650;
 }
@@ -121,7 +121,7 @@
   position: absolute;
   right: 32px;
   bottom: 26px;
-  color: rgba(255, 255, 255, 0.58);
+  color: rgba(255, 255, 255, 0.82);
   font-size: 11px;
   letter-spacing: 0;
 }
@@ -140,6 +140,13 @@
   border-radius: 10px;
   background: var(--af-color-surface);
   box-shadow: 0 20px 60px rgba(13, 28, 51, 0.1);
+}
+
+.login-card .ant-input-password-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
 }
 
 .login-heading {

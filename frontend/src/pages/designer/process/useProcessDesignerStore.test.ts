@@ -204,6 +204,12 @@ describe('process designer tree operations', () => {
     reset({
       id: 'root',
       type: 'ROOT',
+      props: {
+        formPerms: [
+          { fieldId: 'deleted', mode: 'HIDDEN' },
+          { fieldId: 'subject', mode: 'READONLY' },
+        ],
+      },
       children: {
         id: 'approval',
         type: 'APPROVAL',
@@ -222,6 +228,9 @@ describe('process designer tree operations', () => {
     expect(
       useProcessDesignerStore.getState().process.children?.props?.formPerms,
     ).toEqual([{ fieldId: 'subject', mode: 'EDITABLE' }]);
+    expect(useProcessDesignerStore.getState().process.props?.formPerms).toEqual([
+      { fieldId: 'subject', mode: 'READONLY' },
+    ]);
   });
 });
 
@@ -432,6 +441,35 @@ describe('process designer validation', () => {
       nodeId: 'approval',
       message: '请配置审批人',
     });
+  });
+
+  it('validates initiator readonly defaults and approval comment presets', () => {
+    const tree: TreeNode = {
+      id: 'root',
+      type: 'ROOT',
+      props: { formPerms: [{ fieldId: 'subject', mode: 'READONLY' }] },
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: {
+          assignedType: 'SELF',
+          commentPresets: {
+            approve: ['同意', ' 同意 '],
+            reject: [],
+          },
+        },
+      },
+    };
+
+    expect(validateProcessTree(tree, [{
+      id: 'subject', label: '主题', type: 'text', required: true,
+    }])).toEqual(expect.arrayContaining([
+      {
+        nodeId: 'root',
+        message: '发起人只读字段 subject 为必填项但未配置默认值',
+      },
+      { nodeId: 'approval', message: '同意意见预设不能重复' },
+    ]));
   });
 
   it('locates deleted semantic form references while allowing stale permissions', () => {

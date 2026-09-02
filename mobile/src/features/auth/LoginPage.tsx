@@ -7,6 +7,8 @@ import { safeReturnUrl, useAuthStore } from "./auth.store";
 import { apiRequest } from "../../shared/api/http";
 
 const REMEMBERED_USERNAME_KEY = "antflow-mobile-remembered-username";
+type WecomLoginState = 'loading' | 'enabled' | 'disabled' | 'unavailable';
+
 export function LoginPage() {
   const branding = useBranding();
   const navigate = useNavigate();
@@ -20,14 +22,14 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(() => readRememberedUsername().length > 0);
   const [errorMessage, setErrorMessage] = useState("");
   const [providers, setProviders] = useState<Array<{ code: string; displayName: string }>>([]);
-  const [wecomEnabled, setWecomEnabled] = useState(false);
+  const [wecomState, setWecomState] = useState<WecomLoginState>('loading');
 
   useEffect(() => {
-    if (import.meta.env.MODE === 'test') return;
     void apiRequest<Array<{ code: string; displayName: string }>>('/api/public/auth/providers')
-      .then(setProviders).catch(() => setProviders([]));
+      .then((result) => setProviders(Array.isArray(result) ? result : [])).catch(() => setProviders([]));
     void apiRequest<{ oauthEnabled: boolean }>('/api/public/auth/wecom/status')
-      .then((result) => setWecomEnabled(result.oauthEnabled)).catch(() => setWecomEnabled(false));
+      .then((result) => setWecomState(result.oauthEnabled ? 'enabled' : 'disabled'))
+      .catch(() => setWecomState('unavailable'));
   }, []);
 
   useEffect(() => {
@@ -65,9 +67,8 @@ export function LoginPage() {
     <main className="login">
       <section className="login__hero">
         <p className="login__eyebrow">{branding.companyName || "ANTFLOW"}</p>
-        <h1 className="login__title">Hello!</h1>
+        <h1 className="login__title">移动审批</h1>
         <p className="login__subtitle">{branding.loginTitle || "欢迎使用移动审批工作台"}</p>
-        <div className="login__art" aria-hidden="true" />
       </section>
 
       <form className="login__panel" noValidate onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
@@ -93,13 +94,24 @@ export function LoginPage() {
         <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={submitting}>{submitting ? "登录中..." : "登录"}</button>
       </form>
 
-      <div className="login__third">
+      <section className="login__third" aria-label="第三方登录">
         <span>第三方登录</span>
         <div className="login__socials">
-          {wecomEnabled ? <button className="login__social" type="button" aria-label="企业微信" onClick={() => { window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}><svg viewBox="0 0 24 24" fill="#1aad19" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg></button> : null}
-          {providers.map((provider) => <button key={provider.code} className="login__social login__social--oidc" type="button" aria-label={provider.displayName} title={provider.displayName} onClick={() => { window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}><span aria-hidden="true">{provider.displayName.slice(0, 1)}</span></button>)}
+          <button
+            className="login__social login__social--wecom"
+            type="button"
+            disabled={wecomState !== 'enabled'}
+            aria-busy={wecomState === 'loading'}
+            onClick={() => { window.location.assign(`/api/public/auth/wecom/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm7 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M3 13.5C3 9 7 6 12 6s9 3 9 7.5c0 4-3.5 7-8 7l-2-.3-3 1.5.8-2.6C5 18 3 16 3 13.5Z" /></svg>
+            <span>{wecomState === 'loading' ? '正在检查企业微信' : '企业微信登录'}</span>
+          </button>
+          {providers.map((provider) => <button key={provider.code} className="login__social login__social--oidc" type="button" onClick={() => { window.location.assign(`/api/public/auth/oidc/${encodeURIComponent(provider.code)}/authorize?returnUrl=${encodeURIComponent(safeReturnUrl(params.get('returnUrl')) ?? '/workbench')}`); }}><b aria-hidden="true">{provider.displayName.slice(0, 1)}</b><span>{provider.displayName}</span></button>)}
         </div>
-      </div>
+        {wecomState === 'disabled' ? <p className="login__third-status">企业微信登录未启用，请联系管理员</p> : null}
+        {wecomState === 'unavailable' ? <p className="login__third-status">企业微信登录暂不可用，请稍后重试</p> : null}
+      </section>
       <p className="login__agreement">登录即代表你已阅读并同意 <button className="link" type="button">用户协议</button> 与 <button className="link" type="button">隐私政策</button></p>
     </main>
   );

@@ -30,6 +30,8 @@ export function flattenFormFields(nodes: any[]): FormFieldOption[] {
         id: node.id,
         label: node.label ?? node.props?.label ?? node.id,
         type: node.type,
+        required: Boolean(node.rules?.required ?? node.props?.required),
+        defaultValue: node.props?.defaultValue,
         options: Array.isArray(node.props?.options)
           ? node.props.options
               .filter(
@@ -93,7 +95,7 @@ const approvalReady = (node: TreeNode): boolean => {
 const approvalPolicyReady = (node: TreeNode): boolean => {
   const props = node.props ?? {};
   const mode = props.mode ?? 'OR';
-  if (!['OR', 'AND', 'ANY', 'ALL', 'RATIO', 'SEQUENTIAL'].includes(mode)) {
+  if (!['OR', 'AND', 'ANY', 'ALL', 'RATIO'].includes(mode)) {
     return false;
   }
   if (mode === 'RATIO' && !(Number(props.ratio) >= 1 && Number(props.ratio) <= 100)) {
@@ -112,6 +114,7 @@ const approvalPolicyReady = (node: TreeNode): boolean => {
 const formPermsIssue = (
   node: TreeNode,
   fieldTypes?: Map<string, string>,
+  formFields?: FormFieldOption[],
 ): string | null => {
   const perms = node.props?.formPerms;
   if (perms == null) return null;
@@ -136,6 +139,42 @@ const formPermsIssue = (
       EDITABLE_FORBIDDEN_TYPES.has(fieldType)
     ) {
       return `字段 ${entry.fieldId} 暂不支持编辑`;
+    }
+    if (node.type === 'ROOT' && entry.mode === 'READONLY') {
+      const field = formFields?.find((item) => item.id === entry.fieldId);
+      if (field?.required && isEmptyDefaultValue(field.defaultValue)) {
+        return `发起人只读字段 ${entry.fieldId} 为必填项但未配置默认值`;
+      }
+    }
+  }
+  return null;
+};
+
+const isEmptyDefaultValue = (value: unknown): boolean =>
+  value == null ||
+  (typeof value === 'string' && value.trim() === '') ||
+  (Array.isArray(value) && value.length === 0);
+
+const commentPresetsIssue = (node: TreeNode): string | null => {
+  const presets = node.props?.commentPresets;
+  if (presets == null) return null;
+  if (!presets || typeof presets !== 'object' || Array.isArray(presets)) {
+    return '审批意见预设必须是对象';
+  }
+  for (const action of ['approve', 'reject'] as const) {
+    const values = presets[action];
+    if (values == null) continue;
+    if (!Array.isArray(values) || values.length > 10) {
+      return `${action === 'approve' ? '同意' : '驳回'}意见预设最多 10 条`;
+    }
+    const normalized = values.map((value: unknown) =>
+      typeof value === 'string' ? value.trim() : '',
+    );
+    if (normalized.some((value: string) => !value || value.length > 100)) {
+      return `${action === 'approve' ? '同意' : '驳回'}意见预设须为 1 到 100 字`;
+    }
+    if (new Set(normalized).size !== normalized.length) {
+      return `${action === 'approve' ? '同意' : '驳回'}意见预设不能重复`;
     }
   }
   return null;
@@ -292,8 +331,10 @@ export function validateProcessTree(
       ) {
         add(node.id, `表单审批人字段 ${fieldUserId} 已删除或类型不再是人员选择`);
       }
-      const permIssue = formPermsIssue(node, fieldTypes);
+      const permIssue = formPermsIssue(node, fieldTypes, formFields);
       if (permIssue) add(node.id, permIssue);
+      const presetsIssue = commentPresetsIssue(node);
+      if (presetsIssue) add(node.id, presetsIssue);
     }
     if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
       add(node.id, '请配置抄送人');
@@ -341,6 +382,10 @@ export function validateProcessTree(
   };
 
   if (root.type !== 'ROOT') add(root.id, '流程必须从发起人节点开始');
+  if (root.type === 'ROOT') {
+    const rootPermIssue = formPermsIssue(root, fieldTypes, formFields);
+    if (rootPermIssue) add(root.id, rootPermIssue);
+  }
   walk(root, 1);
   if (!hasConfiguredApproval(root)) add(root.id, '流程至少需要一个审批节点');
   return issues;

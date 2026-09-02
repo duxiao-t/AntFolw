@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -28,6 +29,8 @@ class MobileBootstrapControllerTest {
     private MobileAppService mobileAppService;
     @Mock
     private MobileWorkflowMapper workflowMapper;
+    @Mock
+    private MobileDraftService draftService;
 
     private MobileBootstrapController controller;
     private MobileBootstrapService service;
@@ -36,6 +39,7 @@ class MobileBootstrapControllerTest {
     void setUp() {
         service = new MobileBootstrapService(userMapper, taskMapper, mobileAppService,
             workflowMapper);
+        ReflectionTestUtils.setField(service, "draftService", draftService);
         controller = new MobileBootstrapController(service);
         PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("user", "admin")));
     }
@@ -53,6 +57,7 @@ class MobileBootstrapControllerTest {
         user.setDisplayName("AntFlow Admin");
         when(userMapper.selectById(1L)).thenReturn(user);
         when(taskMapper.selectCount(any())).thenReturn(2L);
+        when(draftService.count(1L)).thenReturn(3L);
         when(workflowMapper.countUnreadNotifications(1L)).thenReturn(4L);
         when(mobileAppService.favorites(1L)).thenReturn(List.of(
             new MobileAppDto(11L, "leave", "请假申请", null, "other", "其他", null)));
@@ -64,6 +69,7 @@ class MobileBootstrapControllerTest {
 
         assertEquals("admin", result.user().username());
         assertEquals(2, result.pendingCount());
+        assertEquals(3, result.draftCount());
         assertEquals(4, result.unreadNotificationCount());
         assertEquals(1, result.favoriteApps().size());
         assertEquals("leave", result.favoriteApps().get(0).code());

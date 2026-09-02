@@ -1,7 +1,7 @@
 import { apiRequest } from '../../shared/api/http';
 import type { MobileTaskFile } from '../tasks/tasks.api';
 import { collectMobileFileRefs } from './start.api';
-import type { MobileFormValues } from './schema/types';
+import type { MobileFlowNode, MobileFormValues, MobileSchemaNode } from './schema/types';
 
 export type ReworkTask = {
   taskId: number;
@@ -9,9 +9,9 @@ export type ReworkTask = {
   formCode: string;
   formName: string;
   businessNo: string;
-  schema: unknown;
+  schema: MobileSchemaNode[];
   formData: MobileFormValues;
-  processSnapshot: unknown;
+  processSnapshot: MobileFlowNode;
   files: MobileTaskFile[];
 };
 

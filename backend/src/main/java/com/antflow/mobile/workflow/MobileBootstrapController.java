@@ -26,7 +26,8 @@ public class MobileBootstrapController {
     }
 }
 
-record MobileBootstrapDto(MobileUserDto user, int pendingCount, int unreadNotificationCount,
+record MobileBootstrapDto(MobileUserDto user, int pendingCount, int draftCount,
+                          int unreadNotificationCount,
                           List<MobileAppDto> favoriteApps,
                           List<RecentProcessDto> recentProcesses,
                           String brandingVersion) {

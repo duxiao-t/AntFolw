@@ -56,6 +56,7 @@ describe("WorkbenchPage", () => {
     const payload: MobileBootstrap = {
       user: SAMPLE_USER,
       pendingCount: 4,
+      draftCount: 3,
       favoriteApps: apps,
       recentProcesses: processes,
       brandingVersion: "tenant-2026-07-18",
@@ -76,6 +77,7 @@ describe("WorkbenchPage", () => {
     expect(screen.getByText("流程 1")).toBeInTheDocument();
     expect(screen.getByText("流程 4")).toBeInTheDocument();
     expect(screen.queryByText("流程 5")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /3\s*草稿/ })).toBeInTheDocument();
   });
 
   it("reports error state with retry capability", async () => {

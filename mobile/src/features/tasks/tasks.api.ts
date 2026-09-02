@@ -155,6 +155,7 @@ export type MobileTaskDetail = {
   files: MobileTaskFile[];
   approvalSummary: ApprovalSummary;
   approvalRecords: ApprovalRecord[];
+  commentPresets?: { approve: string[]; reject: string[] };
 };
 
 export type TaskActionPayload = {

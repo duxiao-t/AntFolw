@@ -77,6 +77,25 @@ describe('wecomAdapter', () => {
     expect(new Headers(imports[0]?.[1]?.headers).get('Idempotency-Key')).toBeTruthy();
   });
 
+  it('imports media when the WebView does not implement crypto.randomUUID', async () => {
+    const cryptoWithoutUuid = {
+      getRandomValues: crypto.getRandomValues.bind(crypto),
+    } as Crypto;
+    vi.stubGlobal('crypto', cryptoWithoutUuid);
+    const { wecomAdapter } = await import('./WecomAdapter');
+
+    await expect(wecomAdapter.chooseImages?.(1)).resolves.toEqual([
+      expect.objectContaining({ id: 'image-file' }),
+    ]);
+
+    const mediaImport = vi.mocked(fetch).mock.calls.find(([url]) =>
+      String(url).includes('/media/import'));
+    expect(mediaImport).toBeDefined();
+    expect(new Headers(mediaImport?.[1]?.headers).get('Idempotency-Key')).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
   it('uploads a voice that reaches the WeCom automatic limit exactly once', async () => {
     const { wecomAdapter } = await import('./WecomAdapter');
     await wecomAdapter.startAudioRecording?.();

@@ -58,6 +58,7 @@ export type MobileFieldProps = {
   value: unknown;
   values: MobileFormValues;
   mode: FieldMode;
+  modeOverride?: Record<string, FieldMode>;
   error?: string;
   onValueChange: (fieldId: string, value: unknown) => void;
   renderChildren?: (children: MobileSchemaNode[]) => ReactNode;

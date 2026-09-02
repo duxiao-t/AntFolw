@@ -21,9 +21,6 @@ function resolveSameOriginUrl(url: string): string {
 
 export const browserAdapter: PlatformAdapter = {
   kind: 'browser',
-  async trySilentLogin() {
-    return null;
-  },
   scanCode: scanCodeWithCamera,
   startAudioRecording,
   stopAudioRecording,

@@ -94,8 +94,8 @@ public class ProcessEngine {
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());
         }
-        formDefinitionService.validateSubmission(fd.getSchema(), cmd.data());
-        var visibleData = formDefinitionService.filterVisibleSubmission(fd.getSchema(), cmd.data());
+        var visibleData = formDefinitionService.canonicalizeStarterSubmission(
+            fd.getSchema(), cmd.data(), pd.getProcess());
 
         FormData fd2 = new FormData();
         fd2.setFormDefId(fd.getId());
@@ -240,31 +240,29 @@ public class ProcessEngine {
             if (!decision.newTaskIds().isEmpty()) {
                 notifyAssigned(pi.getId(), decision.newTaskIds());
             }
-            if (!decision.advance()) return;
-
-            JsonNode formData = readFormData(pi.getFormDataId());
-            if (t.getParallelId() != null) {
-                advanceParallelBranch(root, pi, formData, t.getParallelId(), t.getBranchId(), cur);
-            } else {
-                resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
-            }
+            settleV2Decision(decision, cmd, operatorId, force, t, pi, root, cur);
             return;
         }
 
-        String mode = cur.path("props").path("mode").asText("OR");
-        boolean andMode = "AND".equals(mode);
-
-        if (andMode) {
-            // Wait until all PENDING siblings have acted.
-            List<TaskEntity> stillPending = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-                .eq("proc_inst_id", pi.getId())
-                .eq("status", "PENDING")
-                .eq("node_id", t.getNodeId())
-                .ne("id", t.getId()));
-            if (!stillPending.isEmpty()) {
-                return;   // 尚未完成本节点全员
+        String mode = WorkflowRuntimeV2.mode(cur);
+        if ("ALL".equals(mode) || "RATIO".equals(mode)) {
+            List<TaskEntity> votes = legacyNodeVotes(t);
+            if (votes.stream().anyMatch(task -> "PENDING".equals(task.getStatus()))) return;
+            long approved = votes.stream()
+                .filter(task -> "APPROVED".equals(task.getStatus())).count();
+            boolean passed = "ALL".equals(mode)
+                ? approved == votes.size()
+                : approved >= requiredApprovals(votes.size(), cur);
+            if (!passed) {
+                TaskEntity rejection = votes.stream()
+                    .filter(task -> "REJECTED".equals(task.getStatus()))
+                    .findFirst().orElse(t);
+                settleLegacyRejection(
+                    new CompleteCmd(rejection.getId(), "REJECT", rejection.getComment(), null),
+                    rejection.getApprovedBy() == null ? operatorId : rejection.getApprovedBy(),
+                    force, rejection, pi, root);
+                return;
             }
-            // All done — first-come OR any-of-several, choose "auto approve" semantics.
         } else {
             // OR-sign: skip sibling PENDING tasks on same node.
             List<TaskEntity> siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
@@ -397,97 +395,31 @@ public class ProcessEngine {
                 && t.getOperationKind().startsWith("ADD_")
                 ? runtimeV2.rejectAdditional(t, operatorId)
                 : runtimeV2.rejectVote(t, cur, operatorId);
-            if (!decision.reject()) return;
-            if (t.getParallelId() != null) {
-                WorkflowRuntimeV2.ParallelDecision parallel =
-                    runtimeV2.parallelBranchRejected(t, pi, root);
-                if (parallel == WorkflowRuntimeV2.ParallelDecision.WAIT) return;
-                if (parallel == WorkflowRuntimeV2.ParallelDecision.ADVANCE) {
-                    advanceParallelBranch(root, pi, readFormData(pi.getFormDataId()),
-                        t.getParallelId(), t.getBranchId(), cur);
-                    return;
-                }
-            }
-            rejectV2(cmd, operatorId, force, t, pi, root, cur);
+            settleV2Decision(decision, cmd, operatorId, force, t, pi, root, cur);
             return;
         }
 
-        // 同节点兄弟一律 SKIPPED；并行分支任务则把整个并行网关的 PENDING 任务都跳过
-        List<TaskEntity> siblings;
-        if (t.getParallelId() != null) {
-            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-                .eq("proc_inst_id", pi.getId()).eq("status", "PENDING")
-                .eq("parallel_id", t.getParallelId()).ne("id", t.getId()));
-        } else {
-            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-                .eq("proc_inst_id", pi.getId()).eq("status", "PENDING")
-                .eq("node_id", t.getNodeId()).ne("id", t.getId()));
-        }
-        for (TaskEntity sib : siblings) {
-            sib.setStatus("SKIPPED");
-            taskMapper.updateById(sib);
-            insertHistoryOnInstance(pi.getId(), t.getNodeId(), sib.getNodeId(),
-                "SKIP", operatorId, null);
-        }
-
-        if (force && cmd.rejectToNodeId() != null && !cmd.rejectToNodeId().isBlank()) {
-            JsonNode target = ProcessTreeNav.findById(root, cmd.rejectToNodeId());
-            if (target == null || !"APPROVAL".equals(target.path("type").asText())
-                || ProcessTreeNav.isInsideParallelBranch(root, cmd.rejectToNodeId())) {
-                throw new BizException("BAD_REJECT_TARGET", "reject target is not an approval node");
+        String mode = WorkflowRuntimeV2.mode(cur);
+        if (!force && ("ALL".equals(mode) || "RATIO".equals(mode))) {
+            List<TaskEntity> votes = legacyNodeVotes(t);
+            if (votes.stream().anyMatch(task -> "PENDING".equals(task.getStatus()))) return;
+            long approved = votes.stream()
+                .filter(task -> "APPROVED".equals(task.getStatus())).count();
+            if ("RATIO".equals(mode) && approved >= requiredApprovals(votes.size(), cur)) {
+                JsonNode formData = readFormData(pi.getFormDataId());
+                resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
+                return;
             }
-            pi.setStatus("RUNNING");
-            pi.setFinishedAt(null);
-            pi.setCurrentNodeId(target.path("id").asText());
-            processInstanceMapper.updateById(pi);
-            insertHistory(t, t.getNodeId(), target.path("id").asText(),
-                force ? "FORCE_REJECT" : "REJECT_TO_NODE", operatorId, cmd.comment());
-            resolveAndLandFromNode(root, pi, readFormData(pi.getFormDataId()),
-                pi.getStartedBy(), Map.of(), target);
+            TaskEntity rejection = votes.stream()
+                .filter(task -> "REJECTED".equals(task.getStatus()))
+                .findFirst().orElse(t);
+            settleLegacyRejection(
+                new CompleteCmd(rejection.getId(), "REJECT", rejection.getComment(), null),
+                rejection.getApprovedBy() == null ? operatorId : rejection.getApprovedBy(),
+                false, rejection, pi, root);
             return;
         }
-        TaskEntity previous = previousApproval(t);
-        List<TaskEntity> returnedTasks = previous == null
-            ? List.of(newReturnedTask(pi.getId(), "__rework__", "REWORK", "OR_SIGN",
-                pi.getStartedBy(), null, null))
-            : previousNodeAssignees(previous).stream()
-                .map(assigneeId -> newReturnedTask(pi.getId(), previous.getNodeId(), "APPROVAL",
-                    previous.getApprovalMode(), assigneeId, null, null))
-                .toList();
-        String returnedNodeId = previous == null ? "__rework__" : previous.getNodeId();
-        if (returnedTasks.isEmpty()) {
-            throw new BizException("BAD_FLOW", "previous approval has no assignee to return to");
-        }
-
-
-
-
-
-        for (TaskEntity returned : returnedTasks) {
-            taskMapper.insert(returned);
-        }
-
-        pi.setStatus("RUNNING");
-        pi.setFinishedAt(null);
-        pi.setCurrentNodeId(returnedNodeId);
-        processInstanceMapper.updateById(pi);
-        insertHistory(t, t.getNodeId(), returnedNodeId,
-            force ? "FORCE_REJECT" : "REJECT", operatorId,
-            cmd.comment());
-
-        if (previous == null) {
-            FormData formData = formDataMapper.selectById(pi.getFormDataId());
-            if (formData == null) {
-                throw new BizException("NOT_FOUND", "form data not found");
-            }
-            formData.setStatus("NEEDS_REVISION");
-            formDataMapper.updateById(formData);
-        }
-        for (TaskEntity returned : returnedTasks) {
-            notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
-                pi.getId(), returned.getId(), returned.getAssigneeId(),
-                previous == null ? "申请已退回修改" : "审批已退回上一级"));
-        }
+        settleLegacyRejection(cmd, operatorId, force, t, pi, root);
     }
 
     @Transactional
@@ -774,6 +706,143 @@ public class ProcessEngine {
         workflowJobMapper.updateById(job);
         insertHistoryOnInstance(job.getProcInstId(), job.getNodeId(), job.getNodeId(),
             note == null ? "TASK_TIMEOUT" : "TASK_TIMEOUT_SKIPPED", null, note);
+    }
+
+    private List<TaskEntity> legacyNodeVotes(TaskEntity acted) {
+        List<TaskEntity> votes = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+            .eq("proc_inst_id", acted.getProcInstId())
+            .eq("node_id", acted.getNodeId())
+            .eq("task_type", "APPROVAL")
+            .eq("created_at", acted.getCreatedAt())
+            .in("status", List.of("PENDING", "APPROVED", "REJECTED"))
+            .orderByAsc("id"));
+        return votes.isEmpty() ? List.of(acted) : votes;
+    }
+
+    private static int requiredApprovals(int total, JsonNode node) {
+        int ratio = node.path("props").path("ratio").asInt(
+            node.path("props").path("passRatio").asInt(100));
+        return Math.max(1,
+            (int) Math.ceil(total * Math.min(100, Math.max(1, ratio)) / 100.0));
+    }
+
+    private void settleLegacyRejection(CompleteCmd command, long operatorId, boolean force,
+                                       TaskEntity task, ProcessInstance instance, JsonNode root) {
+        List<TaskEntity> siblings;
+        if (task.getParallelId() != null) {
+            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", instance.getId()).eq("status", "PENDING")
+                .eq("parallel_id", task.getParallelId()).ne("id", task.getId()));
+        } else {
+            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
+                .eq("proc_inst_id", instance.getId()).eq("status", "PENDING")
+                .eq("node_id", task.getNodeId()).ne("id", task.getId()));
+        }
+        for (TaskEntity sibling : siblings) {
+            sibling.setStatus("SKIPPED");
+            taskMapper.updateById(sibling);
+            insertHistoryOnInstance(instance.getId(), task.getNodeId(), sibling.getNodeId(),
+                "SKIP", operatorId, null);
+        }
+
+        if (force && command.rejectToNodeId() != null
+            && !command.rejectToNodeId().isBlank()) {
+            JsonNode target = ProcessTreeNav.findById(root, command.rejectToNodeId());
+            if (target == null || !"APPROVAL".equals(target.path("type").asText())
+                || ProcessTreeNav.isInsideParallelBranch(root, command.rejectToNodeId())) {
+                throw new BizException("BAD_REJECT_TARGET", "reject target is not an approval node");
+            }
+            instance.setStatus("RUNNING");
+            instance.setFinishedAt(null);
+            instance.setCurrentNodeId(target.path("id").asText());
+            processInstanceMapper.updateById(instance);
+            insertHistory(task, task.getNodeId(), target.path("id").asText(),
+                "FORCE_REJECT", operatorId, command.comment());
+            resolveAndLandFromNode(root, instance, readFormData(instance.getFormDataId()),
+                instance.getStartedBy(), Map.of(), target);
+            return;
+        }
+
+        TaskEntity previous = previousApproval(task);
+        List<TaskEntity> returnedTasks = previous == null
+            ? List.of(newReturnedTask(instance.getId(), "__rework__", "REWORK", "OR_SIGN",
+                instance.getStartedBy(), null, null))
+            : previousNodeAssignees(previous).stream()
+                .map(assigneeId -> newReturnedTask(instance.getId(), previous.getNodeId(),
+                    "APPROVAL", previous.getApprovalMode(), assigneeId, null, null))
+                .toList();
+        String returnedNodeId = previous == null ? "__rework__" : previous.getNodeId();
+        if (returnedTasks.isEmpty()) {
+            throw new BizException("BAD_FLOW", "previous approval has no assignee to return to");
+        }
+        for (TaskEntity returned : returnedTasks) taskMapper.insert(returned);
+
+        instance.setStatus("RUNNING");
+        instance.setFinishedAt(null);
+        instance.setCurrentNodeId(returnedNodeId);
+        processInstanceMapper.updateById(instance);
+        insertHistory(task, task.getNodeId(), returnedNodeId,
+            force ? "FORCE_REJECT" : "REJECT", operatorId, command.comment());
+
+        if (previous == null) {
+            FormData formData = formDataMapper.selectById(instance.getFormDataId());
+            if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
+            formData.setStatus("NEEDS_REVISION");
+            formDataMapper.updateById(formData);
+        }
+        for (TaskEntity returned : returnedTasks) {
+            notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
+                instance.getId(), returned.getId(), returned.getAssigneeId(),
+                previous == null ? "申请已退回修改" : "审批已退回上一级"));
+        }
+    }
+
+    private void settleV2Decision(WorkflowRuntimeV2.Decision decision, CompleteCmd command,
+                                  long operatorId, boolean force, TaskEntity acted,
+                                  ProcessInstance instance, JsonNode root, JsonNode current) {
+        if (!decision.advance() && !decision.reject()) return;
+        if (decision.advance()) {
+            JsonNode formData = readFormData(instance.getFormDataId());
+            if (acted.getParallelId() != null) {
+                advanceParallelBranch(root, instance, formData, acted.getParallelId(),
+                    acted.getBranchId(), current);
+            } else {
+                resolveAndLand(root, instance, formData, instance.getStartedBy(), Map.of(), current);
+            }
+            return;
+        }
+
+        TaskEntity rejection = firstRejectedTask(acted);
+        long rejectionOperator = rejection.getApprovedBy() == null
+            ? operatorId : rejection.getApprovedBy();
+        CompleteCmd rejectionCommand = fixedRejectTarget(current)
+            ? new CompleteCmd(rejection.getId(), "REJECT", rejection.getComment(), null)
+            : command;
+        if (rejection.getParallelId() != null) {
+            WorkflowRuntimeV2.ParallelDecision parallel =
+                runtimeV2.parallelBranchRejected(rejection, instance, root);
+            if (parallel == WorkflowRuntimeV2.ParallelDecision.WAIT) return;
+            if (parallel == WorkflowRuntimeV2.ParallelDecision.ADVANCE) {
+                advanceParallelBranch(root, instance, readFormData(instance.getFormDataId()),
+                    rejection.getParallelId(), rejection.getBranchId(), current);
+                return;
+            }
+        }
+        rejectV2(rejectionCommand, rejectionOperator, force, rejection, instance, root, current);
+    }
+
+    private TaskEntity firstRejectedTask(TaskEntity acted) {
+        TaskEntity rejection = taskMapper.selectOne(new QueryWrapper<TaskEntity>()
+            .eq("node_instance_id", acted.getNodeInstanceId())
+            .eq("status", "REJECTED")
+            .orderByAsc("approved_at", "id")
+            .last("LIMIT 1"));
+        return rejection == null ? acted : rejection;
+    }
+
+    private static boolean fixedRejectTarget(JsonNode node) {
+        String mode = WorkflowRuntimeV2.mode(node);
+        return "ALL".equals(mode) || "RATIO".equals(mode);
     }
 
     private LockedTask lockPendingTask(long taskId) {

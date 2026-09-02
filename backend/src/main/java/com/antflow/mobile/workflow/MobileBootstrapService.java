@@ -10,6 +10,7 @@ import java.util.Collection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +22,8 @@ public class MobileBootstrapService {
     private final TaskMapper taskMapper;
     private final MobileAppService mobileAppService;
     private final MobileWorkflowMapper workflowMapper;
+    @Autowired(required = false)
+    private MobileDraftService draftService;
 
     public MobileBootstrapDto bootstrap(long userId, Collection<String> roles) {
         User user = userMapper.selectById(userId);
@@ -33,6 +36,7 @@ public class MobileBootstrapService {
             new MobileUserDto(user.getId(), user.getUsername(), user.getDisplayName(),
                 List.copyOf(roles)),
             pendingCount.intValue() + Math.toIntExact(workflowMapper.countUnreadCc(userId)),
+            draftService == null ? 0 : Math.toIntExact(draftService.count(userId)),
             Math.toIntExact(workflowMapper.countUnreadNotifications(userId)),
             mobileAppService.favorites(userId),
             workflowMapper.selectRecentProcesses(userId, MAX_RECENT_PROCESSES),

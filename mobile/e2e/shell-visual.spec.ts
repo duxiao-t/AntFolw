@@ -61,12 +61,18 @@ async function mockApi(page: Page) {
   await page.route('**/api/public/branding', async (route) => {
     await route.fulfill({ json: branding });
   });
-  await page.route('**/api/auth/login', async (route) => {
+  await page.route('**/api/public/auth/providers', async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route('**/api/public/auth/wecom/status', async (route) => {
+    await route.fulfill({ json: { oauthEnabled: false } });
+  });
+  await page.route('**/api/auth/login**', async (route) => {
     await route.fulfill({
       json: { accessToken: 'e2e-token', user: bootstrap.user },
     });
   });
-  await page.route('**/api/auth/refresh', async (route) => {
+  await page.route('**/api/auth/refresh**', async (route) => {
     // Anonymous until explicit login — keep AuthBootstrap from auto-signing-in.
     await route.fulfill({
       status: 401,
@@ -144,7 +150,7 @@ test('shell dimensions stay usable across mobile viewports', async ({ page }) =>
 
 test('captures deterministic key page screenshots', async ({ page }) => {
   await page.goto('/mobile/login');
-  await expect(page.getByRole('heading', { name: 'Hello!' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '移动审批' })).toBeVisible();
   await expect(page).toHaveScreenshot('login.png', { fullPage: true });
 
   await signIn(page, '/workbench');

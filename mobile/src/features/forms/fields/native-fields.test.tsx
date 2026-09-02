@@ -5,6 +5,7 @@ import { PlatformProvider } from '../../../shared/platform/PlatformProvider';
 import { AudioUploadField } from './AudioUploadField';
 import { LocationField } from './LocationField';
 import { ScanCodeField } from './ScanCodeField';
+import { FileUploadField } from './FileUploadField';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 
 const AUDIO_FILE = {
@@ -29,7 +30,10 @@ describe('native form fields', () => {
       id: 'voice', type: 'audio_upload', label: '现场录音', props: { maxCount: 3, maxDuration: 5 },
     }, [], onValueChange)} />, adapter);
 
-    fireEvent.click(screen.getByRole('button', { name: /开始录音/ }));
+    const recordButton = screen.getByRole('button', { name: /开始录音/ });
+    expect(recordButton).toHaveClass('upload-trigger--platform');
+    expect(recordButton.parentElement).toHaveClass('upload-control');
+    fireEvent.click(recordButton);
     await act(async () => { await Promise.resolve(); });
     await act(async () => { vi.advanceTimersByTime(5_000); await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
@@ -44,7 +48,10 @@ describe('native form fields', () => {
     renderField(<ScanCodeField {...props({ id: 'code', type: 'scan_code', label: '物料码' }, 'A-1', onValueChange)} />, adapter);
 
     fireEvent.change(screen.getByLabelText('物料码'), { target: { value: 'A-2' } });
-    fireEvent.click(screen.getByRole('button', { name: '扫码' }));
+    const scanButton = screen.getByRole('button', { name: '扫码' });
+    expect(scanButton).toHaveClass('upload-trigger--platform');
+    expect(scanButton.parentElement).toHaveClass('upload-control');
+    fireEvent.click(scanButton);
     await act(async () => { await Promise.resolve(); });
 
     expect(onValueChange).toHaveBeenCalledWith('code', 'A-2');
@@ -59,7 +66,10 @@ describe('native form fields', () => {
     });
     const onValueChange = vi.fn();
     const view = renderField(<LocationField {...props({ id: 'place', type: 'location', label: '位置' }, null, onValueChange)} />, adapter);
-    fireEvent.click(screen.getByRole('button', { name: /获取当前位置/ }));
+    const locationButton = screen.getByRole('button', { name: /获取当前位置/ });
+    expect(locationButton).toHaveClass('upload-trigger--platform');
+    expect(locationButton.parentElement).toHaveClass('upload-control');
+    fireEvent.click(locationButton);
     await act(async () => { await Promise.resolve(); });
     expect(onValueChange).toHaveBeenCalledWith('place', location);
 
@@ -69,11 +79,23 @@ describe('native form fields', () => {
     expect(adapter.openLocation).toHaveBeenCalledWith(location);
     expect(onValueChange).toHaveBeenLastCalledWith('place', undefined);
   });
+
+  it('marks the WeCom image trigger for full-width platform styling', () => {
+    const adapter = platform({
+      kind: 'wecom',
+      chooseImages: vi.fn().mockResolvedValue([]),
+    });
+    renderField(<FileUploadField {...props({
+      id: 'photos', type: 'image_upload', label: '现场照片', props: { preview: true },
+    }, [], vi.fn())} />, adapter);
+
+    expect(screen.getByRole('button', { name: /添加图片/ })).toHaveClass('upload-trigger--platform');
+  });
 });
 
 function platform(overrides: Partial<PlatformAdapter>): PlatformAdapter {
   return {
-    kind: 'browser', trySilentLogin: async () => null, openFile: async () => undefined,
+    kind: 'browser', openFile: async () => undefined,
     closePage: () => undefined, getEnvironment: () => ({ standalone: false, userAgent: '' }),
     ...overrides,
   };

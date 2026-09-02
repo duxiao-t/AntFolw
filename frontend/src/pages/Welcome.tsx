@@ -15,11 +15,15 @@ import {
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, request, useModel, useNavigate } from '@umijs/max';
-import { App, Button, Empty, Input, Modal, Progress, Result, Skeleton, Space, Table, Tag } from 'antd';
+import { App, Button, Empty, Modal, Progress, Result, Skeleton, Space, Table, Tag } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import './Welcome.css';
+import {
+  ApprovalCommentEditor,
+  fetchApprovalCommentPresets,
+} from '../components/ApprovalCommentEditor';
 
 type Status = 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 
@@ -109,12 +113,21 @@ export default function Workplace() {
   });
   const [action, setAction] = useState<ActionState | null>(null);
   const [comment, setComment] = useState('');
+  const presetsQuery = useQuery({
+    queryKey: ['task-comment-presets', action?.taskId],
+    queryFn: () => {
+      if (!action) throw new Error('请选择审批操作');
+      return fetchApprovalCommentPresets(action.taskId);
+    },
+    enabled: action != null,
+    retry: 0,
+  });
   const actionMutation = useMutation({
     mutationFn: async () => {
       if (!action) throw new Error('请选择审批操作');
       return request(`/api/tasks/${action.taskId}/${action.type}`, {
         method: 'POST',
-        data: { comment },
+        data: { comment: comment.trim() || undefined },
       });
     },
     onSuccess: () => {
@@ -248,7 +261,12 @@ export default function Workplace() {
           actionMutation.mutate();
         }}
       >
-        <Input.TextArea rows={4} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={action?.type === 'approve' ? '审批意见（可选）' : '请说明驳回原因'} />
+        <ApprovalCommentEditor
+          action={action?.type ?? 'approve'}
+          presets={presetsQuery.data}
+          value={comment}
+          onChange={setComment}
+        />
       </Modal>
     </div>
   );
