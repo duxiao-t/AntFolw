@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../../shared/api/http";
 import { queryKeys } from "../../shared/api/queryKeys";
@@ -18,7 +18,7 @@ export async function fetchAppCatalog(filters: AppFilters) {
 }
 
 export function useAppCatalog(filters: AppFilters) {
-  return useQuery({ queryKey: queryKeys.apps(filters), queryFn: () => fetchAppCatalog(filters), staleTime: 30_000, refetchOnWindowFocus: false, retry: 0 });
+  return useQuery({ queryKey: queryKeys.apps(filters), queryFn: () => fetchAppCatalog(filters), staleTime: 30_000, refetchOnWindowFocus: false, retry: 0, placeholderData: keepPreviousData });
 }
 
 export function AppCatalogPage() {

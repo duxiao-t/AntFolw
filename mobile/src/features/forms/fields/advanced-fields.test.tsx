@@ -174,7 +174,13 @@ describe('advanced mobile fields', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '选择审批人' }));
-    await user.type(screen.getByPlaceholderText('搜索姓名或工号'), '张');
+    const search = screen.getByPlaceholderText('搜索姓名或工号');
+    await user.type(search, '张三');
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('张三');
+    await user.clear(search);
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('');
 
     expect(await screen.findByRole('option', { name: '张三 · 研发部 · 工号 000101' })).toBeInTheDocument();
     await user.click(screen.getByRole('option', { name: '张三 · 研发部 · 工号 000101' }));
@@ -206,7 +212,13 @@ describe('advanced mobile fields', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '选择部门' }));
-    await user.type(screen.getByPlaceholderText('搜索部门'), '研');
+    const search = screen.getByPlaceholderText('搜索部门');
+    await user.type(search, '研发');
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('研发');
+    await user.clear(search);
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('');
 
     expect(await screen.findByRole('option', { name: '研发部 2001' })).toBeInTheDocument();
     await user.click(screen.getByRole('option', { name: '研发部 2001' }));

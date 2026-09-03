@@ -29,30 +29,37 @@ export function MobileSelectionPopup({
   children,
 }: MobileSelectionPopupProps) {
   const panelRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!visible || typeof document === 'undefined') {
       return;
     }
-    if (presentation === 'fullscreen')
+    const fullscreen = presentation === 'fullscreen';
+    if (fullscreen) {
       document.body.classList.add('af-full-picker-open');
-    setTimeout(() => {
+    }
+    const timer = window.setTimeout(() => {
       const target = panelRef.current?.querySelector<HTMLInputElement>(
-        'input[type="search"], input, textarea, button',
+        '.af-full-picker__body input[type="search"], .af-full-picker__body input, .af-full-picker__body textarea, .af-full-picker__body button',
       );
-      target?.focus();
+      (target ?? panelRef.current)?.focus();
     }, 0);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.classList.remove('af-full-picker-open');
+      window.clearTimeout(timer);
+      if (fullscreen) {
+        document.body.classList.remove('af-full-picker-open');
+      }
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose, presentation, visible]);
+  }, [presentation, visible]);
 
   if (!visible || typeof document === 'undefined') {
     return null;

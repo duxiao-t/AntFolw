@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { MobileSchemaNode } from '../schema/types';
@@ -372,7 +372,10 @@ describe('leaf mobile fields', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '纸张' }));
-    await user.type(screen.getByRole('searchbox', { name: '搜索用品' }), '签字');
+    const search = screen.getByRole('searchbox', { name: '搜索用品' });
+    await user.type(search, '签字');
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('签字');
     expect(screen.queryByRole('option', { name: '纸张' })).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: '签字笔' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '清空' }));
@@ -429,7 +432,10 @@ describe('leaf mobile fields', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '纸张' }));
-    await user.type(screen.getByRole('searchbox', { name: '搜索用品' }), '不存在');
+    const search = screen.getByRole('searchbox', { name: '搜索用品' });
+    await user.type(search, '不存在');
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('不存在');
     expect(screen.getByText('没有匹配的选项')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '清空' }));
     await user.click(screen.getByRole('button', { name: '完成' }));

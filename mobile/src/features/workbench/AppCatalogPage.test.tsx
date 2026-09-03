@@ -100,6 +100,22 @@ describe("AppCatalogPage", () => {
     });
   });
 
+  it("keeps the search field mounted and focused while the debounced query refreshes", async () => {
+    setupFetch(APPS);
+    renderCatalog();
+
+    const input = await screen.findByRole("textbox", { name: "搜索表单或应用" });
+    input.focus();
+    fireEvent.change(input, { target: { value: "请" } });
+
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) =>
+      String(url).includes("/api/mobile/apps?keyword=%E8%AF%B7"),
+    )).toBe(true));
+
+    expect(screen.getByRole("textbox", { name: "搜索表单或应用" })).toBe(input);
+    expect(input).toHaveFocus();
+  });
+
   it("maps uncategorized apps to the other category tab", async () => {
     setupFetch(APPS);
     renderCatalog();
