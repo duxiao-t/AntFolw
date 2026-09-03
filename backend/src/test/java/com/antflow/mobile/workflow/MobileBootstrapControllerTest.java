@@ -3,6 +3,8 @@ package com.antflow.mobile.workflow;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
+import com.antflow.org.Department;
+import com.antflow.org.DepartmentMapper;
 import com.antflow.task.TaskMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +26,8 @@ class MobileBootstrapControllerTest {
     @Mock
     private UserMapper userMapper;
     @Mock
+    private DepartmentMapper departmentMapper;
+    @Mock
     private TaskMapper taskMapper;
     @Mock
     private MobileAppService mobileAppService;
@@ -37,7 +41,7 @@ class MobileBootstrapControllerTest {
 
     @BeforeEach
     void setUp() {
-        service = new MobileBootstrapService(userMapper, taskMapper, mobileAppService,
+        service = new MobileBootstrapService(userMapper, departmentMapper, taskMapper, mobileAppService,
             workflowMapper);
         ReflectionTestUtils.setField(service, "draftService", draftService);
         controller = new MobileBootstrapController(service);
@@ -55,7 +59,13 @@ class MobileBootstrapControllerTest {
         user.setId(1L);
         user.setUsername("admin");
         user.setDisplayName("AntFlow Admin");
+        user.setEmployeeNo("000001");
+        user.setDeptId(10L);
+        Department department = new Department();
+        department.setId(10L);
+        department.setName("研发部");
         when(userMapper.selectById(1L)).thenReturn(user);
+        when(departmentMapper.selectById(10L)).thenReturn(department);
         when(taskMapper.selectCount(any())).thenReturn(2L);
         when(draftService.count(1L)).thenReturn(3L);
         when(workflowMapper.countUnreadNotifications(1L)).thenReturn(4L);
@@ -68,6 +78,8 @@ class MobileBootstrapControllerTest {
         MobileBootstrapDto result = controller.bootstrap();
 
         assertEquals("admin", result.user().username());
+        assertEquals("研发部", result.user().department());
+        assertEquals("000001", result.user().employeeNo());
         assertEquals(2, result.pendingCount());
         assertEquals(3, result.draftCount());
         assertEquals(4, result.unreadNotificationCount());

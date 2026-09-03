@@ -38,14 +38,6 @@ class WecomServiceRulesTest {
     }
 
     @Test
-    void generatesStableCompanyScopedUsernames() {
-        assertThat(WecomService.deterministicUsername(1, "zhangsan"))
-            .isEqualTo(WecomService.deterministicUsername(1, "zhangsan"))
-            .isNotEqualTo(WecomService.deterministicUsername(2, "zhangsan"))
-            .startsWith("wx_");
-    }
-
-    @Test
     void derivesEnterpriseWecomUrlsFromThePublicOrigin() {
         WecomAppService.AccessInfo info = WecomAppService.accessInfo(
             URI.create("http://test.cqzc.cn:12387"));

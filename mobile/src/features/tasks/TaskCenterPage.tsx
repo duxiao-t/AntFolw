@@ -33,8 +33,8 @@ export function TaskCenterPage() {
     retry: 0,
   });
 
-  const heading = view === "pending" ? "需要你处理的审批" : view === "process" ? "我发起的流程" : "已处理";
-  const subtitle = view === "pending" ? `共 ${query.data?.items.length ?? 0} 单 · 按时间排序` : view === "process" ? `共 ${query.data?.items.length ?? 0} 条 · 跟进审批状态` : `近 30 天 · 共 ${query.data?.items.length ?? 0} 条`;
+  const heading = view === "pending" ? "需要你处理的审批" : view === "process" ? "我发起的" : "已处理";
+  const subtitle = view === "pending" ? `共 ${query.data?.items.length ?? 0} 单 · 按时间排序` : view === "process" ? `共 ${query.data?.items.length ?? 0} 条 · 流程与已填报表单` : `近 30 天 · 共 ${query.data?.items.length ?? 0} 条`;
 
   return (
     <AppPage title="待办" back={false} tabbar action={<button className="app-bar__action" type="button" aria-label="排序"><SortIcon /></button>}>
@@ -81,6 +81,6 @@ function SortIcon() {
 function parseView(value: string | null): TaskView { return value === "done" || value === "process" ? value : "pending"; }
 function nextParams({ view, keyword, status }: { view: TaskView; keyword: string; status: string }) { const params = new URLSearchParams({ view }); if (keyword.trim()) params.set("keyword", keyword.trim()); if (status) params.set("status", status); return params; }
 function returnParams({ view, keyword, status }: { view: TaskView; keyword: string; status: string }) { const params = new URLSearchParams({ returnView: view }); if (keyword.trim()) params.set("returnKeyword", keyword.trim()); if (status) params.set("returnStatus", status); return params; }
-function emptyTitle(view: TaskView) { return view === "done" ? "暂无已处理任务" : view === "process" ? "还没有发起的流程" : "暂无待办任务"; }
+function emptyTitle(view: TaskView) { return view === "done" ? "暂无已处理任务" : view === "process" ? "还没有发起记录" : "暂无待办任务"; }
 
 export default TaskCenterPage;

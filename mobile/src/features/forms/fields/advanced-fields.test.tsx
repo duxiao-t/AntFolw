@@ -18,8 +18,12 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (/\/api\/mobile\/users\/\d+$/.test(url)) {
+        const id = Number(url.split('/').at(-1));
+        return jsonResponse({ id, displayName: '张三', username: 'zhangsan', department: '研发部', employeeNo: '000101' });
+      }
       if (url.startsWith('/api/mobile/users')) {
-        return jsonResponse([{ id: 1001, displayName: '张三', username: 'zhangsan' }]);
+        return jsonResponse([{ id: 1001, displayName: '张三', username: 'zhangsan', department: '研发部', employeeNo: '000101' }]);
       }
       if (url.startsWith('/api/mobile/departments')) {
         return jsonResponse([{ id: 2001, name: '研发部' }]);
@@ -170,13 +174,14 @@ describe('advanced mobile fields', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '选择审批人' }));
-    await user.type(screen.getByPlaceholderText('搜索姓名或账号'), '张');
+    await user.type(screen.getByPlaceholderText('搜索姓名或工号'), '张');
 
-    expect(await screen.findByRole('option', { name: '张三 1001' })).toBeInTheDocument();
-    await user.click(screen.getByRole('option', { name: '张三 1001' }));
+    expect(await screen.findByRole('option', { name: '张三 · 研发部 · 工号 000101' })).toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: '张三 · 研发部 · 工号 000101' }));
 
     expect(onValueChange).toHaveBeenCalledWith('approver', 1001);
     expect(screen.getByText('张三')).toBeInTheDocument();
+    expect(screen.getByText('研发部 · 工号 000101')).toBeInTheDocument();
   });
 
   it('searches and selects a department by numeric id', async () => {
@@ -788,7 +793,7 @@ describe('advanced mobile fields', () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '用户1001' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /张三/ })).toBeInTheDocument());
 
     rerender(
       <UserPickerField
@@ -799,7 +804,7 @@ describe('advanced mobile fields', () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '用户2002' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /张三/ })).toBeInTheDocument());
   });
 
   it('treats malformed optional picker values as invalid while allowing empty values', () => {

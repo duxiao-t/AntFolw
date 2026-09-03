@@ -87,6 +87,11 @@ const routes: RouteObject[] = [
         HydrateFallback: NoHydrate,
       },
       {
+        path: '/submissions/:submissionId',
+        lazy: () => import('../features/forms/DirectSubmissionDetailPage').then(({ DirectSubmissionDetailPage }) => ({ Component: DirectSubmissionDetailPage })),
+        HydrateFallback: NoHydrate,
+      },
+      {
         path: '/processes/:instanceId',
         lazy: () => import('../features/processes/ProcessDetailPage').then(({ ProcessDetailPage }) => ({ Component: ProcessDetailPage })),
         HydrateFallback: NoHydrate,

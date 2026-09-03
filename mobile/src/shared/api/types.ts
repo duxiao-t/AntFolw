@@ -14,6 +14,7 @@ export interface MobileUser {
   username: string;
   displayName: string;
   department?: string;
+  employeeNo?: string;
   avatarUrl?: string;
   roles: string[];
 }

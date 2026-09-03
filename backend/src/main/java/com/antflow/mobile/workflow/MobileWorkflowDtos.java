@@ -74,6 +74,17 @@ record MobileInstanceDto(Long id, String status, String formName, String busines
                           OffsetDateTime startedAt, OffsetDateTime finishedAt) {
 }
 
+record MobileInitiatedDto(String kind, Long id, String status, String formName,
+                          String businessNo, String currentNodeName,
+                          OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+}
+
+record MobileDirectSubmissionDetailDto(Long id, String status, String formCode,
+                                       String formName, String businessNo,
+                                       OffsetDateTime submittedAt, JsonNode schema,
+                                       JsonNode formData, List<MobileFileDto> files) {
+}
+
 record MobileInstanceDetailDto(String visibility, Long id, String status, String formName,
                                String businessNo, String applicantName,
                                String applicantEmployeeNo, String applicantDepartment,

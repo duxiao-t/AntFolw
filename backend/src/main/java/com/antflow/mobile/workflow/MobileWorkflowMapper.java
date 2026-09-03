@@ -152,6 +152,83 @@ public interface MobileWorkflowMapper {
                                          @Param("offset") int offset);
 
     @Select("""
+        <script>
+        SELECT * FROM (
+          SELECT 'WORKFLOW' AS kind,
+                 pi.id,
+                 pi.status,
+                 form.name AS form_name,
+                 data.business_no,
+                 pi.current_node_id,
+                 pi.process_snapshot::text AS process_snapshot,
+                 pi.started_at,
+                 pi.finished_at
+          FROM t_process_instance pi
+          JOIN t_form_data data ON data.id = pi.form_data_id
+          JOIN t_form_definition form ON form.id = data.form_def_id
+          WHERE pi.started_by = #{userId}
+            AND pi.current_node_id IS DISTINCT FROM '__rework__'
+          UNION ALL
+          SELECT 'DIRECT' AS kind,
+                 data.id,
+                 data.status,
+                 form.name AS form_name,
+                 data.business_no,
+                 NULL AS current_node_id,
+                 NULL AS process_snapshot,
+                 data.created_at AS started_at,
+                 data.created_at AS finished_at
+          FROM t_form_data data
+          JOIN t_form_definition form ON form.id = data.form_def_id
+          WHERE data.created_by = #{userId}
+            AND data.status = 'SUBMITTED'
+            AND NOT EXISTS (
+              SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = data.id
+            )
+        ) initiated
+        WHERE 1 = 1
+        <if test="status != null and status != ''">
+          AND status = #{status}
+        </if>
+        <if test="keyword != null and keyword != ''">
+          AND (
+            form_name ILIKE CONCAT('%', #{keyword}, '%')
+            OR business_no ILIKE CONCAT('%', #{keyword}, '%')
+            OR current_node_id ILIKE CONCAT('%', #{keyword}, '%')
+          )
+        </if>
+        ORDER BY started_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+        </script>
+        """)
+    List<InitiatedRow> selectInitiatedPage(@Param("userId") long userId,
+                                           @Param("keyword") String keyword,
+                                           @Param("status") String status,
+                                           @Param("limit") int limit,
+                                           @Param("offset") int offset);
+
+    @Select("""
+        SELECT data.id AS data_id,
+               data.status,
+               data.created_at,
+               data.business_no,
+               data.data::text AS form_data_json,
+               form.code AS form_code,
+               form.name AS form_name,
+               form.schema::text AS form_schema
+        FROM t_form_data data
+        JOIN t_form_definition form ON form.id = data.form_def_id
+        WHERE data.id = #{dataId}
+          AND data.created_by = #{userId}
+          AND data.status = 'SUBMITTED'
+          AND NOT EXISTS (
+            SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = data.id
+          )
+        """)
+    DirectSubmissionRow selectDirectSubmission(@Param("dataId") long dataId,
+                                                @Param("userId") long userId);
+
+    @Select("""
         SELECT pi.id AS instance_id,
                pi.status AS instance_status,
                pi.current_node_id,
@@ -350,6 +427,16 @@ public interface MobileWorkflowMapper {
     record InstanceRow(Long id, String status, String formName, String businessNo,
                        String currentNodeId, String processSnapshot,
                        OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+    }
+
+    record InitiatedRow(String kind, Long id, String status, String formName, String businessNo,
+                        String currentNodeId, String processSnapshot,
+                        OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+    }
+
+    record DirectSubmissionRow(Long dataId, String status, OffsetDateTime createdAt,
+                               String businessNo, String formDataJson, String formCode,
+                               String formName, String formSchema) {
     }
 
     record InstanceDetailRow(Long instanceId, String instanceStatus, String currentNodeId,

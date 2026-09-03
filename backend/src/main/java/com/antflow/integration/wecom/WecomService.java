@@ -10,13 +10,10 @@ import com.antflow.integration.wecom.WecomClient.WecomUser;
 import com.antflow.integration.wecom.WecomClient.WecomUserRef;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +47,7 @@ public class WecomService {
     private static final int USER_BATCH_SIZE = 200;
     private static final int MANAGER_POOL_SIZE = 12;
     private static final long MANAGER_BATCH_INTERVAL_MS = 350;
+    private static final String DEFAULT_WECOM_PASSWORD = "qwer1234";
     private final JdbcTemplate jdbc;
     private final WecomSecretCipher cipher;
     private final WecomClient client;
@@ -305,7 +302,7 @@ public class WecomService {
                 rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)),
             companyId, companyId);
         for (LocalUserState state : localUsers) {
-            context.usernames.add(state.username());
+            context.usernameOwners.put(state.username(), state.id());
             if (state.employeeNo() != null) context.employeeNoOwners.put(state.employeeNo(), state.id());
             if (state.wecomUserId() != null) context.mappedIds.put(state.wecomUserId(), state.id());
             if (state.phone() != null) context.byPhone
@@ -327,6 +324,7 @@ public class WecomService {
 
     private static boolean changed(WecomUser external, LocalUserState local) {
         return !Objects.equals(trim(local.displayName()), displayName(external))
+            || !Objects.equals(local.username(), external.userId())
             || !Objects.equals(local.employeeNo(), external.userId())
             || !Objects.equals(local.status(), external.status() == 1 ? "ACTIVE" : "DISABLED")
             || !Objects.equals(blankToNull(local.position()), blankToNull(external.position()))
@@ -345,17 +343,15 @@ public class WecomService {
         int updated = 0;
         for (int index = 0; index < batch.size(); index++) {
             WecomUser user = batch.get(index);
+            boolean existingMapping = context.mappedIds.containsKey(user.userId());
             Long localId = context.mappedIds.get(user.userId());
             if (localId == null) localId = matchLocal(context, user.phone(), user.email());
             if (localId == null) {
                 Long departmentId = departmentMappings.get(primaryDepartment(user));
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
-                String username = deterministicUsername(companyId, user.userId());
-                if (!context.usernames.add(username)) {
-                    throw new SyncUserException("自动生成的账号已存在");
-                }
                 String employeeNo = wecomEmployeeNo(context, user.userId(), null);
-                String password = passwords.encode(UUID.randomUUID() + ":" + UUID.randomUUID());
+                String username = wecomUsername(context, employeeNo, null);
+                String password = passwords.encode(DEFAULT_WECOM_PASSWORD);
                 inserts.add(new Object[]{departmentId, employeeNo, username, password,
                     displayName(user), blankToNull(user.email()), blankToNull(user.phone()),
                     blankToNull(user.position()), gender(user.gender()),
@@ -367,7 +363,10 @@ public class WecomService {
                 Long departmentId = departmentMappings.get(primaryDepartment(user));
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
                 String employeeNo = wecomEmployeeNo(context, user.userId(), localId);
-                updates.add(new Object[]{employeeNo, departmentId, displayName(user), trim(user.phone()),
+                String username = wecomUsername(context, employeeNo, localId);
+                updates.add(new Object[]{username,
+                    existingMapping ? null : passwords.encode(DEFAULT_WECOM_PASSWORD),
+                    employeeNo, departmentId, displayName(user), trim(user.phone()),
                     trim(user.email()), blankToNull(user.position()), gender(user.gender()),
                     user.status() == 1 ? "ACTIVE" : "DISABLED", localId});
                 updated++;
@@ -411,7 +410,8 @@ public class WecomService {
             """, mappings);
         if (!updates.isEmpty()) {
             jdbc.batchUpdate("""
-                UPDATE t_user SET employee_no = ?, dept_id = ?, display_name = ?,
+                UPDATE t_user SET username = ?, password_hash = COALESCE(?, password_hash),
+                    employee_no = ?, dept_id = ?, display_name = ?,
                     phone = COALESCE(NULLIF(?, ''), phone),
                     email = COALESCE(NULLIF(?, ''), email),
                     position = ?, gender = ?, status = ?
@@ -441,6 +441,18 @@ public class WecomService {
         if (localId != null) context.employeeNoOwners.values().removeIf(id -> Objects.equals(id, localId));
         context.employeeNoOwners.put(value, localId == null ? Long.MIN_VALUE : localId);
         return value;
+    }
+
+    private static String wecomUsername(SyncContext context, String employeeNo, Long localId) {
+        Long owner = context.usernameOwners.get(employeeNo);
+        if (owner != null && !Objects.equals(owner, localId)) {
+            throw new SyncUserException("企业微信账号已被其他本地用户占用");
+        }
+        if (localId != null) {
+            context.usernameOwners.values().removeIf(id -> Objects.equals(id, localId));
+        }
+        context.usernameOwners.put(employeeNo, localId == null ? Long.MIN_VALUE : localId);
+        return employeeNo;
     }
 
     private void syncDepartmentLeaders(long companyId, List<WecomDepartment> departments,
@@ -607,17 +619,6 @@ public class WecomService {
         }
         if (!user.departmentIds().isEmpty()) return user.departmentIds().get(0);
         throw new SyncUserException("成员没有所属部门");
-    }
-
-    static String deterministicUsername(long companyId, String userId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
-                (companyId + "\0" + userId).getBytes(StandardCharsets.UTF_8));
-            return "wx_" + Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
-                .substring(0, 32).toLowerCase();
-        } catch (java.security.NoSuchAlgorithmException exception) {
-            throw new IllegalStateException(exception);
-        }
     }
 
     static List<WecomDepartment> orderDepartments(List<WecomDepartment> input) {
@@ -843,7 +844,7 @@ public class WecomService {
         final Map<String, Long> mappedIds = new HashMap<>();
         final Map<String, List<Long>> byPhone = new HashMap<>();
         final Map<String, List<Long>> byEmail = new HashMap<>();
-        final Set<String> usernames = new HashSet<>();
+        final Map<String, Long> usernameOwners = new HashMap<>();
         final Map<String, Long> employeeNoOwners = new HashMap<>();
         final Map<Long, LocalUserState> byId = new HashMap<>();
         long roleId;

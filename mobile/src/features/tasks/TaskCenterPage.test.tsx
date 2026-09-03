@@ -46,12 +46,25 @@ const DONE_TASKS = [
 
 const STARTED_PROCESSES = [
   {
+    kind: 'WORKFLOW',
     id: 9003,
     status: 'RUNNING',
     formName: '采购申请',
     currentNodeName: '部门审批',
     startedAt: '2026-07-19T11:00:00+08:00',
     finishedAt: null,
+  },
+];
+
+const DIRECT_SUBMISSIONS = [
+  {
+    kind: 'DIRECT',
+    id: 7001,
+    status: 'SUBMITTED',
+    formName: '设备点检表',
+    businessNo: 'CHECK-20260903-001',
+    startedAt: '2026-07-20T11:00:00+08:00',
+    finishedAt: '2026-07-20T11:00:00+08:00',
   },
 ];
 
@@ -82,11 +95,10 @@ function setupFetch(options: { failDone?: boolean; emptyPending?: boolean; paged
           hasMore: Boolean(options.pagedPending) && page !== '2',
         });
       }
-      if (url.pathname === '/api/mobile/instances') {
+      if (url.pathname === '/api/mobile/initiated') {
         expect(url.searchParams.get('page')).toBe('1');
         expect(url.searchParams.get('size')).toBe('20');
-        expect(url.searchParams.has('keyword')).toBe(true);
-        return jsonResponse({ items: STARTED_PROCESSES, hasMore: false });
+        return jsonResponse({ items: [...STARTED_PROCESSES, ...DIRECT_SUBMISSIONS], hasMore: false });
       }
       return jsonResponse({});
     }),
@@ -101,6 +113,7 @@ function renderTaskCenter(initialPath = '/tasks') {
     [
       { path: '/tasks', element: <TaskCenterPage /> },
       { path: '/tasks/:taskId', element: <h1>任务详情</h1> },
+      { path: '/submissions/:submissionId', element: <h1>填报详情</h1> },
     ],
     { initialEntries: [initialPath] },
   );
@@ -170,6 +183,17 @@ describe('TaskCenterPage', () => {
       'href',
       '/processes/9003?returnView=process&returnKeyword=%E9%87%87%E8%B4%AD&returnStatus=RUNNING',
     );
+  });
+
+  it('shows direct submissions beside workflows and opens their read-only detail', async () => {
+    renderTaskCenter('/tasks?view=process');
+
+    const card = await screen.findByRole('link', { name: /设备点检表/ });
+    expect(within(card).getByText('已填报')).toBeInTheDocument();
+    expect(within(card).getByText('无需审批，已完成填报')).toBeInTheDocument();
+    expect(card).toHaveAttribute('href', '/submissions/7001?returnView=process');
+    await userEvent.click(card);
+    expect(await screen.findByRole('heading', { name: '填报详情' })).toBeInTheDocument();
   });
 
   it('shows empty and error states for task lists', async () => {

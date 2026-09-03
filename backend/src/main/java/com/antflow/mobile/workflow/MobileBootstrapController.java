@@ -33,7 +33,8 @@ record MobileBootstrapDto(MobileUserDto user, int pendingCount, int draftCount,
                           String brandingVersion) {
 }
 
-record MobileUserDto(Long id, String username, String displayName, List<String> roles) {
+record MobileUserDto(Long id, String username, String displayName, String department,
+                     String employeeNo, List<String> roles) {
 }
 
 record MobileAppDto(Long formId, String code, String name, String iconUrl,

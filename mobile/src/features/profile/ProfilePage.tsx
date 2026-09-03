@@ -20,7 +20,7 @@ export function ProfilePage() {
 
   return (
     <AppPage title="我的" back={false} tabbar brandHeader contentStyle={{ paddingTop: 0 }} action={<button className="app-bar__action" type="button" aria-label="设置" onClick={() => navigate("/profile/security")}><SettingsIcon /></button>}>
-      <section className="profile-hero"><div className="avatar-lg">{user.displayName.slice(0, 1)}</div><h2>{user.displayName}</h2><small>{user.department || "未设置部门"} · {user.roles.join("、") || "成员"} · {user.username}</small></section>
+      <section className="profile-hero"><div className="avatar-lg">{user.displayName.slice(0, 1)}</div><h2>{user.displayName}</h2><small>{user.department || "未设置部门"} · 工号 {user.employeeNo || "未设置"}</small></section>
       <section className="section"><div className="list-card">
         <MenuRow icon={<FileIcon />} title="我的草稿" hint="未提交的表单" onClick={() => navigate("/forms/drafts")} />
         <MenuRow icon={<MessageIcon />} title="消息中心" hint="审批结果与通知" badge={data.unreadNotificationCount || undefined} onClick={() => navigate("/profile/notifications")} />

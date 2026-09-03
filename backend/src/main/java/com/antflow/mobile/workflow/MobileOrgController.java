@@ -21,6 +21,12 @@ public class MobileOrgController {
         return service.searchUsers(keyword);
     }
 
+    @GetMapping("/users/{id}")
+    public MobilePickerUserDto user(@org.springframework.web.bind.annotation.PathVariable long id) {
+        principal();
+        return service.user(id);
+    }
+
     @GetMapping("/departments")
     public List<MobilePickerDepartmentDto> departments(@RequestParam(required = false) String keyword) {
         principal();

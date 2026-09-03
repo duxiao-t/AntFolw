@@ -290,6 +290,42 @@ class MobileWorkflowServiceTest {
     }
 
     @Test
+    void initiatedQueryIncludesWorkflowAndDirectSubmissions() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-03T09:00:00+08:00");
+        Mockito.when(workflowMapper.selectInitiatedPage(7L, "点检", null, 21, 0))
+            .thenReturn(List.of(
+                new MobileWorkflowMapper.InitiatedRow("WORKFLOW", 501L, "RUNNING",
+                    "采购申请", "PROC-001", "a1", instance(501L, 7L, "RUNNING").getProcessSnapshot(), now, null),
+                new MobileWorkflowMapper.InitiatedRow("DIRECT", 601L, "SUBMITTED",
+                    "设备点检", "CHECK-001", null, null, now, now)
+            ));
+
+        MobilePageDto<MobileInitiatedDto> result = service.listInitiated(7L, 1, 20, " 点检 ", null);
+
+        assertThat(result.items()).extracting(MobileInitiatedDto::kind)
+            .containsExactly("WORKFLOW", "DIRECT");
+        assertThat(result.items().get(1).currentNodeName()).isNull();
+        Mockito.verify(workflowMapper).selectInitiatedPage(7L, "点检", null, 21, 0);
+    }
+
+    @Test
+    void directSubmissionDetailReturnsOnlySubmittedOwnedData() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-03T09:00:00+08:00");
+        Mockito.when(workflowMapper.selectDirectSubmission(601L, 7L)).thenReturn(
+            new MobileWorkflowMapper.DirectSubmissionRow(601L, "SUBMITTED", now, "CHECK-001",
+                "{\"subject\":\"完成\"}", "check", "设备点检",
+                "[{\"id\":\"subject\",\"type\":\"text\",\"label\":\"主题\"}]"));
+        Mockito.when(workflowMapper.selectFilesByFormDataId(601L)).thenReturn(List.of());
+
+        MobileDirectSubmissionDetailDto detail = service.getDirectSubmission(601L, 7L);
+
+        assertThat(detail.formName()).isEqualTo("设备点检");
+        assertThat(detail.formData().path("subject").asText()).isEqualTo("完成");
+        assertThatThrownBy(() -> service.getDirectSubmission(602L, 7L))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
     void taskDetailReturnsAllowedActionsAndLegalRejectTargets() {
         TaskEntity task = task(401L, 501L, "a2", 8L, "PENDING");
         ProcessInstance instance = instanceWithTwoApprovals();

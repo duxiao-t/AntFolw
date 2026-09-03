@@ -30,6 +30,18 @@ function ApprovalTaskCard({ task, returnSearch }: { task: TaskListItem; returnSe
 }
 
 function StartedProcessCard({ process, returnSearch }: { process: StartedProcessItem; returnSearch: string }) {
+  if (process.kind === 'DIRECT') {
+    return (
+      <Link to={`/submissions/${process.id}?${returnSearch}`} className="task-card task-card--success">
+        <div className="task-card__main">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><div className="task-card__title">{process.formName}</div><span className="chip chip--success-soft">已填报</span></div>
+          <div className="task-card__sub">无需审批，已完成填报</div>
+          <div className="task-progress task-progress--success"><i style={{ width: "100%" }} /></div>
+          <div className="task-card__footer"><span>发起人 <b style={{ color: "var(--af-color-text)" }}>我</b></span><span>{formatTime(process.startedAt)}</span></div>
+        </div><span className="task-card__chev">›</span>
+      </Link>
+    );
+  }
   const success = process.status === "APPROVED";
   const danger = process.status === "REJECTED";
   const muted = process.status === "WITHDRAWN";

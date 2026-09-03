@@ -148,6 +148,28 @@ public class MobileWorkflowService {
         );
     }
 
+    public MobilePageDto<MobileInitiatedDto> listInitiated(long userId, int page, int size,
+                                                            String keyword, String status) {
+        int normalizedPage = Math.max(page, 1);
+        int normalizedSize = Math.min(Math.max(size, 1), 50);
+        int fetchSize = normalizedSize + 1;
+        int offset = (normalizedPage - 1) * normalizedSize;
+        List<MobileInitiatedDto> items = workflowMapper.selectInitiatedPage(userId,
+                normalizedText(keyword), normalizedText(status), fetchSize, offset)
+            .stream().map(this::toInitiatedDto).toList();
+        boolean hasMore = items.size() > normalizedSize;
+        return new MobilePageDto<>(hasMore ? items.subList(0, normalizedSize) : items, hasMore);
+    }
+
+    public MobileDirectSubmissionDetailDto getDirectSubmission(long dataId, long userId) {
+        MobileWorkflowMapper.DirectSubmissionRow row = workflowMapper.selectDirectSubmission(dataId, userId);
+        if (row == null) throw new HiddenResourceException("submission not found");
+        return new MobileDirectSubmissionDetailDto(row.dataId(), row.status(), row.formCode(),
+            row.formName(), row.businessNo(), row.createdAt(),
+            readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON"),
+            readJsonObject(row.formDataJson(), "BAD_JSON"), files(row.dataId()));
+    }
+
     public MobileInstanceDetailDto getInstanceDetail(Long instanceId, long userId,
                                                       java.util.Collection<String> roles) {
         AuthorizationService.InstanceVisibility visibility =
@@ -424,6 +446,13 @@ public class MobileWorkflowService {
         JsonNode snapshot = readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON");
         return new MobileInstanceDto(row.id(), row.status(), row.formName(), row.businessNo(),
             nodeName(snapshot, row.currentNodeId()), row.startedAt(), row.finishedAt());
+    }
+
+    private MobileInitiatedDto toInitiatedDto(MobileWorkflowMapper.InitiatedRow row) {
+        String nodeName = "DIRECT".equals(row.kind()) ? null
+            : nodeName(readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON"), row.currentNodeId());
+        return new MobileInitiatedDto(row.kind(), row.id(), row.status(), row.formName(),
+            row.businessNo(), nodeName, row.startedAt(), row.finishedAt());
     }
 
     private static ProcessInstance toProcessInstance(MobileWorkflowMapper.InstanceDetailRow row) {

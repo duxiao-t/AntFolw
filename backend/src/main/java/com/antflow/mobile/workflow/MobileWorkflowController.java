@@ -104,6 +104,19 @@ public class MobileWorkflowController {
         return workflowService.listInstances(principal().userId(), page, size, keyword, status);
     }
 
+    @GetMapping("/initiated")
+    public MobilePageDto<MobileInitiatedDto> initiated(@RequestParam(defaultValue = "1") int page,
+                                                        @RequestParam(defaultValue = "20") int size,
+                                                        @RequestParam(required = false) String keyword,
+                                                        @RequestParam(required = false) String status) {
+        return workflowService.listInitiated(principal().userId(), page, size, keyword, status);
+    }
+
+    @GetMapping("/submissions/{id}")
+    public MobileDirectSubmissionDetailDto submission(@PathVariable long id) {
+        return workflowService.getDirectSubmission(id, principal().userId());
+    }
+
     @GetMapping("/instances/{id}")
     public MobileInstanceDetailDto instance(@PathVariable Long id) {
         PrincipalHolder.Principal principal = principal();

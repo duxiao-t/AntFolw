@@ -22,8 +22,9 @@ export type TaskListItem = {
 };
 
 export type StartedProcessItem = {
+  kind: 'WORKFLOW' | 'DIRECT';
   id: number;
-  status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
+  status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'SUBMITTED' | string;
   formName: string;
   businessNo?: string;
   currentNodeName?: string;
@@ -58,7 +59,7 @@ const DEFAULT_SIZE = 20;
 
 export async function fetchTaskCenterItems(filters: TaskCenterFilters): Promise<TaskPageResult<TaskCenterItem>> {
   if (filters.view === 'process') {
-    const result = await fetchList<StartedProcessItem>('/api/mobile/instances', filters);
+    const result = await fetchList<StartedProcessItem>('/api/mobile/initiated', filters);
     return {
       items: result.items.map((process) => ({ kind: 'process', process })),
       hasMore: result.hasMore,

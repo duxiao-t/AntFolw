@@ -12,6 +12,8 @@ const BOOTSTRAP: MobileBootstrap = {
     id: 7,
     username: 'admin',
     displayName: '管理员',
+    department: '研发部',
+    employeeNo: '000007',
     roles: ['admin'],
   },
   pendingCount: 3,
@@ -58,7 +60,8 @@ describe('ProfilePage', () => {
       expect(screen.getByText('管理员')).toBeInTheDocument();
     });
 
-    expect(screen.getByText((text) => text.includes('admin'))).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes('研发部') && text.includes('000007'))).toBeInTheDocument();
+    expect(screen.queryByText((text) => text.includes('admin'))).not.toBeInTheDocument();
     expect(screen.queryByText('已发起')).not.toBeInTheDocument();
     expect(screen.queryByText('已处理')).not.toBeInTheDocument();
     expect(screen.queryByText('待办')).not.toBeInTheDocument();

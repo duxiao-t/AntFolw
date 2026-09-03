@@ -14,6 +14,8 @@ export type MobilePickerUser = {
   id: number;
   displayName: string;
   username?: string;
+  department?: string | null;
+  employeeNo?: string | null;
 };
 
 export type MobilePickerDept = {
@@ -23,6 +25,10 @@ export type MobilePickerDept = {
 
 export async function searchMobileUsers(endpoint: string, keyword: string): Promise<MobilePickerUser[]> {
   return apiRequest<MobilePickerUser[]>(withKeyword(endpoint, keyword));
+}
+
+export async function fetchMobileUser(endpoint: string, id: number): Promise<MobilePickerUser> {
+  return apiRequest<MobilePickerUser>(`${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`);
 }
 
 export async function searchMobileDepartments(endpoint: string, keyword: string): Promise<MobilePickerDept[]> {
