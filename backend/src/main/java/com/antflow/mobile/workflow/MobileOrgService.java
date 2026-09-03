@@ -25,11 +25,19 @@ public class MobileOrgService {
         query.select("id", "username", "display_name", "employee_no", "dept_id");
         String trimmedKeyword = normalizeKeyword(keyword);
         if (!trimmedKeyword.isEmpty()) {
-            query.and(wrapper -> wrapper.like("username", trimmedKeyword)
-                .or()
-                .like("display_name", trimmedKeyword)
-                .or()
-                .like("employee_no", trimmedKeyword));
+            List<Long> matchingDepartmentIds = departmentMapper.selectList(
+                new QueryWrapper<Department>().select("id").like("name", trimmedKeyword))
+                .stream().map(Department::getId).toList();
+            query.and(wrapper -> {
+                wrapper.like("username", trimmedKeyword)
+                    .or()
+                    .like("display_name", trimmedKeyword)
+                    .or()
+                    .like("employee_no", trimmedKeyword);
+                if (!matchingDepartmentIds.isEmpty()) {
+                    wrapper.or().in("dept_id", matchingDepartmentIds);
+                }
+            });
         }
         query.orderByAsc("display_name").last("LIMIT " + SEARCH_LIMIT);
         List<User> users = userMapper.selectList(query);

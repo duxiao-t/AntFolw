@@ -22,7 +22,9 @@ export function SubmitConfirmPage() {
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(true);
   const formQuery = useQuery({ queryKey: queryKeys.form(code), queryFn: () => fetchMobileForm(code), enabled: code.length > 0, retry: 0 });
-  const selfSelectedRows = useMemo(() => selectedAssigneeNames(findSelfSelectRules(formQuery.data?.process), flow.selfSelected), [flow.selfSelected, formQuery.data?.process]);
+  const selfSelectedRows = useMemo(() => selectedAssigneeNames(
+    findSelfSelectRules(formQuery.data?.process), flow.selfSelected, flow.selfSelectedUsers,
+  ), [flow.selfSelected, flow.selfSelectedUsers, formQuery.data?.process]);
   const formName = formQuery.data?.name ?? "申请";
   const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
   const summaryRows = summarizeSchemaRows(formSchemaWithoutSelfSelectRules(formQuery.data?.schema ?? []), flow.values);

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ import { FormFillPage } from './FormFillPage';
 import { SelfSelectPage } from './SelfSelectPage';
 import { SubmitConfirmPage } from './SubmitConfirmPage';
 import { SubmitSuccessPage } from './SubmitSuccessPage';
-import { useSubmitFlowStore } from './submitFlow.store';
+import { findSelfSelectRules, useSubmitFlowStore } from './submitFlow.store';
 import { ProcessDetailPage } from '../processes/ProcessDetailPage';
 import { TaskCenterPage } from '../tasks/TaskCenterPage';
 import { collectMobileFileRefs } from './start.api';
@@ -68,14 +68,52 @@ const FORM_WITH_SELF_SELECT = {
         name: '直属主管',
         assignedType: 'SELF_SELECT',
         selfSelect: { multiple: false },
-        candidates: [
-          { id: 21, name: '张经理' },
-          { id: 22, name: '李经理' },
-        ],
       },
     },
   },
 };
+
+const FORM_WITH_MULTIPLE_SELF_SELECT = {
+  ...FORM_WITH_SELF_SELECT,
+  process: {
+    id: 'root',
+    type: 'ROOT',
+    children: {
+      id: 'single-approver',
+      type: 'APPROVAL',
+      name: '单人审批',
+      props: {
+        assignedType: 'SELF_SELECT',
+        mode: 'OR',
+        selfSelect: { multiple: false },
+      },
+      children: {
+        id: 'multiple-approvers',
+        type: 'APPROVAL',
+        name: '多人审批',
+        props: {
+          assignedType: 'SELF_SELECT',
+          mode: 'AND',
+          selfSelect: { multiple: true },
+        },
+      },
+    },
+  },
+};
+
+const SELF_SELECT_USERS = [
+  { id: 21, displayName: '张经理', username: 'zhang', department: '研发部', employeeNo: '000021' },
+  { id: 22, displayName: '李经理', username: 'li', department: '制造部', employeeNo: '000022' },
+  { id: 23, displayName: '王经理', username: 'wang', department: '质量部', employeeNo: '000023' },
+  { id: 24, displayName: '超长工号员工', username: 'long-no', department: '制造部', employeeNo: 'WECOM-0000000000000000000000000001' },
+  ...Array.from({ length: 9 }, (_, index) => ({
+    id: 30 + index,
+    displayName: `候选员工${index + 1}`,
+    username: `candidate-${index + 1}`,
+    department: '生产部',
+    employeeNo: `0000${30 + index}`,
+  })),
+];
 
 const FORM_WITH_DIRECT_SUBMIT = {
   ...FORM_WITHOUT_SELF_SELECT,
@@ -95,6 +133,11 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/mobile/users')) {
+        const keyword = new URL(url, 'http://localhost').searchParams.get('keyword') ?? '';
+        return jsonResponse(SELF_SELECT_USERS.filter((user) =>
+          `${user.displayName} ${user.username} ${user.department} ${user.employeeNo}`.includes(keyword)));
+      }
       if (url.includes('/api/mobile/forms/leave')) {
         return jsonResponse(formResponse);
       }
@@ -198,6 +241,30 @@ beforeEach(() => {
 });
 
 describe('mobile form submit flow', () => {
+  it('uses the flow node name and approval mode independently of selection cardinality', () => {
+    const rules = findSelfSelectRules({
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'node_gE8H22GO',
+        type: 'APPROVAL',
+        name: '审批人',
+        props: { assignedType: 'SELF_SELECT', mode: 'OR', selfSelect: { multiple: true } },
+        children: {
+          id: 'node_review',
+          type: 'APPROVAL',
+          name: '复核人',
+          props: { assignedType: 'SELF_SELECT', mode: 'ALL', selfSelect: { multiple: false } },
+        },
+      },
+    });
+
+    expect(rules).toMatchObject([
+      { nodeId: 'node_gE8H22GO', name: '审批人', multiple: true, approvalMode: 'OR' },
+      { nodeId: 'node_review', name: '复核人', multiple: false, approvalMode: 'AND' },
+    ]);
+  });
+
   it('navigates from form directly to confirmation when no self-select nodes exist', async () => {
     renderSubmitFlow();
 
@@ -321,7 +388,7 @@ describe('mobile form submit flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
     expect(await screen.findByText('选择审批人')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: '搜索审批人' })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: '搜索审批人' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '完成' })).toHaveClass('app-bar__action');
     expect(screen.getByText('直属主管')).toBeInTheDocument();
     expect(screen.getByText((text) => text.includes('直属主管') && text.includes('单选'))).toBeInTheDocument();
@@ -329,11 +396,101 @@ describe('mobile form submit flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '完成' }));
     expect(await screen.findByText('请选择直属主管')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText('张经理'));
+    await userEvent.click(await screen.findByRole('button', { name: /张经理/ }));
     await userEvent.click(screen.getByRole('button', { name: '完成' }));
 
     expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
     expect(screen.getByText((text) => text.includes('张经理'))).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '确认提交' }));
+    await waitFor(() => {
+      const call = instancePostCalls()[0];
+      if (!call) throw new Error('instance start call missing');
+      expect(JSON.parse(String((call[1] as RequestInit).body))).toMatchObject({
+        selfSelected: { manager: [21] },
+      });
+    });
+  });
+
+  it('limits the people grid to three rows and keeps hidden matches searchable', async () => {
+    const user = userEvent.setup();
+    setupFetch(FORM_WITH_MULTIPLE_SELF_SELECT);
+    useSubmitFlowStore.setState({
+      formCode: 'leave', draftId: null, reworkTaskId: null, values: {}, selfSelected: {}, selfSelectedUsers: {},
+    });
+    renderSubmitFlow('/forms/leave/self-select');
+
+    await screen.findByRole('button', { name: /张经理/ });
+    const people = () => {
+      const peopleGrid = document.querySelector<HTMLElement>('.people-grid');
+      if (!peopleGrid) throw new Error('people grid missing');
+      return within(peopleGrid);
+    };
+    expect(people().getAllByRole('button')).toHaveLength(11);
+    expect(people().getByRole('status', { name: '还有 2 名匹配人员，请继续搜索' })).toHaveTextContent('…');
+
+    const search = screen.getByRole('searchbox', { name: '搜索审批人' });
+    await user.type(search, '候选员工8');
+    await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(
+      ([url]) => String(url).includes(`/api/mobile/users?keyword=${encodeURIComponent('候选员工8')}`),
+    )).toBe(true));
+    const hiddenPerson = await screen.findByRole('button', { name: /候选员工8/ });
+    expect(people().queryByRole('status')).not.toBeInTheDocument();
+    await user.click(hiddenPerson);
+    expect(useSubmitFlowStore.getState().selfSelected).toEqual({ 'single-approver': [37] });
+  });
+
+  it('searches live employees and keeps single and multiple self-select nodes separate', async () => {
+    const user = userEvent.setup();
+    setupFetch(FORM_WITH_MULTIPLE_SELF_SELECT);
+    useSubmitFlowStore.setState({
+      formCode: 'leave', draftId: null, reworkTaskId: null, values: {}, selfSelected: {}, selfSelectedUsers: {},
+    });
+    renderSubmitFlow('/forms/leave/self-select');
+
+    const search = await screen.findByRole('searchbox', { name: '搜索审批人' });
+    expect(screen.getByText('单人审批 · 单选 · 或签')).toBeInTheDocument();
+    await user.type(search, '李');
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('李');
+    await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(
+      ([url]) => String(url).includes('/api/mobile/users?keyword=%E6%9D%8E'),
+    )).toBe(true));
+
+    const people = () => within(document.querySelector('.people-grid') as HTMLElement);
+    expect(await people().findByText('制造部 · 工号 000022')).toBeInTheDocument();
+    await user.click(people().getByRole('button', { name: /李经理/ }));
+    expect(useSubmitFlowStore.getState().selfSelected).toEqual({ 'single-approver': [22] });
+    expect(within(document.querySelector('.list-card') as HTMLElement).getByText('或签')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '多人审批' }));
+    expect(screen.getByText('多人审批 · 可多选 · 会签')).toBeInTheDocument();
+    await user.clear(search);
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(search).toHaveValue('');
+    await people().findByRole('button', { name: /张经理/ });
+    const longIdentity = '制造部 · 工号 WECOM-0000000000000000000000000001';
+    expect(people().getByText(longIdentity)).toHaveAttribute('title', longIdentity);
+    await user.click(people().getByRole('button', { name: /张经理/ }));
+    await user.click(people().getByRole('button', { name: /超长工号员工/ }));
+    await user.click(people().getByRole('button', { name: /李经理/ }));
+    expect(useSubmitFlowStore.getState().selfSelected).toEqual({
+      'single-approver': [22],
+      'multiple-approvers': [21, 24, 22],
+    });
+    const selectedList = document.querySelector('.list-card') as HTMLElement;
+    expect(within(selectedList).getAllByRole('button')).toHaveLength(4);
+    expect(within(selectedList).getAllByText('会签')).toHaveLength(3);
+    expect(within(selectedList).queryByText('…')).not.toBeInTheDocument();
+    expect(screen.getByText((text, element) =>
+      Boolean(element?.classList.contains('self-select__identity') && text.includes('WECOM-0000000000000000000000000001')),
+    )).toBeInTheDocument();
+
+    await user.click(people().getByRole('button', { name: /李经理/ }));
+    expect(useSubmitFlowStore.getState().selfSelected['multiple-approvers']).toEqual([21, 24]);
+    expect(within(selectedList).getAllByRole('button')).toHaveLength(3);
+    expect(useSubmitFlowStore.getState().selfSelectedUsers[21]).toMatchObject({
+      name: '张经理', department: '研发部', employeeNo: '000021',
+    });
   });
 
   it('submits with a stable idempotency key on retry, then clears state and recovery on success', async () => {

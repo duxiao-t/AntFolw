@@ -8,6 +8,7 @@ export type SubmitFlowState = {
   reworkTaskId: number | null;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
+  selfSelectedUsers: Record<number, SelfSelectAssignee>;
   reset(): void;
 };
 
@@ -15,13 +16,18 @@ export type SelfSelectRule = {
   nodeId: string;
   name: string;
   multiple: boolean;
+  approvalMode: SelfSelectApprovalMode;
   assignees: SelfSelectAssignee[];
 };
+
+export type SelfSelectApprovalMode = 'OR' | 'AND' | 'RATIO' | 'SEQUENTIAL';
 
 export type SelfSelectAssignee = {
   id: number;
   name: string;
   department?: string;
+  employeeNo?: string | null;
+  username?: string;
 };
 
 export const useSubmitFlowStore = create<SubmitFlowState>((set) => ({
@@ -30,8 +36,9 @@ export const useSubmitFlowStore = create<SubmitFlowState>((set) => ({
   reworkTaskId: null,
   values: {},
   selfSelected: {},
+  selfSelectedUsers: {},
   reset() {
-    set({ formCode: null, draftId: null, reworkTaskId: null, values: {}, selfSelected: {} });
+    set({ formCode: null, draftId: null, reworkTaskId: null, values: {}, selfSelected: {}, selfSelectedUsers: {} });
   },
 }));
 
@@ -52,15 +59,19 @@ export function beginSubmitFlow({
     reworkTaskId,
     values,
     selfSelected: {},
+    selfSelectedUsers: {},
   });
 }
 
-export function updateSelfSelected(nodeId: string, userIds: number[]) {
+export function updateSelfSelected(nodeId: string, userIds: number[], user?: SelfSelectAssignee) {
   useSubmitFlowStore.setState((state) => ({
     selfSelected: {
       ...state.selfSelected,
       [nodeId]: userIds,
     },
+    selfSelectedUsers: user
+      ? { ...state.selfSelectedUsers, [user.id]: user }
+      : state.selfSelectedUsers,
   }));
 }
 
@@ -111,12 +122,31 @@ function selfSelectRulesFromNode(node: MobileSchemaNode | MobileFlowNode): SelfS
   return [
     {
       nodeId: node.id,
-      name: String(node.props?.name ?? node.props?.title ?? node.props?.nodeName ?? node.label ?? node.id),
+      name: nodeName(node),
       multiple: Boolean(selfSelect?.multiple ?? node.props?.multiple ?? node.props?.multiSelect),
+      approvalMode: approvalMode(node.props?.mode),
       assignees: assigneesFromProps(node.props),
     },
     ...nested,
   ];
+}
+
+function nodeName(node: MobileSchemaNode | MobileFlowNode) {
+  const values = [
+    (node as MobileFlowNode).name,
+    node.props?.name,
+    node.props?.title,
+    node.props?.nodeName,
+    node.label,
+  ];
+  return String(values.find((value) => typeof value === 'string' && value.trim()) ?? node.id);
+}
+
+function approvalMode(value: unknown): SelfSelectApprovalMode {
+  if (value === 'AND' || value === 'ALL') return 'AND';
+  if (value === 'RATIO') return 'RATIO';
+  if (value === 'SEQUENTIAL') return 'SEQUENTIAL';
+  return 'OR';
 }
 
 function isSelfSelectNode(node: MobileSchemaNode | MobileFlowNode) {
@@ -144,10 +174,13 @@ function assigneesFromProps(props: MobileSchemaNode['props']): SelfSelectAssigne
 export function selectedAssigneeNames(
   rules: SelfSelectRule[],
   selfSelected: Record<string, number[]>,
+  selectedUsers: Record<number, SelfSelectAssignee> = {},
 ) {
   return rules.flatMap((rule) => {
     const names = (selfSelected[rule.nodeId] ?? []).map((id) =>
-      rule.assignees.find((assignee) => assignee.id === id)?.name ?? `用户#${id}`);
+      selectedUsers[id]?.name
+        ?? rule.assignees.find((assignee) => assignee.id === id)?.name
+        ?? `用户#${id}`);
     return names.length > 0 ? [{ nodeId: rule.nodeId, name: rule.name, names }] : [];
   });
 }

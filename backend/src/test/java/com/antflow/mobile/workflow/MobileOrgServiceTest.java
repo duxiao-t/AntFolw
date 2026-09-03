@@ -4,8 +4,10 @@ import com.antflow.org.Department;
 import com.antflow.org.DepartmentMapper;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +45,26 @@ class MobileOrgServiceTest {
 
         assertThat(row.department()).isEqualTo("研发部");
         assertThat(row.employeeNo()).isEqualTo("000007");
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void searchesUsersByMatchingDepartmentName() {
+        UserMapper users = Mockito.mock(UserMapper.class);
+        DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        User user = user(7L, 20L, "张三", "zhangsan", "000007");
+        Department department = new Department();
+        department.setId(20L);
+        department.setName("研发部");
+        Mockito.when(departments.selectList(any(QueryWrapper.class))).thenReturn(List.of(department));
+        Mockito.when(users.selectList(any(QueryWrapper.class))).thenReturn(List.of(user));
+        Mockito.when(departments.selectBatchIds(any())).thenReturn(List.of(department));
+
+        new MobileOrgService(users, departments).searchUsers("研发");
+
+        ArgumentCaptor<QueryWrapper> query = ArgumentCaptor.forClass(QueryWrapper.class);
+        Mockito.verify(users).selectList(query.capture());
+        assertThat(query.getValue().getSqlSegment()).contains("dept_id");
     }
 
     private static User user(long id, long deptId, String displayName, String username,

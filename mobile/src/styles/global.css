@@ -1191,12 +1191,12 @@ body {
 
 /* ─ 20. Self-select 选人/部门网格 ───────────────── */
 .people-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px 8px; padding: 8px 4px 0;
 }
 .person {
   display: grid; gap: 6px; justify-items: center; text-align: center;
-  background: transparent; border: 0; cursor: pointer; padding: 4px;
+  min-width: 0; background: transparent; border: 0; cursor: pointer; padding: 4px;
 }
 .person__avatar {
   width: 50px; height: 50px; border-radius: 50%;
@@ -1209,8 +1209,14 @@ body {
   border-color: var(--af-color-primary);
   box-shadow: 0 0 0 3px rgba(11,87,208,.18);
 }
+.person__name, .person__sub {
+  width: 100%; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .person__name { font-size: 11px; line-height: 1.2; color: var(--af-color-text); }
 .person__sub { font-size: 10px; color: var(--af-color-muted); }
+.self-select__identity { overflow-wrap: anywhere; }
+.person--more { min-height: 92px; place-items: center; color: var(--af-color-muted); font-size: 24px; cursor: default; }
 
 /* ─ 21. 确认页/提交流 ─────────────────────────── */
 .confirm-card {
@@ -3841,9 +3847,12 @@ body {
   white-space: nowrap;
 }
 .af-full-picker__option small {
+  overflow: hidden;
   margin-top: 2px;
   color: var(--af-color-muted);
   font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .af-full-picker__avatar {
   display: grid;
