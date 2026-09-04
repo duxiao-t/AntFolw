@@ -9,6 +9,20 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: antflow
+          POSTGRES_USER: antflow
+          POSTGRES_PASSWORD: antflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U antflow -d antflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     defaults:
       run:
         working-directory: backend
@@ -22,6 +36,9 @@ jobs:
         run: mvn -B test
         env:
           JWT_SECRET: ci-secret-0123456789-ci-secret-0123456789-ci
+          ANTFLOW_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/antflow
+          ANTFLOW_TEST_POSTGRES_USERNAME: antflow
+          ANTFLOW_TEST_POSTGRES_PASSWORD: antflow
 
   frontend:
     runs-on: ubuntu-latest
@@ -34,6 +51,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Lint (Biome)
@@ -45,6 +63,8 @@ jobs:
 
   mobile:
     runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
     defaults:
       run:
         working-directory: mobile

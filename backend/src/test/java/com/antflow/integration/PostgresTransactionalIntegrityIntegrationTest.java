@@ -15,10 +15,14 @@ import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
+import com.antflow.mobile.workflow.FileStorage;
+import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -35,44 +39,98 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@Testcontainers
 @SpringBootTest(properties = {
     "antflow.audit.archive-cron=-",
     "antflow.automation.poll-interval-ms=3600000",
     "antflow.automation.recovery-interval-ms=3600000",
-    "antflow.outbox.poll-interval-ms=3600000"
+    "antflow.outbox.poll-interval-ms=3600000",
+    "antflow.mobile.files.storage=test"
 })
+@Import(PostgresTransactionalIntegrityIntegrationTest.TestFileStorageConfig.class)
 class PostgresTransactionalIntegrityIntegrationTest {
+    private static final String EXTERNAL_POSTGRES_URL = System.getenv("ANTFLOW_TEST_POSTGRES_URL");
     private static final String VALID_SCHEMA =
         "[{\"id\":\"subject\",\"type\":\"text\",\"label\":\"Subject\"}]";
 
-    @Container
     static final PostgreSQLContainer<?> POSTGRES =
-        new PostgreSQLContainer<>("postgres:17-alpine")
+        externalPostgres() ? null : new PostgreSQLContainer<>("postgres:17-alpine")
             .withDatabaseName("antflow")
             .withUsername("antflow")
             .withPassword("antflow");
 
     @DynamicPropertySource
     static void postgresProperties(DynamicPropertyRegistry registry) {
+        if (externalPostgres()) {
+            registry.add("spring.datasource.url", () -> jdbcUrl(EXTERNAL_POSTGRES_URL));
+            registry.add("spring.datasource.username",
+                () -> env("ANTFLOW_TEST_POSTGRES_USERNAME", "antflow"));
+            registry.add("spring.datasource.password",
+                () -> env("ANTFLOW_TEST_POSTGRES_PASSWORD", "antflow"));
+            return;
+        }
+        POSTGRES.start();
         registry.add("spring.datasource.url", () -> {
-            String url = POSTGRES.getJdbcUrl();
-            return url + (url.contains("?") ? "&" : "?") + "stringtype=unspecified";
+            return jdbcUrl(POSTGRES.getJdbcUrl());
         });
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+    }
+
+    private static boolean externalPostgres() {
+        return EXTERNAL_POSTGRES_URL != null && !EXTERNAL_POSTGRES_URL.isBlank();
+    }
+
+    private static String jdbcUrl(String url) {
+        return url + (url.contains("?") ? "&" : "?") + "stringtype=unspecified";
+    }
+
+    private static String env(String name, String fallback) {
+        String value = System.getenv(name);
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestFileStorageConfig {
+        @Bean
+        FileStorage fileStorage() {
+            // MinIO lifecycle is covered by MobileAttachmentMinioIntegrationTest.
+            return new FileStorage() {
+                private final Map<String, byte[]> files = new java.util.concurrent.ConcurrentHashMap<>();
+
+                @Override
+                public StoredObject put(String storageKey, InputStream content, long size,
+                                        String contentType) throws IOException {
+                    byte[] bytes = content.readAllBytes();
+                    files.put(storageKey, bytes);
+                    return new StoredObject(storageKey, bytes.length);
+                }
+
+                @Override
+                public Resource get(String storageKey) {
+                    return new ByteArrayResource(files.getOrDefault(storageKey, new byte[0]));
+                }
+
+                @Override
+                public void delete(String storageKey) {
+                    files.remove(storageKey);
+                }
+            };
+        }
     }
 
     @Autowired private JdbcTemplate jdbcTemplate;
