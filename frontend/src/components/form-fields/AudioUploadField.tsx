@@ -45,7 +45,13 @@ function AudioInput({ node, mode, value, onChange }: FieldComponentProps) {
   }, []);
 
   if (mode === 'designer-preview') {
-    return <div data-field-id={node.id}><AudioOutlined /> 浏览器/企业微信直接录音 · 最多 {maxCount} 段，每段 {maxDuration} 秒</div>;
+    return <div data-field-id={node.id}>
+      <div style={{ marginBottom: 4 }}>{node.label}{node.props?.required ? ' *' : ''}</div>
+      <div className="form-fields-media-placeholder">
+        <AudioOutlined />
+        <span>浏览器/企业微信直接录音 · 最多 {maxCount} 段，每段 {maxDuration} 秒</span>
+      </div>
+    </div>;
   }
 
   return <div data-field-id={node.id}>

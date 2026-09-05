@@ -135,6 +135,48 @@
   min-height: 40px;
 }
 
+.form-renderer__designer-control :where(
+  input.ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-number,
+  .ant-picker,
+  .ant-select-single,
+  .ant-space-compact > .ant-btn
+) {
+  height: 38px;
+}
+
+.form-renderer__designer-control :where(
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-number,
+  .ant-picker,
+  .ant-select-selector
+) {
+  border-width: 1px;
+  border-radius: 6px;
+}
+
+.form-renderer__designer-control :where(input.ant-input, textarea.ant-input, .ant-picker),
+.form-renderer__designer-control .ant-select-single .ant-select-selector {
+  padding-inline: 12px;
+}
+
+.form-renderer__designer-control .ant-input-number-input {
+  height: 36px;
+  padding-inline: 12px;
+}
+
+.form-renderer__designer-control .ant-select-single .ant-select-selector {
+  height: 38px;
+  min-height: 38px;
+}
+
+.form-renderer__designer-control .ant-select-multiple .ant-select-selector {
+  min-height: 38px;
+  padding-inline: 12px;
+}
+
 .form-renderer__designer-actions {
   position: absolute;
   top: 50%;

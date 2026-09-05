@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentType } from 'react';
 import type { FieldComponentProps, SchemaNode } from '../../registry/types';
 import { AudioUploadField } from './AudioUploadField';
+import { FileUploadField } from './FileUploadField';
 import { LocationField } from './LocationField';
 import { ScanCodeField } from './ScanCodeField';
 
@@ -26,6 +27,18 @@ const file = {
 
 describe('desktop native fields', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('uses the shared designer display frame for native output fields', () => {
+    render(
+      <App>
+        <AudioUploadField.Component node={{ id: 'voice', type: 'audio_upload', label: '录音' }} mode="designer-preview" />
+        <LocationField.Component node={{ id: 'place', type: 'location', label: '定位' }} mode="designer-preview" />
+        <FileUploadField.Component node={{ id: 'file', type: 'file_upload', label: '文件' }} mode="designer-preview" />
+      </App>,
+    );
+
+    expect(document.querySelectorAll('.form-fields-media-placeholder')).toHaveLength(3);
+  });
 
   it('writes a successful camera scan while keeping manual entry available', async () => {
     media.scan.mockResolvedValue('CODE-128');

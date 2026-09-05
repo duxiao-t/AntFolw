@@ -59,7 +59,7 @@ export const TableListField: FieldType = {
     return (
       <fieldset
         data-field-id={node.id}
-        style={{ border: '1px dashed #bbb', padding: 12, margin: '8px 0' }}
+        style={{ border: '1px dashed #bbb', borderRadius: 6, padding: 12, margin: '8px 0' }}
       >
         <legend>{node.label ?? '明细表'}</legend>
         {children.length === 0 ? (

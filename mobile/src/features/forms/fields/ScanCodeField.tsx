@@ -18,7 +18,7 @@ export function ScanCodeField(props: MobileFieldProps) {
       <div className="af-scan-field">
         <input
           id={props.node.id}
-          className="af-input"
+          className="af-control"
           aria-label={label}
           value={stringValue(props.value)}
           placeholder={String(props.node.props?.placeholder ?? '扫描或输入二维码/条码内容')}

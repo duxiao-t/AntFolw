@@ -16,7 +16,13 @@ function LocationInput({ node, mode, value, onChange }: FieldComponentProps) {
   const [locating, setLocating] = useState(false);
   const location = asLocation(value);
   const display = location ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}` : '';
-  if (mode === 'designer-preview') return <div data-field-id={node.id}><EnvironmentOutlined /> 浏览器/企业微信原生定位</div>;
+  if (mode === 'designer-preview') return <div data-field-id={node.id}>
+    <div style={{ marginBottom: 4 }}>{node.label}{node.props?.required ? ' *' : ''}</div>
+    <div className="form-fields-media-placeholder">
+      <EnvironmentOutlined />
+      <span>浏览器/企业微信原生定位</span>
+    </div>
+  </div>;
   return <div data-field-id={node.id}>
     <div style={{ marginBottom: 4 }}>{node.label}{node.props?.required ? ' *' : ''}</div>
     <Input value={display} readOnly placeholder="尚未获取位置" />

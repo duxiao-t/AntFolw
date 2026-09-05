@@ -47,7 +47,9 @@ describe('native form fields', () => {
     const onValueChange = vi.fn();
     renderField(<ScanCodeField {...props({ id: 'code', type: 'scan_code', label: '物料码' }, 'A-1', onValueChange)} />, adapter);
 
-    fireEvent.change(screen.getByLabelText('物料码'), { target: { value: 'A-2' } });
+    const manualInput = screen.getByLabelText('物料码');
+    expect(manualInput).toHaveClass('af-control');
+    fireEvent.change(manualInput, { target: { value: 'A-2' } });
     const scanButton = screen.getByRole('button', { name: '扫码' });
     expect(scanButton).toHaveClass('upload-trigger--platform');
     expect(scanButton.parentElement).toHaveClass('upload-control');

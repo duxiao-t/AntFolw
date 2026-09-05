@@ -1,3 +1,4 @@
+import { UploadOutlined } from '@ant-design/icons';
 import { Upload, Button, message } from 'antd';
 import type { FieldType } from '../../registry/types';
 
@@ -6,8 +7,19 @@ export const FileUploadField: FieldType = {
   label: '文件上传',
   icon: 'upload',
   defaultProps: { required: false, multiple: false, accept: '' },
-  Component: ({ node, mode, value, onChange }) => (
-    <div data-field-id={node.id}>
+  Component: ({ node, mode, value, onChange }) => {
+    if (mode === 'designer-preview') {
+      return <div data-field-id={node.id}>
+        <div style={{ display: 'block', marginBottom: 4 }}>
+          {node.label}{node.props?.required ? ' *' : ''}
+        </div>
+        <div className="form-fields-media-placeholder">
+          <UploadOutlined />
+          <span>文件上传{node.props?.multiple ? ' · 支持多文件' : ''}</span>
+        </div>
+      </div>;
+    }
+    return <div data-field-id={node.id}>
       <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
       </div>
@@ -36,8 +48,8 @@ export const FileUploadField: FieldType = {
       >
         <Button>{node.props?.buttonText || '选择文件'}</Button>
       </Upload>
-    </div>
-  ),
+    </div>;
+  },
   ConfigPanel: ({ node, onChange }) => (
     <div style={{ padding: 16, display: 'grid', gap: 8 }}>
       <div>标签</div>
