@@ -3,6 +3,7 @@ package com.antflow.workplace;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
+import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.org.User;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -32,8 +34,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/workplace")
 @RequiredArgsConstructor
 public class WorkplaceController {
-    private static final int ITEM_LIMIT = 8;
-
     private final AuthorizationService authorizationService;
     private final TaskOperationService taskOperationService;
     private final ProcessInstanceMapper instanceMapper;
@@ -42,16 +42,25 @@ public class WorkplaceController {
     private final UserMapper userMapper;
 
     @GetMapping("/overview")
-    public Overview overview() {
+    public Overview overview(
+            @RequestParam(defaultValue = "1") int pendingPage,
+            @RequestParam(defaultValue = "8") int pendingSize,
+            @RequestParam(defaultValue = "1") int recentPage,
+            @RequestParam(defaultValue = "8") int recentSize) {
         authorizationService.requirePermission(PermissionCodes.PAGE_WORKPLACE);
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         long userId = PrincipalHolder.current().orElseThrow().userId();
         boolean canReadInstances = authorizationService.hasPermission(
             PermissionCodes.WORKFLOW_INSTANCE_READ);
         boolean canSeeTasks = authorizationService.hasPermission(PermissionCodes.WORKFLOW_TASK_READ);
+        int safePendingPage = Math.max(1, pendingPage);
+        int safePendingSize = Math.min(100, Math.max(1, pendingSize));
+        int safeRecentPage = Math.max(1, recentPage);
+        int safeRecentSize = Math.min(100, Math.max(1, recentSize));
 
         List<TaskEntity> pendingTasks = canSeeTasks
-            ? taskOperationService.listMyInbox(userId, "PENDING", ITEM_LIMIT)
+            ? taskOperationService.listMyInbox(userId, "PENDING", safePendingSize,
+                pageOffset(safePendingPage, safePendingSize))
             : List.of();
         long pendingTaskCount = canSeeTasks
             ? taskOperationService.countMyInbox(userId, "PENDING") : 0;
@@ -60,8 +69,9 @@ public class WorkplaceController {
         OffsetDateTime dayStart = today.atStartOfDay(zone).toOffsetDateTime();
         OffsetDateTime dayEnd = today.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
         boolean admin = authorizationService.isAdmin();
-        List<ProcessInstance> recentInstances = instanceMapper.selectWorkplaceRecent(
-            userId, admin, canSeeTasks, canReadInstances, ITEM_LIMIT);
+        List<ProcessInstance> recentInstances = instanceMapper.selectInstancePage(
+            userId, admin, canSeeTasks, canReadInstances, "authorized", null, null, null,
+            safeRecentSize, pageOffset(safeRecentPage, safeRecentSize));
         Set<Long> pendingInstanceIds = pendingTasks.stream().map(TaskEntity::getProcInstId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         List<ProcessInstance> pendingInstances = pendingInstanceIds.isEmpty() ? List.of()
@@ -81,9 +91,6 @@ public class WorkplaceController {
             ProcessInstance instance = instancesById.get(task.getProcInstId());
             if (instance == null) {
                 continue;
-            }
-            if (pendingItems.size() == ITEM_LIMIT) {
-                break;
             }
             pendingItems.add(new PendingTaskItem(
                 task.getId(), instance.getId(), instance.getId(), formName(instance, processDefinitions, forms),
@@ -172,6 +179,14 @@ public class WorkplaceController {
         if (!userIds.isEmpty()) {
             userMapper.selectBatchIds(userIds).forEach(user -> users.put(user.getId(), user));
         }
+    }
+
+    private static int pageOffset(int page, int size) {
+        long offset = (long) (page - 1) * size;
+        if (offset > Integer.MAX_VALUE) {
+            throw new BizException("BAD_QUERY", "page offset is too large");
+        }
+        return (int) offset;
     }
 
     public record Overview(

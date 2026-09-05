@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import { vi } from 'vitest';
 import defaultSettings from '../../config/defaultSettings';
@@ -84,7 +84,9 @@ describe('Workplace', () => {
     expect(screen.getByText('今日已完成')).toBeInTheDocument();
     expect(screen.queryByText('项目数')).not.toBeInTheDocument();
     expect(screen.queryByText('团队内排名')).not.toBeInTheDocument();
-    expect(requestMock).toHaveBeenCalledWith('/api/workplace/overview');
+    expect(requestMock).toHaveBeenCalledWith('/api/workplace/overview', {
+      params: { pendingPage: 1, pendingSize: 8, recentPage: 1, recentSize: 8 },
+    });
   });
 
   it('explains an empty authorized scope', async () => {
@@ -113,5 +115,28 @@ describe('Workplace', () => {
     const reject = await screen.findByRole('button', { name: '驳回' });
     expect(reject).toBeDisabled();
     expect(reject).toHaveAttribute('title', '并行审批节点不允许驳回');
+  });
+
+  it('pages pending tasks and recent instances independently', async () => {
+    requestMock.mockResolvedValue({
+      ...overview,
+      pendingTasks: 9,
+      statusBreakdown: { RUNNING: 9, APPROVED: 0, REJECTED: 0, WITHDRAWN: 0 },
+    });
+    renderPage();
+
+    const recent = (await screen.findByText('最近流程')).closest('section') as HTMLElement;
+    fireEvent.click(within(recent).getByTitle('2'));
+    await waitFor(() => expect(requestMock).toHaveBeenLastCalledWith(
+      '/api/workplace/overview',
+      { params: { pendingPage: 1, pendingSize: 8, recentPage: 2, recentSize: 8 } },
+    ));
+
+    const pending = screen.getByText('待处理审批').closest('section') as HTMLElement;
+    fireEvent.click(within(pending).getByTitle('2'));
+    await waitFor(() => expect(requestMock).toHaveBeenLastCalledWith(
+      '/api/workplace/overview',
+      { params: { pendingPage: 2, pendingSize: 8, recentPage: 2, recentSize: 8 } },
+    ));
   });
 });

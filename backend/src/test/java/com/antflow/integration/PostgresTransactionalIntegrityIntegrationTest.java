@@ -833,10 +833,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void workplaceAuthorizationQueriesExecuteAgainstPostgres() {
+    void workplaceAuthorizationQueryExecutesAgainstPostgres() {
         long adminId = userId("admin");
-        assertThat(processInstanceMapper.selectWorkplaceRecent(adminId, true, true, true, 8))
-            .isNotNull();
         OffsetDateTime now = OffsetDateTime.now();
         assertThat(processInstanceMapper.selectWorkplaceStatusCounts(adminId, true, true, true,
             now.minusDays(1), now.plusDays(1))).isNotNull();

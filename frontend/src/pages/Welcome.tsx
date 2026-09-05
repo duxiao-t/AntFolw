@@ -106,10 +106,17 @@ export default function Workplace() {
   const canApprove = roles.includes('admin') || permissions.includes('workflow.task.approve');
   const canReject = roles.includes('admin') || permissions.includes('workflow.task.reject');
   const displayName = user?.displayName ?? user?.name ?? user?.username ?? '当前用户';
+  const [pendingPage, setPendingPage] = useState(1);
+  const [pendingSize, setPendingSize] = useState(8);
+  const [recentPage, setRecentPage] = useState(1);
+  const [recentSize, setRecentSize] = useState(8);
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery<WorkplaceOverview>({
-    queryKey: ['workplace-overview'],
-    queryFn: () => request<WorkplaceOverview>('/api/workplace/overview'),
+    queryKey: ['workplace-overview', pendingPage, pendingSize, recentPage, recentSize],
+    queryFn: () => request<WorkplaceOverview>('/api/workplace/overview', {
+      params: { pendingPage, pendingSize, recentPage, recentSize },
+    }),
+    placeholderData: (previous) => previous,
   });
   const [action, setAction] = useState<ActionState | null>(null);
   const [comment, setComment] = useState('');
@@ -134,6 +141,7 @@ export default function Workplace() {
       message.success(action?.type === 'approve' ? '已同意审批' : '已驳回审批');
       setAction(null);
       setComment('');
+      setPendingPage(1);
       queryClient.invalidateQueries({ queryKey: ['workplace-overview'] });
     },
     onError: (error: any) => message.error(error?.message ?? '审批操作失败，请稍后重试'),
@@ -187,7 +195,19 @@ export default function Workplace() {
             <Table<PendingTaskItem>
               rowKey="taskId"
               size="middle"
-              pagination={false}
+              loading={isFetching}
+              pagination={{
+                current: pendingPage,
+                pageSize: pendingSize,
+                total: data.pendingTasks,
+                showSizeChanger: true,
+                pageSizeOptions: [8, 20, 50],
+                showTotal: (total) => `共 ${total} 项`,
+                onChange: (nextPage, nextSize) => {
+                  setPendingPage(nextSize === pendingSize ? nextPage : 1);
+                  setPendingSize(nextSize);
+                },
+              }}
               dataSource={data.pendingTaskItems}
               locale={{ emptyText: <EmptyPanel text="当前没有待处理审批" /> }}
               columns={[
@@ -223,7 +243,19 @@ export default function Workplace() {
             <Table<RecentInstanceItem>
               rowKey="instanceId"
               size="middle"
-              pagination={false}
+              loading={isFetching}
+              pagination={{
+                current: recentPage,
+                pageSize: recentSize,
+                total: totalStatuses,
+                showSizeChanger: true,
+                pageSizeOptions: [8, 20, 50],
+                showTotal: (total) => `共 ${total} 项`,
+                onChange: (nextPage, nextSize) => {
+                  setRecentPage(nextSize === recentSize ? nextPage : 1);
+                  setRecentSize(nextSize);
+                },
+              }}
               dataSource={data.recentInstanceItems}
               locale={{ emptyText: <EmptyPanel text="暂无流程记录" /> }}
               onRow={(item) => ({ onClick: () => navigate(`/proc/${item.instanceId}`), className: 'clickable-row' })}

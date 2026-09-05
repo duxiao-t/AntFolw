@@ -224,13 +224,13 @@ class TaskOperationServiceTest {
     // ---------- 5. listMyInbox ----------
     @Test
     void listMyInbox_returnsCurrentUserPending() {
-        Mockito.when(taskMapper.selectTaskPage(42L, "pending", "PENDING", 8, 0))
+        Mockito.when(taskMapper.selectTaskPage(42L, "pending", "PENDING", 8, 16))
             .thenReturn(List.of(
             parentTask(1L, 42L, "PENDING"),
             parentTask(2L, 42L, "PENDING")
         ));
-        var inbox = ops.listMyInbox(42L, "PENDING", 8);
+        var inbox = ops.listMyInbox(42L, "PENDING", 8, 16);
         assertThat(inbox).hasSize(2);
-        Mockito.verify(taskMapper).selectTaskPage(42L, "pending", "PENDING", 8, 0);
+        Mockito.verify(taskMapper).selectTaskPage(42L, "pending", "PENDING", 8, 16);
     }
 }

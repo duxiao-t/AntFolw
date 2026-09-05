@@ -64,10 +64,11 @@ class WorkplaceControllerTest {
         user.setDisplayName("运营员");
 
         var tasks = mock(TaskOperationService.class);
-        when(tasks.listMyInbox(7L, "PENDING", 8)).thenReturn(List.of(task));
+        when(tasks.listMyInbox(7L, "PENDING", 20, 20)).thenReturn(List.of(task));
         when(tasks.countMyInbox(7L, "PENDING")).thenReturn(1L);
         var instances = mock(ProcessInstanceMapper.class);
-        when(instances.selectWorkplaceRecent(eq(7L), eq(false), eq(true), eq(true), eq(8)))
+        when(instances.selectInstancePage(7L, false, true, true, "authorized",
+            null, null, null, 50, 100))
             .thenReturn(List.of(instance));
         when(instances.selectBatchIds(any())).thenReturn(List.of(instance));
         when(instances.selectWorkplaceStatusCounts(eq(7L), eq(false), eq(true), eq(true),
@@ -86,7 +87,7 @@ class WorkplaceControllerTest {
 
         var controller = new WorkplaceController(authorization, tasks, instances, processes, forms, users);
 
-        var result = controller.overview();
+        var result = controller.overview(2, 20, 3, 50);
 
         assertThat(result.pendingTasks()).isEqualTo(1);
         assertThat(result.runningInstances()).isEqualTo(1);
@@ -108,11 +109,11 @@ class WorkplaceControllerTest {
         var controller = new WorkplaceController(authorization, tasks, mock(ProcessInstanceMapper.class),
             mock(ProcessDefinitionMapper.class), mock(FormDefinitionMapper.class), mock(UserMapper.class));
 
-        var result = controller.overview();
+        var result = controller.overview(1, 8, 1, 8);
 
         assertThat(result.pendingTasks()).isZero();
         assertThat(result.recentInstanceItems()).isEmpty();
-        verify(tasks, never()).listMyInbox(8L, "PENDING", 8);
+        verify(tasks, never()).listMyInbox(8L, "PENDING", 8, 0);
         verify(tasks, never()).countMyInbox(8L, "PENDING");
     }
 }

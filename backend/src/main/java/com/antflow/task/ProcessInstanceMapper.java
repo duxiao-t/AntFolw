@@ -72,13 +72,6 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
     @Select("SELECT * FROM t_process_instance WHERE id = #{id} FOR UPDATE")
     ProcessInstance selectForUpdate(@Param("id") Long id);
 
-    @Select("SELECT pi.* " + INSTANCE_FROM + " WHERE " + FULL_VISIBLE
-        + " ORDER BY pi.started_at DESC, pi.id DESC LIMIT #{limit}")
-    List<ProcessInstance> selectWorkplaceRecent(@Param("userId") long userId,
-        @Param("admin") boolean admin, @Param("canReadTasks") boolean canReadTasks,
-        @Param("canReadInstances") boolean canReadInstances,
-        @Param("limit") int limit);
-
     @Select("""
         SELECT pi.status AS status, COUNT(*) AS total,
           COUNT(*) FILTER (WHERE pi.finished_at >= #{dayStart} AND pi.finished_at < #{dayEnd})
