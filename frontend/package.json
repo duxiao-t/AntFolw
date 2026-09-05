@@ -30,7 +30,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "doctor": "react-doctor .",
-    "tsc": "tsc --noEmit"
+    "tsc": "max setup && tsc --noEmit"
   },
   "browserslist": [
     "defaults"
