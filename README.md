@@ -56,10 +56,10 @@ BACKUP_ENCRYPTION_SECRET=replace-with-at-least-32-random-characters
 
 ### 2. 构建生产产物
 
-`Dockerfile.local` 只复制本地已经生成的 JAR 和 `dist`，因此每次部署代码变更前必须先构建对应产物：
+`Dockerfile.local` 只复制本地已经生成的 JAR 和 `dist`。首次本地启动或需要手动全量构建时执行：
 
 ```powershell
-mvn -B -f backend/pom.xml -DskipTests package
+mvn -B -f backend/pom.xml "-Dmaven.test.skip=true" package
 
 npm --prefix frontend ci --no-audit --no-fund
 npm --prefix frontend run build
@@ -84,14 +84,30 @@ docker compose --env-file .env.docker.local ps
 
 首次启动会自动执行 Flyway 迁移。PostgreSQL 和 MinIO 分别使用 `antflow-local_postgres_data`、`antflow-local_minio_data` 持久卷。
 
-### 更新并重新部署
+### Linux 增量部署
 
-后端、桌面端或移动端代码改变后，先重新执行上面的对应构建命令，再重建后端和 Web 服务：
+部署服务器在仓库根目录首次启用脚本时执行一次全量构建：
 
-```powershell
-docker compose --env-file .env.docker.local up -d --build backend web
-Invoke-RestMethod http://127.0.0.1:7070/actuator/health
+```bash
+git pull --ff-only
+bash deploy.sh --all
 ```
+
+后续只需一条命令。脚本会拉取代码，对比上次成功部署的提交，只构建并重启发生变化的模块；`package-lock.json` 未变化时会复用现有 `node_modules`：
+
+```bash
+bash deploy.sh
+```
+
+需要恢复性重建时可强制指定模块，指定模块会与自动检测到的变化合并：
+
+```bash
+bash deploy.sh backend
+bash deploy.sh frontend mobile
+bash deploy.sh --all
+```
+
+部署版本记录在 `.git/antflow-deployed-revision`，只有健康检查通过后才更新。修改未纳入 Git 的 `.env.docker.local` 后请使用 `--all`。
 
 不要执行 `docker compose down -v`，除非明确需要删除 PostgreSQL 和 MinIO 的全部本地数据。
 

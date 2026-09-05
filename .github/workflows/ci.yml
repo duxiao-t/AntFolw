@@ -28,6 +28,8 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      - name: Check deploy script
+        run: bash -n ../deploy.sh && bash ../deploy.sh --self-test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
