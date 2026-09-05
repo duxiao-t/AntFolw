@@ -32,7 +32,7 @@ test.describe('draft recovery and offline', () => {
     await page.getByRole('button', { name: '提交' }).click();
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
     await page.getByRole('button', { name: '完成' }).click();
-    await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请确认本次提交内容' })).toBeVisible();
     await expect(page.getByText('离线保留内容')).toBeVisible();
 
     await page.context().setOffline(true);
@@ -42,7 +42,7 @@ test.describe('draft recovery and offline', () => {
     expect(world.instances.size).toBe(0);
 
     await page.context().setOffline(false);
-    await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请确认本次提交内容' })).toBeVisible();
     await expect(page.getByText('离线保留内容')).toBeVisible();
   });
 });

@@ -26,7 +26,7 @@ test.describe('full approval flow', () => {
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
     await page.getByRole('button', { name: '完成' }).click();
 
-    await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请确认本次提交内容' })).toBeVisible();
     await expect(page.getByText('E2E回家探亲')).toBeVisible();
     await expect(page.getByText(USERS.admin.displayName)).toBeVisible();
     await page.getByRole('button', { name: '确认提交' }).click();

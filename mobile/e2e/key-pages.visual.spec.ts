@@ -65,7 +65,7 @@ test.describe('key pages visual regression', () => {
     // 7 confirm
     await page.getByText(USERS.admin.displayName, { exact: true }).click();
     await page.getByRole('button', { name: '完成' }).click();
-    await expect(page.getByRole('heading', { name: '请确认本次申请' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请确认本次提交内容' })).toBeVisible();
     await capture(page, '07-confirm');
 
     // 8 success

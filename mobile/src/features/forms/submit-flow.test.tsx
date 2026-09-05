@@ -271,7 +271,7 @@ describe('mobile form submit flow', () => {
     await userEvent.type(await screen.findByLabelText('请假事由'), '回家探亲');
     await userEvent.click(screen.getByRole('button', { name: '提交' }));
 
-    expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请确认本次提交内容' })).toBeInTheDocument();
     expect(screen.getByText('表单编号将在提交后生成')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '返回编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认提交' })).toHaveClass('btn', 'btn--success');
@@ -399,7 +399,7 @@ describe('mobile form submit flow', () => {
     await userEvent.click(await screen.findByRole('button', { name: /张经理/ }));
     await userEvent.click(screen.getByRole('button', { name: '完成' }));
 
-    expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请确认本次提交内容' })).toBeInTheDocument();
     expect(screen.getByText((text) => text.includes('张经理'))).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '确认提交' }));
     await waitFor(() => {
@@ -611,7 +611,7 @@ describe('mobile form submit flow', () => {
         && (init as RequestInit).method === 'PUT')).toHaveLength(1));
     await userEvent.click(await screen.findByRole('button', { name: '提交' }));
 
-    expect(await screen.findByRole('heading', { name: '请确认本次申请' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '请确认本次提交内容' })).toBeInTheDocument();
     expect(screen.queryByText(/审批流（/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '确认提交' }));
 
