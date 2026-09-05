@@ -26,7 +26,12 @@ const TASK_DETAIL: MobileTaskDetail = {
     createdAt: '2026-07-21T09:00:00+08:00',
   },
   schema: [
-    { id: 'reason', type: 'text', label: '请假事由', props: { required: true } },
+    {
+      id: 'reason',
+      type: 'text',
+      label: '请假事由',
+      props: { required: true, questionDescription: '请填写具体请假原因' },
+    },
     { id: 'days', type: 'number', label: '请假天数' },
     { id: 'proof', type: 'file_upload', label: '证明文件' },
   ],
@@ -198,6 +203,7 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('审批详情')).toBeInTheDocument();
     expect(screen.getAllByText((text) => text.includes('张三')).length).toBeGreaterThan(0);
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
+    expect(screen.queryByText('请填写具体请假原因')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载证明.pdf' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '下载证明.pdf' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '预览证明.pdf' })).not.toBeInTheDocument();

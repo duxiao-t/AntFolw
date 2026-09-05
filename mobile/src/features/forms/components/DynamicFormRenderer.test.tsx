@@ -83,6 +83,52 @@ describe('DynamicFormRenderer', () => {
     expect(screen.queryByLabelText('请假事由')).not.toBeInTheDocument();
   });
 
+  it('hides question descriptions only when explicitly disabled', () => {
+    const schema: MobileSchemaNode[] = [
+      {
+        id: 'reason',
+        type: 'text',
+        label: '请假事由',
+        props: { questionDescription: '请说明具体原因' },
+      },
+      {
+        id: 'inspection',
+        type: 'checklist',
+        label: '检查项',
+        props: {
+          questionDescription: '请逐项核对',
+          items: [{ id: 'item-1', label: '资料完整', required: false }],
+        },
+      },
+      {
+        id: 'notice',
+        type: 'description',
+        label: '说明',
+        props: { text: '请核对附件原件' },
+      },
+    ];
+    const renderer = (showDescriptions?: boolean) => (
+      <DynamicFormRenderer
+        mode="readonly"
+        showDescriptions={showDescriptions}
+        schema={schema}
+        values={{ reason: '回家探亲', inspection: [] }}
+        onValueChange={vi.fn()}
+      />
+    );
+    const { rerender } = render(renderer());
+
+    expect(screen.getByText('请说明具体原因')).toBeInTheDocument();
+    expect(screen.getByText('请逐项核对')).toBeInTheDocument();
+
+    rerender(renderer(false));
+
+    expect(screen.queryByText('请说明具体原因')).not.toBeInTheDocument();
+    expect(screen.queryByText('请逐项核对')).not.toBeInTheDocument();
+    expect(screen.getByText('请核对附件原件')).toBeInTheDocument();
+    expect(screen.getByText('回家探亲')).toBeInTheDocument();
+  });
+
   it('applies per-field mode override and hides hidden fields', () => {
     const schema: MobileSchemaNode[] = [
       { id: 'editable', type: 'text', label: '可编辑' },

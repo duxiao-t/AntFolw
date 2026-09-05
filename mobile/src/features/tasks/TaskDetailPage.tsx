@@ -112,6 +112,7 @@ export function TaskDetailPage() {
             schema={schema}
             values={editableValues}
             mode="readonly"
+            showDescriptions={false}
             modeOverride={fieldModes}
             onValueChange={(fieldId, value) =>
               setEditableValues((previous) => ({ ...previous, [fieldId]: value }))

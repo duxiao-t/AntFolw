@@ -11,6 +11,7 @@ export type DynamicFormRendererProps = {
   schema: MobileSchemaNode[];
   values: MobileFormValues;
   mode: FieldMode;
+  showDescriptions?: boolean;
   modeOverride?: Record<string, FieldMode>;
   errors?: FieldValidationErrors;
   onValueChange: (fieldId: string, value: unknown) => void;
@@ -20,6 +21,7 @@ export function DynamicFormRenderer({
   schema,
   values,
   mode,
+  showDescriptions = true,
   modeOverride = {},
   errors = {},
   onValueChange,
@@ -36,10 +38,13 @@ export function DynamicFormRenderer({
       }
       const definition = getFieldDefinition(node.type);
       const FieldComponent = definition.Component;
+      const renderedNode = showDescriptions
+        ? node
+        : { ...node, props: { ...node.props, showDescription: false } };
       return [
         <div key={node.id} className="af-form-renderer__item" data-field-id={node.id}>
           <FieldComponent
-            node={node}
+            node={renderedNode}
             value={values[node.id]}
             values={values}
             mode={effectiveMode}
