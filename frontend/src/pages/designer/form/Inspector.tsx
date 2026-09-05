@@ -13,7 +13,15 @@ import {
   Space,
   Typography,
 } from 'antd';
-import { DeleteOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  AppstoreOutlined,
+  CreditCardOutlined,
+  DeleteOutlined,
+  DownCircleOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  UnorderedListOutlined,
+} from '@ant-design/icons';
 import { useState } from 'react';
 import { findById, formRegistry } from '../../../registry/formRegistry';
 import type { DisplayCondition, SchemaNode } from '../../../registry/types';
@@ -21,7 +29,24 @@ import { SelectOptionsEditor } from './SelectOptionsEditor';
 import { MatrixAxisEditor } from './MatrixAxisEditor';
 import { DisplayRulesEditor } from './DisplayRulesEditor';
 import { normalizeMatrixProps } from '../../../components/form-fields/matrixFill';
+import {
+  normalizeSelectDisplayStyle,
+  type SelectDisplayStyle,
+} from '../../../registry/selectOptions';
 import { useFormDesignerStore } from './useFormDesignerStore';
+
+const selectDisplayStyles: Array<{
+  value: SelectDisplayStyle;
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { value: 'list', label: '列表', icon: <UnorderedListOutlined /> },
+  { value: 'dropdown', label: '下拉选择', icon: <DownCircleOutlined /> },
+  { value: 'block_single', label: '块状（单列）', icon: <CreditCardOutlined /> },
+  { value: 'block_double', label: '块状（双列）', icon: <AppstoreOutlined /> },
+];
+
+const checklistResultColors = ['#22A052', '#D93025', '#8F8F8F', '#5A6FA8'] as const;
 
 const placeholderTypes = new Set([
   'text',
@@ -227,14 +252,22 @@ export function Inspector() {
       },
     });
 
-  const componentSettings = renderComponentSettings(node, schema, updateProps);
+  const componentSettings = renderComponentSettings(node, updateProps);
+  const isSelect = node.type === 'select' || node.type === 'multi_select';
 
   return (
     <div>
       <InspectorHeader label={fieldType.label} type={node.type} />
       <Collapse
         bordered={false}
-        defaultActiveKey={['basic', 'component', 'validation', 'display']}
+        defaultActiveKey={[
+          'basic',
+          'component',
+          'select-display',
+          'logic-rules',
+          'validation',
+          'display',
+        ]}
         items={[
           {
             key: 'basic',
@@ -320,6 +353,30 @@ export function Inspector() {
               </Typography.Text>
             ),
           },
+          ...(isSelect
+            ? [
+                {
+                  key: 'select-display',
+                  label: '展示样式',
+                  children: renderSelectDisplaySettings(node, updateProps),
+                },
+              ]
+            : []),
+          ...(node.type === 'select'
+            ? [
+                {
+                  key: 'logic-rules',
+                  label: '逻辑规则',
+                  children: (
+                    <DisplayRulesEditor
+                      key={node.id}
+                      source={node}
+                      schema={schema}
+                    />
+                  ),
+                },
+              ]
+            : []),
           {
             key: 'validation',
             label: '校验规则',
@@ -416,7 +473,6 @@ export function Inspector() {
 
 function renderComponentSettings(
   node: SchemaNode,
-  schema: SchemaNode[],
   updateProps: (patch: Record<string, any>) => void,
 ) {
   const props = node.props ?? {};
@@ -599,20 +655,19 @@ function renderComponentSettings(
               updateProps({ enableOptionColor, options })
             }
           />
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
-            <Checkbox
-              checked={props.allowClear !== false}
-              onChange={(event) => updateProps({ allowClear: event.target.checked })}
-            >
-              允许清空
-            </Checkbox>
-            <Checkbox
-              checked={!!props.showSearch}
-              onChange={(event) => updateProps({ showSearch: event.target.checked })}
-            >
-              支持搜索
-            </Checkbox>
-          </Space>
+          <Checkbox
+            checked={props.allowClear !== false}
+            onChange={(event) => updateProps({ allowClear: event.target.checked })}
+          >
+            允许清空
+          </Checkbox>
+          <Checkbox
+            checked={!!props.showSearch}
+            disabled={normalizeSelectDisplayStyle(props.displayStyle) !== 'dropdown'}
+            onChange={(event) => updateProps({ showSearch: event.target.checked })}
+          >
+            支持搜索
+          </Checkbox>
           {node.type === 'multi_select' && (
             <PanelField label="最多选择数">
               <InputNumber
@@ -622,12 +677,6 @@ function renderComponentSettings(
                 onChange={(value) => updateProps({ maxCount: value })}
               />
             </PanelField>
-          )}
-          {node.type === 'select' && (
-            <>
-              <Divider style={{ margin: '4px 0' }} />
-              <DisplayRulesEditor key={node.id} source={node} schema={schema} />
-            </>
           )}
         </Space>
       );
@@ -867,9 +916,9 @@ function renderComponentSettings(
       const checklistResults = Array.isArray(props.results) && props.results.length >= 2
         ? props.results
         : [
-            { id: 'pass', label: '通过' },
-            { id: 'fail', label: '不通过' },
-            { id: 'na', label: '不适用' },
+            { id: 'pass', label: '通过', color: checklistResultColors[0] },
+            { id: 'fail', label: '不通过', color: checklistResultColors[1] },
+            { id: 'na', label: '不适用', color: checklistResultColors[2] },
           ];
       const descMap = props.descriptionRequiredByResult ?? {};
       return (
@@ -890,11 +939,22 @@ function renderComponentSettings(
           <div className="checklist-config__section">
             <div className="checklist-config__section-title">结果选项</div>
             <Typography.Text type="secondary" className="checklist-config__hint">
-              2~4 个，文字可自定义；勾选「描述必填」的结果，填报时该项描述必须填写。
+              2~4 个，结果名称同时作为手机按钮文字；颜色用于手机端选中状态。
             </Typography.Text>
             <div className="checklist-config__rows">
               {checklistResults.map((result, index) => (
                 <div key={result.id ?? index} className="checklist-config__row">
+                  <ColorPicker
+                    aria-label={`结果${index + 1}颜色`}
+                    disabledAlpha
+                    size="small"
+                    value={result.color ?? checklistResultColors[index] ?? checklistResultColors[3]}
+                    onChangeComplete={(color) => {
+                      const next = [...checklistResults];
+                      next[index] = { ...result, color: color.toHexString() };
+                      updateProps({ results: next });
+                    }}
+                  />
                   <Input
                     value={result.label ?? ''}
                     placeholder={`结果${index + 1}`}
@@ -942,6 +1002,7 @@ function renderComponentSettings(
                     {
                       id: `result-${Date.now()}`,
                       label: `结果${checklistResults.length + 1}`,
+                      color: checklistResultColors[checklistResults.length] ?? checklistResultColors[3],
                     },
                   ],
                 })
@@ -1232,4 +1293,32 @@ function renderComponentSettings(
     default:
       return null;
   }
+}
+
+function renderSelectDisplaySettings(
+  node: SchemaNode,
+  updateProps: (patch: Record<string, any>) => void,
+) {
+  const props = node.props ?? {};
+  const displayStyle = normalizeSelectDisplayStyle(props.displayStyle);
+  return (
+    <div className="select-display-style" role="radiogroup" aria-label="展示样式">
+      {selectDisplayStyles.map((item) => (
+        // biome-ignore lint/a11y/useSemanticElements: Cards are buttons with explicit radio state.
+        <button
+          key={item.value}
+          type="button"
+          role="radio"
+          aria-checked={displayStyle === item.value}
+          className="select-display-style__item"
+          onClick={() => updateProps({ displayStyle: item.value })}
+        >
+          <span className="select-display-style__icon" aria-hidden="true">
+            {item.icon}
+          </span>
+          <span>{item.label}</span>
+        </button>
+      ))}
+    </div>
+  );
 }

@@ -38,9 +38,9 @@ export const ChecklistField: FieldType = {
       { id: 'item-2', label: '检查项2', required: true },
     ],
     results: [
-      { id: 'pass', label: '通过' },
-      { id: 'fail', label: '不通过' },
-      { id: 'na', label: '不适用' },
+      { id: 'pass', label: '通过', color: '#22A052' },
+      { id: 'fail', label: '不通过', color: '#D93025' },
+      { id: 'na', label: '不适用', color: '#8F8F8F' },
     ],
     allowDescription: true,
     descriptionRequiredByResult: { fail: true },

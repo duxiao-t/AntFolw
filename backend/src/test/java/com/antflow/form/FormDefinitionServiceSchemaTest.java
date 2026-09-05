@@ -273,6 +273,55 @@ class FormDefinitionServiceSchemaTest {
             .hasMessageContaining("incomplete option");
     }
 
+    @Test void publishAcceptsMissingNullAndKnownSelectDisplayStyles() {
+        for (String displayStyle : List.of(
+            "", ",\"displayStyle\":null", ",\"displayStyle\":\"list\"",
+            ",\"displayStyle\":\"dropdown\"", ",\"displayStyle\":\"block_single\"",
+            ",\"displayStyle\":\"block_double\""
+        )) {
+            var fd = new FormDefinition();
+            fd.setId(1L);
+            fd.setStatus("DRAFT");
+            fd.setVersion(1);
+            fd.setSchema("[{\"id\":\"kind\",\"type\":\"select\",\"props\":{\"options\":[{\"label\":\"甲\",\"value\":\"a\"}]" + displayStyle + "}}]");
+            when(mapper.selectById(1L)).thenReturn(fd);
+            assertThatCode(() -> service.publish(1L)).doesNotThrowAnyException();
+        }
+    }
+
+    @Test void publishRejectsUnknownSelectDisplayStyle() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setStatus("DRAFT");
+        fd.setSchema("[{\"id\":\"kind\",\"type\":\"multi_select\",\"props\":{\"displayStyle\":\"cards\",\"options\":[{\"label\":\"甲\",\"value\":\"a\"}]}}]");
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("displayStyle");
+    }
+
+    @Test void publishValidatesOptionalChecklistResultColors() {
+        for (String color : List.of("", ",\"color\":null", ",\"color\":\"#22A052\"")) {
+            var fd = new FormDefinition();
+            fd.setId(1L);
+            fd.setStatus("DRAFT");
+            fd.setVersion(1);
+            fd.setSchema("[{\"id\":\"check\",\"type\":\"checklist\",\"props\":{\"results\":[{\"id\":\"ok\",\"label\":\"合格\"" + color + "}]}}]");
+            when(mapper.selectById(1L)).thenReturn(fd);
+            assertThatCode(() -> service.publish(1L)).doesNotThrowAnyException();
+        }
+
+        var invalid = new FormDefinition();
+        invalid.setId(2L);
+        invalid.setStatus("DRAFT");
+        invalid.setSchema("[{\"id\":\"check\",\"type\":\"checklist\",\"props\":{\"results\":[{\"id\":\"ok\",\"label\":\"合格\",\"color\":\"red\"}]}}]");
+        when(mapper.selectById(2L)).thenReturn(invalid);
+        assertThatThrownBy(() -> service.publish(2L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("color");
+    }
+
     @Test void clearedNumberBoundsAreUnlimited() {
         String schema = "[{\"id\":\"count\",\"type\":\"number\",\"props\":{}}]";
         assertThatCode(() -> service.validateSubmission(schema, Map.of("count", -1000000)))

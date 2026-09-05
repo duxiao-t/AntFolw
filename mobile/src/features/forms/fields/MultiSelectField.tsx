@@ -2,7 +2,16 @@ import { DownOutline } from 'antd-mobile-icons';
 import { Input } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
-import { allFieldOptions, fieldError, fieldLabel, fieldOptions, FieldShell, isRequired } from './fieldShared';
+import {
+  allFieldOptions,
+  fieldError,
+  fieldLabel,
+  fieldOptions,
+  FieldShell,
+  InlineFieldOptions,
+  isRequired,
+  selectDisplayStyle,
+} from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
@@ -17,6 +26,10 @@ export function MultiSelectField(props: MobileFieldProps) {
   const options = fieldOptions(props.node);
   const searchable = props.node.props?.showSearch === true;
   const clearable = props.node.props?.allowClear !== false;
+  const displayStyle = selectDisplayStyle(props.node);
+  const maxCount = typeof props.node.props?.maxCount === 'number'
+    ? props.node.props.maxCount
+    : undefined;
   const allOptions = allFieldOptions(props.node);
   const useColor = props.node.props?.enableOptionColor === true;
   const otherOption = options.find((option) => option.isOther);
@@ -55,7 +68,41 @@ export function MultiSelectField(props: MobileFieldProps) {
       error={fieldError(props)}
       summary={props.mode === 'readonly' ? <div className="af-field__summary">{selectedLabels.join('、') || '未填写'}</div> : undefined}
     >
-      {options.length > 0 ? (
+      {props.mode !== 'readonly' && options.length > 0 ? (
+        displayStyle !== 'dropdown' ? (
+          <InlineFieldOptions
+            label={label}
+            displayStyle={displayStyle}
+            options={options.map((option) => option.isOther
+              ? { ...option, value: OTHER_OPTION_VALUE }
+              : option)}
+            selectedValues={[
+              ...selected.filter((item) => standardValues.includes(item)),
+              ...(otherSelected ? [OTHER_OPTION_VALUE] : []),
+            ]}
+            multiple
+            useColor={useColor}
+            maxCount={maxCount}
+            onToggle={(option, active) => {
+              const standard = selected.filter((item) => standardValues.includes(item));
+              if (option.isOther) {
+                const next = active ? standard : [...standard, ...selectedCustomValues];
+                setOtherSelected(!active);
+                setSelected(next);
+                props.onValueChange(props.node.id, next);
+                return;
+              }
+              const nextStandard = active
+                ? standard.filter((item) => item !== option.value)
+                : [...standard, option.value];
+              const next = otherSelected
+                ? [...nextStandard, ...selectedCustomValues]
+                : nextStandard;
+              setSelected(next);
+              props.onValueChange(props.node.id, next);
+            }}
+          />
+        ) : (
         <>
           <button
             type="button"
@@ -154,11 +201,13 @@ export function MultiSelectField(props: MobileFieldProps) {
             </fieldset>
           </MobileSelectionPopup>
         </>
-      ) : (
+        )
+      ) : props.mode !== 'readonly' ? (
         <div className="af-field__empty-options">暂无可选项</div>
-      )}
-      {otherOption && otherSelected ? (
+      ) : null}
+      {props.mode !== 'readonly' && otherOption && otherSelected ? (
         <Input
+          className="af-control"
           aria-label={`${label}其他内容`}
           placeholder="请输入"
           value={selectedCustomValues[0] == null ? '' : String(selectedCustomValues[0])}

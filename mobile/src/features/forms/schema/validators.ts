@@ -90,6 +90,7 @@ export function fieldLabel(node: MobileSchemaNode) {
 }
 
 export function fieldDescription(node: MobileSchemaNode) {
+  if (node.props?.showDescription === false) return null;
   const text = node.props?.questionDescription ?? node.props?.description;
   return typeof text === 'string' && text.trim() ? text : null;
 }

@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react';
 import type { FieldType } from '../../registry/types';
 import {
   customValuesFrom,
+  InlineSelectOptions,
+  normalizeSelectDisplayStyle,
   normalizeSelectOptions,
   optionForSelect,
+  selectedOptionSummary,
   selectOptionNode,
   visibleSelectOptions,
   OTHER_OPTION_VALUE,
@@ -16,6 +19,7 @@ export const SelectField: FieldType = {
   icon: 'unordered-list',
   defaultProps: {
     required: false,
+    displayStyle: 'dropdown',
     options: [
       { id: 'option_1', label: '选项1', value: 'option_1' },
       { id: 'option_2', label: '选项2', value: 'option_2' },
@@ -25,6 +29,7 @@ export const SelectField: FieldType = {
   Component: ({ node, mode, value, onChange }) => {
     const options = visibleSelectOptions(node.props?.options);
     const allOptions = normalizeSelectOptions(node.props?.options);
+    const displayStyle = normalizeSelectDisplayStyle(node.props?.displayStyle);
     const useColor = node.props?.enableOptionColor === true;
     const selectOptions = options.map((option) => optionForSelect(option, useColor));
     const otherOption = options.find((option) => option.isOther);
@@ -51,34 +56,67 @@ export const SelectField: FieldType = {
         <div style={{ display: 'block', marginBottom: 4 }}>
           {node.label}{node.props?.required ? ' *' : ''}
         </div>
-        <Select
-          disabled={mode !== 'runtime-fill'}
-          value={selectValue}
-          onChange={(nextValue) => {
-            if (nextValue === OTHER_OPTION_VALUE) {
-              setOtherSelected(true);
+        {mode === 'readonly' ? (
+          <div className="form-select-readonly">
+            {selectedOptionSummary(currentValue, allOptions, false)}
+          </div>
+        ) : displayStyle === 'dropdown' ? (
+          <Select
+            disabled={mode !== 'runtime-fill'}
+            value={selectValue}
+            onChange={(nextValue) => {
+              if (nextValue === OTHER_OPTION_VALUE) {
+                setOtherSelected(true);
+                onChange?.(undefined);
+                return;
+              }
+              setOtherSelected(false);
+              onChange?.(nextValue);
+            }}
+            options={selectOptions}
+            placeholder={node.props?.placeholder}
+            allowClear={node.props?.allowClear !== false}
+            showSearch={!!node.props?.showSearch}
+            optionRender={(option: any) => option.data?.renderedLabel ?? option.label}
+            labelRender={(option: any) => {
+              const selected = selectOptions.find((item) => item.value === option.value)?.option;
+              return selected ? selectOptionNode(selected, useColor) : option.label;
+            }}
+            onClear={() => {
+              setOtherSelected(false);
               onChange?.(undefined);
-              return;
-            }
-            setOtherSelected(false);
-            onChange?.(nextValue);
-          }}
-          options={selectOptions}
-          placeholder={node.props?.placeholder}
-          allowClear={node.props?.allowClear !== false}
-          showSearch={!!node.props?.showSearch}
-          optionRender={(option: any) => option.data?.renderedLabel ?? option.label}
-          labelRender={(option: any) => {
-            const selected = selectOptions.find((item) => item.value === option.value)?.option;
-            return selected ? selectOptionNode(selected, useColor) : option.label;
-          }}
-          onClear={() => {
-            setOtherSelected(false);
-            onChange?.(undefined);
-          }}
-          style={{ width: '100%' }}
-        />
-        {otherOption && otherActive && (
+            }}
+            style={{ width: '100%' }}
+          />
+        ) : (
+          <InlineSelectOptions
+            label={node.label ?? '下拉单选'}
+            displayStyle={displayStyle}
+            options={options}
+            selectedValues={otherActive
+              ? [OTHER_OPTION_VALUE]
+              : currentValue == null || currentValue === '' ? [] : [currentValue]}
+            multiple={false}
+            useColor={useColor}
+            disabled={mode !== 'runtime-fill'}
+            onToggle={(option, selected) => {
+              if (selected) {
+                if (node.props?.allowClear === false) return;
+                setOtherSelected(false);
+                onChange?.(undefined);
+                return;
+              }
+              if (option.isOther) {
+                setOtherSelected(true);
+                onChange?.(undefined);
+              } else {
+                setOtherSelected(false);
+                onChange?.(option.value);
+              }
+            }}
+          />
+        )}
+        {mode !== 'readonly' && otherOption && otherActive && (
           <Input
             aria-label={`${node.label ?? '其他'}自定义内容`}
             disabled={mode !== 'runtime-fill'}

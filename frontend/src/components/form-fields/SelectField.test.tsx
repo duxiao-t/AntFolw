@@ -4,6 +4,97 @@ import { MultiSelectField } from './MultiSelectField';
 import { SelectField } from './SelectField';
 
 describe('desktop select fields', () => {
+  it('keeps historical fields on the dropdown display', () => {
+    render(
+      <SelectField.Component
+        node={{
+          id: 'machine',
+          type: 'select',
+          label: '设备',
+          props: { options: [{ label: '铁面', value: 'iron' }] },
+        }}
+        mode="runtime-fill"
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('combobox')).toBeInTheDocument();
+  });
+
+  it('selects and clears a list-style single choice', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SelectField.Component
+        node={{
+          id: 'machine',
+          type: 'select',
+          label: '设备',
+          props: {
+            displayStyle: 'list',
+            options: [{ label: '铁面', value: 'iron' }],
+          },
+        }}
+        mode="runtime-fill"
+        value="iron"
+        onChange={onChange}
+      />,
+    );
+
+    const option = screen.getByRole('radio', { name: '设备：铁面' });
+    expect(option).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(option);
+    expect(onChange).toHaveBeenLastCalledWith(undefined);
+
+    rerender(
+      <SelectField.Component
+        node={{
+          id: 'machine',
+          type: 'select',
+          label: '设备',
+          props: {
+            displayStyle: 'list',
+            allowClear: false,
+            options: [{ label: '铁面', value: 'iron' }],
+          },
+        }}
+        mode="runtime-fill"
+        value="iron"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('radio', { name: '设备：铁面' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a two-column block multi-select and enforces maxCount', () => {
+    const onChange = vi.fn();
+    render(
+      <MultiSelectField.Component
+        node={{
+          id: 'machines',
+          type: 'multi_select',
+          label: '设备',
+          props: {
+            displayStyle: 'block_double',
+            maxCount: 1,
+            options: [
+              { label: '铁面', value: 'iron' },
+              { label: '冲床', value: 'press' },
+            ],
+          },
+        }}
+        mode="runtime-fill"
+        value={['iron']}
+        onChange={onChange}
+      />,
+    );
+
+    expect(document.querySelector('.form-select-choices--block_double')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '设备：冲床' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: '设备：铁面' }));
+    expect(onChange).toHaveBeenCalledWith([]);
+  });
+
   it('edits a custom single-select value through the other input', () => {
     const onChange = vi.fn();
     render(

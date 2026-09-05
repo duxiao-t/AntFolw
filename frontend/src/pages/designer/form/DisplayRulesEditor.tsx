@@ -97,7 +97,7 @@ export function DisplayRulesEditor({ source, schema }: { source: SchemaNode; sch
   return (
     <div className="display-rules-setting">
       <div className="display-rules-setting__header">
-        <Typography.Text strong>逻辑规则</Typography.Text>
+        <Typography.Text strong>启用逻辑规则</Typography.Text>
         <Switch
           size="small"
           checked={enabled}

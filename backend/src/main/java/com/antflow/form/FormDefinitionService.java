@@ -940,10 +940,36 @@ public class FormDefinitionService {
         });
     }
 
+    private void validateSelectDisplayStyle(com.fasterxml.jackson.databind.JsonNode node) {
+        var displayStyle = node.path("props").get("displayStyle");
+        if (displayStyle != null && !displayStyle.isNull()
+            && (!displayStyle.isTextual() || !Set.of(
+                "list", "dropdown", "block_single", "block_double"
+            ).contains(displayStyle.asText()))) {
+            throw new BizException("BAD_SCHEMA", "select.displayStyle is invalid");
+        }
+    }
+
+    private void validateChecklistResultColors(com.fasterxml.jackson.databind.JsonNode node) {
+        node.path("props").path("results").forEach(result -> {
+            var color = result.get("color");
+            if (color != null && !color.isNull()
+                && (!color.isTextual() || !color.asText().matches("#[0-9a-fA-F]{6}"))) {
+                throw new BizException("BAD_SCHEMA", "checklist result color is invalid");
+            }
+        });
+    }
+
     private void validatePublishingNode(com.fasterxml.jackson.databind.JsonNode node) {
         String type = node.path("type").asText("");
         if (Set.of("select", "radio", "multi_select", "checkbox").contains(type)) {
             validateSelectOptions(node);
+        }
+        if (Set.of("select", "multi_select").contains(type)) {
+            validateSelectDisplayStyle(node);
+        }
+        if ("checklist".equals(type)) {
+            validateChecklistResultColors(node);
         }
         if ("audio_upload".equals(type)) {
             var maxCountValue = node.path("props").path("maxCount");

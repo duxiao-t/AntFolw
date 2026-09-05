@@ -1,5 +1,20 @@
 export type SelectOptionValue = string | number;
 
+export const SELECT_DISPLAY_STYLES = [
+  'list',
+  'dropdown',
+  'block_single',
+  'block_double',
+] as const;
+
+export type SelectDisplayStyle = (typeof SELECT_DISPLAY_STYLES)[number];
+
+export function normalizeSelectDisplayStyle(value: unknown): SelectDisplayStyle {
+  return SELECT_DISPLAY_STYLES.includes(value as SelectDisplayStyle)
+    ? (value as SelectDisplayStyle)
+    : 'dropdown';
+}
+
 export type SelectOption = {
   id?: string;
   label: string;

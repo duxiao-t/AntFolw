@@ -8,8 +8,10 @@ import {
   fieldLabel,
   fieldOptions,
   FieldShell,
+  InlineFieldOptions,
   isRequired,
   optionLabel,
+  selectDisplayStyle,
 } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 
@@ -24,6 +26,7 @@ export function SelectField(props: MobileFieldProps) {
   const options = fieldOptions(props.node);
   const searchable = props.node.props?.showSearch === true;
   const clearable = props.node.props?.allowClear !== false;
+  const displayStyle = selectDisplayStyle(props.node);
   const allOptions = allFieldOptions(props.node);
   const useColor = props.node.props?.enableOptionColor === true;
   const otherOption = options.find((option) => option.isOther);
@@ -55,9 +58,39 @@ export function SelectField(props: MobileFieldProps) {
       label={label}
       required={isRequired(props.node)}
       error={fieldError(props)}
-      summary={props.mode === 'readonly' ? <div className="af-field__summary">{optionLabel(props.node, props.value)}</div> : undefined}
+      summary={props.mode === 'readonly' ? <div className="af-field__summary">{optionLabel(props.node, props.value) || '未填写'}</div> : undefined}
     >
-      {options.length > 0 ? (
+      {props.mode !== 'readonly' && options.length > 0 ? (
+        displayStyle !== 'dropdown' ? (
+          <InlineFieldOptions
+            label={label}
+            displayStyle={displayStyle}
+            options={options.map((option) => option.isOther
+              ? { ...option, value: OTHER_OPTION_VALUE }
+              : option)}
+            selectedValues={otherSelected
+              ? [OTHER_OPTION_VALUE]
+              : selected == null ? [] : [selected]}
+            multiple={false}
+            useColor={useColor}
+            onToggle={(option, active) => {
+              if (active) {
+                if (!clearable) return;
+                clearSelection();
+                return;
+              }
+              if (option.isOther) {
+                setOtherSelected(true);
+                setSelected(null);
+                props.onValueChange(props.node.id, undefined);
+              } else {
+                setOtherSelected(false);
+                setSelected(option.value);
+                props.onValueChange(props.node.id, option.value);
+              }
+            }}
+          />
+        ) : (
         <>
           <button
             type="button"
@@ -139,11 +172,13 @@ export function SelectField(props: MobileFieldProps) {
             </div>
           </MobileSelectionPopup>
         </>
-      ) : (
+        )
+      ) : props.mode !== 'readonly' ? (
         <div className="af-field__empty-options">暂无可选项</div>
-      )}
-      {otherOption && otherSelected ? (
+      ) : null}
+      {props.mode !== 'readonly' && otherOption && otherSelected ? (
         <Input
+          className="af-control"
           aria-label={`${label}其他内容`}
           placeholder="请输入"
           value={selected == null ? '' : String(selected)}

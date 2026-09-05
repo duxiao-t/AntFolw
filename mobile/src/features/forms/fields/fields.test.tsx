@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { MobileSchemaNode } from '../schema/types';
+import { ChecklistField } from './ChecklistField';
 import { DateField } from './DateField';
 import { DateRangeField } from './DateRangeField';
 import { DescriptionField } from './DescriptionField';
@@ -29,6 +30,62 @@ function baseProps(
 }
 
 describe('leaf mobile fields', () => {
+  it('shows checklist question descriptions only when enabled', () => {
+    const node: MobileSchemaNode = {
+      id: 'inspection',
+      type: 'checklist',
+      label: '检查项',
+      props: {
+        questionDescription: '这是题干',
+        showDescription: true,
+        items: [{ id: 'item-1', label: '检查项1', required: true }],
+      },
+    };
+    const { rerender } = render(<ChecklistField {...baseProps(node, [])} />);
+
+    expect(screen.getByText('这是题干')).toHaveClass('af-checklist__description');
+
+    rerender(
+      <ChecklistField
+        {...baseProps({ ...node, props: { ...node.props, showDescription: false } }, [])}
+      />,
+    );
+    expect(screen.queryByText('这是题干')).not.toBeInTheDocument();
+
+    rerender(<ChecklistField {...baseProps(node, [])} mode="readonly" />);
+    expect(screen.getByText('这是题干')).toBeInTheDocument();
+  });
+
+  it('uses configured checklist result labels and selected color', async () => {
+    const onValueChange = vi.fn();
+    const node: MobileSchemaNode = {
+      id: 'inspection',
+      type: 'checklist',
+      label: '检查项',
+      props: {
+        items: [{ id: 'item-1', label: '设备外观', required: true }],
+        results: [
+          { id: 'ok', label: '合格', color: '#123456' },
+          { id: 'bad', label: '需整改', color: '#D93025' },
+        ],
+      },
+    };
+    const { container } = render(
+      <ChecklistField {...baseProps(node, [], onValueChange)} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '合格' }));
+
+    expect(onValueChange).toHaveBeenCalledWith(
+      'inspection',
+      [expect.objectContaining({ id: 'item-1', status: 'ok' })],
+    );
+    expect(screen.getByRole('button', { name: '合格，点击取消选择' })).toBeInTheDocument();
+    expect(container.querySelector('.af-check__card--selected')).toHaveStyle(
+      '--af-check-color: #123456',
+    );
+  });
+
   it('renders and validates text field', () => {
     const onValueChange = vi.fn();
     render(
@@ -237,6 +294,39 @@ describe('leaf mobile fields', () => {
       />,
     );
     expect(screen.getByText('研发部')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['list', 'af-select-choices--list'],
+    ['block_single', 'af-select-choices--block_single'],
+    ['block_double', 'af-select-choices--block_double'],
+  ])('renders %s select choices inline', async (displayStyle, className) => {
+    const onValueChange = vi.fn();
+    render(
+      <SelectField
+        {...baseProps(
+          {
+            id: 'dept',
+            type: 'select',
+            label: '部门',
+            props: {
+              displayStyle,
+              options: [
+                { label: '研发部', value: 'dev' },
+                { label: '财务部', value: 'finance' },
+              ],
+            },
+          },
+          '',
+          onValueChange,
+        )}
+      />,
+    );
+
+    expect(document.querySelector(`.${className}`)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: '部门：研发部' }));
+    expect(onValueChange).toHaveBeenCalledWith('dept', 'dev');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('renders and validates multi select field', async () => {

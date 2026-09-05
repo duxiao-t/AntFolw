@@ -1,11 +1,13 @@
 import { ImageViewer, TextArea, Toast } from 'antd-mobile';
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { isHexColor } from '../../branding/brandTokens';
 import { fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFileDto } from '../files.api';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
+import { fieldDescription } from '../schema/validators';
 import { fieldError, fieldLabel, isRequired } from './fieldShared';
 
-export type ChecklistResultOption = { id: string; label: string };
+export type ChecklistResultOption = { id: string; label: string; color: string };
 export type ChecklistItemDef = { id: string; label: string; required: boolean };
 
 export type ChecklistEntry = {
@@ -18,13 +20,13 @@ export type ChecklistEntry = {
 
 export type ChecklistValue = ChecklistEntry[];
 
-const DEFAULT_RESULTS: ChecklistResultOption[] = [
-  { id: 'pass', label: '通过' },
-  { id: 'fail', label: '不通过' },
-  { id: 'na', label: '不适用' },
-];
+const DEFAULT_RESULT_COLORS = ['#22A052', '#D93025', '#8F8F8F', '#5A6FA8'] as const;
 
-type Tone = 'pass' | 'fail' | 'na' | 'extra' | null;
+const DEFAULT_RESULTS: ChecklistResultOption[] = [
+  { id: 'pass', label: '通过', color: DEFAULT_RESULT_COLORS[0] },
+  { id: 'fail', label: '不通过', color: DEFAULT_RESULT_COLORS[1] },
+  { id: 'na', label: '不适用', color: DEFAULT_RESULT_COLORS[2] },
+];
 
 const iconProps = {
   viewBox: '0 0 24 24',
@@ -32,30 +34,6 @@ const iconProps = {
   stroke: 'currentColor',
 } as const;
 
-function IconPass() {
-  return (
-    <svg {...iconProps} role="img" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round">
-      <title>通过</title>
-      <path d="M4.5 12.5l5 5.5L19.5 6" />
-    </svg>
-  );
-}
-function IconFail() {
-  return (
-    <svg {...iconProps} role="img" strokeWidth={2.6} strokeLinecap="round">
-      <title>不通过</title>
-      <path d="M6 6l12 12M18 6L6 18" />
-    </svg>
-  );
-}
-function IconNa() {
-  return (
-    <svg {...iconProps} role="img" strokeWidth={2.4} strokeLinecap="round">
-      <title>不适用</title>
-      <path d="M15.5 4.5l-7 15" />
-    </svg>
-  );
-}
 function IconCamera() {
   return (
     <svg {...iconProps} role="img" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -75,12 +53,6 @@ function IconImage() {
     </svg>
   );
 }
-
-const TONE_ICONS: Record<string, () => ReactElement> = {
-  pass: IconPass,
-  fail: IconFail,
-  na: IconNa,
-};
 
 export function checklistItems(node: MobileSchemaNode): ChecklistItemDef[] {
   const items = node.props?.items;
@@ -107,19 +79,13 @@ export function checklistResults(node: MobileSchemaNode): ChecklistResultOption[
       const raw = result as Record<string, unknown>;
       const label = String(raw.label ?? `结果${index + 1}`);
       const id = typeof raw.id === 'string' && raw.id ? raw.id : `result-${index}`;
-      return { id, label };
+      const color = typeof raw.color === 'string' && isHexColor(raw.color)
+        ? raw.color
+        : (DEFAULT_RESULT_COLORS[index] ?? DEFAULT_RESULT_COLORS[3]);
+      return { id, label, color };
     })
     .filter((result): result is ChecklistResultOption => Boolean(result));
   return parsed.length >= 2 ? parsed : DEFAULT_RESULTS;
-}
-
-function toneOf(results: ChecklistResultOption[], status: string | null): Tone {
-  if (!status) return null;
-  const index = results.findIndex((result) => result.id === status);
-  if (index === 0) return 'pass';
-  if (index === 1) return 'fail';
-  if (index === 2) return 'na';
-  return index >= 3 ? 'extra' : null;
 }
 
 export function ChecklistField(props: MobileFieldProps) {
@@ -186,6 +152,7 @@ export function ChecklistField(props: MobileFieldProps) {
 
   const error = fieldError(props);
   const required = isRequired(props.node);
+  const description = fieldDescription(props.node);
 
   if (props.mode === 'readonly') {
     return (
@@ -193,6 +160,7 @@ export function ChecklistField(props: MobileFieldProps) {
         <div className="af-checklist__header">
           <strong className="af-checklist__title">{label}</strong>
         </div>
+        {description ? <p className="af-checklist__description">{description}</p> : null}
         <div className="af-checklist__list">{checklistSummary(props.node, props.value)}</div>
       </div>
     );
@@ -224,6 +192,7 @@ export function ChecklistField(props: MobileFieldProps) {
           </button>
         ) : null}
       </div>
+      {description ? <p className="af-checklist__description">{description}</p> : null}
       {error ? <div className="af-checklist__error">{error}</div> : null}
       <div className="af-checklist__list">
         {items.length === 0 ? (
@@ -237,15 +206,15 @@ export function ChecklistField(props: MobileFieldProps) {
             description: '',
             images: [],
           };
-          const tone = toneOf(results, entry.status);
-          const expanded = expandedIds.has(item.id) && tone !== null;
+          const selectedResult = results.find((result) => result.id === entry.status);
+          const expanded = expandedIds.has(item.id) && selectedResult != null;
           return (
             <CheckCard
               key={item.id}
               item={item}
               entry={entry}
               results={results}
-              tone={tone}
+              selectedResult={selectedResult}
               expanded={expanded}
               allowDescription={props.node.props?.allowDescription !== false}
               photoMaxCount={
@@ -271,7 +240,7 @@ function CheckCard({
   item,
   entry,
   results,
-  tone,
+  selectedResult,
   expanded,
   allowDescription,
   photoMaxCount,
@@ -282,7 +251,7 @@ function CheckCard({
   item: ChecklistItemDef;
   entry: ChecklistEntry;
   results: ChecklistResultOption[];
-  tone: Tone;
+  selectedResult?: ChecklistResultOption;
   expanded: boolean;
   allowDescription: boolean;
   photoMaxCount: number;
@@ -290,41 +259,38 @@ function CheckCard({
   onExpand(expanded: boolean): void;
   onEntry(patch: Partial<Omit<ChecklistEntry, 'id' | 'name'>>): void;
 }) {
-  const stateClass = tone && tone !== 'extra' ? `af-check__card--${tone}` : 'af-check__card--none';
-
-  if (!tone) {
+  if (!selectedResult) {
     return (
-      <div className={`af-check__card ${stateClass}`}>
+      <div className="af-check__card af-check__card--none">
         <div className="af-check__head">
           <span className="af-check__name">{item.label}</span>
           <span className="af-check__actions">
-            {results.map((result, index) => {
-              const t = toneOf(results, result.id);
-              const Icon = t && t !== 'extra' ? TONE_ICONS[t] : null;
-              return (
-                <span key={result.id} className="af-check__actions-inner">
-                  {index > 0 ? <span className="af-check__divider" aria-hidden="true" /> : null}
-                  <button
-                    type="button"
-                    className={`af-check__icon-btn af-check__icon-btn--${t ?? 'extra'}`}
-                    aria-label={result.label}
-                    onClick={() => onStatus(result.id)}
-                  >
-                    {Icon ? <Icon /> : <span className="af-check__text-btn">{result.label}</span>}
-                  </button>
-                </span>
-              );
-            })}
+            {results.map((result, index) => (
+              <span key={result.id} className="af-check__actions-inner">
+                {index > 0 ? <span className="af-check__divider" aria-hidden="true" /> : null}
+                <button
+                  type="button"
+                  className="af-check__result-btn"
+                  aria-label={result.label}
+                  style={{ '--af-check-color': result.color } as CSSProperties}
+                  onClick={() => onStatus(result.id)}
+                >
+                  {result.label}
+                </button>
+              </span>
+            ))}
           </span>
         </div>
       </div>
     );
   }
 
-  const Icon = tone !== 'extra' ? TONE_ICONS[tone] : null;
-  const statusLabel = results.find((r) => r.id === entry.status)?.label ?? '状态';
+  const statusLabel = selectedResult.label;
   return (
-    <div className={`af-check__card ${stateClass}`}>
+    <div
+      className="af-check__card af-check__card--selected"
+      style={{ '--af-check-color': selectedResult.color } as CSSProperties}
+    >
       <div className="af-check__head">
         <button
           type="button"
@@ -336,7 +302,7 @@ function CheckCard({
         <span className="af-check__status-area">
           <button
             type="button"
-            className={`af-check__status-icon af-check__status-icon--${tone}`}
+            className="af-check__status-button"
             aria-label={`${statusLabel}，点击取消选择`}
             onClick={(event) => {
               event.stopPropagation();
@@ -344,7 +310,7 @@ function CheckCard({
               onExpand(false);
             }}
           >
-            {Icon ? <Icon /> : <span className="af-check__text-btn">{statusLabel}</span>}
+            {statusLabel}
           </button>
           {allowDescription && !expanded ? (
             <button
