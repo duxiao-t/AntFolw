@@ -13,6 +13,38 @@ export type DirectSubmitResult = {
   businessNo: string;
 };
 
+export type ApprovalPreview = {
+  nodes: ApprovalPreviewNode[];
+};
+
+export type ApprovalPreviewNode = {
+  nodeId: string;
+  nodeName: string;
+  approvalMode: 'ANY' | 'ALL' | 'RATIO' | 'SEQUENTIAL';
+  deferred: boolean;
+  assignees: Array<{ userId: number; displayName: string }>;
+};
+
+export function fetchApprovalPreview({
+  formCode,
+  values,
+  selfSelected,
+  reworkTaskId,
+}: {
+  formCode: string;
+  values: MobileFormValues;
+  selfSelected: Record<string, number[]>;
+  reworkTaskId: number | null;
+}) {
+  return apiRequest<ApprovalPreview>(
+    `/api/mobile/forms/${encodeURIComponent(formCode)}/approval-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ data: values, selfSelected, reworkTaskId }),
+    },
+  );
+}
+
 export async function startMobileInstance({
   formCode,
   values,

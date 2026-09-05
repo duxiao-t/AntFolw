@@ -1232,6 +1232,9 @@ body {
 .confirm-row:first-child { border-top: 0; }
 .confirm-row__k { color: var(--af-color-muted); }
 .confirm-row__v { color: var(--af-color-text); font-weight: 600; }
+.approval-preview { margin-top: 18px; }
+.approval-preview h4 { margin: 0 4px 8px; color: var(--af-color-muted); font-size: 13px; font-weight: 600; }
+.approval-preview__notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--af-color-line); border-radius: var(--af-radius-card); background: var(--af-color-surface); color: var(--af-color-text-secondary); font-size: 12px; box-shadow: var(--af-shadow-card); }
 
 /* ─ 22. EmptyHero 几何插画(空/错误/成功/无网络) ── */
 .empty-hero {

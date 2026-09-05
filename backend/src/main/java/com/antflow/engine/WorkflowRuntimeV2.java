@@ -152,6 +152,22 @@ public class WorkflowRuntimeV2 {
         return activated;
     }
 
+    /** Resolves the task recipients that would be activated without writing runtime state. */
+    public List<Assignment> previewAssignments(long formDefId, JsonNode node,
+                                               List<Long> responsibleUsers) {
+        List<Long> unique = new ArrayList<>(new LinkedHashSet<>(responsibleUsers));
+        if (unique.isEmpty()) {
+            throw new NoAssigneeFoundException(node.path("id").asText(), "fallback empty");
+        }
+        List<Assignment> result = new ArrayList<>();
+        int sequence = 0;
+        for (Long responsible : unique) {
+            result.add(new Assignment(responsible,
+                activeAgentForForm(responsible, formDefId), ++sequence));
+        }
+        return "SEQUENTIAL".equals(mode(node)) ? List.of(result.get(0)) : result;
+    }
+
     public void bindTask(TaskEntity task, NodeContext context, Assignment assignment,
                          ProcessInstance instance, JsonNode node) {
         if (!active(instance) || context.nodeInstanceId() == null) return;
@@ -209,10 +225,9 @@ public class WorkflowRuntimeV2 {
 
     public boolean shouldAutoPass(JsonNode root, ProcessInstance instance, List<Long> users) {
         if (!active(instance) || users.size() != 1) return false;
+        if (shouldAutoPassPreview(root, instance.getStartedBy(), users)) return true;
         JsonNode settings = settings(root);
         long user = users.get(0);
-        if (settings.path("skipStarterAsApprover").asBoolean(false)
-            && Objects.equals(instance.getStartedBy(), user)) return true;
         if (!settings.path("skipConsecutiveSameApprover").asBoolean(false)) return false;
         Long previous = jdbc.query("""
             SELECT participant.responsible_user_id
@@ -225,6 +240,12 @@ public class WorkflowRuntimeV2 {
             """, rs -> rs.next() ? rs.getLong(1) : null,
             instance.getId(), instance.getRoundNo());
         return Objects.equals(previous, user);
+    }
+
+    public boolean shouldAutoPassPreview(JsonNode root, long starterId, List<Long> users) {
+        return users.size() == 1
+            && settings(root).path("skipStarterAsApprover").asBoolean(false)
+            && Objects.equals(starterId, users.get(0));
     }
 
     public boolean shouldSkipResubmittedNode(JsonNode root, ProcessInstance instance,
@@ -254,20 +275,58 @@ public class WorkflowRuntimeV2 {
         try {
             JsonNode current = json.readTree(revisions.get(0));
             JsonNode previous = json.readTree(revisions.get(1));
-            LinkedHashSet<String> changed = new LinkedHashSet<>();
-            current.fieldNames().forEachRemaining(changed::add);
-            previous.fieldNames().forEachRemaining(changed::add);
-            changed.removeIf(field -> Objects.equals(current.get(field), previous.get(field)));
-            if (changed.isEmpty()) return true;
-            JsonNode perms = node.path("props").path("formPerms");
-            if (!perms.isArray() || perms.isEmpty()) return false;
-            for (JsonNode perm : perms) {
-                if (changed.contains(perm.path("fieldId").asText())) return false;
-            }
-            return true;
+            return changedFieldsDoNotAffect(node, current, previous);
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    /** Mirrors DIFF_CONTINUE before the candidate rework revision is persisted. */
+    public boolean shouldSkipResubmittedNodePreview(JsonNode root, ProcessInstance instance,
+                                                    JsonNode node, JsonNode candidateData) {
+        if (!active(instance)
+            || !"DIFF_CONTINUE".equals(settings(root).path("resubmitStrategy").asText("FULL"))) {
+            return false;
+        }
+        int nextRound = (instance.getRoundNo() == null ? 1 : instance.getRoundNo()) + 1;
+        Integer approvedBefore = jdbc.queryForObject("""
+            SELECT COUNT(*) FROM t_process_node_instance node
+            WHERE node.proc_inst_id = ? AND node.node_id = ? AND node.round_no < ?
+              AND (node.status IN ('PASSED', 'AUTO_PASSED') OR (
+                node.status = 'CANCELLED' AND EXISTS (
+                  SELECT 1 FROM t_task task
+                  WHERE task.node_instance_id = node.id AND task.status = 'APPROVED'
+                    AND task.operation_kind = 'INVALIDATED'
+                )
+              ))
+            """, Integer.class, instance.getId(), node.path("id").asText(), nextRound);
+        if (approvedBefore == null || approvedBefore == 0) return false;
+        List<String> revisions = jdbc.queryForList("""
+            SELECT data::text FROM t_form_data_revision
+            WHERE form_data_id = ? AND status = 'SUBMITTED'
+            ORDER BY revision_no DESC LIMIT 1
+            """, String.class, instance.getFormDataId());
+        if (revisions.isEmpty()) return false;
+        try {
+            return changedFieldsDoNotAffect(node, candidateData, json.readTree(revisions.get(0)));
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean changedFieldsDoNotAffect(JsonNode node, JsonNode current,
+                                                     JsonNode previous) {
+        LinkedHashSet<String> changed = new LinkedHashSet<>();
+        current.fieldNames().forEachRemaining(changed::add);
+        previous.fieldNames().forEachRemaining(changed::add);
+        changed.removeIf(field -> Objects.equals(current.get(field), previous.get(field)));
+        if (changed.isEmpty()) return true;
+        JsonNode perms = node.path("props").path("formPerms");
+        if (!perms.isArray() || perms.isEmpty()) return false;
+        for (JsonNode perm : perms) {
+            if (changed.contains(perm.path("fieldId").asText())) return false;
+        }
+        return true;
     }
 
     public Decision approve(TaskEntity task, JsonNode node, long operatorId) {
@@ -889,6 +948,19 @@ public class WorkflowRuntimeV2 {
               AND (delegation.form_def_id IS NULL OR delegation.form_def_id = data.form_def_id)
             ORDER BY delegation.form_def_id NULLS LAST, delegation.id DESC LIMIT 1
             """, rs -> rs.next() ? rs.getLong(1) : null, formDataId, responsible);
+        return agent == null ? responsible : agent;
+    }
+
+    private long activeAgentForForm(long responsible, long formDefId) {
+        Long agent = jdbc.query("""
+            SELECT delegation.agent_id
+            FROM t_approval_delegation delegation
+            JOIN t_user agent ON agent.id = delegation.agent_id AND agent.status = 'ACTIVE'
+            WHERE delegation.principal_id = ? AND delegation.status = 'ACTIVE'
+              AND now() >= delegation.starts_at AND now() < delegation.ends_at
+              AND (delegation.form_def_id IS NULL OR delegation.form_def_id = ?)
+            ORDER BY delegation.form_def_id NULLS LAST, delegation.id DESC LIMIT 1
+            """, rs -> rs.next() ? rs.getLong(1) : null, responsible, formDefId);
         return agent == null ? responsible : agent;
     }
 

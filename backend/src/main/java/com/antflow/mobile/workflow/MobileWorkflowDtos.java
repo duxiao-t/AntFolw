@@ -20,6 +20,21 @@ record MobileFormDto(String code, String name, Integer version, JsonNode schema,
                      Map<String, String> starterFieldModes) {
 }
 
+record ApprovalPreviewRequest(JsonNode data, Map<String, List<Long>> selfSelected,
+                              Long reworkTaskId) {
+}
+
+record ApprovalPreviewDto(List<ApprovalPreviewNodeDto> nodes) {
+}
+
+record ApprovalPreviewNodeDto(String nodeId, String nodeName, String approvalMode,
+                              boolean deferred,
+                              List<ApprovalPreviewAssigneeDto> assignees) {
+}
+
+record ApprovalPreviewAssigneeDto(Long userId, String displayName) {
+}
+
 record MobileTaskActionRequest(String comment, JsonNode data, String rejectToNodeId) {
     MobileTaskActionRequest(String comment, JsonNode data) {
         this(comment, data, null);

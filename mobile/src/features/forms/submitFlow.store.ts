@@ -171,20 +171,6 @@ function assigneesFromProps(props: MobileSchemaNode['props']): SelfSelectAssigne
   });
 }
 
-export function selectedAssigneeNames(
-  rules: SelfSelectRule[],
-  selfSelected: Record<string, number[]>,
-  selectedUsers: Record<number, SelfSelectAssignee> = {},
-) {
-  return rules.flatMap((rule) => {
-    const names = (selfSelected[rule.nodeId] ?? []).map((id) =>
-      selectedUsers[id]?.name
-        ?? rule.assignees.find((assignee) => assignee.id === id)?.name
-        ?? `用户#${id}`);
-    return names.length > 0 ? [{ nodeId: rule.nodeId, name: rule.name, names }] : [];
-  });
-}
-
 function arrayProp(value: unknown) {
   return Array.isArray(value) ? value : [];
 }

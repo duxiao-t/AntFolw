@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MobileWorkflowController {
     private final MobileDraftService draftService;
     private final MobileWorkflowService workflowService;
+    private final ApprovalPreviewService approvalPreviewService;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
 
@@ -77,6 +78,12 @@ public class MobileWorkflowController {
         principal();
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         return workflowService.getMobileForm(code);
+    }
+
+    @PostMapping("/forms/{code}/approval-preview")
+    public ApprovalPreviewDto approvalPreview(@PathVariable String code,
+                                               @RequestBody ApprovalPreviewRequest request) {
+        return approvalPreviewService.preview(code, request, principal().userId());
     }
 
     @PostMapping("/instances")

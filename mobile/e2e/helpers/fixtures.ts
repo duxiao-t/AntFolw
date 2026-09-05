@@ -615,6 +615,37 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         return empty(route, 204);
       }
 
+      if (path === '/api/mobile/users' && method === 'GET') {
+        const keyword = url.searchParams.get('keyword')?.trim() ?? '';
+        const users = [
+          { ...USERS.admin, department: '研发部', employeeNo: '000001' },
+          { id: 22, username: 'manager', displayName: '李经理', roles: ['user'], department: '研发部', employeeNo: '000022' },
+        ];
+        return json(route, users.filter((user) =>
+          `${user.displayName} ${user.username} ${user.department} ${user.employeeNo}`
+            .includes(keyword)));
+      }
+
+      if (path.match(/^\/api\/mobile\/forms\/[^/]+\/approval-preview$/)
+        && method === 'POST') {
+        const body = request.postDataJSON() as { selfSelected?: Record<string, number[]> };
+        const selected = Object.values(body.selfSelected ?? {}).find((ids) => ids.length > 0)
+          ?? [USERS.admin.id];
+        return json(route, {
+          nodes: [{
+            nodeId: 'manager',
+            nodeName: '直属主管',
+            approvalMode: 'ANY',
+            deferred: false,
+            assignees: selected.map((id) => ({
+              userId: id,
+              displayName: Object.values(USERS).find((user) => user.id === id)?.displayName
+                ?? `用户#${id}`,
+            })),
+          }],
+        });
+      }
+
       if (path.startsWith('/api/mobile/forms/') && method === 'GET') {
         const code = decodeURIComponent(path.slice('/api/mobile/forms/'.length));
         if (code === world.formCode || code === 'leave') {

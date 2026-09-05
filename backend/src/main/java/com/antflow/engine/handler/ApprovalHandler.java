@@ -1,8 +1,8 @@
 package com.antflow.engine.handler;
 
-import com.antflow.engine.BizException;
 import com.antflow.engine.NoAssigneeFoundException;
 import com.antflow.engine.WorkflowRuntimeV2;
+import com.antflow.engine.resolver.ApprovalAssigneeSpecs;
 import com.antflow.engine.resolver.AssigneeResolver;
 import com.antflow.engine.resolver.AssigneeSpec;
 import com.antflow.engine.tree.ProcessTreeNav;
@@ -50,7 +50,7 @@ public class ApprovalHandler implements NodeHandler {
                 && "FIELD_USER".equals(node.path("props").path("assignedType").asText())) {
                 assignees = runtimeV2.fieldUsers(node, ctx);
             } else {
-                spec = parseAssignee(node, ctx);
+                spec = ApprovalAssigneeSpecs.from(node, ctx.starterId(), ctx.selfSelected());
                 assignees = assigneeResolver.resolve(nodeId, spec);
             }
         } catch (NoAssigneeFoundException e) {
@@ -115,57 +115,6 @@ public class ApprovalHandler implements NodeHandler {
         pi.setCurrentNodeId(nodeId);
         historyMapper.insert(historyRow(pi.getId(), ctx.fromNodeId(), nodeId, "ARRIVE", ctx.starterId(), null));
         return NodeOutcome.halt(ids);
-    }
-
-    private static AssigneeSpec parseAssignee(JsonNode node, NodeContext ctx) {
-        JsonNode props = node.path("props");
-        String type = props.path("assignedType").asText();
-        switch (type) {
-            case "ASSIGN_USER":
-                return AssigneeSpec.of("ASSIGN_USER", readIds(props.path("assignedUser")));
-            case "ROLE":
-                return AssigneeSpec.of("ROLE", readIds(props.path("role")));
-            case "LEADER": {
-                int level = props.path("leader").path("level").asInt(1);
-                return new AssigneeSpec("LEADER", List.of(), level, ctx.starterId(), List.of());
-            }
-            case "DIRECT_MANAGER": {
-                int level = props.path("manager").path("level").asInt(1);
-                return new AssigneeSpec("DIRECT_MANAGER", List.of(), level,
-                    ctx.starterId(), List.of());
-            }
-            case "SELF":
-                return new AssigneeSpec("SELF", List.of(), 1, ctx.starterId(), List.of());
-            case "SELF_SELECT":
-                List<Long> selected = ctx.selfSelected() == null ? List.of()
-                    : ctx.selfSelected().getOrDefault(node.path("id").asText(), List.of());
-                long selectedCount = selected.stream().filter(java.util.Objects::nonNull)
-                    .distinct().count();
-                if (selectedCount == 0) {
-                    throw new BizException("SELF_SELECT_REQUIRED", "请选择审批人");
-                }
-                JsonNode multipleNode = props.path("selfSelect").path("multiple");
-                boolean multiple = multipleNode.isBoolean() && multipleNode.asBoolean();
-                if (!multiple && selectedCount != 1) {
-                    throw new BizException("SELF_SELECT_MULTIPLE_NOT_ALLOWED",
-                        "该审批节点只能选择一名审批人");
-                }
-                return new AssigneeSpec("SELF_SELECT", List.of(), 1, ctx.starterId(), selected);
-            default:
-                throw new IllegalArgumentException("未识别审批人类型: " + type);
-        }
-    }
-
-    private static List<Long> readIds(JsonNode arr) {
-        var out = new ArrayList<Long>();
-        if (arr == null || !arr.isArray()) return out;
-        for (JsonNode x : arr) {
-            if (x.isNumber()) out.add(x.asLong());
-            else if (x.isTextual()) {
-                try { out.add(Long.parseLong(x.asText())); } catch (NumberFormatException ignored) {}
-            }
-        }
-        return out;
     }
 
     private static com.antflow.task.TaskHistoryEntity historyRow(

@@ -22,10 +22,12 @@ import static org.mockito.Mockito.when;
 class MobileWorkflowControllerAuditTest {
     private final MobileDraftService draftService = Mockito.mock(MobileDraftService.class);
     private final MobileWorkflowService workflowService = Mockito.mock(MobileWorkflowService.class);
+    private final ApprovalPreviewService approvalPreviewService =
+        Mockito.mock(ApprovalPreviewService.class);
     private final AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
     private final AuditService auditService = mockAuditService();
     private final MobileWorkflowController controller = new MobileWorkflowController(
-        draftService, workflowService, authorizationService, auditService);
+        draftService, workflowService, approvalPreviewService, authorizationService, auditService);
 
     private static AuditService mockAuditService() {
         AuditService service = Mockito.mock(AuditService.class, Mockito.CALLS_REAL_METHODS);
@@ -61,6 +63,18 @@ class MobileWorkflowControllerAuditTest {
         assertThat(metadata.getValue().get("fieldCount")).isEqualTo(1);
         assertThat(metadata.getValue().toString())
             .doesNotContain("private-value", "PRIVATE-BUSINESS-NO");
+    }
+
+    @Test
+    void approvalPreviewUsesCurrentPrincipalWithoutAuditMutation() {
+        ApprovalPreviewRequest request = new ApprovalPreviewRequest(
+            new ObjectMapper().createObjectNode(), Map.of(), null);
+        when(approvalPreviewService.preview("leave", request, 7L))
+            .thenReturn(new ApprovalPreviewDto(List.of()));
+
+        assertThat(controller.approvalPreview("leave", request).nodes()).isEmpty();
+
+        verify(approvalPreviewService).preview("leave", request, 7L);
     }
 
     @Test

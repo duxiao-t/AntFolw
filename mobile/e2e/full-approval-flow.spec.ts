@@ -29,6 +29,8 @@ test.describe('full approval flow', () => {
     await expect(page.getByRole('heading', { name: '请确认本次提交内容' })).toBeVisible();
     await expect(page.getByText('E2E回家探亲')).toBeVisible();
     await expect(page.getByText(USERS.admin.displayName)).toBeVisible();
+    await expect(page.getByText(`${USERS.admin.displayName} · 直属主管`)).toBeVisible();
+    await expect(page.getByText('下一审批节点')).toBeVisible();
     await page.getByRole('button', { name: '确认提交' }).click();
 
     await expect(page.getByRole('heading', { name: '提交成功' })).toBeVisible();
@@ -57,7 +59,7 @@ test.describe('full approval flow', () => {
 
     await signOutViaSecurity(page);
     await signIn(page, USERS.bob.username, 'ant.design', `/processes/${instanceId}`);
-    await expect(page.locator('.app-bar__title')).toHaveText('流程进度');
+    await expect(page.locator('.app-bar__title')).toHaveText('审批详情');
     await expect(page.getByText('已通过').first()).toBeVisible();
     await expect(page.locator('.approval-records__list')).toBeVisible();
     await expect(page.locator('.approval-records .approval-panel__summary')).toHaveText('已完成');

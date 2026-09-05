@@ -6,6 +6,8 @@ export const queryKeys = {
   bootstrap: ['mobile', 'bootstrap'] as const,
   apps: (filters: AppFilters) => ['mobile', 'apps', filters] as const,
   form: (code: string) => ['mobile', 'forms', code] as const,
+  approvalPreview: (code: string, payload: string) =>
+    ['mobile', 'forms', code, 'approval-preview', payload] as const,
   drafts: ['mobile', 'drafts'] as const,
   draft: (id: number) => ['mobile', 'drafts', id] as const,
   instance: (id: number) => ['mobile', 'instances', id] as const,

@@ -8,9 +8,9 @@ import { useAuthStore } from "../auth/auth.store";
 import { summarizeSchemaRows } from "./components/ConfirmSummaryList";
 import { fetchMobileForm } from "./drafts.api";
 import { removeRecoveryDraft } from "./recoveryDraft.store";
-import { startMobileInstance, submitMobileFormData } from "./start.api";
+import { fetchApprovalPreview, startMobileInstance, submitMobileFormData, type ApprovalPreviewNode } from "./start.api";
 import { resubmitReworkTask } from "./rework.api";
-import { clearIdempotencyKeyForPayload, findSelfSelectRules, formSchemaWithoutSelfSelectRules, idempotencyKeyForPayload, selectedAssigneeNames, useSubmitFlowStore } from "./submitFlow.store";
+import { clearIdempotencyKeyForPayload, formSchemaWithoutSelfSelectRules, idempotencyKeyForPayload, useSubmitFlowStore } from "./submitFlow.store";
 
 export function SubmitConfirmPage() {
   const { code = "" } = useParams();
@@ -22,12 +22,25 @@ export function SubmitConfirmPage() {
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(true);
   const formQuery = useQuery({ queryKey: queryKeys.form(code), queryFn: () => fetchMobileForm(code), enabled: code.length > 0, retry: 0 });
-  const selfSelectedRows = useMemo(() => selectedAssigneeNames(
-    findSelfSelectRules(formQuery.data?.process), flow.selfSelected, flow.selfSelectedUsers,
-  ), [flow.selfSelected, flow.selfSelectedUsers, formQuery.data?.process]);
   const formName = formQuery.data?.name ?? "申请";
   const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
   const summaryRows = summarizeSchemaRows(formSchemaWithoutSelfSelectRules(formQuery.data?.schema ?? []), flow.values);
+  const previewPayload = useMemo(() => JSON.stringify({
+    data: flow.values,
+    selfSelected: flow.selfSelected,
+    reworkTaskId: flow.reworkTaskId,
+  }), [flow.reworkTaskId, flow.selfSelected, flow.values]);
+  const previewQuery = useQuery({
+    queryKey: queryKeys.approvalPreview(code, previewPayload),
+    queryFn: () => fetchApprovalPreview({
+      formCode: code,
+      values: flow.values,
+      selfSelected: flow.selfSelected,
+      reworkTaskId: flow.reworkTaskId,
+    }),
+    enabled: formQuery.isSuccess && workflowEnabled,
+    retry: 0,
+  });
   const submitMutation = useMutation({
     mutationFn: async () => {
       setError("");
@@ -65,7 +78,12 @@ export function SubmitConfirmPage() {
     <AppPage title="确认提交" contentStyle={{ paddingBottom: 0 }}>
       <div style={{ margin: "8px 0 14px" }}><h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>请确认本次提交内容</h3><small className="muted">提交后将按以下流程流转，可在“我发起的”中跟进。</small></div>
       <div className="confirm-card"><div style={{ padding: "12px 14px", borderBottom: "1px solid var(--af-color-line)" }}><div style={{ fontSize: 13, fontWeight: 700 }}>{formName}</div><small className="muted">{flow.reworkTaskId ? "本次提交将保留原单号" : "表单编号将在提交后生成"}</small></div>{summaryRows.map((row) => <div className="confirm-row" key={row.id}><span className="confirm-row__k">{row.label}</span><span className="confirm-row__v">{row.value || "未填写"}</span></div>)}</div>
-      {selfSelectedRows.length > 0 ? <><h4 style={{ fontSize: 13, color: "var(--af-color-muted)", margin: "18px 4px 8px", fontWeight: 600 }}>审批流（{selfSelectedRows.length} 个节点）</h4><div className="list-card">{selfSelectedRows.map((row, index) => <div className="list-item" key={row.nodeId}><span className={`list-item__avatar flow-person-avatar avatar-tone avatar-tone--${index % 2 === 0 ? "blue" : "mint"}`}>{row.names[0]?.slice(0, 1) || "审"}</span><div className="list-item__main"><b>{row.names.join("、")} · {row.name}</b><small>审批节点 {index + 1}</small></div><span className={`chip ${index === 0 ? "chip--soft" : "chip--ghost"}`}>{index === 0 ? "待审" : "后续"}</span></div>)}</div></> : null}
+      {workflowEnabled ? <ApprovalPreviewSection
+        loading={previewQuery.isPending}
+        error={previewQuery.isError}
+        nodes={previewQuery.data?.nodes ?? []}
+        onRetry={() => void previewQuery.refetch()}
+      /> : null}
       <div style={{ margin: "18px 0", padding: "12px 14px", border: "1px dashed var(--af-color-border)", borderRadius: 10, background: "var(--af-color-surface)" }}><label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: "var(--af-color-text-secondary)" }}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.currentTarget.checked)} /><span>我已确认信息无误，提交后将按上述审批流转入下一节点。</span></label></div>
       {error ? <p role="alert" className="status-notice status-notice--danger">{error}</p> : null}
       <div className="action-bar"><button type="button" className="btn btn--ghost btn--lg" onClick={() => navigate(editPath())}>返回编辑</button><button type="button" className="btn btn--success btn--lg" disabled={!confirmed || submitMutation.isPending} onClick={() => submitMutation.mutate()}>{submitMutation.isPending ? "提交中..." : error ? "重试提交" : flow.reworkTaskId ? "确认重提" : "确认提交"}</button></div>
@@ -77,3 +95,39 @@ export function SubmitConfirmPage() {
 }
 
 export default SubmitConfirmPage;
+
+function ApprovalPreviewSection({
+  loading,
+  error,
+  nodes,
+  onRetry,
+}: {
+  loading: boolean;
+  error: boolean;
+  nodes: ApprovalPreviewNode[];
+  onRetry(): void;
+}) {
+  const heading = nodes.length > 1
+    ? `下一审批节点（${nodes.length} 个并行）`
+    : '下一审批节点';
+  return <section className="approval-preview" aria-labelledby="approval-preview-title">
+    <h4 id="approval-preview-title">{heading}</h4>
+    {loading ? <div className="list-card"><div className="list-item"><div className="list-item__main"><b>正在解析审批节点...</b><small>请稍候</small></div></div></div> : null}
+    {error ? <div className="approval-preview__notice" role="status"><span>暂时无法预览，提交时将再次校验</span><button type="button" className="af-link-button" onClick={onRetry}>重试</button></div> : null}
+    {!loading && !error && nodes.length === 0 ? <div className="approval-preview__notice">提交后无需人工审批</div> : null}
+    {!loading && !error && nodes.length > 0 ? <div className="list-card">{nodes.map((node, index) => {
+      const names = node.assignees.map((assignee) => assignee.displayName);
+      const visibleNames = names.slice(0, 3).join('、');
+      const namesLabel = names.length > 3 ? `${visibleNames} 等 ${names.length} 人` : visibleNames;
+      return <div className="list-item" key={node.nodeId}>
+        <span className={`list-item__avatar flow-person-avatar avatar-tone avatar-tone--${index % 2 === 0 ? "blue" : "mint"}`}>{names[0]?.slice(0, 1) || "审"}</span>
+        <div className="list-item__main"><b>{namesLabel} · {node.nodeName}</b><small>{approvalModeLabel(node.approvalMode)}</small></div>
+        <span className={`chip ${node.deferred ? "chip--ghost" : "chip--soft"}`}>{node.deferred ? "后续" : "待审"}</span>
+      </div>;
+    })}</div> : null}
+  </section>;
+}
+
+function approvalModeLabel(mode: ApprovalPreviewNode['approvalMode']) {
+  return ({ ANY: '或签', ALL: '会签', RATIO: '比例签', SEQUENTIAL: '依次审批' } as const)[mode];
+}
