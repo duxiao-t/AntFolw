@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 
 class WecomServiceRulesTest {
     @Test
@@ -24,6 +26,25 @@ class WecomServiceRulesTest {
         assertThatThrownBy(() -> WecomService.resolveMatch(List.of(1L), List.of(2L)))
             .isInstanceOf(WecomService.SyncUserException.class);
         assertThat(WecomService.resolveMatch(List.of(1L), List.of(1L))).isEqualTo(1);
+    }
+
+    @Test
+    void detectsDepartmentMovesButKeepsLocallySupplementedContacts() {
+        WecomService.LocalUserState local = new WecomService.LocalUserState(
+            7L, "u1", "u1", "13800000000", "local@example.com", "User", "", null,
+            "ACTIVE", "u1", 2L, null);
+
+        assertThat(WecomService.changed(user(List.of(2L), 2), local)).isFalse();
+        assertThat(WecomService.changed(user(List.of(1L), 1), local)).isTrue();
+    }
+
+    @Test
+    void identifiesCyclesAndSafeDatabaseConflictMessages() {
+        assertThat(WecomService.createsCycle(1L, Map.of(1L, 2L, 2L, 1L))).isTrue();
+        assertThat(WecomService.createsCycle(1L, Map.of(1L, 2L, 2L, 3L))).isFalse();
+        DataIntegrityViolationException conflict = new DataIntegrityViolationException("write failed",
+            new RuntimeException("constraint t_user_username_key"));
+        assertThat(WecomService.userError(conflict)).isEqualTo("企微工号与本地账号冲突");
     }
 
     @Test
