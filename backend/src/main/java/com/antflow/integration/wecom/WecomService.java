@@ -425,8 +425,8 @@ public class WecomService {
             jdbc.query("SELECT id, username FROM t_user WHERE username IN (" + placeholders + ")",
                 rs -> {
                     idByUsername.put(rs.getString("username"), rs.getLong("id"));
-                    return null;
-                }, insertedUsernames.toArray());
+                },
+                insertedUsernames.toArray());
             List<Object[]> roleInserts = new ArrayList<>();
             for (int i = 0; i < insertedUsernames.size(); i++) {
                 Long insertedId = idByUsername.get(insertedUsernames.get(i));
