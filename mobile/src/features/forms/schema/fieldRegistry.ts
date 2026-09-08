@@ -26,7 +26,7 @@ import { TextareaField } from '../fields/TextareaField';
 import { TableListField } from '../fields/TableListField';
 import { MatrixFillField } from '../fields/MatrixFillField';
 import { TimeField } from '../fields/TimeField';
-import { UserPickerField } from '../fields/UserPickerField';
+import { pickerValues, UserPickerField } from '../fields/UserPickerField';
 import { ScanCodeField } from '../fields/ScanCodeField';
 import { AudioUploadField } from '../fields/AudioUploadField';
 import { LocationField } from '../fields/LocationField';
@@ -146,8 +146,8 @@ export const registeredFields: MobileFieldDefinition[] = [
     summarize: (_node, value) => value === true ? '是' : '否',
   }),
   field('user_picker', UserPickerField, {
-    validate: validateNumericValue,
-    summarize: (_node, value) => summarizePickerValue('用户', value),
+    validate: validateUserPicker,
+    summarize: (node, value) => summarizeUserPicker(node, value),
   }),
   field('dept_picker', DeptPickerField, {
     validate: validateNumericValue,
@@ -312,8 +312,33 @@ function validateNumericValue(node: MobileSchemaNode, value: unknown) {
   return typeof value === 'number' ? null : `请填写${node.label ?? node.id}`;
 }
 
+function validateUserPicker(node: MobileSchemaNode, value: unknown) {
+  const multiple = node.props?.multiple === true;
+  const empty = value == null || value === '' || (Array.isArray(value) && value.length === 0);
+  if (empty) return node.props?.required === true ? `请填写${node.label ?? node.id}` : null;
+  const valid = multiple
+    ? typeof value === 'number' || (Array.isArray(value) && value.every(isSafeInteger))
+    : isSafeInteger(value);
+  if (!valid) return `请填写${node.label ?? node.id}`;
+  const ids = pickerValues(value, multiple);
+  const commonError = validateCommonRules(node, multiple ? ids : ids[0]);
+  if (commonError) return commonError;
+  const maxCount = node.props?.maxCount;
+  return multiple && typeof maxCount === 'number' && ids.length > maxCount
+    ? `${node.label ?? node.id}最多选择${maxCount}项` : null;
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
 function summarizePickerValue(prefix: string, value: unknown) {
   return typeof value === 'number' ? `${prefix}#${value}` : '未填写';
+}
+
+function summarizeUserPicker(node: MobileSchemaNode, value: unknown) {
+  const ids = pickerValues(value, node.props?.multiple === true);
+  return ids.length > 0 ? ids.map((id) => `用户#${id}`).join('、') : '未填写';
 }
 
 function validateFileUpload(node: MobileSchemaNode, value: unknown) {

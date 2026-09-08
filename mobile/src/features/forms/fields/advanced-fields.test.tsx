@@ -190,6 +190,96 @@ describe('advanced mobile fields', () => {
     expect(screen.getByText('研发部 · 工号 000101')).toBeInTheDocument();
   });
 
+  it('keeps multi-user selections across searches and enforces maxCount on confirm', async () => {
+    const onValueChange = vi.fn();
+    const users = {
+      1001: { id: 1001, displayName: '张三', department: '研发部', employeeNo: '000101' },
+      1002: { id: 1002, displayName: '李四', department: '财务部', employeeNo: '000102' },
+      1003: { id: 1003, displayName: '王五', department: '行政部', employeeNo: '000103' },
+    } as const;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = decodeURIComponent(String(input));
+      const id = Number(url.match(/\/users\/(\d+)$/)?.[1]);
+      if (id) return jsonResponse(users[id as keyof typeof users]);
+      if (url.includes('keyword=李四')) return jsonResponse([users[1002]]);
+      if (url.includes('keyword=王五')) return jsonResponse([users[1003]]);
+      return jsonResponse([users[1001]]);
+    });
+
+    render(
+      <UserPickerField
+        {...baseProps({
+          id: 'reviewers',
+          type: 'user_picker',
+          label: '复核人',
+          props: { multiple: true, maxCount: 2 },
+        }, [], onValueChange)}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '选择复核人' }));
+    await userEvent.click(await screen.findByRole('option', { name: /张三/ }));
+    await userEvent.type(screen.getByPlaceholderText('搜索姓名或工号'), '李四');
+    await userEvent.click(await screen.findByRole('option', { name: /李四/ }));
+    await userEvent.clear(screen.getByPlaceholderText('搜索姓名或工号'));
+    await userEvent.type(screen.getByPlaceholderText('搜索姓名或工号'), '王五');
+
+    expect(await screen.findByRole('option', { name: /王五/ })).toBeDisabled();
+    expect(screen.getByText('已选 2 / 2 人')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '完成' }));
+
+    expect(onValueChange).toHaveBeenCalledWith('reviewers', [1001, 1002]);
+    expect(screen.getByText('张三、李四')).toBeInTheDocument();
+  });
+
+  it('cancels multi-user edits and reads all identities including a legacy single value', async () => {
+    const onValueChange = vi.fn();
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/1002')) {
+        return jsonResponse({ id: 1002, displayName: '李四', department: '财务部', employeeNo: '000102' });
+      }
+      if (/\/users\/\d+$/.test(url)) {
+        return jsonResponse({ id: 1001, displayName: '张三', department: '研发部', employeeNo: '000101' });
+      }
+      return jsonResponse([{ id: 1001, displayName: '张三', department: '研发部', employeeNo: '000101' }]);
+    });
+    const { rerender } = render(
+      <UserPickerField
+        {...baseProps({
+          id: 'reviewers',
+          type: 'user_picker',
+          label: '复核人',
+          props: { multiple: true },
+        }, 1001, onValueChange)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /张三/ })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /张三/ }));
+    await userEvent.click(await screen.findByRole('option', { name: /张三/ }));
+    await userEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(onValueChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /张三/ })).toBeInTheDocument();
+
+    rerender(
+      <UserPickerField
+        {...baseProps({
+          id: 'reviewers',
+          type: 'user_picker',
+          label: '复核人',
+          props: { multiple: true },
+        }, [1001, 1002], onValueChange)}
+        mode="readonly"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('李四')).toBeInTheDocument());
+    expect(screen.getByText('张三')).toBeInTheDocument();
+    expect(screen.getByText('研发部 · 工号 000101')).toBeInTheDocument();
+    expect(screen.getByText('财务部 · 工号 000102')).toBeInTheDocument();
+  });
+
   it('searches and selects a department by numeric id', async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

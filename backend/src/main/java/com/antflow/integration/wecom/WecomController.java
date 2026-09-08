@@ -3,6 +3,7 @@ package com.antflow.integration.wecom;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,12 +32,14 @@ public class WecomController {
     public WecomService.SettingsDto save(@Valid @RequestBody SaveSettingsRequest request) {
         if (request.agentId() == null && request.agentSecret() == null
             && request.oauthEnabled() == null && request.jsSdkEnabled() == null
-            && request.messageEnabled() == null) {
+            && request.messageEnabled() == null && request.scheduleEnabled() == null
+            && request.scheduleTime() == null && request.scheduleMode() == null) {
             return service.saveSettings(request.companyId(), request.corpId(), request.secret());
         }
         return service.saveSettings(request.companyId(), request.corpId(), request.secret(),
-            request.agentId(), request.agentSecret(), Boolean.TRUE.equals(request.oauthEnabled()),
-            Boolean.TRUE.equals(request.jsSdkEnabled()), Boolean.TRUE.equals(request.messageEnabled()));
+            request.agentId(), request.agentSecret(), request.oauthEnabled(),
+            request.jsSdkEnabled(), request.messageEnabled(), request.scheduleEnabled(),
+            request.scheduleTime(), request.scheduleMode());
     }
 
     @PostMapping("/sync-jobs")
@@ -56,6 +59,12 @@ public class WecomController {
                                       @Size(max = 512) String agentSecret,
                                       Boolean oauthEnabled,
                                       Boolean jsSdkEnabled,
-                                      Boolean messageEnabled) { }
+                                      Boolean messageEnabled,
+                                      Boolean scheduleEnabled,
+                                      @Pattern(regexp = "(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d",
+                                          message = "自动同步时间格式必须为 HH:mm:ss")
+                                      String scheduleTime,
+                                      @Pattern(regexp = "INCREMENTAL|FULL", message = "自动同步模式无效")
+                                      String scheduleMode) { }
     public record StartJobRequest(@NotNull Long companyId, String mode) { }
 }

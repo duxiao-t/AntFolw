@@ -84,6 +84,57 @@ describe('leaf mobile fields', () => {
     expect(container.querySelector('.af-check__card--selected')).toHaveStyle(
       '--af-check-color: #123456',
     );
+    await userEvent.click(screen.getByRole('button', { name: '添加描述' }));
+    expect(screen.getByRole('button', { name: /拍照/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /相册上传/ })).toBeEnabled();
+    const fileInputs = container.querySelectorAll<HTMLInputElement>('input[type="file"]');
+    expect(fileInputs).toHaveLength(2);
+    fileInputs.forEach((input) => {
+      expect(input).toHaveAttribute('accept', 'image/*');
+    });
+  });
+
+  it('renders historical checklist descriptions, images, and videos in readonly mode', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['media']), { status: 200 })));
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:inspection-media'),
+      revokeObjectURL: vi.fn(),
+    });
+    const node: MobileSchemaNode = {
+      id: 'inspection',
+      type: 'checklist',
+      label: '检查项',
+      props: {
+        showDescription: false,
+        questionDescription: '审批页不应显示的题干',
+        items: [{ id: 'item-1', label: '设备外观', required: true }],
+        results: [{ id: 'ok', label: '合格' }, { id: 'bad', label: '异常' }],
+      },
+    };
+    render(
+      <ChecklistField
+        {...baseProps(node, [{
+          itemId: 'item-1',
+          result: 'bad',
+          remark: '外壳有划痕',
+          photos: [
+            { id: 'p1', name: '现场.jpg', contentType: 'image/jpeg', contentUrl: '/files/p1', size: 10 },
+            { id: 'v1', name: '现场.mp4', contentType: 'video/mp4', contentUrl: '/files/v1', size: 20 },
+          ],
+        }])}
+        mode="readonly"
+      />,
+    );
+
+    expect(screen.queryByText('审批页不应显示的题干')).not.toBeInTheDocument();
+    expect(screen.getByText('设备外观')).toBeInTheDocument();
+    expect(screen.getByText('异常')).toBeInTheDocument();
+    expect(screen.getByText('外壳有划痕')).toBeInTheDocument();
+    expect(screen.getByText('现场.jpg')).toBeInTheDocument();
+    expect(screen.getByText('现场.mp4')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '现场.jpg' })).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it('renders and validates text field', () => {

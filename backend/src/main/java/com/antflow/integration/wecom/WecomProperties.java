@@ -17,4 +17,5 @@ public class WecomProperties {
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration requestTimeout = Duration.ofSeconds(15);
     private int queueCapacity = 20;
+    private String zoneId = "Asia/Shanghai";
 }

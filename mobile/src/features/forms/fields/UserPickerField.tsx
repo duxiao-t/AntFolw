@@ -1,7 +1,7 @@
 import { RightOutline, UserOutline } from 'antd-mobile-icons';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { MobileFieldProps } from '../schema/types';
-import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
+import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
 import { fetchMobileUser, searchMobileUsers, type MobilePickerUser } from '../files.api';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 
@@ -10,43 +10,48 @@ type PickerState = {
   keyword: string;
   loading: boolean;
   results: MobilePickerUser[];
-  selectedUser: MobilePickerUser | null;
-  selectedValue: number | null;
+  selectedIds: number[];
+  draftIds: number[];
+  users: Record<number, MobilePickerUser>;
 };
 
 export function UserPickerField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const endpoint = String(props.node.props?.searchEndpoint ?? '/api/mobile/users');
-  const value = useMemo(() => numericValue(props.value), [props.value]);
-  const pendingSelection = useRef<number | null>(null);
+  const multiple = props.node.props?.multiple === true;
+  const maxCount = positiveInteger(props.node.props?.maxCount);
+  const valueIds = useMemo(() => pickerValues(props.value, multiple), [multiple, props.value]);
   const [state, setState] = useState<PickerState>({
     open: false,
     keyword: '',
     loading: false,
     results: [],
-    selectedUser: null,
-    selectedValue: value,
+    selectedIds: valueIds,
+    draftIds: valueIds,
+    users: {},
   });
+  useEffect(() => {
+    setState((current) => sameIds(current.selectedIds, valueIds) ? current : {
+      ...current,
+      selectedIds: valueIds,
+      draftIds: current.open ? current.draftIds : valueIds,
+    });
+  }, [valueIds]);
 
   useEffect(() => {
-    if (value == null) {
-      if (pendingSelection.current != null) return;
-      setState((current) => current.selectedValue == null ? current : {
-        ...current, selectedValue: null, selectedUser: null,
-      });
-      return;
-    }
-    if (pendingSelection.current === value) pendingSelection.current = null;
-    if (state.selectedValue === value && state.selectedUser?.id === value) return;
+    const ids = state.selectedIds;
+    if (ids.length === 0) return;
     let active = true;
-    setState((current) => ({ ...current, selectedValue: value }));
-    fetchMobileUser(endpoint, value).then((selectedUser) => {
-      if (active) setState((current) => ({ ...current, selectedUser }));
-    }).catch(() => {
-      if (active) setState((current) => ({ ...current, selectedUser: fallbackUser(value) }));
-    });
+    Promise.all(ids.map((id) => fetchMobileUser(endpoint, id).catch(() => fallbackUser(id))))
+      .then((users) => {
+        if (!active) return;
+        setState((current) => ({
+          ...current,
+          users: { ...current.users, ...Object.fromEntries(users.map((user) => [user.id, user])) },
+        }));
+      });
     return () => { active = false; };
-  }, [endpoint, state.selectedUser?.id, state.selectedValue, value]);
+  }, [endpoint, state.selectedIds]);
 
   useEffect(() => {
     if (!state.open) return;
@@ -62,36 +67,76 @@ export function UserPickerField(props: MobileFieldProps) {
     return () => { active = false; };
   }, [endpoint, state.keyword, state.open]);
 
+  const selectedUsers = state.selectedIds.map((id) => state.users[id] ?? fallbackUser(id));
+  const readonly = props.mode === 'readonly';
+
   return (
     <FieldShell
       node={props.node}
       label={label}
       required={isRequired(props.node)}
       error={fieldError(props)}
-      summary={props.mode === 'readonly' ? readonlySummary(identityText(state.selectedUser, value)) : undefined}
+      summary={readonly ? (
+        <div className="af-field__summary user-picker-summary">
+          {selectedUsers.length > 0 ? selectedUsers.map((user) => (
+            <div key={user.id} className="user-picker-summary__item">
+              <strong>{user.displayName}</strong>
+              <small>{identityMeta(user, user.id)}</small>
+            </div>
+          )) : '未填写'}
+        </div>
+      ) : undefined}
     >
-      {props.mode === 'readonly' ? null : (
+      {!readonly ? (
         <>
           <button
             type="button"
             className="control form-picker user-picker-control"
-            onClick={() => setState((current) => ({ ...current, open: true }))}
+            onClick={() => setState((current) => ({
+              ...current,
+              open: true,
+              keyword: '',
+              draftIds: current.selectedIds,
+            }))}
           >
             <span className="user-stack" aria-hidden="true">
-              <span className="user-avatar">{pickerInitial(state.selectedUser?.displayName ?? '') || <UserOutline />}</span>
+              {selectedUsers.slice(0, 3).map((user) => (
+                <span key={user.id} className="user-avatar">
+                  {pickerInitial(user.displayName) || <UserOutline />}
+                </span>
+              ))}
+              {selectedUsers.length === 0 ? <span className="user-avatar"><UserOutline /></span> : null}
             </span>
             <span className="picker-value user-picker-control__identity">
-              <strong>{state.selectedUser?.displayName || (value == null ? `选择${label}` : `用户${value}`)}</strong>
-              {state.selectedUser || value != null ? <small>{identityMeta(state.selectedUser, value)}</small> : null}
+              <strong>
+                {selectedUsers.length > 0
+                  ? selectedUsers.map((user) => user.displayName).join('、')
+                  : `选择${label}`}
+              </strong>
+              {selectedUsers.length === 1 ? (
+                <small>{identityMeta(selectedUsers[0], selectedUsers[0]?.id ?? null)}</small>
+              ) : selectedUsers.length > 1 ? <small>已选择 {selectedUsers.length} 人</small> : null}
             </span>
             <RightOutline aria-hidden="true" />
           </button>
           {state.open ? (
             <MobileSelectionPopup
-              visible={state.open}
+              visible
               title={`选择${label}`}
-              subtitle="搜索姓名或工号后选择"
-              onClose={() => setState((current) => ({ ...current, open: false }))}
+              subtitle={multiple
+                ? `已选 ${state.draftIds.length}${maxCount ? ` / ${maxCount}` : ''} 人`
+                : '搜索姓名或工号后选择'}
+              onClose={closePicker}
+              footer={multiple ? (
+                <>
+                  <button type="button" className="btn btn--ghost btn--lg" onClick={closePicker}>
+                    取消
+                  </button>
+                  <button type="button" className="btn btn--success btn--lg" onClick={confirmPicker}>
+                    完成
+                  </button>
+                </>
+              ) : undefined}
             >
               <input
                 className="af-full-picker__search"
@@ -103,42 +148,103 @@ export function UserPickerField(props: MobileFieldProps) {
                   setState((current) => ({ ...current, keyword: event.target.value }))}
               />
               {state.loading ? <div className="af-full-picker__hint">加载中</div> : null}
-              <div role="listbox" aria-label={label} className="af-full-picker__list">
-                {state.results.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="option"
-                    aria-label={identityText(item, item.id)}
-                    aria-selected={value === item.id}
-                    className="af-full-picker__option"
-                    onClick={() => {
-                      pendingSelection.current = item.id;
-                      setState((current) => ({
-                        ...current, open: false, selectedUser: item, selectedValue: item.id,
-                      }));
-                      props.onValueChange(props.node.id, item.id);
-                    }}
-                  >
-                    <span className="af-full-picker__avatar" aria-hidden="true">{pickerInitial(item.displayName)}</span>
-                    <span className="af-full-picker__option-text">
-                      <strong>{item.displayName}</strong>
-                      <small>{identityMeta(item, item.id)}</small>
-                    </span>
-                  </button>
-                ))}
+              <div
+                role="listbox"
+                aria-label={label}
+                aria-multiselectable={multiple || undefined}
+                className="af-full-picker__list"
+              >
+                {state.results.map((item) => {
+                  const checked = (multiple ? state.draftIds : state.selectedIds).includes(item.id);
+                  const disabled = multiple && !checked && maxCount != null
+                    && state.draftIds.length >= maxCount;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="option"
+                      aria-label={identityText(item, item.id)}
+                      aria-selected={checked}
+                      disabled={disabled}
+                      className="af-full-picker__option"
+                      onClick={() => selectUser(item)}
+                    >
+                      <span className="af-full-picker__avatar" aria-hidden="true">{pickerInitial(item.displayName)}</span>
+                      <span className="af-full-picker__option-text">
+                        <strong>{item.displayName}</strong>
+                        <small>{identityMeta(item, item.id)}</small>
+                      </span>
+                      {multiple ? (
+                        <span className="af-full-picker__option-status" aria-hidden="true">
+                          {checked ? '✓' : ''}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
                 {!state.loading && state.results.length === 0 ? <div className="af-full-picker__empty">暂无匹配人员</div> : null}
               </div>
             </MobileSelectionPopup>
           ) : null}
         </>
-      )}
+      ) : null}
     </FieldShell>
   );
+
+  function closePicker() {
+    setState((current) => ({
+      ...current,
+      open: false,
+      keyword: '',
+      draftIds: current.selectedIds,
+    }));
+  }
+
+  function confirmPicker() {
+    const ids = state.draftIds;
+    setState((current) => ({ ...current, open: false, keyword: '', selectedIds: ids }));
+    props.onValueChange(props.node.id, ids);
+  }
+
+  function selectUser(user: MobilePickerUser) {
+    if (!multiple) {
+      setState((current) => ({
+        ...current,
+        open: false,
+        selectedIds: [user.id],
+        draftIds: [user.id],
+        users: { ...current.users, [user.id]: user },
+      }));
+      props.onValueChange(props.node.id, user.id);
+      return;
+    }
+    setState((current) => {
+      const checked = current.draftIds.includes(user.id);
+      if (!checked && maxCount != null && current.draftIds.length >= maxCount) return current;
+      return {
+        ...current,
+        draftIds: checked
+          ? current.draftIds.filter((id) => id !== user.id)
+          : [...current.draftIds, user.id],
+        users: { ...current.users, [user.id]: user },
+      };
+    });
+  }
 }
 
-function numericValue(value: unknown) {
-  return typeof value === 'number' ? value : null;
+export function pickerValues(value: unknown, multiple: boolean) {
+  const values = multiple ? (Array.isArray(value) ? value : [value]) : [value];
+  return [...new Set(values.filter((item): item is number =>
+    typeof item === 'number' && Number.isSafeInteger(item)))]
+    .slice(0, multiple ? undefined : 1);
+}
+
+function positiveInteger(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function sameIds(left: number[], right: number[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
 function pickerInitial(value: string) {

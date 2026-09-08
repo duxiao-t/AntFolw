@@ -788,6 +788,25 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         return json(route, { items, hasMore: false });
       }
 
+      if (path === '/api/mobile/initiated' && method === 'GET') {
+        if (!authUser) {
+          return error(route, 401, 'UNAUTHORIZED', '未登录');
+        }
+        const items = [...world.instances.values()]
+          .filter((item) => item.starterUserId === authUser.id)
+          .map((item) => ({
+            kind: 'WORKFLOW',
+            id: item.id,
+            status: item.status,
+            formName: item.formName,
+            businessNo: item.businessNo,
+            currentNodeName: item.currentNodeName,
+            startedAt: item.startedAt,
+            finishedAt: item.finishedAt ?? null,
+          }));
+        return json(route, { items, hasMore: false });
+      }
+
       if (path.match(/^\/api\/mobile\/instances\/\d+$/) && method === 'GET') {
         const id = Number(path.split('/').pop());
         const instance = world.instances.get(id);
@@ -1054,4 +1073,3 @@ export async function installApiMocks(page: Page, world: MockWorld) {
     }
   });
 }
-

@@ -412,7 +412,7 @@ export default function DetailPage() {
             schema={formSchema}
             mode="readonly"
             fieldModes={currentFormModes}
-            value={editableValues}
+            value={myPending ? editableValues : initialFormData}
             onChange={hasEditableFields ? setEditableValues : undefined}
           />
         </div>

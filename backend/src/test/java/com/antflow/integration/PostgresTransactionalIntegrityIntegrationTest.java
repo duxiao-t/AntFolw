@@ -23,6 +23,8 @@ import com.antflow.task.TaskMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -49,6 +51,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,6 +62,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     "antflow.automation.poll-interval-ms=3600000",
     "antflow.automation.recovery-interval-ms=3600000",
     "antflow.outbox.poll-interval-ms=3600000",
+    "antflow.wecom.schedule-poll-interval-ms=3600000",
     "antflow.mobile.files.storage=test"
 })
 @Import(PostgresTransactionalIntegrityIntegrationTest.TestFileStorageConfig.class)
@@ -780,6 +784,71 @@ class PostgresTransactionalIntegrityIntegrationTest {
             INSERT INTO t_wecom_sync_job(company_id, initiated_by) VALUES (?, ?) RETURNING id
             """, Long.class, companyId, adminId);
         jdbcTemplate.update("DELETE FROM t_wecom_sync_job WHERE id IN (?, ?)", firstId, nextId);
+    }
+
+    @Test
+    void wecomScheduleMigratesWithSafeDefaultsAndClaimsOnceAfterActiveJobFinishes() {
+        long companyId = jdbcTemplate.queryForObject(
+            "INSERT INTO t_company(name) VALUES (?) RETURNING id", Long.class,
+            "schedule-" + UUID.randomUUID());
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO t_wecom_config(company_id, corp_id, secret_encrypted)
+                VALUES (?, 'ww-schedule-test', 'encrypted')
+                """, companyId);
+            assertThat(jdbcTemplate.queryForMap("""
+                SELECT schedule_enabled, schedule_time, schedule_mode, schedule_last_run_date
+                FROM t_wecom_config WHERE company_id = ?
+                """, companyId))
+                .containsEntry("schedule_enabled", false)
+                .containsEntry("schedule_mode", "INCREMENTAL")
+                .containsEntry("schedule_last_run_date", null);
+
+            long adminId = userId("admin");
+            PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+            try {
+                WecomService.SettingsDto saved = wecomService.saveSettings(companyId,
+                    "ww-schedule-test", "", null, null, false, false, false,
+                    true, "03:00:00", "FULL");
+                assertThat(saved.scheduleEnabled()).isTrue();
+                assertThat(saved.scheduleTime()).isEqualTo("03:00:00");
+                assertThat(saved.scheduleMode()).isEqualTo("FULL");
+                assertThat(wecomService.settings(companyId)).isEqualTo(saved);
+            } finally {
+                PrincipalHolder.clear();
+            }
+            LocalDate today = LocalDate.of(2026, 9, 8);
+            assertThat(ReflectionTestUtils.<Long>invokeMethod(wecomService, "claimScheduledJob",
+                companyId, today, LocalTime.of(2, 59))).isNull();
+            Long first = ReflectionTestUtils.invokeMethod(wecomService, "claimScheduledJob",
+                companyId, today, LocalTime.NOON);
+            assertThat(first).isNotNull();
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT sync_mode FROM t_wecom_sync_job WHERE id = ?
+                """, String.class, first)).isEqualTo("FULL");
+            assertThat(ReflectionTestUtils.<Long>invokeMethod(wecomService, "claimScheduledJob",
+                companyId, today, LocalTime.NOON)).isNull();
+
+            jdbcTemplate.update("""
+                UPDATE t_wecom_config SET schedule_last_run_date = NULL WHERE company_id = ?
+                """, companyId);
+            assertThat(ReflectionTestUtils.<Long>invokeMethod(wecomService, "claimScheduledJob",
+                companyId, today, LocalTime.NOON)).isNull();
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT schedule_last_run_date FROM t_wecom_config WHERE company_id = ?
+                """, LocalDate.class, companyId)).isNull();
+
+            jdbcTemplate.update("UPDATE t_wecom_sync_job SET status = 'SUCCESS' WHERE id = ?", first);
+            Long afterActive = ReflectionTestUtils.invokeMethod(wecomService, "claimScheduledJob",
+                companyId, today, LocalTime.NOON);
+            assertThat(afterActive).isNotNull();
+            jdbcTemplate.update("UPDATE t_wecom_sync_job SET status = 'FAILED' WHERE id = ?",
+                afterActive);
+            assertThat(ReflectionTestUtils.<Long>invokeMethod(wecomService, "claimScheduledJob",
+                companyId, today, LocalTime.NOON)).isNull();
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_company WHERE id = ?", companyId);
+        }
     }
 
     @Test

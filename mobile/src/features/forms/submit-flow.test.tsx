@@ -306,6 +306,49 @@ describe('mobile form submit flow', () => {
     expect(screen.getByText('或签')).toBeInTheDocument();
   });
 
+  it('uses the readonly renderer to confirm checklist descriptions and media', async () => {
+    const checklistForm = {
+      ...FORM_WITHOUT_SELF_SELECT,
+      schema: [{
+        id: 'inspection',
+        type: 'checklist',
+        label: '设备检查',
+        props: {
+          items: [{ id: 'appearance', label: '设备外观' }],
+          results: [{ id: 'ok', label: '合格' }, { id: 'bad', label: '异常' }],
+        },
+      }],
+    };
+    setupFetch(checklistForm);
+    useSubmitFlowStore.setState({
+      formCode: 'leave',
+      draftId: null,
+      reworkTaskId: null,
+      selfSelected: {},
+      values: {
+        inspection: [{
+          id: 'appearance',
+          status: 'bad',
+          description: '外壳有划痕',
+          images: [{
+            id: 'photo-1',
+            name: '现场.jpg',
+            contentType: 'image/jpeg',
+            contentUrl: '/api/mobile/files/photo-1/content',
+            size: 10,
+          }],
+        }],
+      },
+    });
+
+    renderSubmitFlow('/forms/leave/confirm');
+
+    expect(await screen.findByText('设备外观')).toBeInTheDocument();
+    expect(screen.getByText('异常')).toBeInTheDocument();
+    expect(screen.getByText('外壳有划痕')).toBeInTheDocument();
+    expect(screen.getByText('现场.jpg')).toBeInTheDocument();
+  });
+
   it('shows that rework submission keeps the original business number', async () => {
     useSubmitFlowStore.setState({
       formCode: 'leave',

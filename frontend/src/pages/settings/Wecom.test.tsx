@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import { afterEach, vi } from 'vitest';
 import WecomPage, { syncPollInterval } from './Wecom';
@@ -15,6 +15,9 @@ const settings = {
   companyId: 1,
   corpId: 'ww-corp',
   secretConfigured: true,
+  scheduleEnabled: false,
+  scheduleTime: '03:00:00',
+  scheduleMode: 'INCREMENTAL',
 };
 
 function renderPage() {
@@ -61,6 +64,7 @@ describe('WecomPage', () => {
     renderPage();
 
     expect(await screen.findByDisplayValue('ww-corp')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('自动同步执行时间')).toHaveValue('03:00'));
     expect(screen.getByPlaceholderText('已配置（留空不修改）')).toHaveValue('');
     expect(screen.getByText('10/10')).toBeInTheDocument();
     expect(screen.getByText('成员 u***1 的手机号重复')).toBeInTheDocument();
@@ -103,7 +107,13 @@ describe('WecomPage', () => {
       '/api/integrations/wecom/settings',
       expect.objectContaining({
         method: 'PUT',
-        data: expect.objectContaining({ companyId: 1, corpId: 'ww-updated' }),
+        data: expect.objectContaining({
+          companyId: 1,
+          corpId: 'ww-updated',
+          scheduleEnabled: false,
+          scheduleTime: '03:00:00',
+          scheduleMode: 'INCREMENTAL',
+        }),
       }),
     ));
     await waitFor(() => expect(screen.getByRole('button', { name: /开始同步/ })).toBeEnabled());
@@ -112,6 +122,26 @@ describe('WecomPage', () => {
       '/api/integrations/wecom/sync-jobs',
       { method: 'POST', data: { companyId: 1, mode: 'INCREMENTAL' } },
     ));
+  });
+
+  it('restores an enabled full-sync schedule', async () => {
+    requestMock.mockImplementation((url: string) => {
+      if (url === '/api/companies') return Promise.resolve([{ id: 1, name: 'AntFlow' }]);
+      if (url === '/api/integrations/wecom/settings') return Promise.resolve({
+        ...settings,
+        scheduleEnabled: true,
+        scheduleTime: '04:30:00',
+        scheduleMode: 'FULL',
+      });
+      return Promise.resolve({});
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByLabelText('自动同步执行时间')).toHaveValue('04:30'));
+    expect(screen.getByRole('switch', { name: '每日自动同步' })).toBeChecked();
+    expect(within(screen.getByRole('radiogroup', { name: '自动同步模式' }))
+      .getByRole('radio', { name: '全量同步' })).toBeChecked();
   });
 
   it('polls only active tasks', () => {

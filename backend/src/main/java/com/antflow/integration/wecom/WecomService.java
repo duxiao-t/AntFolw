@@ -12,7 +12,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -39,6 +44,7 @@ import org.springframework.core.NestedExceptionUtils;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +60,9 @@ public class WecomService {
     private static final int MANAGER_POOL_SIZE = 12;
     private static final long MANAGER_BATCH_INTERVAL_MS = 350;
     private static final String DEFAULT_WECOM_PASSWORD = "qwer1234";
+    private static final LocalTime DEFAULT_SCHEDULE_TIME = LocalTime.of(3, 0);
+    private static final DateTimeFormatter SCHEDULE_TIME_FORMAT =
+        DateTimeFormatter.ofPattern("HH:mm:ss");
     private final JdbcTemplate jdbc;
     private final WecomSecretCipher cipher;
     private final WecomClient client;
@@ -63,12 +72,14 @@ public class WecomService {
     private final PasswordEncoder passwords;
     private final TransactionTemplate transactions;
     private final Executor executor;
+    private final WecomProperties properties;
 
     public WecomService(JdbcTemplate jdbc, WecomSecretCipher cipher, WecomClient client,
                         AuthorizationService authorization, AuditService audit, ObjectMapper json,
                         PasswordEncoder passwords,
                         TransactionTemplate transactions,
-                        @Qualifier("wecomSyncExecutor") Executor executor) {
+                        @Qualifier("wecomSyncExecutor") Executor executor,
+                        WecomProperties properties) {
         this.jdbc = jdbc;
         this.cipher = cipher;
         this.client = client;
@@ -78,6 +89,7 @@ public class WecomService {
         this.passwords = passwords;
         this.transactions = transactions;
         this.executor = executor;
+        this.properties = properties;
     }
 
     public SettingsDto settings(long companyId) {
@@ -89,7 +101,10 @@ public class WecomService {
             config == null ? null : config.agentId(),
             config != null && config.encryptedAgentSecret() != null,
             config != null && config.oauthEnabled(), config != null && config.jsSdkEnabled(),
-            config != null && config.messageEnabled());
+            config != null && config.messageEnabled(),
+            config != null && config.scheduleEnabled(),
+            formatScheduleTime(config == null ? DEFAULT_SCHEDULE_TIME : config.scheduleTime()),
+            config == null ? "INCREMENTAL" : config.scheduleMode());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -98,13 +113,23 @@ public class WecomService {
         return saveSettings(companyId, corpId, secret,
             current == null ? null : current.agentId(), null,
             current != null && current.oauthEnabled(), current != null && current.jsSdkEnabled(),
-            current != null && current.messageEnabled());
+            current != null && current.messageEnabled(), null, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
                                     String agentSecret, boolean oauthEnabled,
                                     boolean jsSdkEnabled, boolean messageEnabled) {
+        return saveSettings(companyId, corpId, secret, agentId, agentSecret, oauthEnabled,
+            jsSdkEnabled, messageEnabled, null, null, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
+                                    String agentSecret, Boolean oauthEnabled,
+                                    Boolean jsSdkEnabled, Boolean messageEnabled,
+                                    Boolean scheduleEnabled, String scheduleTime,
+                                    String scheduleMode) {
         authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
         requireCompany(companyId);
         String normalizedCorpId = corpId == null ? "" : corpId.trim();
@@ -121,11 +146,18 @@ public class WecomService {
         String encryptedAgentSecret = agentSecret == null || agentSecret.isBlank()
             ? current == null ? null : current.encryptedAgentSecret()
             : cipher.encrypt(agentSecret.trim(), "wecom-agent:" + companyId);
-        boolean appEnabled = oauthEnabled || jsSdkEnabled || messageEnabled;
-        if (appEnabled && (agentId == null || agentId <= 0 || encryptedAgentSecret == null)) {
+        Integer savedAgentId = agentId == null && current != null ? current.agentId() : agentId;
+        boolean savedOauthEnabled = oauthEnabled == null
+            ? current != null && current.oauthEnabled() : oauthEnabled;
+        boolean savedJsSdkEnabled = jsSdkEnabled == null
+            ? current != null && current.jsSdkEnabled() : jsSdkEnabled;
+        boolean savedMessageEnabled = messageEnabled == null
+            ? current != null && current.messageEnabled() : messageEnabled;
+        boolean appEnabled = savedOauthEnabled || savedJsSdkEnabled || savedMessageEnabled;
+        if (appEnabled && (savedAgentId == null || savedAgentId <= 0 || encryptedAgentSecret == null)) {
             throw new BizException("WECOM_APP_REQUIRED", "启用免登、JS-SDK 或应用消息前请配置 AgentId 和应用 Secret");
         }
-        if (oauthEnabled) {
+        if (savedOauthEnabled) {
             Integer otherOauth = jdbc.queryForObject("""
                 SELECT count(*) FROM t_wecom_config WHERE oauth_enabled AND company_id <> ?
                 """, Integer.class, companyId);
@@ -133,12 +165,20 @@ public class WecomService {
                 throw new BizException("WECOM_OAUTH_CONFLICT", "当前只允许启用一个企业微信 Corp 免登入口");
             }
         }
+        boolean savedScheduleEnabled = scheduleEnabled == null
+            ? current != null && current.scheduleEnabled() : scheduleEnabled;
+        LocalTime savedScheduleTime = scheduleTime == null
+            ? current == null ? DEFAULT_SCHEDULE_TIME : current.scheduleTime()
+            : parseScheduleTime(scheduleTime);
+        String savedScheduleMode = scheduleMode == null
+            ? current == null ? "INCREMENTAL" : current.scheduleMode()
+            : normalizeScheduleMode(scheduleMode);
         long actorId = authorization.currentUserId();
         jdbc.update("""
             INSERT INTO t_wecom_config(company_id, corp_id, secret_encrypted, agent_id,
                 agent_secret_encrypted, oauth_enabled, js_sdk_enabled, message_enabled,
-                created_by, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                schedule_enabled, schedule_time, schedule_mode, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (company_id) DO UPDATE SET
                 corp_id = EXCLUDED.corp_id,
                 secret_encrypted = EXCLUDED.secret_encrypted,
@@ -147,15 +187,21 @@ public class WecomService {
                 oauth_enabled = EXCLUDED.oauth_enabled,
                 js_sdk_enabled = EXCLUDED.js_sdk_enabled,
                 message_enabled = EXCLUDED.message_enabled,
+                schedule_enabled = EXCLUDED.schedule_enabled,
+                schedule_time = EXCLUDED.schedule_time,
+                schedule_mode = EXCLUDED.schedule_mode,
                 updated_by = EXCLUDED.updated_by,
                 updated_at = now()
-            """, companyId, normalizedCorpId, encrypted, agentId, encryptedAgentSecret,
-            oauthEnabled, jsSdkEnabled, messageEnabled, actorId, actorId);
+            """, companyId, normalizedCorpId, encrypted, savedAgentId, encryptedAgentSecret,
+            savedOauthEnabled, savedJsSdkEnabled, savedMessageEnabled, savedScheduleEnabled,
+            savedScheduleTime, savedScheduleMode, actorId, actorId);
         audit.success("integration.wecom.settings.update", "COMPANY", companyId,
             AuditService.RiskLevel.HIGH,
-            Map.of("changedFields", List.of("corpId", "secretConfigured")), Map.of());
-        return new SettingsDto(companyId, normalizedCorpId, true, latestJob(companyId), agentId,
-            encryptedAgentSecret != null, oauthEnabled, jsSdkEnabled, messageEnabled);
+            Map.of("changedFields", List.of("corpId", "secretConfigured", "scheduleEnabled",
+                "scheduleTime", "scheduleMode")), Map.of());
+        return new SettingsDto(companyId, normalizedCorpId, true, latestJob(companyId), savedAgentId,
+            encryptedAgentSecret != null, savedOauthEnabled, savedJsSdkEnabled, savedMessageEnabled,
+            savedScheduleEnabled, formatScheduleTime(savedScheduleTime), savedScheduleMode);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -196,6 +242,55 @@ public class WecomService {
     public JobDto job(long id) {
         authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
         return job(id, true);
+    }
+
+    @Scheduled(fixedDelayString = "${antflow.wecom.schedule-poll-interval-ms:60000}",
+        initialDelayString = "${antflow.wecom.schedule-poll-interval-ms:60000}")
+    void runScheduledSync() {
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of(properties.getZoneId()));
+        runScheduledSync(now.toLocalDate(), now.toLocalTime());
+    }
+
+    void runScheduledSync(LocalDate date, LocalTime time) {
+        List<Long> companyIds = jdbc.queryForList("""
+            SELECT company_id
+            FROM t_wecom_config
+            WHERE schedule_enabled AND schedule_time <= ?
+              AND (schedule_last_run_date IS NULL OR schedule_last_run_date < ?)
+            ORDER BY company_id
+            """, Long.class, time, date);
+        for (long companyId : companyIds) {
+            Long jobId = claimScheduledJob(companyId, date, time);
+            if (jobId == null) continue;
+            log.info("Scheduled WeCom directory sync: company={}, job={}", companyId, jobId);
+            submit(jobId, null);
+        }
+    }
+
+    Long claimScheduledJob(long companyId, LocalDate date, LocalTime time) {
+        return transactions.execute(status -> {
+            String mode = jdbc.query("""
+                UPDATE t_wecom_config
+                SET schedule_last_run_date = ?, updated_at = now()
+                WHERE company_id = ? AND schedule_enabled AND schedule_time <= ?
+                  AND (schedule_last_run_date IS NULL OR schedule_last_run_date < ?)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM t_wecom_sync_job
+                    WHERE company_id = ? AND status IN ('PENDING', 'RUNNING')
+                  )
+                RETURNING schedule_mode
+                """, result -> result.next() ? result.getString(1) : null,
+                date, companyId, time, date, companyId);
+            if (mode == null) return null;
+            Long jobId = jdbc.query("""
+                INSERT INTO t_wecom_sync_job(company_id, initiated_by, sync_mode, message)
+                VALUES (?, NULL, ?, '自动同步任务已排队')
+                ON CONFLICT (company_id) WHERE status IN ('PENDING', 'RUNNING') DO NOTHING
+                RETURNING id
+                """, result -> result.next() ? result.getLong(1) : null, companyId, mode);
+            if (jobId == null) status.setRollbackOnly();
+            return jobId;
+        });
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -805,11 +900,13 @@ public class WecomService {
     private Config config(long companyId) {
         return jdbc.query("""
             SELECT corp_id, secret_encrypted, agent_id, agent_secret_encrypted,
-                   oauth_enabled, js_sdk_enabled, message_enabled
+                   oauth_enabled, js_sdk_enabled, message_enabled,
+                   schedule_enabled, schedule_time, schedule_mode
             FROM t_wecom_config WHERE company_id = ?
             """, rs -> rs.next() ? new Config(rs.getString(1), rs.getString(2),
                 (Integer) rs.getObject(3), rs.getString(4), rs.getBoolean(5),
-                rs.getBoolean(6), rs.getBoolean(7)) : null, companyId);
+                rs.getBoolean(6), rs.getBoolean(7), rs.getBoolean(8),
+                rs.getObject(9, LocalTime.class), rs.getString(10)) : null, companyId);
     }
 
     private Long mappedDepartment(long companyId, long externalId) {
@@ -974,9 +1071,29 @@ public class WecomService {
         return value.charAt(0) + "***" + value.charAt(value.length() - 1);
     }
 
+    static LocalTime parseScheduleTime(String value) {
+        if (value == null || !value.matches("(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d")) {
+            throw new BizException("WECOM_SCHEDULE_TIME_INVALID", "自动同步时间格式必须为 HH:mm:ss");
+        }
+        return LocalTime.parse(value, DateTimeFormatter.ISO_LOCAL_TIME);
+    }
+
+    static String normalizeScheduleMode(String value) {
+        if (!"INCREMENTAL".equals(value) && !"FULL".equals(value)) {
+            throw new BizException("WECOM_SCHEDULE_MODE_INVALID", "自动同步模式无效");
+        }
+        return value;
+    }
+
+    private static String formatScheduleTime(LocalTime value) {
+        return value.format(SCHEDULE_TIME_FORMAT);
+    }
+
     private record Config(String corpId, String encryptedSecret, Integer agentId,
                           String encryptedAgentSecret, boolean oauthEnabled,
-                          boolean jsSdkEnabled, boolean messageEnabled) { }
+                          boolean jsSdkEnabled, boolean messageEnabled,
+                          boolean scheduleEnabled, LocalTime scheduleTime,
+                          String scheduleMode) { }
     private record DepartmentState(long companyId, String path) { }
     private record ManagerUpdate(long userId, Long managerId, WecomUser user, String issue) { }
     static record LocalUserState(long id, String username, String employeeNo, String phone,
@@ -1003,9 +1120,11 @@ public class WecomService {
     public record SettingsDto(long companyId, String corpId, boolean secretConfigured,
                               JobDto latestJob, Integer agentId, boolean agentSecretConfigured,
                               boolean oauthEnabled, boolean jsSdkEnabled,
-                              boolean messageEnabled) {
+                              boolean messageEnabled, boolean scheduleEnabled,
+                              String scheduleTime, String scheduleMode) {
         public SettingsDto(long companyId, String corpId, boolean secretConfigured, JobDto latestJob) {
-            this(companyId, corpId, secretConfigured, latestJob, null, false, false, false, false);
+            this(companyId, corpId, secretConfigured, latestJob, null, false, false, false, false,
+                false, "03:00:00", "INCREMENTAL");
         }
     }
     public record JobDto(long id, long companyId, String status, String phase, int percent,

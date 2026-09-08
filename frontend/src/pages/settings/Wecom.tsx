@@ -24,10 +24,11 @@ import {
   Space,
   Switch,
   Tag,
+  TimePicker,
   Typography,
 } from 'antd';
 import { createStyles } from 'antd-style';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useState } from 'react';
 
 type Company = { id: number; name: string };
@@ -59,6 +60,9 @@ type Settings = {
   oauthEnabled: boolean;
   jsSdkEnabled: boolean;
   messageEnabled: boolean;
+  scheduleEnabled: boolean;
+  scheduleTime: string;
+  scheduleMode: 'FULL' | 'INCREMENTAL';
 };
 type FormValues = {
   corpId: string;
@@ -68,6 +72,9 @@ type FormValues = {
   oauthEnabled: boolean;
   jsSdkEnabled: boolean;
   messageEnabled: boolean;
+  scheduleEnabled: boolean;
+  scheduleTime: Dayjs;
+  scheduleMode: 'FULL' | 'INCREMENTAL';
 };
 type DeliveryStatus = { pending: number; dead: number; oldestPendingAt?: string };
 type AccessInfo = {
@@ -194,6 +201,7 @@ export default function WecomPage() {
   const [startedJobId, setStartedJobId] = useState<number>();
   const [dirty, setDirty] = useState(false);
   const [syncMode, setSyncMode] = useState<'FULL' | 'INCREMENTAL'>('INCREMENTAL');
+  const scheduleEnabled = Form.useWatch('scheduleEnabled', form);
 
   const companiesQuery = useQuery({
     queryKey: ['companies'],
@@ -229,6 +237,9 @@ export default function WecomPage() {
       oauthEnabled: settings.oauthEnabled,
       jsSdkEnabled: settings.jsSdkEnabled,
       messageEnabled: settings.messageEnabled,
+      scheduleEnabled: settings.scheduleEnabled ?? false,
+      scheduleTime: dayjs(`2000-01-01T${settings.scheduleTime ?? '03:00:00'}`),
+      scheduleMode: settings.scheduleMode ?? 'INCREMENTAL',
     });
     setDirty(false);
   }, [form, settings]);
@@ -261,6 +272,9 @@ export default function WecomPage() {
         oauthEnabled: values.oauthEnabled,
         jsSdkEnabled: values.jsSdkEnabled,
         messageEnabled: values.messageEnabled,
+        scheduleEnabled: values.scheduleEnabled,
+        scheduleTime: values.scheduleTime.format('HH:mm:ss'),
+        scheduleMode: values.scheduleMode,
       },
     }),
     onSuccess: (saved) => {
@@ -404,6 +418,33 @@ export default function WecomPage() {
                   autoComplete="new-password"
                   placeholder={settings?.secretConfigured ? '已配置（留空不修改）' : '请输入通讯录同步 Secret'}
                 />
+              </Form.Item>
+              <Form.Item
+                name="scheduleEnabled"
+                label="每日自动同步"
+                valuePropName="checked"
+                extra="到达设定时间后自动同步通讯录；服务错过时间会在当天补跑"
+              >
+                <Switch aria-label="每日自动同步" />
+              </Form.Item>
+              <Form.Item
+                name="scheduleTime"
+                label="执行时间"
+                rules={[{ required: true, message: '请选择执行时间' }]}
+              >
+                <TimePicker
+                  aria-label="自动同步执行时间"
+                  allowClear={false}
+                  disabled={!scheduleEnabled}
+                  format="HH:mm"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              <Form.Item name="scheduleMode" label="自动同步模式">
+                <Radio.Group aria-label="自动同步模式" disabled={!scheduleEnabled}>
+                  <Radio.Button value="INCREMENTAL">增量同步</Radio.Button>
+                  <Radio.Button value="FULL">全量同步</Radio.Button>
+                </Radio.Group>
               </Form.Item>
               <Space wrap>
                 <Button

@@ -4,12 +4,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
 class WecomServiceRulesTest {
+    @Test
+    void validatesDailyScheduleValues() {
+        assertThat(WecomService.parseScheduleTime("03:15:00"))
+            .isEqualTo(LocalTime.of(3, 15));
+        assertThat(WecomService.normalizeScheduleMode("FULL")).isEqualTo("FULL");
+        assertThatThrownBy(() -> WecomService.parseScheduleTime("3:15"))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+        assertThatThrownBy(() -> WecomService.normalizeScheduleMode("WEEKLY"))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+    }
+
     @Test
     void choosesDeclaredMainDepartmentThenFallsBackToFirst() {
         WecomClient.WecomUser declared = user(List.of(1L, 2L), 2);

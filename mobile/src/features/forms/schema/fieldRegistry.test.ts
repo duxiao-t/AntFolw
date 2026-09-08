@@ -116,6 +116,24 @@ describe('mobile field registry', () => {
     });
   });
 
+  it('validates multi-user arrays, limits, and historical single values', () => {
+    const schema: MobileSchemaNode[] = [{
+      id: 'reviewers',
+      type: 'user_picker',
+      label: '复核人',
+      props: { multiple: true, required: true, maxCount: 2 },
+    }];
+
+    expect(validateSchemaValues(schema, { reviewers: [1, 2] })).toEqual({});
+    expect(validateSchemaValues(schema, { reviewers: 1 })).toEqual({});
+    expect(validateSchemaValues(schema, { reviewers: [1, 2, 3] })).toEqual({
+      reviewers: '复核人最多选择2项',
+    });
+    expect(validateSchemaValues(schema, { reviewers: [] })).toEqual({
+      reviewers: '请填写复核人',
+    });
+  });
+
   it('validates checklist required items and per-result description', () => {
     const schema: MobileSchemaNode[] = [
       {

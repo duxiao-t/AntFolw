@@ -101,7 +101,7 @@ test.describe('key pages visual regression', () => {
 
     // 13 started
     await page.goto('/mobile/tasks?view=process');
-    await expect(page.getByRole('heading', { name: '我发起的流程' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '我发起的', exact: true })).toBeVisible();
     await capture(page, '13-started');
 
     // 14 process detail

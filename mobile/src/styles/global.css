@@ -1224,6 +1224,7 @@ body {
   background: #fff; border: 1px solid var(--af-color-line);
   border-radius: var(--af-radius-card); box-shadow: var(--af-shadow-card);
 }
+.confirm-form { padding: 0 14px; }
 .confirm-row {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-top: 1px solid var(--af-color-line);
@@ -2531,6 +2532,9 @@ body {
   background: #ddf0e7;
   color: #286f59;
 }
+.user-picker-summary { display: grid; gap: 8px; }
+.user-picker-summary__item { display: grid; gap: 2px; }
+.user-picker-summary__item small { color: var(--af-color-muted); font-size: 10.5px; }
 .picker-value {
   min-width: 0;
   flex: 1;
@@ -4256,4 +4260,19 @@ body {
   border: none; border-radius: 50%; padding: 0;
   background: rgba(0,0,0,.5); color: #fff; font-size: 12px; line-height: 1;
   cursor: pointer; display: grid; place-items: center;
+}
+.af-check__readonly-card {
+  padding: 12px;
+  border: 1px solid var(--af-color-border);
+  border-radius: var(--af-radius-control);
+  background: var(--af-color-surface);
+}
+.af-check__readonly-head { display: flex; justify-content: space-between; gap: 12px; }
+.af-check__readonly-head span { flex: 0 0 auto; font-weight: 600; }
+.af-check__readonly-description {
+  margin: 8px 0 0;
+  color: var(--af-color-text-secondary);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

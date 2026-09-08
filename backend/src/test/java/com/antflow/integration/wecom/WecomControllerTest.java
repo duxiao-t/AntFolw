@@ -34,6 +34,9 @@ class WecomControllerTest {
             .andExpect(jsonPath("$.corpId").value("ww-corp"))
             .andExpect(jsonPath("$.secretConfigured").value(true))
             .andExpect(jsonPath("$.secret").doesNotExist())
+            .andExpect(jsonPath("$.scheduleEnabled").value(false))
+            .andExpect(jsonPath("$.scheduleTime").value("03:00:00"))
+            .andExpect(jsonPath("$.scheduleMode").value("INCREMENTAL"))
             .andExpect(jsonPath("$.latestJob.status").value("SUCCESS"));
     }
 
@@ -49,6 +52,28 @@ class WecomControllerTest {
             .andExpect(jsonPath("$.secret").doesNotExist());
 
         verify(service).saveSettings(1, "ww-corp", "");
+    }
+
+    @Test
+    void savesAndValidatesDailySchedule() throws Exception {
+        mvc.perform(put("/api/integrations/wecom/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"companyId":1,"corpId":"ww-corp","scheduleEnabled":true,
+                     "scheduleTime":"04:30:00","scheduleMode":"FULL"}
+                    """))
+            .andExpect(status().isOk());
+
+        verify(service).saveSettings(1, "ww-corp", null, null, null,
+            null, null, null, true, "04:30:00", "FULL");
+
+        mvc.perform(put("/api/integrations/wecom/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"companyId":1,"corpId":"ww-corp","scheduleEnabled":true,
+                     "scheduleTime":"4:30","scheduleMode":"WEEKLY"}
+                    """))
+            .andExpect(status().isBadRequest());
     }
 
     private static WecomService.JobDto job() {

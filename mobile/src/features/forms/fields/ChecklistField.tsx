@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { isHexColor } from '../../branding/brandTokens';
 import { fetchMobileFileBlob, uploadMobileFile } from '../files.api';
 import type { MobileFileDto } from '../files.api';
+import { ReadonlyMediaList } from '../components/MediaPreview';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldDescription } from '../schema/validators';
 import { fieldError, fieldLabel, isRequired } from './fieldShared';
@@ -161,7 +162,24 @@ export function ChecklistField(props: MobileFieldProps) {
           <strong className="af-checklist__title">{label}</strong>
         </div>
         {description ? <p className="af-checklist__description">{description}</p> : null}
-        <div className="af-checklist__list">{checklistSummary(props.node, props.value)}</div>
+        <div className="af-checklist__list">
+          {items.length === 0 ? <div className="af-checklist__empty">尚未配置检查项</div> : null}
+          {entries.map((entry) => {
+            const result = results.find((option) => option.id === entry.status);
+            return (
+              <div key={entry.id} className="af-check__readonly-card">
+                <div className="af-check__readonly-head">
+                  <strong>{entry.name || items.find((item) => item.id === entry.id)?.label}</strong>
+                  <span style={{ color: result?.color }}>{result?.label ?? entry.status ?? '未完成'}</span>
+                </div>
+                {entry.description.trim() ? (
+                  <p className="af-check__readonly-description">{entry.description}</p>
+                ) : null}
+                {entry.images.length > 0 ? <ReadonlyMediaList files={entry.images} /> : null}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
