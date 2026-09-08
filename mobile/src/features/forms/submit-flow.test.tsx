@@ -343,7 +343,9 @@ describe('mobile form submit flow', () => {
 
     renderSubmitFlow('/forms/leave/confirm');
 
-    expect(await screen.findByText('设备外观')).toBeInTheDocument();
+    expect(await screen.findByText('1项异常')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /设备检查/ }));
+    expect(screen.getByText('设备外观')).toBeInTheDocument();
     expect(screen.getByText('异常')).toBeInTheDocument();
     expect(screen.getByText('外壳有划痕')).toBeInTheDocument();
     expect(screen.getByText('现场.jpg')).toBeInTheDocument();

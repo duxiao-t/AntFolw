@@ -204,6 +204,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getAllByText((text) => text.includes('张三')).length).toBeGreaterThan(0);
     expect(screen.getByText('回家探亲')).toBeInTheDocument();
     expect(screen.queryByText('请填写具体请假原因')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /证明文件/ }));
     expect(screen.getByRole('button', { name: '下载证明.pdf' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '下载证明.pdf' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '预览证明.pdf' })).not.toBeInTheDocument();
@@ -228,6 +229,7 @@ describe('TaskDetailPage', () => {
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
 
     renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: /证明文件/ }));
     await screen.findByRole('button', { name: '下载证明.pdf' });
     fetchMock.mockClear();
 
@@ -252,6 +254,7 @@ describe('TaskDetailPage', () => {
   it('shows a precise error when the MinIO object is missing', async () => {
     setupFetch({ fileDownloadFailure: true });
     renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: /证明文件/ }));
     await screen.findByRole('button', { name: '下载证明.pdf' });
 
     await userEvent.click(screen.getByRole('button', { name: '下载证明.pdf' }));
@@ -371,6 +374,29 @@ describe('TaskDetailPage', () => {
     });
   });
 
+  it('does not expose fields hidden by the current approval node', async () => {
+    const hiddenDetail: typeof TASK_DETAIL = {
+      ...TASK_DETAIL,
+      schema: [...TASK_DETAIL.schema, { id: 'internal', type: 'text', label: '内部备注' }],
+      formData: { ...TASK_DETAIL.formData, internal: '不得展示' },
+      processSnapshot: {
+        id: 'root',
+        type: 'ROOT',
+        children: {
+          id: 'a1',
+          type: 'APPROVAL',
+          props: { name: '直属主管', formPerms: [{ fieldId: 'internal', mode: 'HIDDEN' }] },
+        },
+      },
+    };
+    setupFetch({ detail: hiddenDetail });
+    renderDetail();
+
+    await screen.findByText('表单详情');
+    expect(screen.queryByText('内部备注')).not.toBeInTheDocument();
+    expect(screen.queryByText('不得展示')).not.toBeInTheDocument();
+  });
+
   it('renders image attachments inside form fields with download actions', async () => {
     const detail: typeof TASK_DETAIL = {
       ...TASK_DETAIL,
@@ -392,6 +418,7 @@ describe('TaskDetailPage', () => {
     setupFetch({ detail });
     renderDetail();
 
+    await userEvent.click(await screen.findByRole('button', { name: /图片/ }));
     expect(await screen.findByRole('img', { name: 'photo.png' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载photo.png' })).toBeInTheDocument();
     expect(screen.getByText('2 KB · 图片')).toBeInTheDocument();

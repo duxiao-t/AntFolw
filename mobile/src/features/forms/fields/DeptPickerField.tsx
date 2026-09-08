@@ -2,7 +2,7 @@ import { FolderOutline, RightOutline } from 'antd-mobile-icons';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
-import { searchMobileDepartments, type MobilePickerDept } from '../files.api';
+import { fetchMobileDepartment, searchMobileDepartments, type MobilePickerDept } from '../files.api';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 
 type PickerState = {
@@ -23,7 +23,7 @@ export function DeptPickerField(props: MobileFieldProps) {
     keyword: '',
     loading: false,
     results: [],
-    selectedLabel: value == null ? '' : `部门${value}`,
+    selectedLabel: value == null ? '' : `部门 #${value}`,
     selectedValue: value,
   });
 
@@ -34,10 +34,33 @@ export function DeptPickerField(props: MobileFieldProps) {
         : {
             ...current,
             selectedValue: value,
-            selectedLabel: value == null ? '' : `部门${value}`,
+            selectedLabel: value == null ? '' : `部门 #${value}`,
           },
     );
   }, [value]);
+
+  useEffect(() => {
+    if (value == null) {
+      return undefined;
+    }
+    let active = true;
+    void fetchMobileDepartment(endpoint, value)
+      .then((department) => {
+        if (!active) return;
+        setState((current) => current.selectedValue !== value ? current : {
+          ...current,
+          selectedLabel: department.name,
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setState((current) => current.selectedValue !== value ? current : {
+          ...current,
+          selectedLabel: `部门 #${value}`,
+        });
+      });
+    return () => { active = false; };
+  }, [endpoint, value]);
 
   useEffect(() => {
     if (!state.open) {

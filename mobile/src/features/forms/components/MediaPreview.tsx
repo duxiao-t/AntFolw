@@ -53,6 +53,14 @@ export function ReadonlyMediaList({ files }: { files: MediaFile[] }) {
     setThumbUrls(imageFiles.map(() => null));
     setImageFailed(imageFiles.map(() => false));
     imageFiles.forEach((file, index) => {
+      if (!file.contentUrl) {
+        setImageFailed((previous) => {
+          const next = [...previous];
+          next[index] = true;
+          return next;
+        });
+        return;
+      }
       fetchMobileFileBlob(file.contentUrl)
         .then(async (blob) => {
           if (!alive) return;
@@ -150,13 +158,13 @@ function AttachmentRow({
           type="button"
           className="af-field__attachment-thumb af-field__attachment-thumb--image"
           aria-label={`预览 ${file.name ?? '图片'}`}
-          disabled={!thumbUrl && !imageFailed}
+          disabled={!thumbUrl}
           onClick={onOpenImage}
         >
           {thumbUrl ? (
             <img src={thumbUrl} alt={file.name ?? '图片'} />
           ) : (
-            <span>{imageFailed ? '预览失败' : '加载中…'}</span>
+            <span>{!file.contentUrl ? '附件地址为空' : imageFailed ? '预览失败' : '加载中…'}</span>
           )}
         </button>
         <div className="af-field__attachment-main">
@@ -205,6 +213,10 @@ export function AudioAttachmentRow({ file }: { file: MediaFile }) {
   useEffect(() => {
     let objectUrl = '';
     let alive = true;
+    if (!file.contentUrl) {
+      setError('附件地址为空');
+      return undefined;
+    }
     fetchMobileFileBlob(file.contentUrl).then((blob) => {
       if (!alive) return;
       objectUrl = URL.createObjectURL(blob);
@@ -234,6 +246,10 @@ function VideoAttachmentRow({ file }: { file: MediaFile }) {
 
   useEffect(() => {
     let alive = true;
+    if (!file.contentUrl) {
+      setError('附件地址为空');
+      return undefined;
+    }
     fetchMobileFileBlob(file.contentUrl)
       .then(async (blob) => {
         if (!alive) return;
@@ -269,6 +285,10 @@ function VideoAttachmentRow({ file }: { file: MediaFile }) {
     setError('');
     setOpening(true);
     try {
+      if (!file.contentUrl) {
+        setError('附件地址为空');
+        return;
+      }
       if (!videoUrlRef.current) {
         const blob = await fetchMobileFileBlob(file.contentUrl);
         videoUrlRef.current = URL.createObjectURL(blob);

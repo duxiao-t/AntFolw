@@ -5,7 +5,7 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageEmpty, PageError, PageSkeleton } from "../../shared/ui/PageStates";
 import { useAuthStore } from "../auth/auth.store";
-import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
+import { ConfirmSummaryList } from "./components/ConfirmSummaryList";
 import { fetchMobileForm } from "./drafts.api";
 import { removeRecoveryDraft } from "./recoveryDraft.store";
 import { fetchApprovalPreview, startMobileInstance, submitMobileFormData, type ApprovalPreviewNode } from "./start.api";
@@ -77,7 +77,7 @@ export function SubmitConfirmPage() {
   return (
     <AppPage title="确认提交" contentStyle={{ paddingBottom: 0 }}>
       <div style={{ margin: "8px 0 14px" }}><h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>请确认本次提交内容</h3><small className="muted">提交后将按以下流程流转，可在“我发起的”中跟进。</small></div>
-      <div className="confirm-card"><div style={{ padding: "12px 14px", borderBottom: "1px solid var(--af-color-line)" }}><div style={{ fontSize: 13, fontWeight: 700 }}>{formName}</div><small className="muted">{flow.reworkTaskId ? "本次提交将保留原单号" : "表单编号将在提交后生成"}</small></div><div className="confirm-form"><DynamicFormRenderer schema={formSchema} values={flow.values} mode="readonly" onValueChange={() => undefined} /></div></div>
+      <div className="confirm-card"><div style={{ padding: "12px 14px", borderBottom: "1px solid var(--af-color-line)" }}><div style={{ fontSize: 13, fontWeight: 700 }}>{formName}</div><small className="muted">{flow.reworkTaskId ? "本次提交将保留原单号" : "表单编号将在提交后生成"}</small></div><ConfirmSummaryList schema={formSchema} values={flow.values} /></div>
       {workflowEnabled ? <ApprovalPreviewSection
         loading={previewQuery.isPending}
         error={previewQuery.isError}

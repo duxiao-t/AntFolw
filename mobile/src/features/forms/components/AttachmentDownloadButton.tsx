@@ -27,7 +27,7 @@ export function AttachmentDownloadButton({ file }: AttachmentDownloadButtonProps
     <div className="attachment-file__download">
       <button
         type="button"
-        aria-label={`下载${file.name}`}
+        aria-label={`下载${file.name || '附件'}`}
         disabled={downloading}
         onClick={() => void downloadFile()}
       >

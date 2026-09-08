@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectSubmissionDetailPage } from './DirectSubmissionDetailPage';
@@ -31,7 +32,9 @@ describe('DirectSubmissionDetailPage', () => {
     expect(await screen.findByText('设备点检表')).toBeInTheDocument();
     expect(screen.getByText('已填报')).toBeInTheDocument();
     expect(screen.getByText('完成')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /点检照片.jpg/ })).toHaveAttribute('href', '/api/mobile/files/file-1/content');
+    await userEvent.click(screen.getByRole('button', { name: /其他附件/ }));
+    expect(screen.getByText('点检照片.jpg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载点检照片.jpg' })).toBeInTheDocument();
     expect(screen.queryByText('审批记录')).not.toBeInTheDocument();
   });
 });

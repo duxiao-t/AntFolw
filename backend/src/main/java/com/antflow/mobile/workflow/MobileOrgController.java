@@ -33,6 +33,13 @@ public class MobileOrgController {
         return service.searchDepartments(keyword);
     }
 
+    @GetMapping("/departments/{id}")
+    public MobilePickerDepartmentDto department(
+        @org.springframework.web.bind.annotation.PathVariable long id) {
+        principal();
+        return service.department(id);
+    }
+
     private static PrincipalHolder.Principal principal() {
         return PrincipalHolder.current()
             .orElseThrow(() -> new AccessDeniedException("authentication required"));

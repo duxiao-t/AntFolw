@@ -167,6 +167,7 @@ describe('ProcessDetailPage', () => {
 
     renderProcess();
 
+    await userEvent.click(await screen.findByRole('button', { name: /报价单/ }));
     expect(await screen.findByRole('button', { name: '下载报价单.pdf' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '下载报价单.pdf' })).not.toBeInTheDocument();
   });
@@ -207,9 +208,11 @@ describe('ProcessDetailPage', () => {
 
     renderProcess();
 
+    await userEvent.click(await screen.findByRole('button', { name: /^图片/ }));
     expect(await screen.findByRole('img', { name: 'photo.png' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载photo.png' })).toBeInTheDocument();
     expect(screen.getByText('2 KB · 图片')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /报价单/ }));
     expect(screen.getByRole('button', { name: '下载报价单.pdf' })).toBeInTheDocument();
     expect(screen.getByText('2 KB · 文件')).toBeInTheDocument();
     expect(screen.queryByText('暂无附件')).not.toBeInTheDocument();
@@ -242,6 +245,7 @@ describe('ProcessDetailPage', () => {
 
     renderProcess();
 
+    await userEvent.click(await screen.findByRole('button', { name: /图片/ }));
     expect(await screen.findByRole('img', { name: 'a.png' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载a.png' })).toBeInTheDocument();
     expect(screen.queryByText('暂无附件')).not.toBeInTheDocument();

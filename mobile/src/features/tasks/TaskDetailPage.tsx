@@ -5,7 +5,7 @@ import { isApiError } from "../../shared/api/errors";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
+import { ConfirmSummaryList, summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
 import type {
   FieldMode,
@@ -68,6 +68,8 @@ export function TaskDetailPage() {
     return modes;
   }, [detailQuery.data]);
   const hasEditableFields = Object.values(fieldModes).includes("fill");
+  const summarySchema = useMemo(() => summarySchemaForTask(schema, fieldModes), [fieldModes, schema]);
+  const editableSchema = useMemo(() => editableSchemaForTask(schema, fieldModes), [fieldModes, schema]);
   const editablePayload = Object.fromEntries(
     Object.entries(collectVisibleValues(schema, editableValues))
       .filter(([fieldId]) => fieldModes[fieldId] === "fill"),
@@ -79,7 +81,7 @@ export function TaskDetailPage() {
 
   const detail = detailQuery.data;
   const task = detail.task;
-  const rows = summarizeSchemaRows(schema, values);
+  const rows = summarizeSchemaRows(schema, editableValues, fieldModes);
   const approvalRecords = Array.isArray(detail.approvalRecords) ? detail.approvalRecords : [];
   const approvalSummary = detail.approvalSummary ?? fallbackApprovalSummary(approvalRecords.length);
   const canApprove = detail.allowedActions.includes("APPROVE");
@@ -106,10 +108,14 @@ export function TaskDetailPage() {
       {statusNotice ? <p className="status-notice" role="status">{statusNotice}</p> : null}
       <section className="approval-panel form-detail-panel">
         <header className="approval-panel__head form-detail-panel__head"><div><h2>表单详情</h2><p>单号 <strong>{task.businessNo}</strong></p></div><div className="field-total"><span>字段总数</span><strong>{rows.length}</strong></div></header>
-        {hasEditableFields ? <p className="muted small">以下字段可在审批时修改</p> : null}
-        {schema.length > 0 ? (
+        {summarySchema.length > 0 ? (
+          <ConfirmSummaryList schema={summarySchema} values={editableValues} fieldModes={fieldModes} />
+        ) : !hasEditableFields ? <p className="muted small">暂无表单字段</p> : null}
+        {editableSchema.length > 0 ? (
+          <section className="approval-editable-fields" aria-labelledby="editable-fields-title">
+            <div className="approval-editable-fields__head"><strong id="editable-fields-title">可修改内容</strong><span>以下字段可在审批时修改</span></div>
           <DynamicFormRenderer
-            schema={schema}
+            schema={editableSchema}
             values={editableValues}
             mode="readonly"
             showDescriptions={false}
@@ -118,7 +124,8 @@ export function TaskDetailPage() {
               setEditableValues((previous) => ({ ...previous, [fieldId]: value }))
             }
           />
-        ) : <p className="muted small">暂无表单字段</p>}
+          </section>
+        ) : null}
       </section>
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} processSnapshot={detail.processSnapshot} schema={schema} history={detail.history} /></section>
@@ -133,6 +140,35 @@ async function invalidateTaskCaches(queryClient: ReturnType<typeof useQueryClien
 function returnPath(params: URLSearchParams) { const next = new URLSearchParams(); const view = params.get("returnView"); const keyword = params.get("returnKeyword"); const status = params.get("returnStatus"); if (view) next.set("view", view); if (keyword) next.set("keyword", keyword); if (status) next.set("status", status); return next.size ? `/tasks?${next}` : "/tasks"; }
 function normalizeSchema(schema: unknown): MobileSchemaNode[] { return Array.isArray(schema) ? schema as MobileSchemaNode[] : []; }
 function normalizeValues(data?: Record<string, unknown> | null): MobileFormValues { return data && typeof data === "object" && !Array.isArray(data) ? data : {}; }
+function summarySchemaForTask(nodes: MobileSchemaNode[], modes: Record<string, FieldMode>): MobileSchemaNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === 'description' || modes[node.id] === 'hidden') return [];
+    if (node.type === 'table_list') return hasEditableDescendant(node, modes) ? [] : [node];
+    if (!node.children?.length) return modes[node.id] === 'fill' ? [] : [node];
+    const children = summarySchemaForTask(node.children, modes);
+    return children.length > 0 ? [{ ...node, children }] : [];
+  });
+}
+function editableSchemaForTask(nodes: MobileSchemaNode[], modes: Record<string, FieldMode>): MobileSchemaNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === 'description' || modes[node.id] === 'hidden') return [];
+    if (node.type === 'table_list') {
+      if (!hasEditableDescendant(node, modes)) return [];
+      return [{
+        ...node,
+        children: (node.children ?? []).filter((child) => child.type !== 'description'),
+      }];
+    }
+    if (node.children?.length) {
+      const children = editableSchemaForTask(node.children, modes);
+      return children.length > 0 ? [{ ...node, children }] : [];
+    }
+    return modes[node.id] === 'fill' ? [node] : [];
+  });
+}
+function hasEditableDescendant(node: MobileSchemaNode, modes: Record<string, FieldMode>): boolean {
+  return modes[node.id] === 'fill' || (node.children ?? []).some((child) => hasEditableDescendant(child, modes));
+}
 function safeParse(value: string): unknown { try { return JSON.parse(value); } catch { return null; } }
 function findProcessNode(node: any, id: string): any {
   if (!node || typeof node !== "object" || !node.id) return null;

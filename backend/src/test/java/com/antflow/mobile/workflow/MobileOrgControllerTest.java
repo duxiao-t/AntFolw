@@ -77,6 +77,18 @@ class MobileOrgControllerTest {
         assertThat(captor.getValue().getSqlSegment()).contains("name");
     }
 
+    @Test
+    void mobileDepartmentPickerReadsOneSafeDepartmentById() throws Exception {
+        when(departmentMapper.selectById(2001L)).thenReturn(department());
+
+        mockMvc.perform(get("/api/mobile/departments/2001"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(2001))
+            .andExpect(jsonPath("$.name").value("研发部"))
+            .andExpect(jsonPath("$.leaderId").doesNotExist())
+            .andExpect(jsonPath("$.path").doesNotExist());
+    }
+
     private static User user() {
         User user = new User();
         user.setId(1001L);

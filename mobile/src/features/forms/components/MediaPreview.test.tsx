@@ -108,4 +108,13 @@ describe('ReadonlyMediaList', () => {
     expect(screen.getByText('1 KB · 文件')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载c.pdf' })).toBeInTheDocument();
   });
+
+  it('isolates an attachment with no content URL without issuing a broken preview request', () => {
+    render(<ReadonlyMediaList files={[{
+      id: 'missing-url', name: 'lost.png', contentType: 'image/png', contentUrl: '', size: 1,
+    }]} />);
+
+    expect(screen.getByText('附件地址为空')).toBeInTheDocument();
+    expect(fetchMock()).not.toHaveBeenCalled();
+  });
 });

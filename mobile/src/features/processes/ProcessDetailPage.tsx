@@ -6,8 +6,7 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import { createClientId } from "../../shared/clientId";
 import { AppPage } from "../../shared/ui/AppPage";
 import { PageError, PageSkeleton } from "../../shared/ui/PageStates";
-import { DynamicFormRenderer } from "../forms/components/DynamicFormRenderer";
-import { summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
+import { ConfirmSummaryList, summarizeSchemaRows } from "../forms/components/ConfirmSummaryList";
 import type { MobileFormValues, MobileSchemaNode } from "../forms/schema/types";
 import { ApprovalRecords, approvalSummaryLabel } from "../tasks/ApprovalRecords";
 import { fetchMobileInstanceDetail, withdrawMobileInstance } from "./processes.api";
@@ -58,14 +57,7 @@ export function ProcessDetailPage() {
 
       {!summaryOnly ? <section className="approval-panel form-detail-panel">
         <header className="approval-panel__head form-detail-panel__head"><div><h2>表单详情</h2><p>单号 <strong>{instance.businessNo}</strong></p></div><div className="field-total"><span>字段总数</span><strong>{rows.length}</strong></div></header>
-        {schema.length > 0 ? (
-          <DynamicFormRenderer
-            schema={schema}
-            values={values}
-            mode="readonly"
-            onValueChange={() => undefined}
-          />
-        ) : <p className="muted small">暂无表单字段</p>}
+        <ConfirmSummaryList schema={schema} values={values} emptyText="暂无表单字段" />
       </section> : null}
 
       <section className="approval-panel approval-records"><header className="approval-panel__head"><div><h2>审批记录</h2><p>已流转 {approvalSummary.flowedCount} 个节点</p></div><span className="approval-panel__summary">{approvalSummaryLabel(approvalSummary)}</span></header><ApprovalRecords records={approvalRecords} processSnapshot={instance.processSnapshot} schema={schema} history={instance.history} /></section>

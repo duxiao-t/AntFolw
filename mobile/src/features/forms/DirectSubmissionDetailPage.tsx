@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppPage } from '../../shared/ui/AppPage';
 import { PageError, PageSkeleton } from '../../shared/ui/PageStates';
-import { DynamicFormRenderer } from './components/DynamicFormRenderer';
+import { ConfirmSummaryList } from './components/ConfirmSummaryList';
 import { fetchMobileDirectSubmission } from './direct-submissions.api';
 
 export function DirectSubmissionDetailPage() {
@@ -35,12 +35,13 @@ export function DirectSubmissionDetailPage() {
       </section>
       <section className="approval-panel form-detail-panel">
         <header className="approval-panel__head form-detail-panel__head"><div><h2>填报内容</h2><p>此表单无需审批，提交后即完成。</p></div></header>
-        <DynamicFormRenderer schema={submission.schema} values={submission.formData} mode="readonly" onValueChange={() => undefined} />
+        <ConfirmSummaryList
+          schema={submission.schema}
+          values={submission.formData}
+          extraFiles={submission.files}
+          emptyText="暂无填报字段"
+        />
       </section>
-      {submission.files.length > 0 ? <section className="approval-panel form-detail-panel">
-        <header className="approval-panel__head form-detail-panel__head"><div><h2>附件</h2><p>点击查看已上传的文件。</p></div></header>
-        {submission.files.map((file) => <a className="list-item" key={file.id} href={file.contentUrl} target="_blank" rel="noreferrer"><div className="list-item__main"><b>{file.name}</b><small>{file.contentType}</small></div><span className="list-item__chev">›</span></a>)}
-      </section> : null}
     </AppPage>
   );
 }

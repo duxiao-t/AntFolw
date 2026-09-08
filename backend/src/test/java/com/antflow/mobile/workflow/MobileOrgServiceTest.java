@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 
 class MobileOrgServiceTest {
@@ -45,6 +46,29 @@ class MobileOrgServiceTest {
 
         assertThat(row.department()).isEqualTo("研发部");
         assertThat(row.employeeNo()).isEqualTo("000007");
+    }
+
+    @Test
+    void readsSelectedDepartmentById() {
+        UserMapper users = Mockito.mock(UserMapper.class);
+        DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        Department department = new Department();
+        department.setId(20L);
+        department.setName("研发部");
+        Mockito.when(departments.selectById(20L)).thenReturn(department);
+
+        MobilePickerDepartmentDto row = new MobileOrgService(users, departments).department(20L);
+
+        assertThat(row).isEqualTo(new MobilePickerDepartmentDto(20L, "研发部"));
+    }
+
+    @Test
+    void hidesMissingSelectedDepartment() {
+        UserMapper users = Mockito.mock(UserMapper.class);
+        DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+
+        assertThatThrownBy(() -> new MobileOrgService(users, departments).department(404L))
+            .isInstanceOf(com.antflow.authz.HiddenResourceException.class);
     }
 
     @Test

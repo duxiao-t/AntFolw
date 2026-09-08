@@ -31,6 +31,10 @@ export async function fetchMobileUser(endpoint: string, id: number): Promise<Mob
   return apiRequest<MobilePickerUser>(`${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`);
 }
 
+export async function fetchMobileDepartment(endpoint: string, id: number): Promise<MobilePickerDept> {
+  return apiRequest<MobilePickerDept>(`${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`);
+}
+
 export async function searchMobileDepartments(endpoint: string, keyword: string): Promise<MobilePickerDept[]> {
   return apiRequest<MobilePickerDept[]>(withKeyword(endpoint, keyword));
 }

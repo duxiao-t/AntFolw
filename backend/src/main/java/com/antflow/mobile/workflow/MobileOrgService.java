@@ -72,6 +72,14 @@ public class MobileOrgService {
             .toList();
     }
 
+    public MobilePickerDepartmentDto department(long departmentId) {
+        Department department = departmentMapper.selectById(departmentId);
+        if (department == null) {
+            throw new com.antflow.authz.HiddenResourceException("department not found");
+        }
+        return new MobilePickerDepartmentDto(department.getId(), department.getName());
+    }
+
     private static String normalizeKeyword(String keyword) {
         if (keyword == null) {
             return "";
