@@ -80,6 +80,30 @@ class FormDefinitionServiceSchemaTest {
         assertThatThrownBy(() -> service.publish(1L)).isInstanceOf(BizException.class);
     }
 
+    @Test void departmentPickerAcceptsMultiValuesAndLegacyScalarButRejectsInvalidValues() {
+        String multiple = """
+            [{"id":"departments","type":"dept_picker","label":"协作部门",
+              "props":{"multiple":true,"required":true,"maxCount":2}}]
+            """;
+        String single = """
+            [{"id":"department","type":"dept_picker","label":"所属部门","props":{}}]
+            """;
+
+        assertThatCode(() -> service.validateSubmission(multiple,
+            Map.of("departments", List.of(1, 2)))).doesNotThrowAnyException();
+        assertThatCode(() -> service.validateSubmission(multiple,
+            Map.of("departments", 1))).doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateSubmission(multiple,
+            Map.of("departments", List.of(1, 2, 3))))
+            .isInstanceOf(BizException.class).hasMessageContaining("maxCount");
+        assertThatThrownBy(() -> service.validateSubmission(multiple,
+            Map.of("departments", List.of(1, "2"))))
+            .isInstanceOf(BizException.class).hasMessageContaining("department ids");
+        assertThatThrownBy(() -> service.validateSubmission(single,
+            Map.of("department", List.of(1))))
+            .isInstanceOf(BizException.class).hasMessageContaining("department ids");
+    }
+
     @Test void saveDraftTranslatesObjectToJsonString() {
         when(mapper.selectCount(any())).thenReturn(0L);
         when(mapper.insert(any(FormDefinition.class))).thenAnswer(inv -> {

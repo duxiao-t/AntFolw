@@ -22,6 +22,7 @@ export type ApprovalPreviewNode = {
   nodeName: string;
   approvalMode: 'ANY' | 'ALL' | 'RATIO' | 'SEQUENTIAL';
   deferred: boolean;
+  autoPass?: boolean;
   assignees: Array<{ userId: number; displayName: string }>;
 };
 

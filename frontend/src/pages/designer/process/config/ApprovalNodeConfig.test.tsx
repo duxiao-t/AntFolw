@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalNodeConfig } from './ApprovalNodeConfig';
 
@@ -68,6 +68,33 @@ describe('ApprovalNodeConfig', () => {
     expect(screen.getByRole('radio', { name: '会签（全员操作后判定）' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: '比例签（全员操作后判定）' })).toBeInTheDocument();
     expect(screen.queryByText('顺签')).not.toBeInTheDocument();
+  });
+
+  it('lists optional top-level personnel fields for form-based approval', async () => {
+    render(
+      <ApprovalNodeConfig
+        node={{
+          id: 'approval',
+          type: 'APPROVAL',
+          props: {
+            assignedType: 'FIELD_USER',
+            fieldUser: { fieldId: '' },
+            fallbackAssignee: { type: 'ROLE', ids: [7] },
+          },
+        }}
+        formFields={[
+          { id: 'handover', label: '交接人员', type: 'user_picker', required: false },
+          { id: 'table-user', label: '明细人员', type: 'user_picker', inTable: true },
+        ]}
+      />,
+    );
+
+    const fieldItem = screen.getByText('人员字段').closest('.ant-form-item');
+    expect(fieldItem).not.toBeNull();
+    fireEvent.mouseDown(within(fieldItem as HTMLElement).getByRole('combobox'));
+
+    expect(await screen.findByRole('option', { name: '交接人员' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '明细人员' })).not.toBeInTheDocument();
   });
 
   it('uses a fixed reject target for all-sign and ratio-sign nodes', () => {

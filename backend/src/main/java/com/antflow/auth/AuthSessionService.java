@@ -31,6 +31,8 @@ public class AuthSessionService {
     private final AuthService authService;
     private final JwtService jwtService;
     private final long sessionTtlSeconds;
+    private final String refreshCookieName;
+    private final String csrfCookieName;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthSessionService(
@@ -38,10 +40,23 @@ public class AuthSessionService {
             AuthService authService,
             JwtService jwtService,
             @Value("${antflow.auth.session-ttl-seconds:2592000}") long sessionTtlSeconds) {
+        this(sessionMapper, authService, jwtService, sessionTtlSeconds, "antflow");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AuthSessionService(
+            AuthSessionMapper sessionMapper,
+            AuthService authService,
+            JwtService jwtService,
+            @Value("${antflow.auth.session-ttl-seconds:2592000}") long sessionTtlSeconds,
+            @Value("${antflow.auth.cookie-prefix:antflow}") String cookiePrefix) {
         this.sessionMapper = sessionMapper;
         this.authService = authService;
         this.jwtService = jwtService;
         this.sessionTtlSeconds = sessionTtlSeconds;
+        String prefix = validCookiePrefix(cookiePrefix);
+        this.refreshCookieName = prefix + "-refresh";
+        this.csrfCookieName = prefix + "-csrf";
     }
 
     @Transactional
@@ -143,6 +158,9 @@ public class AuthSessionService {
             && session.getExpiresAt().isAfter(now());
     }
 
+    public String refreshCookieName() { return refreshCookieName; }
+    public String csrfCookieName() { return csrfCookieName; }
+
     @Transactional
     public void revokeAll(long userId) {
         OffsetDateTime revokedAt = now();
@@ -192,13 +210,13 @@ public class AuthSessionService {
 
     private void writeCookies(HttpServletResponse response, boolean secure, String refreshToken,
                               String csrfToken, long maxAgeSeconds) {
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie(REFRESH_COOKIE, refreshToken, true, secure, maxAgeSeconds));
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie(CSRF_COOKIE, csrfToken, false, secure, maxAgeSeconds));
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie(refreshCookieName, refreshToken, true, secure, maxAgeSeconds));
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie(csrfCookieName, csrfToken, false, secure, maxAgeSeconds));
     }
 
     private void clearCookies(HttpServletResponse response, boolean secure) {
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie(REFRESH_COOKIE, "", true, secure, 0));
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie(CSRF_COOKIE, "", false, secure, 0));
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie(refreshCookieName, "", true, secure, 0));
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie(csrfCookieName, "", false, secure, 0));
     }
 
     private String cookie(String name, String value, boolean httpOnly, boolean secure, long maxAgeSeconds) {
@@ -216,6 +234,13 @@ public class AuthSessionService {
         byte[] bytes = new byte[32];
         secureRandom.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String validCookiePrefix(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9-]{1,32}")) {
+            throw new IllegalStateException("ANTFLOW_AUTH_COOKIE_PREFIX is invalid");
+        }
+        return value;
     }
 
     public static String hash(String value) {

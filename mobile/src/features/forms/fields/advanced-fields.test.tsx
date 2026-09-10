@@ -316,6 +316,53 @@ describe('advanced mobile fields', () => {
     expect(onValueChange).toHaveBeenCalledWith('deptId', 2001);
   });
 
+  it('keeps multi-department selections across searches and applies maxCount on confirm', async () => {
+    const onValueChange = vi.fn();
+    const departments = {
+      2001: { id: 2001, name: '研发部' },
+      2002: { id: 2002, name: '财务部' },
+      2003: { id: 2003, name: '行政部' },
+    } as const;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = decodeURIComponent(String(input));
+      const id = Number(url.match(/\/departments\/(\d+)$/)?.[1]);
+      if (id) return jsonResponse(departments[id as keyof typeof departments]);
+      if (url.includes('keyword=财务')) return jsonResponse([departments[2002]]);
+      if (url.includes('keyword=行政')) return jsonResponse([departments[2003]]);
+      return jsonResponse([departments[2001]]);
+    });
+
+    render(
+      <DeptPickerField
+        {...baseProps({
+          id: 'departments',
+          type: 'dept_picker',
+          label: '协作部门',
+          props: { multiple: true, maxCount: 2 },
+        }, 2001, onValueChange)}
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /研发部/ }));
+    await userEvent.type(screen.getByPlaceholderText('搜索部门'), '财务');
+    await userEvent.click(await screen.findByRole('option', { name: '财务部 2002' }));
+    await userEvent.clear(screen.getByPlaceholderText('搜索部门'));
+    await userEvent.type(screen.getByPlaceholderText('搜索部门'), '行政');
+
+    expect(await screen.findByRole('option', { name: '行政部 2003' })).toBeDisabled();
+    expect(screen.getByText('已选 2 / 2 个部门')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(onValueChange).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: /研发部/ }));
+    await userEvent.type(screen.getByPlaceholderText('搜索部门'), '财务');
+    await userEvent.click(await screen.findByRole('option', { name: '财务部 2002' }));
+    await userEvent.click(screen.getByRole('button', { name: '完成' }));
+
+    expect(onValueChange).toHaveBeenCalledWith('departments', [2001, 2002]);
+    expect(screen.getByText('研发部、财务部')).toBeInTheDocument();
+  });
+
   it('uses mobile-safe default picker endpoints', async () => {
     const user = userEvent.setup();
     const fetchMock = vi.mocked(fetch);
@@ -928,6 +975,15 @@ describe('advanced mobile fields', () => {
     expect(validateSchemaValues([optionalDept], { deptId: null })).toEqual({});
     expect(validateSchemaValues([optionalDept], { deptId: 'bad-value' })).toEqual({
       deptId: '请填写部门',
+    });
+    const multipleDept = {
+      ...optionalDept,
+      props: { multiple: true, maxCount: 2 },
+    } satisfies MobileSchemaNode;
+    expect(validateSchemaValues([multipleDept], { deptId: 2001 })).toEqual({});
+    expect(validateSchemaValues([multipleDept], { deptId: [2001, 2002] })).toEqual({});
+    expect(validateSchemaValues([multipleDept], { deptId: [2001, 2002, 2003] })).toEqual({
+      deptId: '部门最多选择2项',
     });
   });
 });

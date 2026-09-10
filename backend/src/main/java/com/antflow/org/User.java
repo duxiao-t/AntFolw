@@ -21,6 +21,10 @@ public class User {
     private String position;
     private String gender;
     private String status;
+    @TableField(exist = false) private Boolean wecomMapped = false;
+    @TableField(exist = false) private Integer wecomStatus;
+    @TableField(exist = false) private Boolean wecomDirectoryPresent = false;
+    @TableField(exist = false) private Boolean departmentLeader = false;
     private Long authzVersion;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
 }

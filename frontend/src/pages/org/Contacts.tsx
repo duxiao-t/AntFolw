@@ -34,6 +34,8 @@ interface UserItem {
   id: number; employeeNo: string; username: string; displayName: string; email: string;
   phone: string; position: string; gender: string; deptId: number;
   managerId?: number | null; managerDisplayName?: string | null;
+  status: string; wecomMapped?: boolean; wecomStatus?: number | null;
+  wecomDirectoryPresent?: boolean; departmentLeader?: boolean;
 }
 interface UserPage { records?: UserItem[]; total?: number; }
 interface ManagerCandidate { id: number; displayName: string; employeeNo: string; deptId: number; }
@@ -247,6 +249,14 @@ export default function ContactsPage() {
       request(`/api/users/${id}/password`, { method: 'PUT', data: { newPassword } }),
     onSuccess: () => { msg.success('密码已重置，用户的旧会话已失效'); },
   });
+  const memberLoginAccess = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      request(`/api/users/${id}/login-access`, { method: 'PUT', data: { enabled } }),
+    onSuccess: async (_data, variables) => {
+      await qc.invalidateQueries({ queryKey: ['users-page'] });
+      msg.success(variables.enabled ? '已允许该成员登录' : '已禁止该成员登录');
+    },
+  });
 
   // --- tree drop ---
   const onDrop = useCallback((info: any) => {
@@ -346,6 +356,8 @@ export default function ContactsPage() {
     if (leaderDeptId === null) return;
     try {
       await deptUpdate.mutateAsync({ id: leaderDeptId, leaderIds: userIds });
+      setMemberPage(1);
+      await qc.invalidateQueries({ queryKey: ['users-page'] });
       setLeaderOpen(false); setLeaderDeptId(null);
     } catch {
       // The global request handler displays the backend business message.
@@ -505,8 +517,11 @@ export default function ContactsPage() {
               onImport={handleImportMembers}
               canAdd={!!selectedDepartment?.canManageUsers}
               canResetPassword={!!access.canAdmin}
+              canControlLogin={!!access.canAdmin}
               canManageUsersByDept={canManageUsersByDept}
               onResetPassword={(member) => { passwordForm.resetFields(); setPasswordTarget(member); }}
+              onSetLoginAccess={(member, enabled) => memberLoginAccess.mutate({ id: member.id, enabled })}
+              loginAccessLoadingId={memberLoginAccess.isPending ? memberLoginAccess.variables?.id : undefined}
             />
           ) : (
             <div className="ct-empty">请从左侧选择部门</div>

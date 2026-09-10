@@ -2,18 +2,23 @@ import {
   App,
   Alert,
   Button,
-  Card,
-  Descriptions,
+  Empty,
   Input,
   Modal,
+  Result,
+  Segmented,
   Select,
+  Skeleton,
   Space,
-  Spin,
   Table,
   Tag,
-  Timeline,
+  Typography,
 } from 'antd';
-import { RedoOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  RedoOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
@@ -23,41 +28,39 @@ import {
   fetchApprovalCommentPresets,
 } from '../../components/ApprovalCommentEditor';
 import type { FieldMode } from '../../registry/types';
+import {
+  buildActivityItems,
+  buildProgressStages,
+  formatDateTime,
+  formatDuration,
+  type HistoryView,
+  instanceStatus,
+  type ActivityCategory,
+  type ActivityItem,
+  type InstancePresentation,
+  nodeLabel,
+  type PersonView,
+  parseProcessSnapshot,
+  type ProgressStage,
+} from './detailPresentation';
 import { pickEditableValues } from './fieldPermissions';
-
-const ACTION_LABEL: Record<string, string> = {
-  START: '发起',
-  ARRIVE: '到达',
-  APPROVE: '同意',
-  REJECT: '驳回',
-  REJECT_TO_NODE: '驳回到节点',
-  WITHDRAW: '撤回',
-  COMPLETE: '完成',
-  CC: '抄送',
-  AUTO_PASS: '自动通过',
-  DELAY_SCHEDULED: '延时已计划',
-  DELAY_COMPLETED: '延时已完成',
-  TRIGGER_QUEUED: '触发器已入队',
-  TRIGGER_SUCCEEDED: '触发器发送成功',
-  TRIGGER_FAILED: '触发器发送失败',
-  FORCE_APPROVE: '紧急同意',
-  FORCE_REJECT: '紧急驳回',
-};
-
-function actionLabel(action: string): string {
-  return ACTION_LABEL[action] ?? action;
-}
+import './Detail.less';
 
 function statusTagColor(status: string): string {
   switch (status) {
     case 'APPROVED':
+    case 'SUCCEEDED':
       return 'green';
     case 'REJECTED':
+    case 'FAILED':
       return 'red';
     case 'CC':
       return 'cyan';
     case 'PENDING':
+    case 'RUNNING':
       return 'blue';
+    case 'SCHEDULED':
+      return 'gold';
     default:
       return 'default';
   }
@@ -99,7 +102,7 @@ function findNodeById(node: any, id: string): any {
 
 export default function DetailPage() {
   const { id } = useParams();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
   const { initialState } = useModel('@@initialState');
   const currentUserId = (initialState?.currentUser as any)?.id;
@@ -112,10 +115,21 @@ export default function DetailPage() {
   const canReject = isAdmin || permissions.includes('workflow.task.reject');
   const canWithdraw = isAdmin || permissions.includes('workflow.instance.withdraw');
 
-  const { data, isFetching } = useQuery({
+  const detailQuery = useQuery<{
+    runtime: Record<string, any>;
+    presentation: InstancePresentation;
+  }>({
     queryKey: ['instance', id],
-    queryFn: () => request(`/api/instances/${id}`),
+    queryFn: async () => {
+      const [runtime, presentation] = await Promise.all([
+        request<Record<string, any>>(`/api/instances/${id}`),
+        request<InstancePresentation>(`/api/mobile/instances/${id}`),
+      ]);
+      return { runtime, presentation };
+    },
   });
+  const data = detailQuery.data?.runtime;
+  const presentation = detailQuery.data?.presentation;
 
   const [rejectFor, setRejectFor] = useState<
     { taskId: number; targetNodeId: string | null } | null
@@ -130,15 +144,11 @@ export default function DetailPage() {
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideTarget, setOverrideTarget] = useState<string | undefined>();
   const [editableValues, setEditableValues] = useState<Record<string, any>>({});
+  const [activityFilter, setActivityFilter] = useState<'all' | ActivityCategory>('all');
 
   const snapshotObj = useMemo(() => {
     const raw = (data as any)?.instance?.processSnapshot;
-    if (!raw) return null;
-    try {
-      return typeof raw === 'string' ? JSON.parse(raw) : raw;
-    } catch {
-      return null;
-    }
+    return parseProcessSnapshot(raw);
   }, [data]);
 
   const formSchema = useMemo(() => {
@@ -198,12 +208,76 @@ export default function DetailPage() {
     retry: 0,
   });
 
-  if (isFetching || !data) return <Spin />;
-  const { instance, tasks, history: historyRows } = data as any;
-  if (!instance) return <Spin />;
+  const instance = (data as any)?.instance;
+  const tasks = (data as any)?.tasks ?? [];
+  const historyRows: HistoryView[] = presentation?.history ?? (data as any)?.history ?? [];
+  const fullVisibility = data?.visibility !== 'SUMMARY';
+  const actorIds = useMemo(
+    () => fullVisibility
+      ? [...new Set(historyRows.flatMap((row) => row.operatorId == null ? [] : [row.operatorId]))]
+          .sort((left, right) => left - right)
+      : [],
+    [fullVisibility, historyRows],
+  );
+  const actorsQuery = useQuery<Record<number, PersonView>>({
+    queryKey: ['instance-actors', id, actorIds.join(',')],
+    queryFn: async () => {
+      const people = await Promise.all(actorIds.map(async (actorId) => {
+        try {
+          return await request<PersonView>(`/api/mobile/users/${actorId}`, {
+            skipErrorHandler: true,
+          });
+        } catch {
+          return { id: actorId } satisfies PersonView;
+        }
+      }));
+      return Object.fromEntries(people.map((person) => [person.id, person]));
+    },
+    enabled: actorIds.length > 0,
+    retry: 0,
+  });
+  const progressStages = useMemo(
+    () => buildProgressStages({
+      root: snapshotObj,
+      nodeInstances: (data as any)?.nodeInstances ?? [],
+      approvalRecords: presentation?.approvalRecords ?? [],
+      instanceStatus: instance?.status ?? '',
+      currentNodeId: instance?.currentNodeId,
+      currentNodeName: presentation?.currentNodeName,
+    }),
+    [data, instance?.currentNodeId, instance?.status, presentation?.approvalRecords,
+      presentation?.currentNodeName, snapshotObj],
+  );
+  const activityItems = useMemo(
+    () => buildActivityItems({
+      root: snapshotObj,
+      approvalRecords: presentation?.approvalRecords ?? [],
+      history: historyRows,
+      people: actorsQuery.data,
+      applicantName: presentation?.applicantName,
+    }),
+    [actorsQuery.data, historyRows, presentation?.applicantName,
+      presentation?.approvalRecords, snapshotObj],
+  );
+  const filteredActivities = activityFilter === 'all'
+    ? activityItems : activityItems.filter((item) => item.category === activityFilter);
 
-  const ccTasks = (tasks ?? []).filter((t: any) => t.status === 'CC');
-  const normalTasks = (tasks ?? []).filter((t: any) => t.status !== 'CC');
+  if (detailQuery.isLoading) {
+    return <ProcessDetailLoading />;
+  }
+  if (detailQuery.isError || !data || !instance || !presentation) {
+    return (
+      <div className="process-detail-page">
+        <Result
+          status="error"
+          title="流程详情加载失败"
+          subTitle="请检查网络连接后重新加载。"
+          extra={<Button type="primary" onClick={() => detailQuery.refetch()}>重新加载</Button>}
+        />
+      </div>
+    );
+  }
+
   const isStarter =
     currentUserId != null && instance.startedBy === currentUserId;
   const isRunner = instance.status === 'RUNNING';
@@ -216,7 +290,6 @@ export default function DetailPage() {
   const fixedRejectTarget = ['AND', 'ALL', 'RATIO'].includes(
     rejectTask?.approvalMode,
   );
-  const fullVisibility = (data as any).visibility !== 'SUMMARY';
 
   async function doApprove(taskId: number) {
     try {
@@ -316,7 +389,7 @@ export default function DetailPage() {
       qc.invalidateQueries({ queryKey: ['instance', id] });
     };
     if (isStarter) {
-      Modal.confirm({
+      modal.confirm({
         title: '介入本人发起的流程？',
         content: '该操作会记录为关键风险审计事件。',
         okText: '确认介入',
@@ -328,240 +401,283 @@ export default function DetailPage() {
     await execute();
   }
 
+  const statusView = instanceStatus(instance.status, instance.currentNodeId);
+  const currentNodeName = isRework
+    ? '等待发起人修改原单'
+    : instance.status === 'APPROVED'
+      ? '流程已完成'
+      : instance.status === 'REJECTED'
+        ? '流程已驳回'
+        : presentation.currentNodeName || nodeLabel(snapshotObj, instance.currentNodeId);
+  const applicantIdentity = [
+    presentation.applicantDepartment,
+    presentation.applicantEmployeeNo ? `工号 ${presentation.applicantEmployeeNo}` : null,
+  ].filter(Boolean).join(' · ');
+  const automationJobs = (data as any).automationJobs ?? [];
+  const activityCounts = {
+    approval: activityItems.filter((item) => item.category === 'approval').length,
+    cc: activityItems.filter((item) => item.category === 'cc').length,
+    system: activityItems.filter((item) => item.category === 'system').length,
+  };
+
   return (
-    <Card
-      title={`流程实例 #${instance.id}`}
-      extra={
-        <Space>
-          {myPending && isRunner && fullVisibility && (
-            <>
-              {canApprove && (
-              <Button
-                type="primary"
-                onClick={() => {
-                  setApproveComment('');
-                  setApproveOpen(true);
-                }}
-              >
-                同意
-              </Button>
-              )}
-              {canReject && (
-              <Button
-                danger
-                disabled={!!myPending.parallelId}
-                title={myPending.parallelId ? '并行审批节点不允许驳回' : undefined}
-                onClick={() =>
-                  setRejectFor({ taskId: myPending.id, targetNodeId: null })
-                }
-              >
-                驳回
-              </Button>
-              )}
-            </>
-          )}
-          {canWithdraw && isStarter && isRunner && !isRework && fullVisibility && (
-            <Button onClick={() => setWithdrawOpen(true)}>撤回流程</Button>
-          )}
-          {canOverride && isRunner && pendingTask && fullVisibility && (
-            <Button danger icon={<ThunderboltOutlined />} onClick={() => setOverrideOpen(true)}>
-              紧急介入
-            </Button>
-          )}
-          <Button onClick={() => history.back()}>返回</Button>
-        </Space>
-      }
-    >
-      {!fullVisibility && (
-        <Alert
-          type="info"
-          showIcon
-          message="当前账号仅可查看流程摘要"
-          description="表单内容、附件、自动化作业和流程操作已隐藏。"
-          style={{ marginBottom: 16 }}
-        />
-      )}
-      {fullVisibility && isRework && (
-        <Alert
-          type="info"
-          showIcon
-          title="流程待修改"
-          description="请到移动端修改原表单并重新提交，原实例和单号已保留。"
-          style={{ marginBottom: 16 }}
-        />
-      )}
-      <Descriptions bordered size="small" column={2}>
-        <Descriptions.Item label="ID">{instance.id}</Descriptions.Item>
-        <Descriptions.Item label="状态">
-          <Tag color={statusTagColor(instance.status)}>{instance.status}</Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="流程">
-          v{instance.processDefVersion ?? '?'} · def#{instance.procDefId}
-        </Descriptions.Item>
-        <Descriptions.Item label="发起人">{instance.startedBy}</Descriptions.Item>
-        <Descriptions.Item label="发起时间">{instance.startedAt}</Descriptions.Item>
-        <Descriptions.Item label="完成时间">
-          {instance.finishedAt ?? '—'}
-        </Descriptions.Item>
-      </Descriptions>
+    <>
+      <div className="process-detail-page">
+        <div className="process-detail-shell">
+          <header className="process-detail-hero">
+            <div className="process-detail-hero__top">
+              <div className="process-detail-identity">
+                <Button
+                  type="text"
+                  className="process-detail-back"
+                  icon={<ArrowLeftOutlined />}
+                  aria-label="返回上一页"
+                  onClick={() => history.back()}
+                />
+                <div>
+                  <p className="process-detail-kicker">ANTFLOW / INSTANCE</p>
+                  <div className="process-detail-title-row">
+                    <h1>{presentation.formName || '未命名流程'}</h1>
+                    <span className={`process-status process-status--${statusView.tone}`}>
+                      {statusView.label}
+                    </span>
+                  </div>
+                  <p className="process-detail-subtitle">
+                    {presentation.businessNo ? `单号 ${presentation.businessNo}` : '尚未生成业务单号'}
+                  </p>
+                </div>
+              </div>
+              <div className="process-detail-actions">
+                {myPending && isRunner && fullVisibility && (
+                  <>
+                    {canApprove && (
+                      <Button type="primary" onClick={() => {
+                        setApproveComment('');
+                        setApproveOpen(true);
+                      }}>同意</Button>
+                    )}
+                    {canReject && (
+                      <Button
+                        danger
+                        disabled={!!myPending.parallelId}
+                        title={myPending.parallelId ? '并行审批节点不允许驳回' : undefined}
+                        onClick={() => setRejectFor({ taskId: myPending.id, targetNodeId: null })}
+                      >
+                        驳回
+                      </Button>
+                    )}
+                  </>
+                )}
+                {canWithdraw && isStarter && isRunner && !isRework && fullVisibility && (
+                  <Button onClick={() => setWithdrawOpen(true)}>撤回流程</Button>
+                )}
+                {canOverride && isRunner && pendingTask && fullVisibility && (
+                  <Button danger icon={<ThunderboltOutlined />} onClick={() => setOverrideOpen(true)}>
+                    紧急介入
+                  </Button>
+                )}
+              </div>
+            </div>
 
-      {fullVisibility && formSchema.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h3>表单详情</h3>
-          <FormRenderer
-            schema={formSchema}
-            mode="readonly"
-            fieldModes={currentFormModes}
-            value={myPending ? editableValues : initialFormData}
-            onChange={hasEditableFields ? setEditableValues : undefined}
-          />
-        </div>
-      )}
+            <dl className="process-detail-meta">
+              <div>
+                <dt>当前进度</dt>
+                <dd>{currentNodeName}</dd>
+                <small>{statusView.label}</small>
+              </div>
+              <div>
+                <dt>发起人</dt>
+                <dd>{presentation.applicantName || `用户 #${instance.startedBy}`}</dd>
+                <small>{applicantIdentity || '未记录部门与工号'}</small>
+              </div>
+              <div>
+                <dt>发起时间</dt>
+                <dd>{formatDateTime(instance.startedAt)}</dd>
+                <small>以系统记录为准</small>
+              </div>
+              <div>
+                <dt>{instance.finishedAt ? '完成时间' : '已运行'}</dt>
+                <dd>{instance.finishedAt
+                  ? formatDateTime(instance.finishedAt)
+                  : formatDuration(instance.startedAt)}</dd>
+                <small>{instance.finishedAt
+                  ? `总耗时 ${formatDuration(instance.startedAt, instance.finishedAt)}`
+                  : '流程仍在处理中'}</small>
+              </div>
+            </dl>
 
-      {snapshotObj && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            background: '#fafafa',
-            borderRadius: 6,
-          }}
-        >
-          <strong>流程快照（v{instance.processDefVersion}）</strong>
-          <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-            {rejectTargets.length} 个审批节点：
-            {rejectTargets.map((t: any) => t.name).join(' / ') || '无'}
+            {fullVisibility && (
+              <details className="process-technical">
+                <summary>技术信息 <span>仅用于排障</span></summary>
+                <dl>
+                  <TechnicalValue label="实例 ID" value={instance.id} />
+                  <TechnicalValue label="流程定义" value={instance.procDefId} />
+                  <TechnicalValue label="流程版本" value={instance.processDefVersion} />
+                  <TechnicalValue label="当前节点 ID" value={instance.currentNodeId} />
+                  <TechnicalValue label="引擎版本" value={instance.engineVersion} />
+                </dl>
+              </details>
+            )}
+          </header>
+
+          {!fullVisibility && (
+            <Alert
+              type="info"
+              showIcon
+              title="当前账号仅可查看流程摘要"
+              description="表单内容、附件、自动化作业和流程操作已隐藏。"
+            />
+          )}
+          {fullVisibility && isRework && (
+            <Alert
+              type="info"
+              showIcon
+              title="流程待修改"
+              description="请到移动端修改原表单并重新提交，原实例和单号已保留。"
+            />
+          )}
+
+          <section className="process-detail-panel process-progress-panel" aria-labelledby="process-progress-title">
+            <SectionHeading
+              kicker="FLOW ROUTE"
+              title="流程进度"
+              id="process-progress-title"
+              extra={`${progressStages.filter((stage) => stage.state === 'done').length}/${progressStages.length} 个阶段完成`}
+            />
+            <ProcessRail stages={progressStages} />
+          </section>
+
+          <div className={`process-detail-grid${fullVisibility ? '' : ' process-detail-grid--single'}`}>
+            {fullVisibility && (
+              <main className="process-detail-main">
+                <section className="process-detail-panel form-detail-card" aria-labelledby="form-content-title">
+                  <SectionHeading
+                    kicker="FORM CONTENT"
+                    title="表单内容"
+                    id="form-content-title"
+                    extra={hasEditableFields ? '当前审批节点可修改部分字段' : '提交时内容'}
+                  />
+                  <div className="form-detail-card__body">
+                    {formSchema.length > 0 ? (
+                      <FormRenderer
+                        schema={formSchema}
+                        mode="readonly"
+                        fieldModes={currentFormModes}
+                        value={myPending ? editableValues : initialFormData}
+                        onChange={hasEditableFields ? setEditableValues : undefined}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可显示的表单内容" />
+                    )}
+                  </div>
+                </section>
+
+                {automationJobs.length > 0 && (
+                  <section className="process-detail-panel" aria-labelledby="automation-title">
+                    <SectionHeading
+                      kicker="AUTOMATION"
+                      title="自动化作业"
+                      id="automation-title"
+                      extra={`${automationJobs.length} 项`}
+                    />
+                    <div className="process-detail-table-scroll">
+                      <Table
+                        rowKey="id"
+                        size="small"
+                        pagination={false}
+                        dataSource={automationJobs}
+                        scroll={{ x: 760 }}
+                        columns={[
+                          {
+                            title: '节点',
+                            dataIndex: 'nodeId',
+                            minWidth: 180,
+                            render: (value: string, row: any) => (
+                              <div className="process-primary-cell">
+                                <strong>{nodeLabel(snapshotObj, value)}</strong>
+                                <small>{row.jobType === 'DELAY' ? '延时任务' : 'Webhook 自动任务'}</small>
+                              </div>
+                            ),
+                          },
+                          {
+                            title: '状态',
+                            dataIndex: 'status',
+                            width: 110,
+                            render: (value: string) => (
+                              <Tag color={statusTagColor(value)}>{automationStatusLabel(value)}</Tag>
+                            ),
+                          },
+                          {
+                            title: '执行',
+                            width: 160,
+                            render: (_: unknown, row: any) =>
+                              `${row.attempts}/${row.maxAttempts} · ${row.blocking ? '成功后继续' : '发送后继续'}`,
+                          },
+                          {
+                            title: '计划时间',
+                            dataIndex: 'scheduledAt',
+                            width: 180,
+                            render: formatDateTime,
+                          },
+                          {
+                            title: '失败原因',
+                            dataIndex: 'lastError',
+                            minWidth: 180,
+                            render: (value: string | null) => value
+                              ? <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>
+                              : '—',
+                          },
+                          {
+                            title: '操作',
+                            width: 92,
+                            fixed: 'right',
+                            render: (_: unknown, row: any) =>
+                              canRetryAutomation && row.status === 'FAILED' ? (
+                                <Button
+                                  size="small"
+                                  icon={<RedoOutlined />}
+                                  onClick={() => retryAutomationJob(row.id)}
+                                >
+                                  重试
+                                </Button>
+                              ) : null,
+                          },
+                        ]}
+                      />
+                    </div>
+                  </section>
+                )}
+              </main>
+            )}
+
+            <aside className="process-detail-sidebar" aria-label="流程流转轨迹">
+              <section className="process-detail-panel activity-panel">
+                <SectionHeading
+                  kicker="ACTIVITY"
+                  title="流转轨迹"
+                  id="activity-title"
+                  extra={`${activityItems.length} 条记录`}
+                />
+                <div className="activity-filter">
+                  <Segmented
+                    block
+                    size="small"
+                    value={activityFilter}
+                    onChange={(value) => setActivityFilter(value as 'all' | ActivityCategory)}
+                    options={[
+                      { label: `全部 ${activityItems.length}`, value: 'all' },
+                      { label: `审批 ${activityCounts.approval}`, value: 'approval' },
+                      { label: `抄送 ${activityCounts.cc}`, value: 'cc' },
+                      { label: `系统 ${activityCounts.system}`, value: 'system' },
+                    ]}
+                  />
+                </div>
+                <ActivityList items={filteredActivities} />
+              </section>
+            </aside>
           </div>
         </div>
-      )}
-
-      <h3 style={{ marginTop: 24 }}>任务</h3>
-      <Timeline
-        items={normalTasks.map((t: any) => ({
-          color:
-            t.status === 'APPROVED'
-              ? 'green'
-              : t.status === 'REJECTED'
-                ? 'red'
-                : 'blue',
-          children: (
-            <div>
-              <strong>{t.nodeId}</strong>
-              {' · '}
-              <Tag color={statusTagColor(t.status)}>{t.status}</Tag>
-              {' · assignee='}
-              {t.assigneeId}
-              {t.comment ? ` · "${t.comment}"` : ''}
-            </div>
-          ),
-        }))}
-      />
-
-      <h3 style={{ marginTop: 24 }}>抄送人</h3>
-      {ccTasks.length === 0 ? (
-        <div style={{ color: '#999' }}>无抄送任务</div>
-      ) : (
-        <Timeline
-          items={ccTasks.map((t: any) => ({
-            color: 'cyan',
-            children: (
-              <div>
-                <strong>{t.nodeId}</strong>
-                {' · '}
-                <Tag color={statusTagColor('CC')}>CC</Tag>
-                {' · assignee='}
-                {t.assigneeId}
-                {t.comment ? ` · "${t.comment}"` : ''}
-              </div>
-            ),
-          }))}
-        />
-      )}
-
-      <h3 style={{ marginTop: 24 }}>历史</h3>
-      <Timeline
-        items={(historyRows ?? []).map((h: any) => ({
-          children: (
-            <div>
-              <strong>{actionLabel(h.action)}</strong>
-              {h.fromNodeId
-                ? ` · ${h.fromNodeId} → ${h.toNodeId ?? 'end'}`
-                : ''}
-              {' · '}
-              {h.operatorId ? `operator=${h.operatorId}` : 'system'}
-              {h.comment ? ` · "${h.comment}"` : ''}
-              {' · '}
-              <small>{h.createdAt}</small>
-            </div>
-          ),
-        }))}
-      />
-
-      {fullVisibility && (data as any).automationJobs?.length > 0 && (
-        <>
-          <h3 style={{ marginTop: 24 }}>自动化作业</h3>
-          <Table
-            rowKey="id"
-            size="small"
-            pagination={false}
-            dataSource={(data as any).automationJobs}
-            scroll={{ x: 760 }}
-            columns={[
-              {
-                title: '节点',
-                dataIndex: 'nodeId',
-                minWidth: 140,
-                render: (value: string, row: any) => (
-                  <Space size={6}>
-                    <strong>{value}</strong>
-                    <Tag>{row.jobType === 'DELAY' ? '延时' : 'Webhook'}</Tag>
-                  </Space>
-                ),
-              },
-              {
-                title: '状态',
-                dataIndex: 'status',
-                width: 110,
-                render: (value: string) => (
-                  <Tag color={statusTagColor(value)}>{value}</Tag>
-                ),
-              },
-              {
-                title: '执行',
-                width: 150,
-                render: (_: unknown, row: any) =>
-                  `${row.attempts}/${row.maxAttempts} · ${row.blocking ? '成功后继续' : '发送后继续'}`,
-              },
-              {
-                title: '计划时间',
-                dataIndex: 'scheduledAt',
-                width: 190,
-              },
-              {
-                title: '失败原因',
-                dataIndex: 'lastError',
-                minWidth: 180,
-                render: (value: string | null) => value ?? '—',
-              },
-              {
-                title: '操作',
-                width: 92,
-                fixed: 'right',
-                render: (_: unknown, row: any) =>
-                  canRetryAutomation && row.status === 'FAILED' ? (
-                    <Button
-                      size="small"
-                      icon={<RedoOutlined />}
-                      onClick={() => retryAutomationJob(row.id)}
-                    >
-                      重试
-                    </Button>
-                  ) : null,
-              },
-            ]}
-          />
-        </>
-      )}
+      </div>
 
       <Modal
         title="同意审批"
@@ -632,7 +748,7 @@ export default function DetailPage() {
         okText="执行介入"
         okButtonProps={{ danger: true }}
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <div>
             <div>处理动作</div>
             <Select
@@ -684,6 +800,146 @@ export default function DetailPage() {
           当前审批轮次已有实际审批时不能撤回；已成功执行的外部 Webhook 无法回滚。
         </p>
       </Modal>
-    </Card>
+    </>
   );
+}
+
+function ProcessDetailLoading() {
+  return (
+    <div className="process-detail-page">
+      <div className="process-detail-shell process-detail-loading">
+        <Skeleton active avatar paragraph={{ rows: 4 }} />
+        <Skeleton active paragraph={{ rows: 10 }} />
+      </div>
+    </div>
+  );
+}
+
+function SectionHeading({
+  kicker,
+  title,
+  id,
+  extra,
+}: {
+  kicker: string;
+  title: string;
+  id: string;
+  extra?: string;
+}) {
+  return (
+    <header className="process-section-heading">
+      <div>
+        <p>{kicker}</p>
+        <h2 id={id}>{title}</h2>
+      </div>
+      {extra ? <span>{extra}</span> : null}
+    </header>
+  );
+}
+
+function TechnicalValue({ label, value }: { label: string; value: unknown }) {
+  const text = value == null || value === '' ? '—' : String(value);
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>
+        {text === '—' ? text : (
+          <Typography.Text copyable={{ text, tooltips: ['复制', '已复制'] }}>
+            {text}
+          </Typography.Text>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+function ProcessRail({ stages }: { stages: ProgressStage[] }) {
+  return (
+    <div className="process-rail-scroll">
+      <ol className="process-rail">
+        {stages.map((stage, index) => (
+          <li
+            key={stage.id}
+            className={`process-stage process-stage--${stage.state}`}
+            aria-current={stage.state === 'current' ? 'step' : undefined}
+          >
+            <div className="process-stage__track" aria-hidden="true">
+              <span>{stage.state === 'done' ? '✓' : index + 1}</span>
+            </div>
+            <strong title={stage.label}>{stage.label}</strong>
+            <small title={stage.detail}>{stage.detail}</small>
+            <em>{progressStateLabel(stage.state)}</em>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ActivityList({ items }: { items: ActivityItem[] }) {
+  if (items.length === 0) {
+    return (
+      <div className="activity-empty">
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选下暂无流转记录" />
+      </div>
+    );
+  }
+  return (
+    <ol className="activity-list">
+      {items.map((item) => (
+        <li key={item.id} className={`activity-item activity-item--${item.state}`}>
+          <span className="activity-item__marker" aria-hidden="true">
+            {activityMarker(item.category)}
+          </span>
+          <article>
+            <div className="activity-item__head">
+              <div>
+                {item.context ? <span className="activity-item__context">{item.context}</span> : null}
+                <h3>{item.title}</h3>
+              </div>
+              <span className="activity-item__status">{item.status}</span>
+            </div>
+            <div className="activity-item__person">
+              <strong>{item.person}</strong>
+              {item.identity ? <span>{item.identity}</span> : null}
+              {item.source ? <span>{item.source}</span> : null}
+            </div>
+            <Typography.Paragraph
+              className="activity-item__comment"
+              ellipsis={{ rows: 2, expandable: 'collapsible', symbol: (expanded) => expanded ? '收起' : '展开' }}
+            >
+              {item.comment}
+            </Typography.Paragraph>
+            <footer>
+              <span>{activityCategoryLabel(item.category)}</span>
+              {item.roundNo > 1 ? <span>第 {item.roundNo} 次提交</span> : null}
+              <time>{formatDateTime(item.time)}</time>
+            </footer>
+          </article>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function progressStateLabel(state: ProgressStage['state']) {
+  return ({ done: '已完成', current: '处理中', waiting: '待到达', error: '异常结束' } as const)[state];
+}
+
+function activityMarker(category: ActivityCategory) {
+  return ({ approval: '审', cc: '抄', system: '系' } as const)[category];
+}
+
+function activityCategoryLabel(category: ActivityCategory) {
+  return ({ approval: '审批记录', cc: '抄送记录', system: '系统记录' } as const)[category];
+}
+
+function automationStatusLabel(status: string) {
+  return ({
+    SCHEDULED: '等待执行',
+    RUNNING: '执行中',
+    SUCCEEDED: '已成功',
+    FAILED: '执行失败',
+    CANCELLED: '已取消',
+  } as Record<string, string>)[status] ?? status;
 }

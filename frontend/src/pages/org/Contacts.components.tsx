@@ -1,9 +1,9 @@
 import { ProTable } from '@ant-design/pro-components';
 import {
   DeleteOutlined, DownloadOutlined, EditOutlined, ImportOutlined, KeyOutlined,
-  UserAddOutlined,
+  LockOutlined, UnlockOutlined, UserAddOutlined,
 } from '@ant-design/icons';
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag } from 'antd';
+import { Button, Form, Grid, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd';
 import type { FormInstance } from 'antd';
 import type { ChangeEvent, Key, RefObject } from 'react';
 import { useMemo, useState } from 'react';
@@ -21,6 +21,11 @@ export interface MemberListItem {
   deptId: number;
   managerId?: number | null;
   managerDisplayName?: string | null;
+  status: string;
+  wecomMapped?: boolean;
+  wecomStatus?: number | null;
+  wecomDirectoryPresent?: boolean;
+  departmentLeader?: boolean;
 }
 
 export function MemberGenderTag({ value }: { value?: string }) {
@@ -28,6 +33,42 @@ export function MemberGenderTag({ value }: { value?: string }) {
   if (genderLabel === '男') return <Tag color="blue">男</Tag>;
   if (genderLabel === '女') return <Tag color="pink">女</Tag>;
   return genderLabel || '-';
+}
+
+function wecomStatus(member: MemberListItem) {
+  if (!member.wecomMapped) return { label: '本地账号', color: undefined };
+  if (!member.wecomDirectoryPresent) return { label: '已移出通讯录', color: 'default' };
+  switch (member.wecomStatus) {
+    case 1: return { label: '已激活', color: 'green' };
+    case 2: return { label: '已禁用', color: 'red' };
+    case 4: return { label: '未激活', color: 'gold' };
+    case 5: return { label: '已退出', color: 'default' };
+    case null:
+    case undefined: return { label: '待同步', color: 'default' };
+    default: return { label: `未知状态（${member.wecomStatus}）`, color: 'default' };
+  }
+}
+
+function loginControlDisabledReason(member: MemberListItem) {
+  if (!member.wecomDirectoryPresent) return '该成员已移出企业微信通讯录，不能修改登录权限';
+  if (member.wecomStatus == null) return '请先同步企业微信状态';
+  if (member.wecomStatus !== 1 && member.wecomStatus !== 4) {
+    return '当前企业微信状态不允许修改登录权限';
+  }
+  return '';
+}
+
+export function MemberAccountStatus({ member }: { member: MemberListItem }) {
+  const source = wecomStatus(member);
+  const loginEnabled = member.status === 'ACTIVE';
+  return (
+    <Space className="ct-account-status" size={[4, 4]} wrap>
+      <Tag color={source.color}>{source.label}</Tag>
+      <Tag color={loginEnabled ? 'green' : 'red'}>
+        {loginEnabled ? '可登录' : '禁止登录'}
+      </Tag>
+    </Space>
+  );
 }
 
 export function LeaderPicker({ users, currentLeaderIds, onOk, onCancel, saving }: {
@@ -101,8 +142,11 @@ export function MembersSection({
   onImport,
   canAdd,
   canResetPassword,
+  canControlLogin,
   canManageUsersByDept,
   onResetPassword,
+  onSetLoginAccess,
+  loginAccessLoadingId,
 }: {
   breadcrumb: string;
   members: MemberListItem[];
@@ -121,14 +165,19 @@ export function MembersSection({
   onImport: (event: ChangeEvent<HTMLInputElement>) => void;
   canAdd?: boolean;
   canResetPassword?: boolean;
+  canControlLogin?: boolean;
   canManageUsersByDept?: Record<number, boolean>;
   onResetPassword?: (member: MemberListItem) => void;
+  onSetLoginAccess?: (member: MemberListItem, enabled: boolean) => void;
+  loginAccessLoadingId?: number;
 }) {
+  const screens = Grid.useBreakpoint();
+  const fixedColumns = !!screens.xl;
   return (
     <>
       <div className="ct-right-header">
         <h2>{breadcrumb} · {total}人</h2>
-        <Space>
+        <Space wrap>
           <Button icon={<UserAddOutlined />} type="primary" onClick={onAdd} disabled={!canAdd}>添加成员</Button>
           <Popconfirm
             title={`确定删除选中的 ${selectedMemberIds.length} 名成员?`}
@@ -145,22 +194,64 @@ export function MembersSection({
       <ProTable<MemberListItem>
         rowKey="id"
         columns={[
-          { title: '姓名', dataIndex: 'displayName' },
-          { title: '工号', dataIndex: 'employeeNo' },
-          { title: '账号', dataIndex: 'username' },
-          { title: '手机', dataIndex: 'phone' },
-          { title: '部门', dataIndex: 'deptId', render: (_, r) => deptNameById[r.deptId] ?? '-' },
-          { title: '职务', dataIndex: 'position' },
-          { title: '直属上级', dataIndex: 'managerDisplayName', render: (value) => value || '-' },
-          { title: '性别', dataIndex: 'gender', render: (_, r) => <MemberGenderTag value={r.gender} /> },
-          { title: '操作', key: 'op', width: 250, render: (_, r) => {
+          { title: '姓名', dataIndex: 'displayName', width: 180,
+            fixed: fixedColumns ? 'left' : undefined, render: (_, r) => (
+            <span className="ct-member-name">
+              <span className="ct-member-name__text" title={r.displayName}>{r.displayName}</span>
+              {r.departmentLeader && <Tag className="ct-leader-tag">负责人</Tag>}
+            </span>
+          ) },
+          { title: '工号', dataIndex: 'employeeNo', width: 100, ellipsis: true },
+          { title: '账号', dataIndex: 'username', width: 100, ellipsis: true },
+          { title: '手机', dataIndex: 'phone', width: 130, ellipsis: true },
+          { title: '部门', dataIndex: 'deptId', width: 150, ellipsis: true,
+            render: (_, r) => deptNameById[r.deptId] ?? '-' },
+          { title: '职务', dataIndex: 'position', width: 180, ellipsis: true },
+          { title: '直属上级', dataIndex: 'managerDisplayName', width: 110, ellipsis: true,
+            render: (value) => value || '-' },
+          { title: '账号状态', key: 'accountStatus', width: 150,
+            fixed: fixedColumns ? 'right' : undefined,
+            render: (_, r) => <MemberAccountStatus member={r} /> },
+          { title: '性别', dataIndex: 'gender', width: 70,
+            render: (_, r) => <MemberGenderTag value={r.gender} /> },
+          { title: '操作', key: 'op', width: 300,
+            fixed: fixedColumns ? 'right' : undefined, render: (_, r) => {
             const canManage = !!canManageUsersByDept?.[r.deptId];
+            const loginEnabled = r.status === 'ACTIVE';
+            const loginControlReason = loginControlDisabledReason(r);
             return (
               <Space size={2}>
                 <Button type="text" size="small" icon={<EditOutlined />} disabled={!canManage} onClick={() => onEdit(r)}>编辑</Button>
                 {canResetPassword && (
                   <Button type="text" size="small" icon={<KeyOutlined />} onClick={() => onResetPassword?.(r)}>重置密码</Button>
                 )}
+                {canControlLogin && r.wecomMapped && (loginControlReason ? (
+                  <Tooltip title={loginControlReason}>
+                    <span>
+                      <Button type="text" size="small" disabled icon={<LockOutlined />}>登录控制</Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Popconfirm
+                    title={`确定${loginEnabled ? '禁止' : '允许'} ${r.displayName} 登录？`}
+                    description={loginEnabled
+                      ? '该用户已有的登录会话将立即失效'
+                      : '允许后可使用账号密码登录 AntFlow'}
+                    okText="确定"
+                    cancelText="取消"
+                    onConfirm={() => onSetLoginAccess?.(r, !loginEnabled)}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      danger={loginEnabled}
+                      loading={loginAccessLoadingId === r.id}
+                      icon={loginEnabled ? <LockOutlined /> : <UnlockOutlined />}
+                    >
+                      {loginEnabled ? '禁止登录' : '允许登录'}
+                    </Button>
+                  </Popconfirm>
+                ))}
                 <Popconfirm title="确定删除?" disabled={!canManage} onConfirm={() => onRemove(r.id)}>
                   <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={!canManage} aria-label={`删除 ${r.displayName}`} />
                 </Popconfirm>
@@ -170,12 +261,15 @@ export function MembersSection({
         ]}
         dataSource={members}
         rowSelection={{
+          fixed: fixedColumns,
+          columnWidth: 40,
           selectedRowKeys: selectedMemberIds,
           onChange: onSelectedMemberIdsChange,
           getCheckboxProps: (record) => ({ disabled: !canManageUsersByDept?.[record.deptId] }),
         }}
         search={false}
         options={false}
+        scroll={{ x: 1510 }}
         pagination={{ current: currentPage, pageSize: 15, total, showSizeChanger: false,
           onChange: onPageChange }}
       />

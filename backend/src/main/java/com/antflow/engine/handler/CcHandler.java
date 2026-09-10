@@ -14,6 +14,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /** CC 节点：建 CC 任务（不阻塞，沿单链继续） */
@@ -32,7 +33,10 @@ public class CcHandler implements NodeHandler {
 
     @Override
     public NodeOutcome handle(JsonNode root, JsonNode node, ProcessInstance pi, NodeContext ctx) {
-        var ccUsers = readIds(node.path("props").path("assignedUser"));
+        List<Long> ccUsers = runtimeV2 != null && runtimeV2.active(pi)
+            ? runtimeV2.ccUsers(node, ctx)
+            : readIds(node.path("props").path("assignedUser"));
+        ccUsers = new ArrayList<>(new LinkedHashSet<>(ccUsers));
         for (Long u : ccUsers) {
             if (runtimeV2 != null && runtimeV2.active(pi)) {
                 runtimeV2.recordCc(pi, ctx.nodeInstanceId(), u);

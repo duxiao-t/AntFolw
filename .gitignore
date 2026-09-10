@@ -13,6 +13,7 @@ backend/target/
 backend/.idea/
 backend/*.class
 backend/.env
+.env.test
 
 # IDE
 .vscode/

@@ -28,7 +28,7 @@ record ApprovalPreviewDto(List<ApprovalPreviewNodeDto> nodes) {
 }
 
 record ApprovalPreviewNodeDto(String nodeId, String nodeName, String approvalMode,
-                              boolean deferred,
+                              boolean deferred, boolean autoPass,
                               List<ApprovalPreviewAssigneeDto> assignees) {
 }
 

@@ -139,7 +139,7 @@ class ApprovalPreviewServiceTest {
     }
 
     @Test
-    void skipsStarterSelfApprovalAndContinuesToNextNode() throws Exception {
+    void showsStarterAutoPassAndContinuesToNextManualNode() throws Exception {
         stubNewFlow("""
             {"id":"root","type":"ROOT","props":{"settings":{"skipStarterAsApprover":true}},
              "children":{"id":"self","name":"本人确认","type":"APPROVAL","props":
@@ -153,7 +153,56 @@ class ApprovalPreviewServiceTest {
             json.createObjectNode(), Map.of("self", List.of(7L)), null), 7L);
 
         assertThat(result.nodes()).extracting(ApprovalPreviewNodeDto::nodeId)
-            .containsExactly("manager");
+            .containsExactly("self", "manager");
+        assertThat(result.nodes()).extracting(ApprovalPreviewNodeDto::autoPass)
+            .containsExactly(true, false);
+    }
+
+    @Test
+    void continuesAfterParallelBranchesWhenEveryBranchAutoPasses() throws Exception {
+        stubNewFlow("""
+            {"id":"root","type":"ROOT","props":{"settings":{"skipStarterAsApprover":true}},
+             "children":{"id":"parallel","type":"PARALLEL","branchs":[
+              {"id":"b1","type":"BRANCH","props":{"conditionMode":"ALWAYS"},"children":
+               {"id":"self1","name":"本人确认一","type":"APPROVAL","props":
+                {"mode":"OR","assignedType":"SELF"}}},
+              {"id":"b2","type":"BRANCH","props":{"conditionMode":"ALWAYS"},"children":
+               {"id":"self2","name":"本人确认二","type":"APPROVAL","props":
+                {"mode":"OR","assignedType":"SELF"}}}
+             ],"children":{"id":"manager","name":"主管审批","type":"APPROVAL","props":
+              {"mode":"OR","assignedType":"ASSIGN_USER","assignedUser":[8]}}}}
+            """);
+        when(runtime.shouldAutoPassPreview(any(JsonNode.class), anyLong(), anyList()))
+            .thenAnswer(invocation -> ((List<?>) invocation.getArgument(2)).equals(List.of(7L)));
+
+        ApprovalPreviewDto result = service.preview("leave",
+            new ApprovalPreviewRequest(json.createObjectNode(), Map.of(), null), 7L);
+
+        assertThat(result.nodes()).extracting(ApprovalPreviewNodeDto::nodeId)
+            .containsExactly("self1", "self2", "manager");
+        assertThat(result.nodes()).extracting(ApprovalPreviewNodeDto::autoPass)
+            .containsExactly(true, true, false);
+    }
+
+    @Test
+    void previewsNodeFallbackWhenAnOptionalPersonnelFieldIsEmpty() throws Exception {
+        stubNewFlow("""
+            {"id":"root","type":"ROOT","props":{"fallbackPolicy":"NODE_REQUIRED"},
+             "children":{"id":"handover","name":"交接审批","type":"APPROVAL","props":
+              {"mode":"OR","assignedType":"FIELD_USER","fieldUser":{"fieldId":"handoverUser"},
+               "fallbackAssignee":{"type":"ROLE","ids":[8]}}}}
+            """);
+        when(runtime.fieldUsers(any(JsonNode.class), any())).thenReturn(List.of());
+        when(runtime.fallbackUsers(any(JsonNode.class), any(JsonNode.class))).thenReturn(List.of(8L));
+
+        ApprovalPreviewDto result = service.preview("leave", new ApprovalPreviewRequest(
+            json.createObjectNode(), Map.of(), null), 7L);
+
+        assertThat(result.nodes()).extracting(ApprovalPreviewNodeDto::nodeId)
+            .containsExactly("handover");
+        assertThat(result.nodes().get(0).assignees())
+            .extracting(ApprovalPreviewAssigneeDto::userId)
+            .containsExactly(8L);
     }
 
     @Test

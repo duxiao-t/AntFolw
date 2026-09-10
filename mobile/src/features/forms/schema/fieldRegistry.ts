@@ -3,7 +3,7 @@ import { CheckboxField } from '../fields/CheckboxField';
 import { DateField } from '../fields/DateField';
 import { DateRangeField } from '../fields/DateRangeField';
 import { DescriptionField } from '../fields/DescriptionField';
-import { DeptPickerField } from '../fields/DeptPickerField';
+import { departmentValues, DeptPickerField } from '../fields/DeptPickerField';
 import { FileUploadField, hasBlockingUploadQueue } from '../fields/FileUploadField';
 import { ImageUploadField } from '../fields/ImageUploadField';
 import { VideoUploadField } from '../fields/VideoUploadField';
@@ -150,8 +150,8 @@ export const registeredFields: MobileFieldDefinition[] = [
     summarize: (node, value) => summarizeUserPicker(node, value),
   }),
   field('dept_picker', DeptPickerField, {
-    validate: validateNumericValue,
-    summarize: (_node, value) => summarizePickerValue('部门', value),
+    validate: validateDepartmentPicker,
+    summarize: (node, value) => summarizeDepartmentPicker(node, value),
   }),
   field('file_upload', FileUploadField, {
     validate: validateFileUpload,
@@ -305,11 +305,22 @@ function options(node: MobileSchemaNode) {
   });
 }
 
-function validateNumericValue(node: MobileSchemaNode, value: unknown) {
-  if (value == null || value === '') {
+function validateDepartmentPicker(node: MobileSchemaNode, value: unknown) {
+  const multiple = node.props?.multiple === true;
+  const empty = value == null || value === '' || (Array.isArray(value) && value.length === 0);
+  if (empty) {
     return node.props?.required === true ? `请填写${node.label ?? node.id}` : null;
   }
-  return typeof value === 'number' ? null : `请填写${node.label ?? node.id}`;
+  const valid = multiple
+    ? isPickerId(value) || (Array.isArray(value) && value.every(isPickerId))
+    : isPickerId(value);
+  if (!valid) return `请填写${node.label ?? node.id}`;
+  const ids = departmentValues(value, multiple);
+  const commonError = validateCommonRules(node, multiple ? ids : ids[0]);
+  if (commonError) return commonError;
+  const maxCount = node.props?.maxCount;
+  return multiple && typeof maxCount === 'number' && ids.length > maxCount
+    ? `${node.label ?? node.id}最多选择${maxCount}项` : null;
 }
 
 function validateUserPicker(node: MobileSchemaNode, value: unknown) {
@@ -332,8 +343,13 @@ function isSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value);
 }
 
-function summarizePickerValue(prefix: string, value: unknown) {
-  return typeof value === 'number' ? `${prefix}#${value}` : '未填写';
+function isPickerId(value: unknown): value is number {
+  return isSafeInteger(value) && value > 0;
+}
+
+function summarizeDepartmentPicker(node: MobileSchemaNode, value: unknown) {
+  const ids = departmentValues(value, node.props?.multiple === true);
+  return ids.length > 0 ? ids.map((id) => `部门#${id}`).join('、') : '未填写';
 }
 
 function summarizeUserPicker(node: MobileSchemaNode, value: unknown) {

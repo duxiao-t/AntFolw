@@ -370,7 +370,7 @@ export default function FormManagementWizard() {
   const processIssues = useMemo(
     () =>
       processTree
-        ? validateProcessTree(processTree as TreeNode, processFormFields)
+        ? validateProcessTree(processTree as TreeNode, processFormFields, true)
         : [],
     [processFormFields, processTree],
   );

@@ -16,6 +16,9 @@ beforeEach(() => {
     if (url.endsWith('/departments/2001')) {
       return jsonResponse({ id: 2001, name: '研发部' });
     }
+    if (url.endsWith('/departments/2002')) {
+      return jsonResponse({ id: 2002, name: '财务部' });
+    }
     if (url.includes('/content')) {
       return new Response(new Blob(['media'], { type: 'image/png' }), { status: 200 });
     }
@@ -125,12 +128,46 @@ describe('form flow components', () => {
     expect(screen.getByText('2001')).toBeInTheDocument();
   });
 
+  it('uses field titles and end-aligns expanded multi-select and personnel details', async () => {
+    render(<ConfirmSummaryList schema={[
+      {
+        id: 'areas', type: 'multi_select', label: '适用区域', props: {
+          options: [{ label: '一号车间', value: 'one' }, { label: '二号车间', value: 'two' }],
+        },
+      },
+      { id: 'handover', type: 'user_picker', label: '交接人员', props: { multiple: true } },
+    ]} values={{ areas: ['one', 'two'], handover: [1001, 1002] }} />);
+
+    expect(screen.getByText('适用区域')).toBeInTheDocument();
+    expect(screen.getByText('交接人员')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /适用区域/ }));
+    expect(document.querySelector('.confirm-summary-tags--end')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('张三、李四')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /交接人员/ }));
+    expect(document.querySelector('.confirm-summary-people--end')).toBeInTheDocument();
+  });
+
   it('falls back to a stable department identifier when its historical target no longer exists', async () => {
     render(<ConfirmSummaryList schema={[{ id: 'department', type: 'dept_picker', label: '所属部门' }]} values={{ department: 404 }} />);
 
     await waitFor(() => expect(screen.getByText('部门 #404')).toBeInTheDocument());
     await userEvent.click(screen.getByRole('button', { name: /所属部门/ }));
     expect(screen.getByText('部门编号')).toBeInTheDocument();
+  });
+
+  it('resolves every selected department while accepting a legacy single value', async () => {
+    const schema: MobileSchemaNode[] = [{
+      id: 'departments', type: 'dept_picker', label: '协作部门', props: { multiple: true },
+    }];
+    const { rerender } = render(<ConfirmSummaryList schema={schema} values={{ departments: 2001 }} />);
+
+    await waitFor(() => expect(screen.getByText('研发部')).toBeInTheDocument());
+    rerender(<ConfirmSummaryList schema={schema} values={{ departments: [2001, 2002] }} />);
+    await waitFor(() => expect(screen.getByText('研发部、财务部')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /协作部门/ }));
+    expect(screen.getAllByText('部门名称')).toHaveLength(2);
+    expect(screen.getByText('2001')).toBeInTheDocument();
+    expect(screen.getByText('2002')).toBeInTheDocument();
   });
 
   it('uses a single expandable other-files row for unlinked direct-submission attachments', async () => {

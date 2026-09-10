@@ -14,6 +14,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.HashSet;
 import java.util.function.Function;
@@ -299,9 +300,13 @@ public class UserService {
                 }
             });
         }
-        query.orderByAsc("display_name").orderByAsc("id");
+        query.orderByDesc("EXISTS (SELECT 1 FROM t_department_leader department_leader"
+                + " WHERE department_leader.department_id = t_user.dept_id"
+                + " AND department_leader.user_id = t_user.id)")
+            .orderByAsc("display_name").orderByAsc("id");
         Page<User> result = userMapper.selectPage(Page.of(safePage, safeSize), query);
         fillManagerNames(result.getRecords());
+        fillDirectoryMetadata(result.getRecords());
         return result;
     }
 
@@ -347,6 +352,36 @@ public class UserService {
         }
     }
 
+    private void fillDirectoryMetadata(List<User> users) {
+        if (users.isEmpty()) return;
+        Map<Long, User> byId = users.stream()
+            .collect(Collectors.toMap(User::getId, Function.identity()));
+        String placeholders = String.join(",", Collections.nCopies(users.size(), "?"));
+        jdbcTemplate.query("""
+            SELECT user_row.id, mapping.user_id IS NOT NULL AS wecom_mapped,
+                   mapping.wecom_status, mapping.directory_present,
+                   EXISTS (
+                       SELECT 1 FROM t_department_leader department_leader
+                       WHERE department_leader.department_id = user_row.dept_id
+                         AND department_leader.user_id = user_row.id
+                   ) AS department_leader
+            FROM t_user user_row
+            LEFT JOIN t_department department ON department.id = user_row.dept_id
+            LEFT JOIN t_wecom_user_mapping mapping
+              ON mapping.user_id = user_row.id
+             AND mapping.company_id = department.company_id
+            WHERE user_row.id IN (""" + placeholders + ")", resultSet -> {
+                User user = byId.get(resultSet.getLong("id"));
+                if (user == null) return;
+                boolean mapped = resultSet.getBoolean("wecom_mapped");
+                user.setWecomMapped(mapped);
+                user.setWecomStatus(mapped ? (Integer) resultSet.getObject("wecom_status") : null);
+                user.setWecomDirectoryPresent(mapped
+                    && resultSet.getBoolean("directory_present"));
+                user.setDepartmentLeader(resultSet.getBoolean("department_leader"));
+            }, users.stream().map(User::getId).toArray());
+    }
+
     private void changeStatus(User user, String status) {
         if (!List.of("ACTIVE", "DISABLED").contains(status)) {
             throw new BizException("BAD_USER_STATUS", "用户状态无效");
@@ -373,6 +408,9 @@ public class UserService {
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        if (body.containsKey("status") && hasWecomMapping(userId)) {
+            throw new BizException("WECOM_LOGIN_ACCESS_REQUIRED", "企业微信成员请使用登录权限操作");
         }
         List<String> targetRoles = rolesOf(userId);
         if (!authorizationService.isAdmin() && targetRoles.contains("admin")) {
@@ -434,6 +472,66 @@ public class UserService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public User setWecomLoginAccess(Long userId, boolean enabled) {
+        authorizationService.requireAdmin();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        if (!enabled && authorizationService.currentUserId() == userId) {
+            throw new BizException("SELF_USER_PROTECTED", "不能禁止当前登录账号");
+        }
+        WecomLoginState mapping = jdbcTemplate.query("""
+            SELECT mapping.company_id, mapping.wecom_status, mapping.directory_present
+            FROM t_wecom_user_mapping mapping
+            JOIN t_user user_row ON user_row.id = mapping.user_id
+            JOIN t_department department ON department.id = user_row.dept_id
+              AND department.company_id = mapping.company_id
+            WHERE mapping.user_id = ?
+            FOR UPDATE OF mapping
+            """, resultSet -> resultSet.next()
+                ? new WecomLoginState(resultSet.getLong("company_id"),
+                    (Integer) resultSet.getObject("wecom_status"),
+                    resultSet.getBoolean("directory_present"))
+                : null, userId);
+        if (mapping == null) {
+            throw new BizException("WECOM_ACCOUNT_REQUIRED", "该成员不是企业微信同步账号");
+        }
+        if (!mapping.directoryPresent() || mapping.wecomStatus() == null
+            || (mapping.wecomStatus() != 1 && mapping.wecomStatus() != 4)) {
+            throw new BizException("WECOM_LOGIN_ACCESS_LOCKED", "当前企业微信状态不允许修改登录权限");
+        }
+        if (!enabled && rolesOf(userId).contains("admin")) {
+            lockAdminRole();
+            user = userMapper.selectById(userId);
+            if (user == null) throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        jdbcTemplate.update("""
+            UPDATE t_wecom_user_mapping
+            SET login_enabled_override = ?
+            WHERE company_id = ? AND user_id = ?
+            """, enabled, mapping.companyId(), userId);
+        changeStatus(user, enabled ? "ACTIVE" : "DISABLED");
+        userMapper.updateById(user);
+        authorizationChanged(userId);
+        fillDirectoryMetadata(List.of(user));
+        return user;
+    }
+
+    private boolean hasWecomMapping(Long userId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM t_wecom_user_mapping mapping
+                JOIN t_user user_row ON user_row.id = mapping.user_id
+                JOIN t_department department ON department.id = user_row.dept_id
+                  AND department.company_id = mapping.company_id
+                WHERE mapping.user_id = ?
+            )
+            """, Boolean.class, userId));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public void resetPassword(Long userId, String rawPassword) {
         authorizationService.requireAdmin();
         User user = userMapper.selectById(userId);
@@ -454,6 +552,9 @@ public class UserService {
             throw new BizException("PASSWORD_INVALID", "密码长度必须为 8 到 64 位");
         }
     }
+
+    static record WecomLoginState(long companyId, Integer wecomStatus,
+                                  boolean directoryPresent) { }
 
     private void setRolesInternal(Long userId, List<Long> roleIds) {
         roleIds.forEach(rid -> userRoleMapper.insert(new UserRole(userId, rid)));

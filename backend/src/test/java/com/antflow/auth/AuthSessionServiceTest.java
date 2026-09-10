@@ -68,6 +68,23 @@ class AuthSessionServiceTest {
     }
 
     @Test
+    void customCookiePrefixKeepsAnIsolatedEnvironmentOutOfTheDefaultSessionNamespace() {
+        service = new AuthSessionService(sessionMapper, authService, jwtService, 3600,
+            "antflow-test");
+        when(jwtService.issue(eq(7L), eq("admin"), eq(List.of("admin")), any(UUID.class)))
+            .thenReturn("session-access-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        service.create(authenticated(), request("Mozilla/5.0"), response);
+
+        assertThat(service.refreshCookieName()).isEqualTo("antflow-test-refresh");
+        assertThat(service.csrfCookieName()).isEqualTo("antflow-test-csrf");
+        assertThat(response.getHeaders("Set-Cookie"))
+            .anySatisfy(cookie -> assertThat(cookie).contains("antflow-test-refresh="))
+            .anySatisfy(cookie -> assertThat(cookie).contains("antflow-test-csrf="));
+    }
+
+    @Test
     void refreshRotatesBothTokensAndMarksCurrentSessionInList() {
         String refreshToken = "refresh-token";
         String csrfToken = "csrf-token";

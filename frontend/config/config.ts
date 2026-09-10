@@ -10,6 +10,7 @@ import routes from './routes';
 const { UMI_ENV = 'dev' } = process.env;
 const production = process.env.NODE_ENV === 'production';
 const recordRequests = process.env.REQUEST_RECORD === 'true';
+const authCsrfCookieName = process.env.ANTFLOW_AUTH_CSRF_COOKIE_NAME || 'antflow-csrf';
 
 // Compute commit hash: env vars take precedence, fall back to git at build time
 const commitHash =
@@ -249,6 +250,7 @@ export default defineConfig({
   define: {
     'process.env.CI': process.env.CI,
     'process.env.COMMIT_HASH': commitHash,
+    'process.env.ANTFLOW_AUTH_CSRF_COOKIE_NAME': authCsrfCookieName,
     __APP_VERSION__: require('./../package.json').version,
     __UMI_VERSION__: require('@umijs/max/package.json').version,
     __UTOO_VERSION__: require('@utoo/pack/package.json').version,

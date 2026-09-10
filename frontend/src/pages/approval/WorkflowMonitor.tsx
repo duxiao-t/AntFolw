@@ -3,6 +3,7 @@ import {
   ClockCircleOutlined,
   InboxOutlined,
   ReloadOutlined,
+  UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -32,10 +33,20 @@ type RejectionRate = {
   reject_rate?: number;
 };
 
+type FallbackBacklog = {
+  assignee_id: number;
+  assignee_name?: string;
+  pending_count: number;
+  oldest_pending_at?: string;
+  affected_node_count: number;
+  affected_instance_count: number;
+};
+
 type WorkflowMonitorOverview = {
   stuckInstances: StuckInstance[];
   overdueTasks: OverdueTask[];
   nodeRejectionRates: RejectionRate[];
+  fallbackBacklogs?: FallbackBacklog[];
   outbox: { pending: number; dead: number; oldest_pending?: string };
 };
 
@@ -113,6 +124,11 @@ export default function WorkflowMonitor() {
           <strong>{data.outbox.dead}</strong>
           <small>达到最大重试次数</small>
         </article>
+        <article className="metric metric-danger">
+          <span className="metric-label"><UserSwitchOutlined />兜底待办</span>
+          <strong>{(data.fallbackBacklogs ?? []).reduce((sum, item) => sum + item.pending_count, 0)}</strong>
+          <small>集中堆积通常表示组织或规则需调整</small>
+        </article>
       </section>
 
       <div className="workplace-main-grid">
@@ -155,6 +171,27 @@ export default function WorkflowMonitor() {
           </div>
         </section>
       </div>
+
+      <section className="workplace-section" style={{ maxWidth: 1500, margin: '0 auto' }}>
+        <div className="section-heading"><div><p className="section-kicker">FALLBACK QUEUE</p><h2>兜底任务堆积</h2></div><span className="section-count">按实际处理人汇总</span></div>
+        <div className="table-scroll">
+          <Table<FallbackBacklog>
+            rowKey="assignee_id"
+            size="middle"
+            pagination={false}
+            dataSource={data.fallbackBacklogs ?? []}
+            locale={{ emptyText: empty('当前没有兜底任务堆积') }}
+            columns={[
+              { title: '处理人', dataIndex: 'assignee_name', ellipsis: true, render: (name: string | undefined, row) => name || `用户#${row.assignee_id}` },
+              { title: '待办', dataIndex: 'pending_count', width: 90 },
+              { title: '影响节点', dataIndex: 'affected_node_count', width: 110 },
+              { title: '影响实例', dataIndex: 'affected_instance_count', width: 110 },
+              { title: '最早待办', dataIndex: 'oldest_pending_at', width: 150, render: formatTime },
+            ]}
+            scroll={{ x: 660 }}
+          />
+        </div>
+      </section>
 
       <section className="workplace-section" style={{ maxWidth: 1500, margin: '0 auto' }}>
         <div className="section-heading"><div><p className="section-kicker">NODE QUALITY</p><h2>节点驳回率</h2></div><span className="section-count">按已处理任务统计</span></div>

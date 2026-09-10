@@ -17,10 +17,14 @@ import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
+import com.antflow.org.User;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDate;
@@ -51,6 +55,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 
@@ -70,6 +75,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     private static final String EXTERNAL_POSTGRES_URL = System.getenv("ANTFLOW_TEST_POSTGRES_URL");
     private static final String VALID_SCHEMA =
         "[{\"id\":\"subject\",\"type\":\"text\",\"label\":\"Subject\"}]";
+    private final ObjectMapper flowJson = new ObjectMapper();
 
     static final PostgreSQLContainer<?> POSTGRES =
         externalPostgres() ? null : new PostgreSQLContainer<>("postgres:17-alpine")
@@ -604,7 +610,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void v2UsesNodeFallbackThenAdministratorAndFreezesDelegationOnTask() {
+    void v2UsesExplicitNodeFallbackAndFreezesDelegationOnTask() {
         long adminId = userId("admin");
         long bobId = userId("bob");
         long unavailable = insertUser("disabled-approver-" + UUID.randomUUID());
@@ -617,13 +623,26 @@ class PostgresTransactionalIntegrityIntegrationTest {
             WHERE proc_inst_id = ? AND status = 'PENDING'
             """, Long.class, nodeFallback.instanceId())).containsExactly(bobId);
 
-        StartedV2 adminFallback = startV2(approvalFlow(unavailable), adminId);
-        assertThat(jdbcTemplate.queryForList("""
-            SELECT DISTINCT role.code FROM t_task task
-            JOIN t_user_role user_role ON user_role.user_id = task.assignee_id
-            JOIN t_role role ON role.id = user_role.role_id
-            WHERE task.proc_inst_id = ? AND task.status = 'PENDING'
-            """, String.class, adminFallback.instanceId())).contains("admin");
+        long unavailableFallback = insertUser("disabled-fallback-" + UUID.randomUUID());
+        jdbcTemplate.update("UPDATE t_user SET status = 'DISABLED' WHERE id = ?", unavailableFallback);
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "DRAFT", approvalWithFallbackFlow(unavailable,
+            unavailableFallback));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            publishService.publish(formId, processId);
+            assertThatThrownBy(() -> processEngine.start(
+                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of()), adminId))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("FALLBACK_UNAVAILABLE"));
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_process_instance WHERE proc_def_id = ?
+                """, Long.class, processId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+        }
 
         long principal = insertUser("delegation-principal-" + UUID.randomUUID());
         long agent = insertUser("delegation-agent-" + UUID.randomUUID());
@@ -902,6 +921,90 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void wecomLoginOverrideAndDepartmentLeaderOrderingExecuteAgainstPostgres() {
+        long adminId = userId("admin");
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long departmentId = insertDepartment(companyId, "企微账号测试部");
+        long leaderId = insertUser("zz-wecom-leader-" + UUID.randomUUID());
+        long memberId = insertUser("aa-wecom-member-" + UUID.randomUUID());
+        UUID sessionId = UUID.randomUUID();
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ?, status = 'DISABLED' WHERE id IN (?, ?)",
+            departmentId, leaderId, memberId);
+        jdbcTemplate.update("""
+            INSERT INTO t_wecom_user_mapping(
+                company_id, wecom_user_id, user_id, wecom_status, directory_present)
+            VALUES (?, ?, ?, 4, true), (?, ?, ?, 4, true)
+            """, companyId, "leader-" + leaderId, leaderId,
+            companyId, "member-" + memberId, memberId);
+        jdbcTemplate.update("""
+            INSERT INTO t_department_leader(department_id, user_id) VALUES (?, ?)
+            """, departmentId, leaderId);
+        jdbcTemplate.update("""
+            INSERT INTO t_auth_session(id, user_id, refresh_token_hash, csrf_token_hash,
+                                       device_name, expires_at)
+            VALUES (?, ?, ?, ?, 'test', now() + interval '1 hour')
+            """, sessionId, leaderId, UUID.randomUUID().toString(), UUID.randomUUID().toString());
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            WecomService wecomTarget = AopTestUtils.getTargetObject(wecomService);
+            List<User> users = userService.listAuthorizedPage(
+                null, departmentId, false, 1, 20).getRecords();
+            assertThat(users).extracting(User::getId).containsExactly(leaderId, memberId);
+            assertThat(users.get(0).getDepartmentLeader()).isTrue();
+            assertThat(users.get(0).getWecomStatus()).isEqualTo(4);
+
+            assertThat(userService.setWecomLoginAccess(leaderId, true).getStatus())
+                .isEqualTo("ACTIVE");
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT login_enabled_override FROM t_wecom_user_mapping WHERE user_id = ?
+                """, Boolean.class, leaderId)).isTrue();
+            ReflectionTestUtils.invokeMethod(wecomTarget, "applyLoginStatus",
+                companyId, List.of(leaderId));
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_user WHERE id = ?", String.class, leaderId))
+                .isEqualTo("ACTIVE");
+
+            userService.setWecomLoginAccess(leaderId, false);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_user WHERE id = ?", String.class, leaderId))
+                .isEqualTo("DISABLED");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT revoked_at IS NOT NULL FROM t_auth_session WHERE id = ?",
+                Boolean.class, sessionId)).isTrue();
+
+            UUID hardDisabledSessionId = UUID.randomUUID();
+            jdbcTemplate.update("""
+                UPDATE t_wecom_user_mapping
+                SET wecom_status = 2, login_enabled_override = true
+                WHERE user_id = ?
+                """, leaderId);
+            jdbcTemplate.update("UPDATE t_user SET status = 'ACTIVE' WHERE id = ?", leaderId);
+            jdbcTemplate.update("""
+                INSERT INTO t_auth_session(id, user_id, refresh_token_hash, csrf_token_hash,
+                                           device_name, expires_at)
+                VALUES (?, ?, ?, ?, 'test', now() + interval '1 hour')
+                """, hardDisabledSessionId, leaderId, UUID.randomUUID().toString(),
+                UUID.randomUUID().toString());
+            ReflectionTestUtils.invokeMethod(wecomTarget, "applyLoginStatus",
+                companyId, List.of(leaderId));
+            assertThat(jdbcTemplate.queryForMap("""
+                SELECT user_row.status, session.revoked_at IS NOT NULL AS revoked
+                FROM t_user user_row
+                JOIN t_auth_session session ON session.user_id = user_row.id
+                WHERE user_row.id = ? AND session.id = ?
+                """, leaderId, hardDisabledSessionId))
+                .containsEntry("status", "DISABLED")
+                .containsEntry("revoked", true);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", leaderId, memberId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", departmentId);
+        }
+    }
+
+    @Test
     void workplaceAuthorizationQueryExecutesAgainstPostgres() {
         long adminId = userId("admin");
         OffsetDateTime now = OffsetDateTime.now();
@@ -1112,6 +1215,25 @@ class PostgresTransactionalIntegrityIntegrationTest {
         assertThat(mobileWorkflowMapper.markCcRead(ccId, bobId)).isEqualTo(1);
         assertThat(mobileWorkflowMapper.selectTaskPage(bobId, "done", null, null, 20, 0))
             .extracting(MobileWorkflowMapper.TaskRow::id).contains(pendingCc.id());
+    }
+
+    @Test
+    void v2CcPreservesRecordsButSendsOneNotificationPerRecipientPerRound() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        StartedV2 started = startV2(twoCcThenApprovalFlow(bobId, adminId), adminId);
+
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_cc_record WHERE proc_inst_id = ? AND recipient_id = ?
+            """, Long.class, started.instanceId(), bobId)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_cc_notification_batch
+            WHERE proc_inst_id = ? AND round_no = 1 AND recipient_id = ?
+            """, Long.class, started.instanceId(), bobId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_workflow_outbox
+            WHERE aggregate_id = ? AND event_type = 'CC_ASSIGNED' AND recipient_id = ?
+            """, Long.class, started.instanceId(), bobId)).isEqualTo(1L);
     }
 
     @Test
@@ -1608,12 +1730,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(starterId, "admin", List.of("admin")));
         try {
             publishService.publish(formId, processId);
+            String compatibleLegacyFlow = strictFlow(legacyFlow);
             jdbcTemplate.update("""
                 UPDATE t_process_definition_version
                 SET process = ?::jsonb,
                     checksum = encode(digest(?::jsonb::text, 'sha256'), 'hex')
                 WHERE process_definition_id = ?
-                """, legacyFlow, legacyFlow, processId);
+                """, compatibleLegacyFlow, compatibleLegacyFlow, processId);
             Map<String, Object> result = processEngine.start(
                 new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of()), starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
@@ -1624,11 +1747,47 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     private long insertProcess(long formId, String status, String process) {
+        String strictProcess = strictFlow(process);
         return jdbcTemplate.queryForObject("""
             INSERT INTO t_process_definition(form_def_id, version, process, status, created_by)
             VALUES (?, 1, ?::jsonb, ?, ?)
             RETURNING id
-            """, Long.class, formId, process, status, userId("admin"));
+            """, Long.class, formId, strictProcess, status, userId("admin"));
+    }
+
+    private String strictFlow(String flow) {
+        try {
+            JsonNode parsed = flowJson.readTree(flow);
+            if (!(parsed instanceof ObjectNode root) || !"ROOT".equals(root.path("type").asText())) {
+                return flow;
+            }
+            props(root).put("fallbackPolicy", "NODE_REQUIRED");
+            addFallbacks(root);
+            return flowJson.writeValueAsString(root);
+        } catch (Exception error) {
+            throw new AssertionError("Unable to prepare test flow", error);
+        }
+    }
+
+    private void addFallbacks(JsonNode node) {
+        if (!(node instanceof ObjectNode object)) return;
+        if ("APPROVAL".equals(object.path("type").asText())) {
+            ObjectNode props = props(object);
+            if (!props.path("fallbackAssignee").isObject()) {
+                ObjectNode fallback = props.putObject("fallbackAssignee");
+                fallback.put("type", "USER");
+                fallback.putArray("ids").add(userId("admin"));
+            }
+        }
+        object.path("branchs").forEach(this::addFallbacks);
+        addFallbacks(object.path("children"));
+    }
+
+    private static ObjectNode props(ObjectNode node) {
+        if (node.path("props") instanceof ObjectNode props) return props;
+        ObjectNode props = new ObjectMapper().createObjectNode();
+        node.set("props", props);
+        return props;
     }
 
     private long insertParallelTask(long instanceId, String nodeId,
@@ -1787,6 +1946,17 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "assignedType":"ASSIGN_USER","assignedUser":[%d],"mode":"OR"},
                 "children":null}}}
             """.formatted(recipientId, approverId);
+    }
+
+    private static String twoCcThenApprovalFlow(long recipientId, long approverId) {
+        return """
+            {"id":"root","type":"ROOT","children":{
+              "id":"cc1","type":"CC","props":{"assignedUser":[%d]},
+              "children":{"id":"cc2","type":"CC","props":{"assignedUser":[%d]},
+              "children":{"id":"a1","type":"APPROVAL","props":{
+                "assignedType":"ASSIGN_USER","assignedUser":[%d],"mode":"OR"},
+                "children":null}}}}
+            """.formatted(recipientId, recipientId, approverId);
     }
 
     private static String parallelResubmitFlow(String strategy, long first, long second,

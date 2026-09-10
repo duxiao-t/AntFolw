@@ -38,6 +38,21 @@ function freshRoot(): TreeNode {
   };
 }
 
+function requireNodeFallbacks(node: TreeNode): TreeNode {
+  const children = node.children ? requireNodeFallbacks(node.children) : node.children;
+  const branchs = node.branchs?.map(requireNodeFallbacks);
+  const needsFallback = node.type === 'APPROVAL'
+    && !Object.hasOwn(node.props ?? {}, 'fallbackAssignee');
+  return {
+    ...node,
+    ...(needsFallback
+      ? { props: { ...node.props, fallbackAssignee: { type: 'ROLE', ids: [] } } }
+      : {}),
+    children,
+    branchs,
+  };
+}
+
 function mutate(
   node: TreeNode,
   id: string,
@@ -214,7 +229,10 @@ export const useProcessDesignerStore = create<State>((set) => ({
   process: freshRoot(),
   selectedId: null,
 
-  load: (tree) => set({ process: tree ?? freshRoot(), selectedId: null }),
+  load: (tree) => set({
+    process: tree ? requireNodeFallbacks(tree) : freshRoot(),
+    selectedId: null,
+  }),
   select: (id) => set({ selectedId: id }),
 
   insertAfter: (parentId, type) =>

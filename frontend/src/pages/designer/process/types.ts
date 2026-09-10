@@ -70,6 +70,7 @@ export type FormFieldOption = {
   label: string;
   type: string;
   required?: boolean;
+  inTable?: boolean;
   defaultValue?: unknown;
   options?: Array<{
     label: string;
@@ -86,13 +87,15 @@ export const APPROVAL_PROPS = () => ({
   leader: { level: 1 },
   manager: { level: 1 },
   selfSelect: { multiple: false },
-  nobody: { handler: 'TO_PASS' },
+  fallbackAssignee: { type: 'ROLE' as const, ids: [] as number[] },
   commentPresets: { approve: [] as string[], reject: [] as string[] },
 });
 
 export const CC_PROPS = () => ({
+  assignedType: 'ASSIGN_USER',
   assignedUser: [] as number[],
   role: [] as number[],
+  fieldUser: { fieldId: '' },
 });
 
 export const CONDITION_PROPS = () => ({

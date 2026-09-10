@@ -54,6 +54,25 @@ public class WorkflowMonitoringController {
             HAVING COUNT(*) FILTER (WHERE task.status IN ('APPROVED', 'REJECTED')) > 0
             ORDER BY reject_rate DESC NULLS LAST, decided DESC LIMIT ?
             """, safeLimit);
+        List<Map<String, Object>> fallbackBacklogs = jdbc.queryForList("""
+            SELECT task.assignee_id,
+                   COALESCE(user_row.display_name, user_row.username,
+                            CONCAT('用户#', task.assignee_id)) AS assignee_name,
+                   COUNT(*) AS pending_count,
+                   MIN(task.created_at) AS oldest_pending_at,
+                   COUNT(DISTINCT node.node_id) AS affected_node_count,
+                   COUNT(DISTINCT task.proc_inst_id) AS affected_instance_count
+            FROM t_task task
+            JOIN t_process_node_instance node ON node.id = task.node_instance_id
+            JOIN t_node_participant participant
+              ON participant.node_instance_id = task.node_instance_id
+             AND participant.actual_user_id = task.assignee_id
+             AND participant.sequence_no = task.sequence_no
+            LEFT JOIN t_user user_row ON user_row.id = task.assignee_id
+            WHERE task.status = 'PENDING' AND participant.source LIKE 'FALLBACK%'
+            GROUP BY task.assignee_id, user_row.display_name, user_row.username
+            ORDER BY pending_count DESC, oldest_pending_at LIMIT ?
+            """, safeLimit);
         Map<String, Object> outbox = jdbc.queryForMap("""
             SELECT COUNT(*) FILTER (WHERE status = 'PENDING') AS pending,
                    COUNT(*) FILTER (WHERE status = 'DEAD') AS dead,
@@ -61,6 +80,7 @@ public class WorkflowMonitoringController {
             FROM t_workflow_outbox
             """);
         return Map.of("stuckInstances", stuck, "overdueTasks", overdue,
-            "nodeRejectionRates", rejectionRates, "outbox", outbox);
+            "nodeRejectionRates", rejectionRates, "fallbackBacklogs", fallbackBacklogs,
+            "outbox", outbox);
     }
 }

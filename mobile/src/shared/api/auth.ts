@@ -39,9 +39,9 @@ export function isAuthEndpoint(path: string): boolean {
 
 export function readCsrfCookie(): string | null {
   if (typeof document === 'undefined') return null;
-  const match = /(?:^|;\s*)antflow-csrf=([^;]+)/.exec(document.cookie);
-  if (!match) return null;
-  const value = match[1];
+  const name = import.meta.env.VITE_AUTH_CSRF_COOKIE_NAME || 'antflow-csrf';
+  const value = document.cookie.split('; ')
+    .find((entry) => entry.startsWith(`${name}=`))?.split('=').slice(1).join('=');
   if (!value) return null;
   try {
     return decodeURIComponent(value);

@@ -6,7 +6,6 @@ export type ProcessValidationIssue = {
 };
 
 const MAX_TREE_DEPTH = 50;
-const FIELD_CONTAINER_TYPES = new Set(['span_layout', 'table_list']);
 const EDITABLE_FORBIDDEN_TYPES = new Set([
   'image_upload',
   'video_upload',
@@ -18,11 +17,15 @@ const EDITABLE_FORBIDDEN_TYPES = new Set([
 
 export function flattenFormFields(nodes: any[]): FormFieldOption[] {
   const result: FormFieldOption[] = [];
-  const visit = (list: any[]) => {
+  const visit = (list: any[], inTable = false) => {
     for (const node of list) {
       if (!node?.id) continue;
-      if (FIELD_CONTAINER_TYPES.has(node.type)) {
-        if (Array.isArray(node.children)) visit(node.children);
+      if (node.type === 'span_layout') {
+        if (Array.isArray(node.children)) visit(node.children, inTable);
+        continue;
+      }
+      if (node.type === 'table_list') {
+        if (Array.isArray(node.children)) visit(node.children, true);
         continue;
       }
       if (node.type === 'description') continue;
@@ -31,6 +34,7 @@ export function flattenFormFields(nodes: any[]): FormFieldOption[] {
         label: node.label ?? node.props?.label ?? node.id,
         type: node.type,
         required: Boolean(node.rules?.required ?? node.props?.required),
+        inTable,
         defaultValue: node.props?.defaultValue,
         options: Array.isArray(node.props?.options)
           ? node.props.options
@@ -109,6 +113,57 @@ const approvalPolicyReady = (node: TreeNode): boolean => {
       ['REMIND', 'ESCALATE', 'AUTO_APPROVE'].includes(timeout.action) &&
       (timeout.action !== 'AUTO_APPROVE' || timeout.riskLevel === 'LOW'))
   );
+};
+
+const fallbackReady = (node: TreeNode): boolean => {
+  const fallback = node.props?.fallbackAssignee;
+  return (
+    fallback &&
+    ['ROLE', 'USER'].includes(fallback.type) &&
+    Array.isArray(fallback.ids) &&
+    fallback.ids.length > 0
+  );
+};
+
+const ccReady = (node: TreeNode): boolean => {
+  const props = node.props ?? {};
+  if ((props.assignedType ?? 'ASSIGN_USER') === 'ASSIGN_USER') {
+    return Array.isArray(props.assignedUser) && props.assignedUser.length > 0;
+  }
+  if (props.assignedType === 'ROLE') {
+    return Array.isArray(props.role) && props.role.length > 0;
+  }
+  return props.assignedType === 'FIELD_USER' && Boolean(props.fieldUser?.fieldId);
+};
+
+const starterFieldMode = (root: TreeNode, fieldId: string): string =>
+  root.props?.formPerms?.find((entry: any) => entry?.fieldId === fieldId)?.mode ??
+  'EDITABLE';
+
+const fieldUserIssue = (
+  node: TreeNode,
+  root: TreeNode,
+  formFields?: FormFieldOption[],
+): string | null => {
+  if (node.props?.assignedType !== 'FIELD_USER') return null;
+  if (!formFields) return null;
+  const fieldId = node.props?.fieldUser?.fieldId;
+  const field = formFields?.find((item) => item.id === fieldId);
+  const subject = node.type === 'APPROVAL' ? '审批人' : '抄送人';
+  if (field?.type !== 'user_picker') {
+    return node.type === 'APPROVAL'
+      ? `表单审批人字段 ${fieldId || ''} 已删除或类型不再是人员选择`
+      : `表单抄送人字段 ${fieldId || ''} 已删除或类型不再是人员选择`;
+  }
+  if (field.inTable) {
+    return `表单${subject}字段 ${field.label} 必须位于表单顶层`;
+  }
+  if (node.type === 'APPROVAL') {
+    if (starterFieldMode(root, field.id) !== 'EDITABLE') {
+      return `表单审批人字段 ${field.label} 必须对发起人可填写`;
+    }
+  }
+  return null;
 };
 
 const formPermsIssue = (
@@ -305,6 +360,7 @@ const missingTriggerField = (
 export function validateProcessTree(
   root: TreeNode,
   formFields?: FormFieldOption[],
+  requireNodeFallbacks = false,
 ): ProcessValidationIssue[] {
   const issues: ProcessValidationIssue[] = [];
   const fieldTypes = formFields
@@ -322,22 +378,21 @@ export function validateProcessTree(
     if (node.type === 'APPROVAL' && !approvalReady(node))
       add(node.id, '请配置审批人');
     if (node.type === 'APPROVAL') {
-      if (!approvalPolicyReady(node)) add(node.id, '请配置有效的审批或超时规则');
-      const fieldUserId = node.props?.fieldUser?.fieldId;
-      if (
-        fieldTypes &&
-        fieldUserId &&
-        fieldTypes.get(fieldUserId) !== 'user_picker'
-      ) {
-        add(node.id, `表单审批人字段 ${fieldUserId} 已删除或类型不再是人员选择`);
+      if ((requireNodeFallbacks || node.props?.fallbackAssignee) && !fallbackReady(node)) {
+        add(node.id, '请配置找不到审批人时的转交对象');
       }
+      if (!approvalPolicyReady(node)) add(node.id, '请配置有效的审批或超时规则');
+      const dynamicIssue = fieldUserIssue(node, root, formFields);
+      if (dynamicIssue) add(node.id, dynamicIssue);
       const permIssue = formPermsIssue(node, fieldTypes, formFields);
       if (permIssue) add(node.id, permIssue);
       const presetsIssue = commentPresetsIssue(node);
       if (presetsIssue) add(node.id, presetsIssue);
     }
-    if (node.type === 'CC' && (node.props?.assignedUser?.length ?? 0) === 0) {
-      add(node.id, '请配置抄送人');
+    if (node.type === 'CC') {
+      if (!ccReady(node)) add(node.id, '请配置抄送人');
+      const dynamicIssue = fieldUserIssue(node, root, formFields);
+      if (dynamicIssue) add(node.id, dynamicIssue);
     }
     if (node.type === 'DELAY' && !delayReady(node))
       add(node.id, '请配置有效的延时规则');

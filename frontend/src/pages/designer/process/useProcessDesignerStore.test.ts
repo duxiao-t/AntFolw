@@ -235,6 +235,68 @@ describe('process designer tree operations', () => {
 });
 
 describe('process designer validation', () => {
+  it('requires a per-node fallback only for publish-time validation', () => {
+    const tree: TreeNode = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: { assignedType: 'SELF' },
+      },
+    };
+
+    expect(validateProcessTree(tree)).toEqual([]);
+    expect(validateProcessTree(tree, undefined, true)).toContainEqual({
+      nodeId: 'approval',
+      message: '请配置找不到审批人时的转交对象',
+    });
+  });
+
+  it('accepts a visible optional top-level personnel field for dynamic approval', () => {
+    const tree: TreeNode = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: {
+          assignedType: 'FIELD_USER',
+          fieldUser: { fieldId: 'reviewers' },
+          fallbackAssignee: { type: 'ROLE', ids: [7] },
+        },
+      },
+    };
+
+    expect(validateProcessTree(tree, [{
+      id: 'reviewers', label: '复核人', type: 'user_picker', required: false,
+    }], true)).toEqual([]);
+  });
+
+  it('accepts a multi-person field as a non-blocking CC source', () => {
+    const tree: TreeNode = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'approval',
+        type: 'APPROVAL',
+        props: {
+          assignedType: 'SELF',
+          fallbackAssignee: { type: 'ROLE', ids: [7] },
+        },
+        children: {
+          id: 'cc',
+          type: 'CC',
+          props: { assignedType: 'FIELD_USER', fieldUser: { fieldId: 'copied' } },
+        },
+      },
+    };
+
+    expect(validateProcessTree(tree, [{
+      id: 'copied', label: '抄送人', type: 'user_picker', required: false,
+    }], true)).toEqual([]);
+  });
+
   it('requires an array value for in conditions', () => {
     const branch = (value: string | string[]): TreeNode => ({
       id: 'root',

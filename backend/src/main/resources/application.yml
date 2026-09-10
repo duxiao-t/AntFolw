@@ -46,6 +46,7 @@ antflow:
     per-hour: 30
   auth:
     session-ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:2592000}
+    cookie-prefix: ${ANTFLOW_AUTH_COOKIE_PREFIX:antflow}
     public-base-url: ${ANTFLOW_PUBLIC_BASE_URL:http://localhost:5173}
     oidc-allowed-hosts: ${ANTFLOW_OIDC_ALLOWED_HOSTS:}
     oidc-https-only: ${ANTFLOW_OIDC_HTTPS_ONLY:true}

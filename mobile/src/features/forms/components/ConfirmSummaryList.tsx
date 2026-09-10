@@ -161,7 +161,7 @@ function UserSummaryItem({ entry }: { entry: SummaryEntry }) {
   const users = usePickerUsers(endpoint, ids);
   const names = users.map((user) => user.displayName || `用户#${user.id}`);
   const detail = ids.length > 0 ? (
-    <div className="confirm-summary-people">
+    <div className="confirm-summary-people confirm-summary-people--end">
       {users.map((user) => (
         <div key={user.id} className="confirm-summary-person">
           <strong>{user.displayName || `用户#${user.id}`}</strong>
@@ -182,16 +182,19 @@ function UserSummaryItem({ entry }: { entry: SummaryEntry }) {
 
 function DepartmentSummaryItem({ entry }: { entry: SummaryEntry }) {
   const endpoint = String(entry.node.props?.searchEndpoint ?? '/api/mobile/departments');
-  const id = departmentId(entry.rawValue);
-  const department = usePickerDepartment(endpoint, id);
-  const name = department?.name || (id == null ? '未填写' : `部门 #${id}`);
-  const detail = id == null ? null : (
+  const multiple = entry.node.props?.multiple === true;
+  const ids = useMemo(() => pickerIds(entry.rawValue, multiple), [entry.rawValue, multiple]);
+  const departments = usePickerDepartments(endpoint, ids);
+  const names = departments.map((department) => department.name || `部门 #${department.id}`);
+  const detail = ids.length === 0 ? null : (
     <div className="confirm-summary-definition-list">
-      <div><span>部门名称</span><strong>{name}</strong></div>
-      <div><span>部门编号</span><strong>{id}</strong></div>
+      {departments.flatMap((department) => [
+        <div key={`${department.id}-name`}><span>部门名称</span><strong>{department.name || `部门 #${department.id}`}</strong></div>,
+        <div key={`${department.id}-id`}><span>部门编号</span><strong>{department.id}</strong></div>,
+      ])}
     </div>
   );
-  return <SummaryItemFrame id={entry.id} label={entry.label} value={name} detail={detail} />;
+  return <SummaryItemFrame id={entry.id} label={entry.label} value={compactLabels(names)} detail={detail} />;
 }
 
 function SummaryItemFrame({
@@ -268,7 +271,7 @@ function detailFor(
   if (isOptionField(node.type)) {
     const labels = optionLabels(node, value);
     return optionNeedsDetail(node, value, labels)
-      ? <SummaryTags labels={labels} />
+      ? <SummaryTags labels={labels} endAligned={node.type === 'multi_select'} />
       : null;
   }
   if (isTextField(node.type)) {
@@ -354,10 +357,10 @@ function TableSummaryDetail({
   );
 }
 
-function SummaryTags({ labels }: { labels: string[] }) {
+function SummaryTags({ labels, endAligned = false }: { labels: string[]; endAligned?: boolean }) {
   const occurrences = new Map<string, number>();
   return (
-    <div className="confirm-summary-tags">
+    <div className={`confirm-summary-tags${endAligned ? ' confirm-summary-tags--end' : ''}`}>
       {labels.map((label) => {
         const occurrence = (occurrences.get(label) ?? 0) + 1;
         occurrences.set(label, occurrence);
@@ -419,8 +422,8 @@ function summaryText(node: MobileSchemaNode, value: unknown): string {
     return ids.length > 0 ? compactLabels(ids.map((id) => `用户#${id}`)) : '未填写';
   }
   if (node.type === 'dept_picker') {
-    const id = departmentId(value);
-    return id == null ? '未填写' : `部门 #${id}`;
+    const ids = pickerIds(value, node.props?.multiple === true);
+    return ids.length > 0 ? compactLabels(ids.map((id) => `部门 #${id}`)) : '未填写';
   }
   if (node.type === 'checklist') {
     const summary = checklistSummary(node, value);
@@ -654,26 +657,23 @@ function usePickerUsers(endpoint: string, ids: number[]) {
   return ids.map((id) => users[id] ?? fallbackUser(id));
 }
 
-function usePickerDepartment(endpoint: string, id: number | null) {
-  const [department, setDepartment] = useState<MobilePickerDept | null>(null);
+function usePickerDepartments(endpoint: string, ids: number[]) {
+  const [departments, setDepartments] = useState<Record<number, MobilePickerDept>>({});
   useEffect(() => {
-    if (id == null) {
-      setDepartment(null);
-      return undefined;
-    }
+    if (ids.length === 0) return undefined;
     let active = true;
-    void fetchMobileDepartment(endpoint, id)
-      .then((item) => { if (active) setDepartment(item); })
-      .catch(() => { if (active) setDepartment(null); });
+    void Promise.all(ids.map((id) => fetchMobileDepartment(endpoint, id)
+      .catch(() => ({ id, name: `部门 #${id}` }))))
+      .then((items) => {
+        if (!active) return;
+        setDepartments((current) => ({
+          ...current,
+          ...Object.fromEntries(items.map((item) => [item.id, item])),
+        }));
+      });
     return () => { active = false; };
-  }, [endpoint, id]);
-  return department?.id === id ? department : null;
-}
-
-function departmentId(value: unknown) {
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
-  return isRecord(value) && typeof value.id === 'number' && Number.isSafeInteger(value.id)
-    ? value.id : null;
+  }, [endpoint, ids]);
+  return ids.map((id) => departments[id] ?? { id, name: `部门 #${id}` });
 }
 
 function fallbackUser(id: number): MobilePickerUser {

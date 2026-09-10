@@ -94,6 +94,9 @@ public class ProcessEngine {
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());
         }
+        if (runtimeV2 != null) {
+            processDefinitionService.requireNodeFallbackPolicy(pd.getProcess());
+        }
         var visibleData = formDefinitionService.canonicalizeStarterSubmission(
             fd.getSchema(), cmd.data(), pd.getProcess());
 

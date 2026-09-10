@@ -130,6 +130,7 @@ const START_RESULT = {
 function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
   failFirstStart?: boolean;
   failPreview?: boolean;
+  previewError?: { code: string; message: string };
   preview?: unknown;
 } = {}) {
   let startAttempts = 0;
@@ -143,6 +144,9 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
           `${user.displayName} ${user.username} ${user.department} ${user.employeeNo}`.includes(keyword)));
       }
       if (url.includes('/api/mobile/forms/leave/approval-preview') && init?.method === 'POST') {
+        if (options.previewError) {
+          return jsonResponse(options.previewError, 422);
+        }
         if (options.failPreview) {
           return jsonResponse({ code: 'TEMPORARY_ERROR', message: '预览失败' }, 503);
         }
@@ -739,6 +743,51 @@ describe('mobile form submit flow', () => {
     expect(screen.getByText('后续')).toBeInTheDocument();
   });
 
+  it('shows an automatic approval before the next manual approval', async () => {
+    setupFetch(FORM_WITHOUT_SELF_SELECT, { preview: {
+      nodes: [
+        {
+          nodeId: 'self', nodeName: '发起人本人', approvalMode: 'ANY', deferred: false,
+          autoPass: true, assignees: [{ userId: 7, displayName: 'Bob' }],
+        },
+        {
+          nodeId: 'manager', nodeName: '直属上级', approvalMode: 'ANY', deferred: false,
+          autoPass: false, assignees: [{ userId: 21, displayName: '张经理' }],
+        },
+      ],
+    } });
+    useSubmitFlowStore.setState({
+      formCode: 'leave', draftId: null, reworkTaskId: null,
+      values: { reason: '回家探亲' }, selfSelected: {}, selfSelectedUsers: {},
+    });
+    renderSubmitFlow('/forms/leave/confirm');
+
+    expect(await screen.findByText('Bob · 发起人本人')).toBeInTheDocument();
+    expect(screen.getByText('自动通过')).toBeInTheDocument();
+    expect(screen.getByText('张经理 · 直属上级')).toBeInTheDocument();
+    expect(screen.getByText('待审')).toBeInTheDocument();
+    expect(screen.getByText('下一审批节点')).toBeInTheDocument();
+    expect(screen.queryByText(/个并行/)).not.toBeInTheDocument();
+  });
+
+  it('keeps all automatic approvals visible when no manual approval remains', async () => {
+    setupFetch(FORM_WITHOUT_SELF_SELECT, { preview: {
+      nodes: [{
+        nodeId: 'self', nodeName: '发起人本人', approvalMode: 'ANY', deferred: false,
+        autoPass: true, assignees: [{ userId: 7, displayName: 'Bob' }],
+      }],
+    } });
+    useSubmitFlowStore.setState({
+      formCode: 'leave', draftId: null, reworkTaskId: null,
+      values: { reason: '回家探亲' }, selfSelected: {}, selfSelectedUsers: {},
+    });
+    renderSubmitFlow('/forms/leave/confirm');
+
+    expect(await screen.findByText('Bob · 发起人本人')).toBeInTheDocument();
+    expect(screen.getByText('自动通过')).toBeInTheDocument();
+    expect(screen.getByText('以上节点将自动通过，提交后无需人工审批')).toBeInTheDocument();
+  });
+
   it('allows submission when approval preview fails', async () => {
     setupFetch(FORM_WITHOUT_SELF_SELECT, { failPreview: true });
     useSubmitFlowStore.setState({
@@ -751,6 +800,23 @@ describe('mobile form submit flow', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '确认提交' }));
     expect(await screen.findByRole('heading', { name: '提交成功' })).toBeInTheDocument();
+  });
+
+  it('blocks confirmation when the flow is missing required fallback configuration', async () => {
+    setupFetch(FORM_WITHOUT_SELF_SELECT, {
+      previewError: {
+        code: 'FALLBACK_CONFIGURATION_REQUIRED',
+        message: '流程尚未配置每个审批节点的兜底对象，请重新配置并发布',
+      },
+    });
+    useSubmitFlowStore.setState({
+      formCode: 'leave', draftId: null, reworkTaskId: null,
+      values: { reason: '回家探亲' }, selfSelected: {}, selfSelectedUsers: {},
+    });
+    renderSubmitFlow('/forms/leave/confirm');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('兜底对象');
+    expect(screen.getByRole('button', { name: '确认提交' })).toBeDisabled();
   });
 
   it('reuses the same idempotency key after remounting confirmation for a failed same-payload retry', async () => {

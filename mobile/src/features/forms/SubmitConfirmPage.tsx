@@ -11,6 +11,7 @@ import { removeRecoveryDraft } from "./recoveryDraft.store";
 import { fetchApprovalPreview, startMobileInstance, submitMobileFormData, type ApprovalPreviewNode } from "./start.api";
 import { resubmitReworkTask } from "./rework.api";
 import { clearIdempotencyKeyForPayload, formSchemaWithoutSelfSelectRules, idempotencyKeyForPayload, useSubmitFlowStore } from "./submitFlow.store";
+import { isApiError } from "../../shared/api/errors";
 
 export function SubmitConfirmPage() {
   const { code = "" } = useParams();
@@ -41,6 +42,9 @@ export function SubmitConfirmPage() {
     enabled: formQuery.isSuccess && workflowEnabled,
     retry: 0,
   });
+  const previewConfigurationError = isBlockingPreviewError(previewQuery.error)
+    ? previewQuery.error.message
+    : "";
   const submitMutation = useMutation({
     mutationFn: async () => {
       setError("");
@@ -81,12 +85,13 @@ export function SubmitConfirmPage() {
       {workflowEnabled ? <ApprovalPreviewSection
         loading={previewQuery.isPending}
         error={previewQuery.isError}
+        configurationError={previewConfigurationError}
         nodes={previewQuery.data?.nodes ?? []}
         onRetry={() => void previewQuery.refetch()}
       /> : null}
       <div style={{ margin: "18px 0", padding: "12px 14px", border: "1px dashed var(--af-color-border)", borderRadius: 10, background: "var(--af-color-surface)" }}><label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: "var(--af-color-text-secondary)" }}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.currentTarget.checked)} /><span>我已确认信息无误，提交后将按上述审批流转入下一节点。</span></label></div>
       {error ? <p role="alert" className="status-notice status-notice--danger">{error}</p> : null}
-      <div className="action-bar"><button type="button" className="btn btn--ghost btn--lg" onClick={() => navigate(editPath())}>返回编辑</button><button type="button" className="btn btn--success btn--lg" disabled={!confirmed || submitMutation.isPending} onClick={() => submitMutation.mutate()}>{submitMutation.isPending ? "提交中..." : error ? "重试提交" : flow.reworkTaskId ? "确认重提" : "确认提交"}</button></div>
+      <div className="action-bar"><button type="button" className="btn btn--ghost btn--lg" onClick={() => navigate(editPath())}>返回编辑</button><button type="button" className="btn btn--success btn--lg" disabled={!confirmed || submitMutation.isPending || !!previewConfigurationError} onClick={() => submitMutation.mutate()}>{submitMutation.isPending ? "提交中..." : error ? "重试提交" : flow.reworkTaskId ? "确认重提" : "确认提交"}</button></div>
     </AppPage>
   );
 
@@ -99,21 +104,27 @@ export default SubmitConfirmPage;
 function ApprovalPreviewSection({
   loading,
   error,
+  configurationError,
   nodes,
   onRetry,
 }: {
   loading: boolean;
   error: boolean;
+  configurationError: string;
   nodes: ApprovalPreviewNode[];
   onRetry(): void;
 }) {
-  const heading = nodes.length > 1
-    ? `下一审批节点（${nodes.length} 个并行）`
-    : '下一审批节点';
+  const pendingCount = nodes.filter((node) => !node.autoPass).length;
+  const heading = pendingCount === 0
+    ? '审批节点'
+    : pendingCount > 1
+      ? `下一审批节点（${pendingCount} 个并行）`
+      : '下一审批节点';
   return <section className="approval-preview" aria-labelledby="approval-preview-title">
     <h4 id="approval-preview-title">{heading}</h4>
     {loading ? <div className="list-card"><div className="list-item"><div className="list-item__main"><b>正在解析审批节点...</b><small>请稍候</small></div></div></div> : null}
-    {error ? <div className="approval-preview__notice" role="status"><span>暂时无法预览，提交时将再次校验</span><button type="button" className="af-link-button" onClick={onRetry}>重试</button></div> : null}
+    {configurationError ? <div className="approval-preview__notice" role="alert">{configurationError}</div> : null}
+    {error && !configurationError ? <div className="approval-preview__notice" role="status"><span>暂时无法预览，提交时将再次校验</span><button type="button" className="af-link-button" onClick={onRetry}>重试</button></div> : null}
     {!loading && !error && nodes.length === 0 ? <div className="approval-preview__notice">提交后无需人工审批</div> : null}
     {!loading && !error && nodes.length > 0 ? <div className="list-card">{nodes.map((node, index) => {
       const names = node.assignees.map((assignee) => assignee.displayName);
@@ -122,10 +133,15 @@ function ApprovalPreviewSection({
       return <div className="list-item" key={node.nodeId}>
         <span className={`list-item__avatar flow-person-avatar avatar-tone avatar-tone--${index % 2 === 0 ? "blue" : "mint"}`}>{names[0]?.slice(0, 1) || "审"}</span>
         <div className="list-item__main"><b>{namesLabel} · {node.nodeName}</b><small>{approvalModeLabel(node.approvalMode)}</small></div>
-        <span className={`chip ${node.deferred ? "chip--ghost" : "chip--soft"}`}>{node.deferred ? "后续" : "待审"}</span>
+        <span className={`chip ${node.deferred && !node.autoPass ? "chip--ghost" : "chip--soft"}`}>{node.autoPass ? "自动通过" : node.deferred ? "后续" : "待审"}</span>
       </div>;
     })}</div> : null}
+    {!loading && !error && nodes.length > 0 && pendingCount === 0 ? <div className="approval-preview__notice">以上节点将自动通过，提交后无需人工审批</div> : null}
   </section>;
+}
+
+function isBlockingPreviewError(error: unknown): error is Error {
+  return isApiError(error) && ["FALLBACK_CONFIGURATION_REQUIRED", "FALLBACK_UNAVAILABLE"].includes(error.body.code);
 }
 
 function approvalModeLabel(mode: ApprovalPreviewNode['approvalMode']) {

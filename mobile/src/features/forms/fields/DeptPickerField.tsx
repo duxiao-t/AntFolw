@@ -1,7 +1,7 @@
 import { FolderOutline, RightOutline } from 'antd-mobile-icons';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { MobileFieldProps } from '../schema/types';
-import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary } from './fieldShared';
+import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
 import { fetchMobileDepartment, searchMobileDepartments, type MobilePickerDept } from '../files.api';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 
@@ -10,81 +10,72 @@ type PickerState = {
   keyword: string;
   loading: boolean;
   results: MobilePickerDept[];
-  selectedLabel: string;
-  selectedValue: number | null;
+  selectedIds: number[];
+  draftIds: number[];
+  departments: Record<number, MobilePickerDept>;
 };
 
 export function DeptPickerField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const endpoint = String(props.node.props?.searchEndpoint ?? '/api/mobile/departments');
-  const value = useMemo(() => numericValue(props.value), [props.value]);
+  const multiple = props.node.props?.multiple === true;
+  const maxCount = positiveInteger(props.node.props?.maxCount);
+  const valueIds = useMemo(() => departmentValues(props.value, multiple), [multiple, props.value]);
   const [state, setState] = useState<PickerState>({
     open: false,
     keyword: '',
     loading: false,
     results: [],
-    selectedLabel: value == null ? '' : `部门 #${value}`,
-    selectedValue: value,
+    selectedIds: valueIds,
+    draftIds: valueIds,
+    departments: {},
   });
 
   useEffect(() => {
-    setState((current) =>
-      current.selectedValue === value
-        ? current
-        : {
-            ...current,
-            selectedValue: value,
-            selectedLabel: value == null ? '' : `部门 #${value}`,
-          },
-    );
-  }, [value]);
+    setState((current) => sameIds(current.selectedIds, valueIds) ? current : {
+      ...current,
+      selectedIds: valueIds,
+      draftIds: current.open ? current.draftIds : valueIds,
+    });
+  }, [valueIds]);
 
   useEffect(() => {
-    if (value == null) {
-      return undefined;
-    }
+    if (state.selectedIds.length === 0) return;
     let active = true;
-    void fetchMobileDepartment(endpoint, value)
-      .then((department) => {
+    void Promise.all(state.selectedIds.map((id) =>
+      fetchMobileDepartment(endpoint, id).catch(() => fallbackDepartment(id))))
+      .then((departments) => {
         if (!active) return;
-        setState((current) => current.selectedValue !== value ? current : {
+        setState((current) => ({
           ...current,
-          selectedLabel: department.name,
-        });
-      })
-      .catch(() => {
-        if (!active) return;
-        setState((current) => current.selectedValue !== value ? current : {
-          ...current,
-          selectedLabel: `部门 #${value}`,
-        });
+          departments: {
+            ...current.departments,
+            ...Object.fromEntries(departments.map((department) => [department.id, department])),
+          },
+        }));
       });
     return () => { active = false; };
-  }, [endpoint, value]);
+  }, [endpoint, state.selectedIds]);
 
   useEffect(() => {
-    if (!state.open) {
-      return;
-    }
+    if (!state.open) return;
     let active = true;
     setState((current) => ({ ...current, loading: true }));
     searchMobileDepartments(endpoint, state.keyword)
       .then((results) => {
-        if (!active) {
-          return;
-        }
-        setState((current) => ({ ...current, loading: false, results }));
+        if (active) setState((current) => ({ ...current, loading: false, results }));
       })
       .catch(() => {
-        if (!active) {
-          return;
-        }
-        setState((current) => ({ ...current, loading: false, results: [] }));
+        if (active) setState((current) => ({ ...current, loading: false, results: [] }));
       });
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [endpoint, state.keyword, state.open]);
+
+  const selectedDepartments = state.selectedIds.map(
+    (id) => state.departments[id] ?? fallbackDepartment(id),
+  );
+  const selectedNames = selectedDepartments.map((department) => department.name).join('、');
+  const readonly = props.mode === 'readonly';
 
   return (
     <FieldShell
@@ -92,27 +83,44 @@ export function DeptPickerField(props: MobileFieldProps) {
       label={label}
       required={isRequired(props.node)}
       error={fieldError(props)}
-      summary={props.mode === 'readonly' ? readonlySummary(state.selectedLabel || value) : undefined}
+      summary={readonly ? <div className="af-field__summary">{selectedNames || '未填写'}</div> : undefined}
     >
-      {props.mode === 'readonly' ? null : (
+      {!readonly ? (
         <>
           <button
             type="button"
             className="control form-picker department-picker-control"
-            onClick={() => setState((current) => ({ ...current, open: true }))}
+            onClick={() => setState((current) => ({
+              ...current,
+              open: true,
+              keyword: '',
+              draftIds: current.selectedIds,
+            }))}
           >
             <span className="department-mark" aria-hidden="true">
-              {pickerInitial(state.selectedLabel || (value == null ? '' : String(value))) || <FolderOutline />}
+              {pickerInitial(selectedDepartments[0]?.name ?? '') || <FolderOutline />}
             </span>
-            <span className="picker-value">{state.selectedLabel || (value == null ? `选择${label}` : String(value))}</span>
+            <span className="picker-value">{selectedNames || `选择${label}`}</span>
             <RightOutline aria-hidden="true" />
           </button>
           {state.open ? (
             <MobileSelectionPopup
-              visible={state.open}
+              visible
               title={`选择${label}`}
-              subtitle="搜索部门名称后选择"
-              onClose={() => setState((current) => ({ ...current, open: false }))}
+              subtitle={multiple
+                ? `已选 ${state.draftIds.length}${maxCount ? ` / ${maxCount}` : ''} 个部门`
+                : '搜索部门名称后选择'}
+              onClose={closePicker}
+              footer={multiple ? (
+                <>
+                  <button type="button" className="btn btn--ghost btn--lg" onClick={closePicker}>
+                    取消
+                  </button>
+                  <button type="button" className="btn btn--success btn--lg" onClick={confirmPicker}>
+                    完成
+                  </button>
+                </>
+              ) : undefined}
             >
               <input
                 className="af-full-picker__search"
@@ -124,32 +132,38 @@ export function DeptPickerField(props: MobileFieldProps) {
                   setState((current) => ({ ...current, keyword: event.target.value }))}
               />
               {state.loading ? <div className="af-full-picker__hint">加载中</div> : null}
-              <div role="listbox" aria-label={label} className="af-full-picker__list">
+              <div
+                role="listbox"
+                aria-label={label}
+                aria-multiselectable={multiple || undefined}
+                className="af-full-picker__list"
+              >
                 {state.results.map((item) => {
                   const title = `${item.name} ${item.id}`;
+                  const checked = (multiple ? state.draftIds : state.selectedIds).includes(item.id);
+                  const disabled = multiple && !checked && maxCount != null
+                    && state.draftIds.length >= maxCount;
                   return (
                     <button
                       key={item.id}
                       type="button"
                       role="option"
                       aria-label={title}
-                      aria-selected={value === item.id}
+                      aria-selected={checked}
+                      disabled={disabled}
                       className="af-full-picker__option"
-                      onClick={() => {
-                        setState((current) => ({
-                          ...current,
-                          open: false,
-                          selectedLabel: item.name,
-                          selectedValue: item.id,
-                        }));
-                        props.onValueChange(props.node.id, item.id);
-                      }}
+                      onClick={() => selectDepartment(item)}
                     >
                       <span className="af-full-picker__avatar af-full-picker__avatar--dept" aria-hidden="true">{pickerInitial(item.name)}</span>
                       <span className="af-full-picker__option-text">
                         <strong>{title}</strong>
                         <small>{`部门编号 ${item.id}`}</small>
                       </span>
+                      {multiple ? (
+                        <span className="af-full-picker__option-status" aria-hidden="true">
+                          {checked ? '✓' : ''}
+                        </span>
+                      ) : null}
                     </button>
                   );
                 })}
@@ -160,13 +174,68 @@ export function DeptPickerField(props: MobileFieldProps) {
             </MobileSelectionPopup>
           ) : null}
         </>
-      )}
+      ) : null}
     </FieldShell>
   );
+
+  function closePicker() {
+    setState((current) => ({
+      ...current,
+      open: false,
+      keyword: '',
+      draftIds: current.selectedIds,
+    }));
+  }
+
+  function confirmPicker() {
+    const ids = state.draftIds;
+    setState((current) => ({ ...current, open: false, keyword: '', selectedIds: ids }));
+    props.onValueChange(props.node.id, ids);
+  }
+
+  function selectDepartment(department: MobilePickerDept) {
+    if (!multiple) {
+      setState((current) => ({
+        ...current,
+        open: false,
+        selectedIds: [department.id],
+        draftIds: [department.id],
+        departments: { ...current.departments, [department.id]: department },
+      }));
+      props.onValueChange(props.node.id, department.id);
+      return;
+    }
+    setState((current) => {
+      const checked = current.draftIds.includes(department.id);
+      if (!checked && maxCount != null && current.draftIds.length >= maxCount) return current;
+      return {
+        ...current,
+        draftIds: checked
+          ? current.draftIds.filter((id) => id !== department.id)
+          : [...current.draftIds, department.id],
+        departments: { ...current.departments, [department.id]: department },
+      };
+    });
+  }
 }
 
-function numericValue(value: unknown) {
-  return typeof value === 'number' ? value : null;
+export function departmentValues(value: unknown, multiple: boolean) {
+  const values = multiple ? (Array.isArray(value) ? value : [value]) : [value];
+  return [...new Set(values.filter((item): item is number =>
+    typeof item === 'number' && Number.isSafeInteger(item) && item > 0))]
+    .slice(0, multiple ? undefined : 1);
+}
+
+function positiveInteger(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function sameIds(left: number[], right: number[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function fallbackDepartment(id: number): MobilePickerDept {
+  return { id, name: `部门 #${id}` };
 }
 
 function pickerInitial(value: string) {

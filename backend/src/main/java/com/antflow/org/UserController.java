@@ -4,6 +4,8 @@ import com.antflow.authz.AuthorizationService;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -93,6 +95,18 @@ public class UserController {
                 Map.of("changedFields", List.of("password")), Map.of("sessionsRevoked", true)));
     }
 
+    @PutMapping("/{id}/login-access")
+    public User setLoginAccess(@PathVariable Long id,
+                               @Valid @RequestBody LoginAccessRequest request) {
+        authorizationService.requireAdmin();
+        return auditService.execute(
+            () -> userService.setWecomLoginAccess(id, request.enabled()),
+            user -> auditService.success("org.user.login_access.update", "USER", id,
+                AuditService.RiskLevel.CRITICAL,
+                Map.of("changedFields", List.of("loginAccess")),
+                Map.of("enabled", request.enabled(), "sessionsRevoked", !request.enabled())));
+    }
+
     @PostMapping("/import")
     public ImportResult importUsers(@RequestBody ImportRequest request) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
@@ -161,4 +175,5 @@ public class UserController {
     public record ImportResult(int successCount, int failedCount, String defaultPassword,
                                List<ImportFailure> failures) { }
     public record ManagerCandidate(Long id, String displayName, String employeeNo, Long deptId) { }
+    public record LoginAccessRequest(@NotNull Boolean enabled) { }
 }

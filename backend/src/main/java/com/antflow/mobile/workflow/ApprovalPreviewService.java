@@ -80,6 +80,7 @@ public class ApprovalPreviewService {
                 nodeName(node.node()),
                 WorkflowRuntimeV2.mode(node.node()),
                 node.deferred(),
+                node.autoPass(),
                 node.assignments().stream()
                     .map(WorkflowRuntimeV2.Assignment::actualUserId)
                     .distinct()
@@ -99,6 +100,7 @@ public class ApprovalPreviewService {
         authorizationService.requireFormAction(form.getId(), PermissionCodes.FORM_RUNTIME_READ);
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         if (process == null) return null;
+        processDefinitionService.requireNodeFallbackPolicy(process.getProcess());
         String processJson = processDefinitionService.normalizeConditionValues(
             process.getProcess(), form.getSchema());
         Map<String, Object> data = formDefinitionService.canonicalizeStarterSubmission(
@@ -139,6 +141,7 @@ public class ApprovalPreviewService {
 
     private List<PreviewNode> walk(JsonNode start, String parallelBoundaryId, boolean deferred,
                                    PreviewContext context) {
+        List<PreviewNode> result = new ArrayList<>();
         JsonNode node = start;
         boolean delayed = deferred;
         while (node != null && !node.isNull() && node.has("id")) {
@@ -149,7 +152,10 @@ public class ApprovalPreviewService {
                     parallelBoundaryId);
                 case "PARALLEL" -> {
                     List<PreviewNode> parallel = parallel(node, delayed, context);
-                    if (!parallel.isEmpty()) return parallel;
+                    result.addAll(parallel);
+                    if (parallel.stream().anyMatch(preview -> !preview.autoPass())) {
+                        return result;
+                    }
                     node = ProcessTreeNav.next(context.root(), node, parallelBoundaryId);
                 }
                 case "DELAY" -> {
@@ -177,17 +183,21 @@ public class ApprovalPreviewService {
                     }
                     if (runtimeV2.shouldAutoPassPreview(
                         context.root(), context.starterId(), assignees)) {
+                        long assignee = assignees.get(0);
+                        result.add(new PreviewNode(node, delayed, true,
+                            List.of(new WorkflowRuntimeV2.Assignment(assignee, assignee, 1))));
                         node = ProcessTreeNav.next(context.root(), node, parallelBoundaryId);
                         continue;
                     }
-                    return List.of(new PreviewNode(node, delayed,
+                    result.add(new PreviewNode(node, delayed, false,
                         runtimeV2.previewAssignments(context.formDefId(), node, assignees)));
+                    return result;
                 }
                 default -> throw new BizException("BAD_NODE_TYPE",
                     "未识别节点类型: " + node.path("type").asText());
             }
         }
-        return List.of();
+        return result;
     }
 
     private List<PreviewNode> parallel(JsonNode gateway, boolean deferred,
@@ -254,6 +264,9 @@ public class ApprovalPreviewService {
             }
         } catch (NoAssigneeFoundException exception) {
             assignees = runtimeV2.fallbackUsers(context.root(), node);
+            if (assignees.isEmpty() && runtimeV2.requiresNodeFallbackPolicy(context.root())) {
+                throw runtimeV2.fallbackUnavailable(node);
+            }
             if (assignees.isEmpty() && spec != null
                 && "DIRECT_MANAGER".equals(spec.type())) throw exception;
             if (assignees.isEmpty()
@@ -264,6 +277,9 @@ public class ApprovalPreviewService {
             if (assignees.isEmpty()) throw exception;
         }
         if (assignees.isEmpty()) assignees = runtimeV2.fallbackUsers(context.root(), node);
+        if (assignees.isEmpty() && runtimeV2.requiresNodeFallbackPolicy(context.root())) {
+            throw runtimeV2.fallbackUnavailable(node);
+        }
         if (assignees.isEmpty()) {
             throw new NoAssigneeFoundException(node.path("id").asText(), "no active assignee");
         }
@@ -328,7 +344,7 @@ public class ApprovalPreviewService {
                                   ProcessInstance reworkInstance) {
     }
 
-    private record PreviewNode(JsonNode node, boolean deferred,
+    private record PreviewNode(JsonNode node, boolean deferred, boolean autoPass,
                                List<WorkflowRuntimeV2.Assignment> assignments) {
     }
 }

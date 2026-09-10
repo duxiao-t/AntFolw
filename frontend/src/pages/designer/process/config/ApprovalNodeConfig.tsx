@@ -25,6 +25,11 @@ export function ApprovalNodeConfig({
   } | undefined) ?? { approve: [], reject: [] };
   const approvalMode = (p.mode as string | undefined) ?? 'OR';
   const fixedRejectTarget = ['AND', 'ALL', 'RATIO'].includes(approvalMode);
+  const fallback = (p.fallbackAssignee as {
+    type?: 'ROLE' | 'USER';
+    ids?: number[];
+  } | undefined) ?? { type: 'ROLE' as const, ids: [] };
+  const fallbackType = fallback.type === 'USER' ? 'USER' : 'ROLE';
 
   return (
     <Form layout="vertical" style={{ padding: 16 }}>
@@ -112,7 +117,7 @@ export function ApprovalNodeConfig({
             value={(p.fieldUser as { fieldId?: string })?.fieldId}
             placeholder="选择人员选择字段"
             options={formFields
-              .filter((field) => field.type === 'user_picker')
+              .filter((field) => field.type === 'user_picker' && !field.inTable)
               .map((field) => ({ value: field.id, label: field.label }))}
             onChange={(fieldId) => set({ fieldUser: { fieldId } })}
           />
@@ -148,27 +153,30 @@ export function ApprovalNodeConfig({
           />
         </Form.Item>
       )}
-      <Form.Item label="审批人为空时的兜底人员">
-        <AssigneePicker
-          mode="user"
-          value={(p.fallbackAssignee as { ids?: number[] })?.ids ?? []}
-          onChange={(ids) => set({ fallbackAssignee: { type: 'USER', ids } })}
+      <Form.Item
+        label="找不到审批人时，转交给"
+        extra="优先选择流程管理员或业务负责人角色；该对象不可用时会阻止本次流转。"
+      >
+        <Radio.Group
+          value={fallbackType}
+          onChange={(event) =>
+            set({ fallbackAssignee: { type: event.target.value, ids: [] } })
+          }
+          options={[
+            { value: 'ROLE', label: '角色' },
+            { value: 'USER', label: '指定成员' },
+          ]}
         />
       </Form.Item>
-      {p.assignedType !== 'DIRECT_MANAGER' && (
-        <Form.Item label="审批人为空时">
-          <Radio.Group
-            value={
-              ((p.nobody as { handler?: string })?.handler ?? 'TO_PASS') as string
-            }
-            onChange={(e) => set({ nobody: { handler: e.target.value } })}
-            options={[
-              { value: 'TO_PASS', label: '自动通过' },
-              { value: 'TO_REFUSE', label: '自动驳回' },
-            ]}
-          />
-        </Form.Item>
-      )}
+      <Form.Item label={fallbackType === 'ROLE' ? '兜底角色' : '兜底成员'}>
+        <AssigneePicker
+          mode={fallbackType === 'ROLE' ? 'role' : 'user'}
+          value={fallback.ids ?? []}
+          onChange={(ids) =>
+            set({ fallbackAssignee: { type: fallbackType, ids } })
+          }
+        />
+      </Form.Item>
       <Divider />
       <Form.Item label="超时后">
         <Select

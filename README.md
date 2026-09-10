@@ -111,6 +111,22 @@ bash deploy.sh --all
 
 不要执行 `docker compose down -v`，除非明确需要删除 PostgreSQL 和 MinIO 的全部本地数据。
 
+### 隔离测试 Docker
+
+需要基于当前 `antflow-local` 数据验证改动时，使用独立的测试栈：
+
+```bash
+bash scripts/test-docker.sh up
+```
+
+脚本会对正式 PostgreSQL 做只读逻辑导出、复制 MinIO 对象到 `antflow-test_*` 卷，
+并在副本中禁用外部登录、企业微信、消息队列、备份和所有调度任务。测试入口为
+<http://10.0.0.250:17070>，不会占用正式环境的端口或卷。测试环境默认保留；仅在不再需要时执行：
+
+```bash
+bash scripts/test-docker.sh destroy
+```
+
 系统设置中的“系统备份”每天默认 02:30 生成 PostgreSQL、附件和审计归档的
 AES-GCM 加密备份并保留 30 天，文件存放在宿主机 `backups/`。恢复必须停机执行：
 

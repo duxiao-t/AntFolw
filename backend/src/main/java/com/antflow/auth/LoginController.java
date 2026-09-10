@@ -48,11 +48,11 @@ public class LoginController {
 
     @PostMapping("/refresh")
     public Map<String, Object> refresh(
-            @CookieValue(name = AuthSessionService.REFRESH_COOKIE, required = false) String refreshToken,
-            @CookieValue(name = AuthSessionService.CSRF_COOKIE, required = false) String csrfCookie,
             @RequestHeader(name = "X-CSRF-Token", required = false) String csrfHeader,
             @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
             HttpServletRequest request, HttpServletResponse response) {
+        String refreshToken = cookie(request, sessionService.refreshCookieName());
+        String csrfCookie = cookie(request, sessionService.csrfCookieName());
         var authenticated = auditService.execute(
             () -> sessionService.refresh(refreshToken, csrfCookie, csrfHeader, request, response),
             result -> auditService.successAs(auditPrincipal(result), "auth.refresh", "USER",
@@ -62,10 +62,10 @@ public class LoginController {
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-            @CookieValue(name = AuthSessionService.REFRESH_COOKIE, required = false) String refreshToken,
-            @CookieValue(name = AuthSessionService.CSRF_COOKIE, required = false) String csrfCookie,
             @RequestHeader(name = "X-CSRF-Token", required = false) String csrfHeader,
             HttpServletRequest request, HttpServletResponse response) {
+        String refreshToken = cookie(request, sessionService.refreshCookieName());
+        String csrfCookie = cookie(request, sessionService.csrfCookieName());
         auditService.execute(
             () -> sessionService.logout(refreshToken, csrfCookie, csrfHeader, request, response),
             () -> auditService.success("auth.logout", "SESSION", null,
@@ -74,9 +74,9 @@ public class LoginController {
     }
 
     @GetMapping("/sessions")
-    public List<AuthSessionService.DeviceSessionDto> sessions(
-            @CookieValue(name = AuthSessionService.REFRESH_COOKIE, required = false) String refreshToken) {
-        return sessionService.list(principal().userId(), refreshToken);
+    public List<AuthSessionService.DeviceSessionDto> sessions(HttpServletRequest request) {
+        return sessionService.list(principal().userId(),
+            cookie(request, sessionService.refreshCookieName()));
     }
 
     @DeleteMapping("/sessions/{id}")
@@ -141,6 +141,15 @@ public class LoginController {
     private PrincipalHolder.Principal principal() {
         return PrincipalHolder.current().orElseThrow(() ->
             new org.springframework.security.access.AccessDeniedException("not authenticated"));
+    }
+
+    private static String cookie(HttpServletRequest request, String name) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) return null;
+        for (Cookie cookie : cookies) {
+            if (name.equals(cookie.getName())) return cookie.getValue();
+        }
+        return null;
     }
 
     public record LoginReq(String username, String password) {}

@@ -44,10 +44,21 @@ class WecomServiceRulesTest {
     void detectsDepartmentMovesButKeepsLocallySupplementedContacts() {
         WecomService.LocalUserState local = new WecomService.LocalUserState(
             7L, "u1", "u1", "13800000000", "local@example.com", "User", "", null,
-            "ACTIVE", "u1", 2L, null);
+            "ACTIVE", "u1", 1, true, null, 2L, null);
 
         assertThat(WecomService.changed(user(List.of(2L), 2), local)).isFalse();
         assertThat(WecomService.changed(user(List.of(1L), 1), local)).isTrue();
+    }
+
+    @Test
+    void appliesWecomLoginPolicyWithoutOverridingHardDisabledStates() {
+        assertThat(WecomService.effectiveUserStatus(1, null)).isEqualTo("ACTIVE");
+        assertThat(WecomService.effectiveUserStatus(1, false)).isEqualTo("DISABLED");
+        assertThat(WecomService.effectiveUserStatus(4, null)).isEqualTo("DISABLED");
+        assertThat(WecomService.effectiveUserStatus(4, true)).isEqualTo("ACTIVE");
+        assertThat(WecomService.effectiveUserStatus(2, true)).isEqualTo("DISABLED");
+        assertThat(WecomService.effectiveUserStatus(5, true)).isEqualTo("DISABLED");
+        assertThat(WecomService.effectiveUserStatus(99, true)).isEqualTo("DISABLED");
     }
 
     @Test

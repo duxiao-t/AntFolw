@@ -59,6 +59,9 @@ public class ApprovalHandler implements NodeHandler {
                 if (!assignees.isEmpty()) {
                     return landTasks(root, node, pi, ctx, assignees, "FALLBACK");
                 }
+                if (runtimeV2.requiresNodeFallbackPolicy(root)) {
+                    throw runtimeV2.fallbackUnavailable(node);
+                }
             }
             if (spec != null && "DIRECT_MANAGER".equals(spec.type())) throw e;
             String handler = node.path("props").path("nobody").path("handler").asText("TO_PASS");
@@ -74,6 +77,12 @@ public class ApprovalHandler implements NodeHandler {
         }
         if (runtimeV2 != null && runtimeV2.active(pi) && assignees.isEmpty()) {
             assignees = runtimeV2.fallbackUsers(root, node);
+            if (!assignees.isEmpty()) {
+                return landTasks(root, node, pi, ctx, assignees, "FALLBACK");
+            }
+            if (runtimeV2.requiresNodeFallbackPolicy(root)) {
+                throw runtimeV2.fallbackUnavailable(node);
+            }
         }
         return landTasks(root, node, pi, ctx, assignees, "RULE");
     }

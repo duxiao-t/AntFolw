@@ -191,6 +191,41 @@ class ProcessDefinitionServiceValidationTest {
         assertThatCode(() -> service.validateProcessTree(tree)).doesNotThrowAnyException();
     }
 
+    @Test void explicitFallbackPolicy_requires_each_approval_to_name_a_user_or_role() {
+        String missing = """
+            {"id":"root","type":"ROOT","props":{"fallbackPolicy":"NODE_REQUIRED"},
+             "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF"}}}
+            """;
+        String configured = """
+            {"id":"root","type":"ROOT","props":{"fallbackPolicy":"NODE_REQUIRED"},
+             "children":{"id":"a1","type":"APPROVAL","props":{"assignedType":"SELF",
+               "fallbackAssignee":{"type":"ROLE","ids":[7]}}}}
+            """;
+
+        assertThatThrownBy(() -> service.validateProcessTree(missing))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("转交指定人");
+        assertThatCode(() -> service.validateProcessTree(configured)).doesNotThrowAnyException();
+    }
+
+    @Test void cc_accepts_roles_and_personnel_fields_but_rejects_other_field_types() {
+        String role = """
+            {"id":"root","type":"ROOT","children":{"id":"cc","type":"CC",
+             "props":{"assignedType":"ROLE","role":[7]},"children":{"id":"a1",
+             "type":"APPROVAL","props":{"assignedType":"SELF"}}}}
+            """;
+        String field = role.replace("\"ROLE\",\"role\":[7]",
+            "\"FIELD_USER\",\"fieldUser\":{\"fieldId\":\"reviewers\"}");
+
+        assertThatCode(() -> service.validateProcessTree(role)).doesNotThrowAnyException();
+        assertThatCode(() -> service.validateProcessTree(field,
+            Map.of("reviewers", "user_picker"))).doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateProcessTree(field,
+            Map.of("reviewers", "text")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("表单抄送人字段");
+    }
+
     @Test void validate_accepts_delay_and_trigger_with_complete_configuration() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
@@ -505,9 +540,10 @@ class ProcessDefinitionServiceValidationTest {
         draft.setStatus("DRAFT");
         draft.setProcess("""
             {"id":"root","type":"ROOT","props":{"formPerms":[
-              {"fieldId":"subject","mode":"READONLY"}]},
+             {"fieldId":"subject","mode":"READONLY"}]},
              "children":{"id":"a1","type":"APPROVAL",
-              "props":{"assignedType":"SELF"}}}
+              "props":{"assignedType":"SELF",
+                "fallbackAssignee":{"type":"ROLE","ids":[1]}}}}
             """);
         when(mapper.selectById(12L)).thenReturn(draft);
         when(formService.getById(7L)).thenReturn(form);
@@ -518,6 +554,35 @@ class ProcessDefinitionServiceValidationTest {
             .isInstanceOf(BizException.class)
             .hasMessageContaining("只读必填字段 subject")
             .hasMessageContaining("默认值");
+    }
+
+    @Test void publishAllowsOptionalDynamicApprovalPersonFieldWhenStarterCanFillIt() {
+        ProcessDefinitionMapper mapper = Mockito.mock(ProcessDefinitionMapper.class);
+        FormDefinitionService formService = Mockito.mock(FormDefinitionService.class);
+        ProcessDefinitionService publishService =
+            new ProcessDefinitionService(mapper, formService, new ObjectMapper());
+        FormDefinition form = new FormDefinition();
+        form.setId(7L);
+        form.setStatus("PUBLISHED");
+        form.setSchema("""
+            [{"id":"reviewers","type":"user_picker","props":{"required":false}}]
+            """);
+        ProcessDefinition draft = new ProcessDefinition();
+        draft.setId(12L);
+        draft.setFormDefId(7L);
+        draft.setVersion(1);
+        draft.setStatus("DRAFT");
+        draft.setProcess("""
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+             "props":{"assignedType":"FIELD_USER","fieldUser":{"fieldId":"reviewers"},
+               "fallbackAssignee":{"type":"ROLE","ids":[1]}}}}
+            """);
+        when(mapper.selectById(12L)).thenReturn(draft);
+        when(formService.getById(7L)).thenReturn(form);
+        when(formService.leafFieldTypes(form.getSchema()))
+            .thenReturn(Map.of("reviewers", "user_picker"));
+
+        assertThatCode(() -> publishService.publish(12L)).doesNotThrowAnyException();
     }
 
     private static String conditionalTree(String value) {

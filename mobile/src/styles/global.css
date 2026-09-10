@@ -1244,8 +1244,11 @@ body {
 .confirm-row__detail-json { margin: 0; color: var(--af-color-text-secondary); font: inherit; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .confirm-row__detail-json { overflow: auto; }
 .confirm-summary-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.confirm-summary-tags--end { justify-content: flex-end; }
 .confirm-summary-tags span { max-width: 100%; padding: 4px 8px; border-radius: var(--af-radius-pill); background: color-mix(in srgb, var(--af-color-primary) 8%, var(--af-color-surface)); color: var(--af-color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .confirm-summary-people { display: grid; gap: 10px; }
+.confirm-summary-people--end { justify-items: end; text-align: right; }
+.confirm-summary-people--end .confirm-summary-person { max-width: 100%; text-align: right; }
 .confirm-summary-person { display: grid; gap: 2px; }
 .confirm-summary-person strong { color: var(--af-color-text); font-size: 13px; }
 .confirm-summary-person small { color: var(--af-color-muted); font-size: 11px; overflow-wrap: anywhere; }

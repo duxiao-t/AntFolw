@@ -22,13 +22,21 @@ export function ApprovalNode({ node }: { node: TreeNode }) {
             ? `制单人的第 ${props.manager?.level ?? 1} 级直属上级`
             : props.assignedType === 'SELF'
               ? '发起人本人'
-              : '发起人自选';
+              : props.assignedType === 'FIELD_USER'
+                ? '表单中的人员'
+                : '发起人自选';
+  const fallback = props.fallbackAssignee;
+  const fallbackSummary = fallback?.type === 'ROLE'
+    ? `兜底角色 ${fallback.ids?.length ?? 0} 个`
+    : fallback?.type === 'USER'
+      ? `兜底成员 ${fallback.ids?.length ?? 0} 人`
+      : '兜底待配置';
   return (
     <NodeCard
       node={node}
       kind="approval"
       icon={<UserSwitchOutlined />}
-      summary={`${summary} · ${modeLabel}`}
+      summary={`${summary} · ${modeLabel} · ${fallbackSummary}`}
     />
   );
 }

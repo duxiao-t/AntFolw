@@ -66,13 +66,6 @@ export function RootNodeConfig({
           }
         />
       </Form.Item>
-      <Form.Item label="流程兜底审批人">
-        <AssigneePicker
-          mode="user"
-          value={(p.fallbackAssignee as { ids?: number[] })?.ids ?? []}
-          onChange={(ids) => set({ fallbackAssignee: { type: 'USER', ids } })}
-        />
-      </Form.Item>
       <Divider />
       <Form.Item label="发起人字段权限">
         <FieldPermissionEditor

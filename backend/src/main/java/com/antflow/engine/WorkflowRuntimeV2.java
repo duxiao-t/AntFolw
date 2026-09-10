@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class WorkflowRuntimeV2 {
+    private static final int MAX_FALLBACK_ASSIGNEES = 100;
     private final JdbcTemplate jdbc;
     private final DefinitionVersionRepository versions;
     private final ObjectMapper json;
@@ -137,7 +138,7 @@ public class WorkflowRuntimeV2 {
                 VALUES (?, ?, ?, ?, 'WAITING', ?)
                 ON CONFLICT (node_instance_id, responsible_user_id, sequence_no) DO NOTHING
                 """, context.nodeInstanceId(), responsible, actual, sequence,
-                actual == responsible ? source : "DELEGATION");
+                actual == responsible ? source : source + "_DELEGATION");
             result.add(assignment);
         }
         String mode = mode(node);
@@ -204,15 +205,31 @@ public class WorkflowRuntimeV2 {
         return activeUsers(new ArrayList<>(ids));
     }
 
+    /** Resolves non-blocking CC recipients; invalid or unavailable values intentionally disappear. */
+    public List<Long> ccUsers(JsonNode node, NodeContext context) {
+        JsonNode props = node.path("props");
+        return switch (props.path("assignedType").asText("ASSIGN_USER")) {
+            case "ASSIGN_USER" -> activeUsers(readIds(props.path("assignedUser")));
+            case "ROLE" -> roleUsers(readIds(props.path("role")));
+            case "FIELD_USER" -> fieldUsers(node, context);
+            default -> List.of();
+        };
+    }
+
     public List<Long> fallbackUsers(JsonNode root, JsonNode node) {
         JsonNode fallback = node.path("props").path("fallbackAssignee");
-        if (!fallback.isObject()) fallback = settings(root).path("fallbackAssignee");
+        boolean nodePolicy = hasNodeFallbackPolicy(root);
+        if (!fallback.isObject() && !nodePolicy) fallback = settings(root).path("fallbackAssignee");
         List<Long> result = switch (fallback.path("type").asText()) {
             case "USER" -> activeUsers(readIds(fallback.path("ids")));
             case "ROLE" -> roleUsers(readIds(fallback.path("ids")));
             default -> List.of();
         };
-        if (!result.isEmpty()) return result;
+        if (result.size() > MAX_FALLBACK_ASSIGNEES) {
+            throw new BizException("ROLE_ASSIGNEE_TOO_MANY",
+                "兜底角色成员数量超过上限 " + MAX_FALLBACK_ASSIGNEES);
+        }
+        if (!result.isEmpty() || nodePolicy) return result;
         return jdbc.queryForList("""
             SELECT DISTINCT user_row.id
             FROM t_user user_row
@@ -221,6 +238,15 @@ public class WorkflowRuntimeV2 {
             WHERE role.code = 'admin' AND role.enabled = true AND user_row.status = 'ACTIVE'
             ORDER BY user_row.id
             """, Long.class);
+    }
+
+    public BizException fallbackUnavailable(JsonNode node) {
+        return new BizException("FALLBACK_UNAVAILABLE", "审批节点 " + node.path("id").asText()
+            + " 的兜底对象当前不可用，请修复配置后重试");
+    }
+
+    public boolean requiresNodeFallbackPolicy(JsonNode root) {
+        return hasNodeFallbackPolicy(root);
     }
 
     public boolean shouldAutoPass(JsonNode root, ProcessInstance instance, List<Long> users) {
@@ -396,21 +422,33 @@ public class WorkflowRuntimeV2 {
     }
 
     public void outbox(long instanceId, Long recipientId, String type, Long taskId) {
+        outbox(instanceId, recipientId, type, taskId, null);
+    }
+
+    private void outbox(long instanceId, Long recipientId, String type, Long taskId,
+                        Integer roundNo) {
         jdbc.update("""
             INSERT INTO t_workflow_outbox(
                 aggregate_type, aggregate_id, event_type, recipient_id, payload)
             VALUES ('PROCESS_INSTANCE', ?, ?, ?,
-                    jsonb_build_object('instanceId', ?::bigint, 'taskId', ?::bigint))
-            """, instanceId, type, recipientId, instanceId, taskId);
+                    jsonb_strip_nulls(jsonb_build_object(
+                        'instanceId', ?::bigint, 'taskId', ?::bigint, 'roundNo', ?::int)))
+            """, instanceId, type, recipientId, instanceId, taskId, roundNo);
     }
 
     public void recordCc(ProcessInstance instance, Long nodeInstanceId, long recipientId) {
         if (!active(instance)) return;
-        jdbc.update("""
+        int created = jdbc.update("""
             INSERT INTO t_cc_record(proc_inst_id, node_instance_id, recipient_id)
             VALUES (?, ?, ?) ON CONFLICT (node_instance_id, recipient_id) DO NOTHING
             """, instance.getId(), nodeInstanceId, recipientId);
-        outbox(instance.getId(), recipientId, "CC_ASSIGNED", null);
+        if (created == 0) return;
+        int roundNo = instance.getRoundNo() == null ? 1 : instance.getRoundNo();
+        int claimed = jdbc.update("""
+            INSERT INTO t_cc_notification_batch(proc_inst_id, round_no, recipient_id)
+            VALUES (?, ?, ?) ON CONFLICT (proc_inst_id, round_no, recipient_id) DO NOTHING
+            """, instance.getId(), roundNo, recipientId);
+        if (claimed > 0) outbox(instance.getId(), recipientId, "CC_ASSIGNED", null, roundNo);
     }
 
     public void registerParallelBranch(ProcessInstance instance, Long gatewayNodeInstanceId,
@@ -482,10 +520,6 @@ public class WorkflowRuntimeV2 {
             JOIN t_user manager ON manager.id = assignee.manager_id AND manager.status = 'ACTIVE'
             WHERE assignee.id = ?
             """, rs -> rs.next() ? rs.getLong(1) : null, task.getAssigneeId());
-        if (manager == null) {
-            List<Long> fallback = fallbackUsers(json.createObjectNode(), json.createObjectNode());
-            manager = fallback.isEmpty() ? null : fallback.get(0);
-        }
         if (manager == null || Objects.equals(manager, task.getAssigneeId())) {
             timeoutReminder(job, task);
             return;
@@ -1009,6 +1043,10 @@ public class WorkflowRuntimeV2 {
     private static JsonNode settings(JsonNode root) {
         JsonNode nested = root.path("props").path("settings");
         return nested.isObject() ? nested : root.path("props");
+    }
+
+    private static boolean hasNodeFallbackPolicy(JsonNode root) {
+        return "NODE_REQUIRED".equals(root.path("props").path("fallbackPolicy").asText());
     }
 
     private static List<Long> readIds(JsonNode values) {

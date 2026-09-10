@@ -411,6 +411,7 @@ public class WecomService {
         List<LocalUserState> localUsers = jdbc.query("""
             SELECT u.id, u.username, u.employee_no, u.phone, u.email, u.display_name,
                    u.position, u.gender, u.status, m.wecom_user_id,
+                   m.wecom_status, m.directory_present, m.login_enabled_override,
                    COALESCE(department_mapping.wecom_department_id, 0), u.manager_id
             FROM t_user u
             JOIN t_department d ON d.id = u.dept_id
@@ -422,7 +423,8 @@ public class WecomService {
             """, (rs, rowNum) -> new LocalUserState(rs.getLong(1), rs.getString(2),
                 rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
                 rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10),
-                rs.getLong(11), (Long) rs.getObject(12)),
+                (Integer) rs.getObject(11), (Boolean) rs.getObject(12),
+                (Boolean) rs.getObject(13), rs.getLong(14), (Long) rs.getObject(15)),
             companyId, companyId, companyId);
         for (LocalUserState state : localUsers) {
             context.usernameOwners.put(state.username(), state.id());
@@ -454,7 +456,19 @@ public class WecomService {
             || !sameWhenProvided(local.phone(), external.phone())
             || !sameWhenProvided(local.email(), external.email())
             || !Objects.equals(gender(local.gender()), gender(external.gender()))
+            || !Objects.equals(local.wecomStatus(), external.status())
+            || !Boolean.TRUE.equals(local.directoryPresent())
+            || !Objects.equals(local.status(), effectiveUserStatus(
+                external.status(), local.loginEnabledOverride()))
             || !sameDepartment(local, external);
+    }
+
+    static String effectiveUserStatus(int wecomStatus, Boolean loginEnabledOverride) {
+        if (wecomStatus == 1) {
+            return Boolean.FALSE.equals(loginEnabledOverride) ? "DISABLED" : "ACTIVE";
+        }
+        if (wecomStatus == 4 && Boolean.TRUE.equals(loginEnabledOverride)) return "ACTIVE";
+        return "DISABLED";
     }
 
     private static boolean sameWhenProvided(String local, String external) {
@@ -491,7 +505,7 @@ public class WecomService {
                 String password = passwords.encode(DEFAULT_WECOM_PASSWORD);
                 inserts.add(new Object[]{departmentId, employeeNo, username, password,
                     displayName(user), email(user), phone(user), position(user), gender(user.gender()),
-                    user.status() == 1 ? "ACTIVE" : "DISABLED"});
+                    effectiveUserStatus(user.status(), null)});
                 insertedUsernames.add(username);
                 insertedIndexes.add(index);
                 created++;
@@ -503,8 +517,7 @@ public class WecomService {
                 updates.add(new Object[]{username,
                     existingMapping ? null : passwords.encode(DEFAULT_WECOM_PASSWORD),
                     employeeNo, departmentId, displayName(user), phone(user), email(user),
-                    position(user), gender(user.gender()),
-                    user.status() == 1 ? "ACTIVE" : "DISABLED", localId});
+                    position(user), gender(user.gender()), localId});
                 updated++;
             }
         }
@@ -536,12 +549,21 @@ public class WecomService {
         for (WecomUser user : batch) {
             Long id = context.mappedIds.get(user.userId());
             if (id == null) throw new SyncUserException("成员映射缺失");
-            mappings.add(new Object[]{companyId, user.userId(), id});
+            mappings.add(new Object[]{companyId, user.userId(), id, user.status()});
         }
         jdbc.batchUpdate("""
-            INSERT INTO t_wecom_user_mapping(company_id, wecom_user_id, user_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT (company_id, wecom_user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            INSERT INTO t_wecom_user_mapping(
+                company_id, wecom_user_id, user_id, wecom_status, directory_present)
+            VALUES (?, ?, ?, ?, true)
+            ON CONFLICT (company_id, wecom_user_id) DO UPDATE
+            SET user_id = EXCLUDED.user_id,
+                wecom_status = EXCLUDED.wecom_status,
+                directory_present = true,
+                login_enabled_override = CASE
+                    WHEN EXCLUDED.wecom_status IN (1, 4)
+                    THEN t_wecom_user_mapping.login_enabled_override
+                    ELSE NULL
+                END
             """, mappings);
         if (!updates.isEmpty()) {
             jdbc.batchUpdate("""
@@ -549,11 +571,45 @@ public class WecomService {
                     employee_no = ?, dept_id = ?, display_name = ?,
                     phone = COALESCE(NULLIF(?, ''), phone),
                     email = COALESCE(NULLIF(?, ''), email),
-                    position = ?, gender = ?, status = ?
+                    position = ?, gender = ?
                 WHERE id = ?
                 """, updates);
         }
+        applyLoginStatus(companyId, batch.stream()
+            .map(user -> context.mappedIds.get(user.userId()))
+            .filter(Objects::nonNull).distinct().toList());
         return new int[]{created, updated};
+    }
+
+    private void applyLoginStatus(long companyId, List<Long> userIds) {
+        if (userIds.isEmpty()) return;
+        String placeholders = String.join(",", Collections.nCopies(userIds.size(), "?"));
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(companyId);
+        arguments.addAll(userIds);
+        jdbc.update("""
+            WITH account_status AS (
+                UPDATE t_user user_row
+                SET status = CASE
+                    WHEN mapping.directory_present AND mapping.wecom_status = 1
+                         AND mapping.login_enabled_override IS DISTINCT FROM false THEN 'ACTIVE'
+                    WHEN mapping.directory_present AND mapping.wecom_status = 4
+                         AND mapping.login_enabled_override IS true THEN 'ACTIVE'
+                    ELSE 'DISABLED'
+                END
+                FROM t_wecom_user_mapping mapping
+                WHERE mapping.company_id = ?
+                  AND mapping.user_id = user_row.id
+                  AND user_row.id IN (%s)
+                RETURNING user_row.id, user_row.status
+            )
+            UPDATE t_auth_session session
+            SET revoked_at = now()
+            WHERE session.revoked_at IS NULL
+              AND session.user_id IN (
+                  SELECT id FROM account_status WHERE status = 'DISABLED'
+              )
+            """.formatted(placeholders), arguments.toArray());
     }
 
     private static Long matchLocal(SyncContext context, String phone, String email) {
@@ -730,17 +786,42 @@ public class WecomService {
     private int deactivateMissing(long companyId, List<WecomUser> externalUsers) {
         Set<String> externalIds = externalUsers.stream()
             .map(WecomUser::userId).collect(Collectors.toSet());
-        List<Object[]> targets = jdbc.query("""
-            SELECT wecom_user_id, user_id FROM t_wecom_user_mapping WHERE company_id = ?
-            """, (rs, rowNum) -> new Object[]{rs.getString(1), rs.getLong(2)}, companyId)
-            .stream()
-            .filter(row -> !externalIds.contains((String) row[0]))
-            .map(row -> new Object[]{row[1]})
-            .toList();
-        if (targets.isEmpty()) return 0;
-        jdbc.batchUpdate(
-            "UPDATE t_user SET status = 'DISABLED' WHERE id = ? AND status <> 'DISABLED'", targets);
-        return targets.size();
+        Integer disabled = transactions.execute(status -> {
+            List<Object[]> targets = jdbc.query("""
+                SELECT wecom_user_id, user_id
+                FROM t_wecom_user_mapping
+                WHERE company_id = ? AND directory_present
+                FOR UPDATE
+                """, (rs, rowNum) -> new Object[]{rs.getString(1), rs.getLong(2)}, companyId)
+                .stream()
+                .filter(row -> !externalIds.contains((String) row[0]))
+                .toList();
+            if (targets.isEmpty()) return 0;
+            List<Long> userIds = targets.stream().map(row -> (Long) row[1]).distinct().toList();
+            String placeholders = String.join(",", Collections.nCopies(userIds.size(), "?"));
+            List<Object> arguments = new ArrayList<>();
+            arguments.add(companyId);
+            arguments.addAll(userIds);
+            jdbc.update("""
+                WITH missing AS (
+                    UPDATE t_wecom_user_mapping
+                    SET directory_present = false, login_enabled_override = NULL
+                    WHERE company_id = ? AND user_id IN (%s)
+                    RETURNING user_id
+                ), disabled_users AS (
+                    UPDATE t_user user_row
+                    SET status = 'DISABLED'
+                    WHERE user_row.id IN (SELECT user_id FROM missing)
+                    RETURNING user_row.id
+                )
+                UPDATE t_auth_session session
+                SET revoked_at = now()
+                WHERE session.revoked_at IS NULL
+                  AND session.user_id IN (SELECT id FROM disabled_users)
+                """.formatted(placeholders), arguments.toArray());
+            return userIds.size();
+        });
+        return disabled == null ? 0 : disabled;
     }
 
     private Map<Long, Long> syncDepartments(long companyId, List<WecomDepartment> departments) {
@@ -1099,7 +1180,9 @@ public class WecomService {
     static record LocalUserState(long id, String username, String employeeNo, String phone,
                                  String email, String displayName, String position,
                                  String gender, String status, String wecomUserId,
-                                 long wecomDepartmentId, Long managerId) { }
+                                 Integer wecomStatus, Boolean directoryPresent,
+                                 Boolean loginEnabledOverride, long wecomDepartmentId,
+                                 Long managerId) { }
     private static final class SyncContext {
         final Map<String, Long> mappedIds = new HashMap<>();
         final Map<String, List<Long>> byPhone = new HashMap<>();

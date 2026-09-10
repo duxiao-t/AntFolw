@@ -15,7 +15,7 @@ export function ProcessTree({
 }) {
   const process = useProcessDesignerStore((state) => state.process);
   const issues = useMemo(
-    () => validateProcessTree(process, formFields),
+    () => validateProcessTree(process, formFields, true),
     [process, formFields],
   );
   return (

@@ -126,7 +126,7 @@ export function ProcessDesignerSurface({
   }, [formDef, formFields, process, reconcileFormFields]);
   const validationFields = formDef ? formFields : undefined;
   const issues = useMemo(
-    () => validateProcessTree(process, validationFields),
+    () => validateProcessTree(process, validationFields, true),
     [process, validationFields],
   );
 
@@ -243,7 +243,9 @@ export function ProcessDesignerSurface({
             rejectTargets={upstreamApprovals(process, selected.id)}
           />
         )}
-        {selected?.type === 'CC' && <CcNodeConfig node={selected} />}
+        {selected?.type === 'CC' && (
+          <CcNodeConfig node={selected} formFields={formFields} />
+        )}
         {selected?.type === 'CONDITION' && (
           <ConditionNodeConfig node={selected} formFields={conditionFormFields} />
         )}

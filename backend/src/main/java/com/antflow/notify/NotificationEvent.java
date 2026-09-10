@@ -21,15 +21,23 @@ public class NotificationEvent extends ApplicationEvent {
     private final Long taskId;
     private final Long userId;       // 接收人（task assignee / starter / delegator）
     private final String message;   // 人类可读消息
+    private final String deliveryKey;
 
     public NotificationEvent(Object source, String type, Long procInstId,
                               Long taskId, Long userId, String message) {
+        this(source, type, procInstId, taskId, userId, message, null);
+    }
+
+    /** Stable channel key for events that have no task id, such as a CC round. */
+    public NotificationEvent(Object source, String type, Long procInstId,
+                              Long taskId, Long userId, String message, String deliveryKey) {
         super(source);
         this.type = type;
         this.procInstId = procInstId;
         this.taskId = taskId;
         this.userId = userId;
         this.message = message;
+        this.deliveryKey = deliveryKey;
     }
 
     public String getType() { return type; }
@@ -37,4 +45,5 @@ public class NotificationEvent extends ApplicationEvent {
     public Long getTaskId() { return taskId; }
     public Long getUserId() { return userId; }
     public String getMessage() { return message; }
+    public String getDeliveryKey() { return deliveryKey; }
 }

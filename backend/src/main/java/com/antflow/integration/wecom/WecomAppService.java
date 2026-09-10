@@ -200,8 +200,11 @@ public class WecomAppService implements NotificationListener {
 
     @Override
     public void onEvent(NotificationEvent event) {
-        String key = String.join(":", event.getType(), String.valueOf(event.getProcInstId()),
-            String.valueOf(event.getTaskId()), String.valueOf(event.getUserId()));
+        String key = event.getDeliveryKey();
+        if (key == null || key.isBlank()) {
+            key = String.join(":", event.getType(), String.valueOf(event.getProcInstId()),
+                String.valueOf(event.getTaskId()), String.valueOf(event.getUserId()));
+        }
         jdbc.update("""
             INSERT INTO t_wecom_message_delivery(
                 dedupe_key, event_type, proc_inst_id, task_id, recipient_id, title)
@@ -396,7 +399,7 @@ public class WecomAppService implements NotificationListener {
             case "TASK_RETURNED" -> "申请已退回修改";
             case "TASK_CANCELLED" -> "审批任务已作废";
             case "APPROVAL_INVALIDATED" -> "您的审批已作废";
-            case "CC_ASSIGNED" -> "您收到一条抄送";
+            case "CC_ASSIGNED" -> "您收到本轮抄送汇总";
             case "TASK_TIMEOUT_REMINDER" -> "审批任务即将超时";
             case "INSTANCE_APPROVED" -> "流程已审批通过";
             case "INSTANCE_REJECTED" -> "流程已被驳回";

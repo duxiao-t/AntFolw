@@ -100,9 +100,11 @@ public class ProcessDefinitionService {
         }
 
         pd.setProcess(normalizeConditionValuesForPublish(pd.getProcess(), fd.getSchema()));
+        pd.setProcess(applyNodeFallbackPolicyForPublish(pd.getProcess()));
         validateProcessTree(pd.getProcess(),
             formDefinitionService.leafFieldTypes(fd.getSchema()));
         validateStarterReadonlyDefaults(pd.getProcess(), fd.getSchema());
+        validateDynamicUserFields(pd.getProcess(), fd.getSchema());
 
         pd.setStatus("PUBLISHED");
         pd.setVersion(pd.getVersion() + 1);
@@ -127,6 +129,63 @@ public class ProcessDefinitionService {
 
     public List<ProcessDefinition> list() {
         return mapper.selectList(null);
+    }
+
+    /** New definitions must opt in to explicit, per-node fallback handling. */
+    public void requireNodeFallbackPolicy(String processJson) {
+        try {
+            JsonNode root = json.readTree(processJson == null ? "{}" : processJson);
+            if (!hasNodeFallbackPolicy(root)) {
+                throw new BizException("FALLBACK_CONFIGURATION_REQUIRED",
+                    "流程尚未配置每个审批节点的兜底对象，请重新配置并发布");
+            }
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException("BAD_FLOW_JSON", e.getMessage());
+        }
+    }
+
+    private String applyNodeFallbackPolicyForPublish(String processJson) {
+        try {
+            JsonNode parsed = json.readTree(processJson == null ? "{}" : processJson);
+            if (!(parsed instanceof ObjectNode root) || !"ROOT".equals(root.path("type").asText())) {
+                throw new BizException("BAD_FLOW", "流程必须以 ROOT 节点开始");
+            }
+            ObjectNode props = objectProps(root);
+            props.put("fallbackPolicy", "NODE_REQUIRED");
+            props.remove("fallbackAssignee");
+            removeLegacyFallbackSettings(root, true);
+            return json.writeValueAsString(root);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException("BAD_FLOW_JSON", e.getMessage());
+        }
+    }
+
+    private ObjectNode objectProps(ObjectNode node) {
+        JsonNode value = node.get("props");
+        if (value instanceof ObjectNode props) return props;
+        ObjectNode props = json.createObjectNode();
+        node.set("props", props);
+        return props;
+    }
+
+    private void removeLegacyFallbackSettings(JsonNode node, boolean root) {
+        if (!(node instanceof ObjectNode object)) return;
+        JsonNode props = object.get("props");
+        if (props instanceof ObjectNode values) {
+            if (root) {
+                values.remove("fallbackAssignee");
+                if (values.path("settings") instanceof ObjectNode settings) {
+                    settings.remove("fallbackAssignee");
+                }
+            }
+            if ("APPROVAL".equals(object.path("type").asText())) values.remove("nobody");
+        }
+        object.path("branchs").forEach(branch -> removeLegacyFallbackSettings(branch, false));
+        removeLegacyFallbackSettings(object.path("children"), false);
     }
 
     /** 将选项条件严格规范化为 Schema 中的真实 value；兼容唯一精确匹配的旧 label。 */
@@ -320,10 +379,11 @@ public class ProcessDefinitionService {
             if (!"ROOT".equals(root.path("type").asText())) {
                 throw new BizException("BAD_FLOW", "流程必须以 ROOT 节点开始");
             }
-            if (!walk(root, new HashSet<>(), fieldTypes, 1)) {
+            boolean nodeFallbackPolicy = hasNodeFallbackPolicy(root);
+            if (!walk(root, new HashSet<>(), fieldTypes, 1, nodeFallbackPolicy)) {
                 throw new BizException("BAD_FLOW", "审批流程至少需要 1 个审批节点");
             }
-            validateRootSettings(root);
+            validateRootSettings(root, nodeFallbackPolicy);
             validateFormPerms(root, fieldTypes, true);
             validateRejectTargets(root, root);
         } catch (BizException e) {
@@ -334,7 +394,8 @@ public class ProcessDefinitionService {
     }
 
     private boolean walk(com.fasterxml.jackson.databind.JsonNode n, Set<String> ids,
-                         Map<String, String> fieldTypes, int depth) {
+                         Map<String, String> fieldTypes, int depth,
+                         boolean nodeFallbackPolicy) {
         if (n == null || n.isNull() || !n.has("id")) return false;
         ensureTreeDepth(n, depth);
         registerId(n, ids);
@@ -342,9 +403,9 @@ public class ProcessDefinitionService {
         String type = n.path("type").asText();
         switch (type) {
             case "ROOT", "EMPTY" -> {}
-            case "CC" -> validateCc(n);
+            case "CC" -> validateCc(n, fieldTypes);
             case "APPROVAL" -> {
-                validateApproval(n, fieldTypes);
+                validateApproval(n, fieldTypes, nodeFallbackPolicy);
                 hasApprovalNode = true;
             }
             case "DELAY" -> validateDelay(n);
@@ -366,7 +427,8 @@ public class ProcessDefinitionService {
                     } else {
                         validateCondition(b);
                     }
-                    hasApprovalNode = walk(b.path("children"), ids, fieldTypes, depth + 2)
+                    hasApprovalNode = walk(b.path("children"), ids, fieldTypes, depth + 2,
+                        nodeFallbackPolicy)
                         || hasApprovalNode;
                 }
                 if (defaultCount != 1) {
@@ -416,7 +478,8 @@ public class ProcessDefinitionService {
                     if (inner == null || inner.isNull() || !inner.has("id")) {
                         throw new BizException("BAD_FLOW", "并行分支不能为空");
                     }
-                    hasApprovalNode = walkParallelBranch(inner, ids, fieldTypes, depth + 2)
+                    hasApprovalNode = walkParallelBranch(inner, ids, fieldTypes, depth + 2,
+                        nodeFallbackPolicy)
                         || hasApprovalNode;
                 }
                 if (n.path("children") == null || n.path("children").isNull()
@@ -426,14 +489,15 @@ public class ProcessDefinitionService {
             }
             default -> throw new BizException("BAD_NODE_TYPE", "未知节点类型: " + type);
         }
-        return walk(n.path("children"), ids, fieldTypes, depth + 1) || hasApprovalNode;
+        return walk(n.path("children"), ids, fieldTypes, depth + 1, nodeFallbackPolicy)
+            || hasApprovalNode;
     }
 
     /** 并行分支沿完整流程树递归校验，允许嵌套分支和自动化节点。 */
     private boolean walkParallelBranch(com.fasterxml.jackson.databind.JsonNode n,
                                        Set<String> ids, Map<String, String> fieldTypes,
-                                       int depth) {
-        return walk(n, ids, fieldTypes, depth);
+                                       int depth, boolean nodeFallbackPolicy) {
+        return walk(n, ids, fieldTypes, depth, nodeFallbackPolicy);
     }
 
     private void ensureTreeDepth(com.fasterxml.jackson.databind.JsonNode node, int depth) {
@@ -449,10 +513,27 @@ public class ProcessDefinitionService {
         }
     }
 
-    private void validateCc(com.fasterxml.jackson.databind.JsonNode n) {
-        if (!n.path("props").path("assignedUser").isArray()
-            || n.path("props").path("assignedUser").isEmpty()) {
-            throw new BizException("BAD_FLOW", "抄送节点 " + n.path("id").asText() + " 未配置抄送人");
+    private void validateCc(com.fasterxml.jackson.databind.JsonNode n,
+                            Map<String, String> fieldTypes) {
+        var props = n.path("props");
+        String assignedType = props.path("assignedType").asText("ASSIGN_USER");
+        boolean empty = switch (assignedType) {
+            case "ASSIGN_USER" -> !props.path("assignedUser").isArray()
+                || props.path("assignedUser").isEmpty();
+            case "ROLE" -> !props.path("role").isArray() || props.path("role").isEmpty();
+            case "FIELD_USER" -> props.path("fieldUser").path("fieldId").asText().isBlank();
+            default -> true;
+        };
+        if (empty) {
+            throw new BizException("BAD_FLOW", "抄送节点 " + n.path("id").asText()
+                + " 未配置抄送人");
+        }
+        if ("FIELD_USER".equals(assignedType)) {
+            String fieldId = props.path("fieldUser").path("fieldId").asText();
+            if (!"user_picker".equals(fieldTypes.get(fieldId))) {
+                throw new BizException("BAD_FLOW", "抄送节点 " + n.path("id").asText()
+                    + " 的表单抄送人字段必须是人员选择字段");
+            }
         }
     }
 
@@ -566,7 +647,8 @@ public class ProcessDefinitionService {
         }
     }
     private void validateApproval(com.fasterxml.jackson.databind.JsonNode n,
-                                  Map<String, String> fieldTypes) {
+                                  Map<String, String> fieldTypes,
+                                  boolean nodeFallbackPolicy) {
         com.fasterxml.jackson.databind.JsonNode p = n.path("props");
         String at = p.path("assignedType").asText();
         boolean empty = switch (at) {
@@ -616,9 +698,31 @@ public class ProcessDefinitionService {
                 throw new BizException("BAD_FLOW", "比例签通过比例必须为 1 到 100");
             }
         }
+        if (nodeFallbackPolicy) validateFallbackAssignee(n);
         validateTimeout(n);
         validateFormPerms(n, fieldTypes, false);
         validateCommentPresets(n);
+    }
+
+    private void validateFallbackAssignee(com.fasterxml.jackson.databind.JsonNode node) {
+        var fallback = node.path("props").path("fallbackAssignee");
+        String type = fallback.path("type").asText();
+        if (!fallback.isObject() || !Set.of("USER", "ROLE").contains(type)
+            || !fallback.path("ids").isArray() || fallback.path("ids").isEmpty()) {
+            throw new BizException("BAD_FLOW", "审批节点 " + node.path("id").asText()
+                + " 必须配置转交指定人兜底对象");
+        }
+        for (var id : fallback.path("ids")) {
+            boolean valid = id.isIntegralNumber() && id.asLong() > 0;
+            if (!valid && id.isTextual()) {
+                try { valid = Long.parseLong(id.asText()) > 0; }
+                catch (NumberFormatException ignored) { }
+            }
+            if (!valid) {
+                throw new BizException("BAD_FLOW", "审批节点 " + node.path("id").asText()
+                    + " 的兜底对象包含无效 ID");
+            }
+        }
     }
 
     private void validateTimeout(com.fasterxml.jackson.databind.JsonNode node) {
@@ -636,7 +740,8 @@ public class ProcessDefinitionService {
         }
     }
 
-    private void validateRootSettings(com.fasterxml.jackson.databind.JsonNode root) {
+    private void validateRootSettings(com.fasterxml.jackson.databind.JsonNode root,
+                                      boolean nodeFallbackPolicy) {
         var settings = root.path("props").path("settings");
         if (!settings.isObject()) settings = root.path("props");
         String strategy = settings.path("resubmitStrategy").asText("FULL");
@@ -644,12 +749,85 @@ public class ProcessDefinitionService {
             throw new BizException("BAD_FLOW", "重提策略必须是 FULL 或 DIFF_CONTINUE");
         }
         var fallback = settings.path("fallbackAssignee");
-        if (!fallback.isMissingNode() && !fallback.isNull()
+        if (nodeFallbackPolicy && !fallback.isMissingNode() && !fallback.isNull()) {
+            throw new BizException("BAD_FLOW", "流程级兜底已废止，请在每个审批节点配置转交对象");
+        }
+        if (!nodeFallbackPolicy && !fallback.isMissingNode() && !fallback.isNull()
             && (!fallback.isObject()
                 || !Set.of("USER", "ROLE").contains(fallback.path("type").asText())
                 || !fallback.path("ids").isArray() || fallback.path("ids").isEmpty())) {
             throw new BizException("BAD_FLOW", "兜底审批人必须配置用户或角色");
         }
+    }
+
+    private static boolean hasNodeFallbackPolicy(JsonNode root) {
+        return "NODE_REQUIRED".equals(root.path("props").path("fallbackPolicy").asText());
+    }
+
+    /** Dynamic personnel references are evaluated against starter data, never table rows. */
+    private void validateDynamicUserFields(String processJson, String schema) {
+        try {
+            JsonNode root = json.readTree(processJson == null ? "{}" : processJson);
+            Set<String> topLevelUserFields = new HashSet<>();
+            collectTopLevelUserFields(json.readTree(schema == null ? "[]" : schema),
+                topLevelUserFields);
+            validateDynamicUserFields(root, root, topLevelUserFields);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException("BAD_FLOW", "表单人员字段校验失败: " + e.getMessage());
+        }
+    }
+
+    private void collectTopLevelUserFields(JsonNode nodes, Set<String> fields) {
+        if (!nodes.isArray()) return;
+        for (JsonNode node : nodes) {
+            String type = node.path("type").asText();
+            if ("table_list".equals(type)) continue;
+            if ("span_layout".equals(type)) {
+                collectTopLevelUserFields(node.path("children"), fields);
+                continue;
+            }
+            if ("user_picker".equals(type) && !node.path("id").asText().isBlank()) {
+                fields.add(node.path("id").asText());
+            }
+        }
+    }
+
+    private void validateDynamicUserFields(JsonNode node, JsonNode root,
+                                           Set<String> topLevelUserFields) {
+        if (node == null || node.isNull() || !node.has("id")) return;
+        String nodeType = node.path("type").asText();
+        String assignedType = node.path("props").path("assignedType").asText();
+        if (("APPROVAL".equals(nodeType) || "CC".equals(nodeType))
+            && "FIELD_USER".equals(assignedType)) {
+            String fieldId = node.path("props").path("fieldUser").path("fieldId").asText();
+            if (!topLevelUserFields.contains(fieldId)) {
+                throw new BizException("BAD_FLOW", ("APPROVAL".equals(nodeType) ? "审批" : "抄送")
+                    + "节点 " + node.path("id").asText()
+                    + " 的人员字段必须是发起人可见的顶层人员选择字段");
+            }
+            if ("APPROVAL".equals(nodeType)) {
+                if (!"EDITABLE".equals(starterFieldMode(root, fieldId))) {
+                    throw new BizException("BAD_FLOW", "审批节点 " + node.path("id").asText()
+                        + " 的表单审批人字段必须是发起人可填写的人员选择字段");
+                }
+            }
+        }
+        node.path("branchs").forEach(branch ->
+            validateDynamicUserFields(branch, root, topLevelUserFields));
+        validateDynamicUserFields(node.path("children"), root, topLevelUserFields);
+    }
+
+    private static String starterFieldMode(JsonNode root, String fieldId) {
+        JsonNode permissions = root.path("props").path("formPerms");
+        if (!permissions.isArray()) return "EDITABLE";
+        for (JsonNode entry : permissions) {
+            if (fieldId.equals(entry.path("fieldId").asText())) {
+                return entry.path("mode").asText("EDITABLE");
+            }
+        }
+        return "EDITABLE";
     }
 
     private void validateRejectTargets(com.fasterxml.jackson.databind.JsonNode root,

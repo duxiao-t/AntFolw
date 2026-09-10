@@ -198,6 +198,26 @@ class OperationAuditControllerTest {
                 "password", "never-audit-this");
     }
 
+    @Test
+    void userLoginAccessChangeIsAuditedAsCritical() {
+        UserService service = Mockito.mock(UserService.class);
+        AuthorizationService authorization = Mockito.mock(AuthorizationService.class);
+        AuditService auditService = mockAuditService();
+        UserController controller = new UserController(Mockito.mock(UserMapper.class), service,
+            authorization, auditService);
+        User user = new User();
+        user.setId(71L);
+        user.setStatus("ACTIVE");
+        when(service.setWecomLoginAccess(71L, true)).thenReturn(user);
+
+        controller.setLoginAccess(71L, new UserController.LoginAccessRequest(true));
+
+        verify(authorization).requireAdmin();
+        verify(auditService).success(eq("org.user.login_access.update"), eq("USER"), eq(71L),
+            eq(AuditService.RiskLevel.CRITICAL), any(),
+            eq(Map.of("enabled", true, "sessionsRevoked", false)));
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static ArgumentCaptor<Map<String, ?>> mapCaptor() {
         return (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);

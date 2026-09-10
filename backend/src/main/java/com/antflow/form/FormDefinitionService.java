@@ -616,6 +616,9 @@ public class FormDefinitionService {
         if (required && isEmpty(value)) {
             throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " is required");
         }
+        if ("dept_picker".equals(type) && !isEmpty(value)) {
+            validateDepartmentPickerValue(node, value);
+        }
         int maxLength = rules.path("maxLength").asInt(props.path("maxLength").asInt(-1));
         if (maxLength > -1 && value instanceof String s && s.length() > maxLength) {
             throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " exceeds maxLength");
@@ -1100,6 +1103,37 @@ public class FormDefinitionService {
             || (value instanceof String s && s.isBlank())
             || (value instanceof List<?> list && list.isEmpty())
             || (value instanceof Map<?, ?> map && map.isEmpty());
+    }
+
+    private void validateDepartmentPickerValue(JsonNode node, Object value) {
+        boolean multiple = node.path("props").path("multiple").asBoolean(false);
+        if (!multiple && value instanceof List<?>) {
+            throw invalidDepartmentPickerValue(node);
+        }
+        List<?> ids = value instanceof List<?> list ? list : List.of(value);
+        if (ids.stream().anyMatch(id -> !isPositiveIntegralId(id))) {
+            throw invalidDepartmentPickerValue(node);
+        }
+        int maxCount = node.path("props").path("maxCount").asInt(-1);
+        if (multiple && maxCount > 0 && ids.size() > maxCount) {
+            throw new BizException("FORM_DATA_INVALID",
+                node.path("label").asText(node.path("id").asText()) + " exceeds maxCount");
+        }
+    }
+
+    private BizException invalidDepartmentPickerValue(JsonNode node) {
+        return new BizException("FORM_DATA_INVALID",
+            node.path("label").asText(node.path("id").asText())
+                + " must contain positive department ids");
+    }
+
+    private static boolean isPositiveIntegralId(Object value) {
+        if (!(value instanceof Number number)) return false;
+        try {
+            return new java.math.BigDecimal(number.toString()).longValueExact() > 0;
+        } catch (ArithmeticException | NumberFormatException error) {
+            return false;
+        }
     }
 
     private void validateStatus(String status) {

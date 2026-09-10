@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -246,6 +247,109 @@ class UserServiceTest {
         assertEquals("encoded", user.getPasswordHash());
         verify(userMapper).updateById(user);
         verify(sessions).revokeAll(9L);
+    }
+
+    @Test
+    void administratorCanAllowUnactivatedWecomUserToLogin() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            jdbcTemplate, authorizationService);
+        User user = user(9L, 10L, null, "DISABLED");
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
+            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserService.WecomLoginState>>any(),
+            eq(9L))).thenReturn(new UserService.WecomLoginState(1L, 4, true));
+
+        User updated = service.setWecomLoginAccess(9L, true);
+
+        assertEquals("ACTIVE", updated.getStatus());
+        verify(jdbcTemplate).update(contains("login_enabled_override = ?"),
+            eq(true), eq(1L), eq(9L));
+        verify(userMapper).updateById(user);
+    }
+
+    @Test
+    void disablingWecomLoginRevokesExistingSessions() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        UserService service = new UserService(userMapper, userRoleMapper,
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            jdbcTemplate, Mockito.mock(FormalNumberService.class),
+            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class));
+        User user = user(9L, 10L, null, "ACTIVE");
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
+            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserService.WecomLoginState>>any(),
+            eq(9L))).thenReturn(new UserService.WecomLoginState(1L, 1, true));
+
+        service.setWecomLoginAccess(9L, false);
+
+        assertEquals("DISABLED", user.getStatus());
+        verify(sessions).revokeAll(9L);
+    }
+
+    @Test
+    void hardDisabledWecomUserCannotBeManuallyAllowed() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            jdbcTemplate);
+        when(userMapper.selectById(9L)).thenReturn(user(9L, 10L, null, "DISABLED"));
+        when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
+            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserService.WecomLoginState>>any(),
+            eq(9L))).thenReturn(new UserService.WecomLoginState(1L, 2, true));
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.setWecomLoginAccess(9L, true));
+
+        assertEquals("WECOM_LOGIN_ACCESS_LOCKED", error.getCode());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void nonAdministratorCannotChangeWecomLoginAccess() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            Mockito.mock(JdbcTemplate.class), authorizationService);
+        doThrow(new org.springframework.security.access.AccessDeniedException("denied"))
+            .when(authorizationService).requireAdmin();
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+            () -> service.setWecomLoginAccess(9L, true));
+
+        verify(userMapper, never()).selectById(any());
+    }
+
+    @Test
+    void genericStatusUpdateCannotBypassWecomLoginPolicy() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            jdbcTemplate);
+        when(userMapper.selectById(9L)).thenReturn(user(9L, 10L, null, "DISABLED"));
+        when(jdbcTemplate.queryForObject(contains("SELECT EXISTS"), eq(Boolean.class), eq(9L)))
+            .thenReturn(true);
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.update(9L, Map.of("status", "ACTIVE")));
+
+        assertEquals("WECOM_LOGIN_ACCESS_REQUIRED", error.getCode());
+        verify(userMapper, never()).updateById(any(User.class));
     }
     @Test
     void deleteClearsUserAssociationsBeforeRemovingUser() {

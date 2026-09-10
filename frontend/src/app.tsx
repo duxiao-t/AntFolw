@@ -29,10 +29,11 @@ import { errorConfig } from './requestErrorConfig';
 const isDev = process.env.NODE_ENV === 'development' || process.env.UMI_ENV === 'dev';
 const loginPath = '/user/login';
 const TOKEN_KEY = 'antflow-token';
+const CSRF_COOKIE_NAME = process.env.ANTFLOW_AUTH_CSRF_COOKIE_NAME || 'antflow-csrf';
 
 async function restoreCookieSession(): Promise<boolean> {
   const csrf = document.cookie.split('; ')
-    .find((entry) => entry.startsWith('antflow-csrf='))?.split('=').slice(1).join('=');
+    .find((entry) => entry.startsWith(`${CSRF_COOKIE_NAME}=`))?.split('=').slice(1).join('=');
   if (!csrf) return false;
   try {
     const response = await fetch('/api/auth/refresh', {

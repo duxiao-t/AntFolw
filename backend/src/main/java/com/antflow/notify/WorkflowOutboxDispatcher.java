@@ -67,7 +67,7 @@ public class WorkflowOutboxDispatcher {
                     event.payload());
             }
             publisher.publishReliable(new NotificationEvent(this, event.type(), event.instanceId(),
-                taskId, event.recipientId(), title(event.type())));
+                taskId, event.recipientId(), title(event.type()), deliveryKey(event, payload)));
             jdbc.update("""
                 UPDATE t_workflow_outbox
                 SET status = 'DELIVERED', delivered_at = now(),
@@ -94,7 +94,7 @@ public class WorkflowOutboxDispatcher {
             case "TASK_RETURNED" -> "申请已退回修改";
             case "TASK_CANCELLED" -> "审批任务已作废";
             case "APPROVAL_INVALIDATED" -> "您的审批已作废";
-            case "CC_ASSIGNED" -> "您收到一条抄送";
+            case "CC_ASSIGNED" -> "您收到本轮抄送汇总";
             case "INSTANCE_APPROVED" -> "流程已审批通过";
             case "INSTANCE_REJECTED" -> "流程已被驳回";
             default -> "流程状态已更新";
@@ -103,6 +103,15 @@ public class WorkflowOutboxDispatcher {
 
     private static Long nullableLong(Object value) {
         return value == null ? null : ((Number) value).longValue();
+    }
+
+    private static String deliveryKey(Event event, JsonNode payload) {
+        if (!"CC_ASSIGNED".equals(event.type()) || event.recipientId() == null
+            || !payload.path("roundNo").canConvertToInt()) {
+            return null;
+        }
+        return "CC_ASSIGNED:" + event.instanceId() + ":" + payload.path("roundNo").asInt()
+            + ":" + event.recipientId();
     }
 
     record Event(UUID id, long instanceId, String type, Long recipientId,
