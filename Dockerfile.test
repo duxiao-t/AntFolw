@@ -9,6 +9,9 @@ ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 FROM nginx:1.28-alpine AS web
 
 COPY infra/docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY frontend/dist/ /usr/share/nginx/html/
-COPY mobile/dist/ /usr/share/nginx/html/mobile/
+COPY frontend/dist-test/ /usr/share/nginx/html/
+COPY mobile/dist-test/ /usr/share/nginx/html/mobile/
+RUN grep -q "antflow-test-csrf" /usr/share/nginx/html/*.js \
+    && grep -R -q "antflow-test-csrf" /usr/share/nginx/html/mobile/assets/ \
+    && ! grep -R -q "antflow-csrf=" /usr/share/nginx/html/
 EXPOSE 80

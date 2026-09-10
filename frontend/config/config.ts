@@ -11,6 +11,7 @@ const { UMI_ENV = 'dev' } = process.env;
 const production = process.env.NODE_ENV === 'production';
 const recordRequests = process.env.REQUEST_RECORD === 'true';
 const authCsrfCookieName = process.env.ANTFLOW_AUTH_CSRF_COOKIE_NAME || 'antflow-csrf';
+const outputPath = process.env.ANTFLOW_OUTPUT_PATH || 'dist';
 
 // Compute commit hash: env vars take precedence, fall back to git at build time
 const commitHash =
@@ -56,6 +57,7 @@ export default defineConfig({
   },
 
   publicPath: PUBLIC_PATH,
+  outputPath,
 
   /**
    * @name 兼容性设置

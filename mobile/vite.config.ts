@@ -1,6 +1,8 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+const outputPath = process.env.ANTFLOW_OUTPUT_PATH || 'dist';
+
 export default defineConfig({
   base: '/mobile/',
   plugins: [react()],
@@ -13,6 +15,7 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: outputPath,
     manifest: true,
     // Keep default minification; budget is enforced on gzip via scripts/check-bundle-budget.mjs
   },

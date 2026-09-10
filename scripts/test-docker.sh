@@ -80,16 +80,25 @@ build_artifacts() {
     docker run --rm -v "$ROOT/frontend:/workspace" -w /workspace node:22-bookworm \
       npm ci --no-audit --no-fund
   fi
-  docker run --rm -e ANTFLOW_AUTH_CSRF_COOKIE_NAME=antflow-test-csrf \
+  docker run --rm \
+    -e ANTFLOW_OUTPUT_PATH=dist-test \
+    -e ANTFLOW_AUTH_CSRF_COOKIE_NAME=antflow-test-csrf \
     -v "$ROOT/frontend:/workspace" -w /workspace node:22-bookworm \
     npm run build
   if [[ ! -x "$ROOT/mobile/node_modules/.bin/vite" ]]; then
     docker run --rm -v "$ROOT/mobile:/workspace" -w /workspace node:22-bookworm \
       npm ci --no-audit --no-fund
   fi
-  docker run --rm -e VITE_AUTH_CSRF_COOKIE_NAME=antflow-test-csrf \
+  docker run --rm \
+    -e ANTFLOW_OUTPUT_PATH=dist-test \
+    -e VITE_AUTH_CSRF_COOKIE_NAME=antflow-test-csrf \
     -v "$ROOT/mobile:/workspace" -w /workspace node:22-bookworm \
     npm run build
+  if ! grep -Rqs 'antflow-test-csrf' "$ROOT/frontend/dist-test" \
+      || ! grep -Rqs 'antflow-test-csrf' "$ROOT/mobile/dist-test"; then
+    echo 'Test frontend artifacts use the wrong CSRF cookie name.' >&2
+    return 1
+  fi
 }
 
 clone_database() {

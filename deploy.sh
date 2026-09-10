@@ -165,13 +165,15 @@ main() {
     if (( deps_frontend )) || [[ ! -d frontend/node_modules ]]; then
       npm --prefix frontend ci --prefer-offline --no-audit --no-fund
     fi
-    npm --prefix frontend run build
+    ANTFLOW_OUTPUT_PATH=dist ANTFLOW_AUTH_CSRF_COOKIE_NAME=antflow-csrf \
+      npm --prefix frontend run build
   fi
   if (( build_mobile )); then
     if (( deps_mobile )) || [[ ! -d mobile/node_modules ]]; then
       npm --prefix mobile ci --prefer-offline --no-audit --no-fund
     fi
-    npm --prefix mobile run build
+    ANTFLOW_OUTPUT_PATH=dist VITE_AUTH_CSRF_COOKIE_NAME=antflow-csrf \
+      npm --prefix mobile run build
   fi
   if (( build_backend )); then
     bash backend/build.sh -Dmaven.test.skip=true package
