@@ -6,7 +6,6 @@ import {
   firstAccessiblePath,
   navToMenuData,
   pageAllowed,
-  registeredPageKeys,
 } from '../registry';
 
 const readCodes = (key: string) =>
@@ -17,13 +16,15 @@ describe('page registry', () => {
     expect(readCodes('org.contacts')).toEqual([
       'org:company:read', 'org:department:read', 'org:user:read',
     ]);
-    const page = PAGES.find((item) => item.key === 'org.contacts')!;
+    const page = PAGES.find((item) => item.key === 'org.contacts');
+    if (!page) throw new Error('org.contacts page is missing');
     expect(pageAllowed(page, ['user'], ['org:company:read', 'org:user:read'])).toBe(false);
-    expect(pageAllowed(page, ['user'], readCodes('org.contacts'))).toBe(true);
+    expect(pageAllowed(page, ['user'], [CONSOLE_ENTRY, ...readCodes('org.contacts')])).toBe(true);
   });
 
   it('keeps 工作台 open for anyone who can enter the console', () => {
-    const workplace = PAGES.find((page) => page.key === 'workplace')!;
+    const workplace = PAGES.find((page) => page.key === 'workplace');
+    if (!workplace) throw new Error('workplace page is missing');
     expect(workplace.readCapabilities).toEqual([]);
     expect(pageAllowed(workplace, ['employee'], [CONSOLE_ENTRY])).toBe(true);
   });
@@ -40,10 +41,6 @@ describe('page registry', () => {
     // 工作台没有额外只读能力要求，因此只要能进管理端就排在第一位
     expect(firstAccessiblePath(['auditor'], [CONSOLE_ENTRY, 'audit:event:read']))
       .toBe('/workplace');
-  });
-
-  it('exposes exactly the registered page keys for menu saving', () => {
-    expect(registeredPageKeys()).toEqual(PAGES.map((page) => page.key));
   });
 
   it('skips menu entries whose pageKey is unknown to this frontend build', () => {

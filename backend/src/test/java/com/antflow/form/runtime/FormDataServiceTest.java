@@ -2,6 +2,7 @@ package com.antflow.form.runtime;
 
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.FormGrantService;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.common.FormalNumberService;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
@@ -23,6 +24,7 @@ import java.util.UUID;
 import com.antflow.mobile.workflow.MobileFileRef;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 
 class FormDataServiceTest {
@@ -35,6 +37,7 @@ class FormDataServiceTest {
     private FormDataService service;
     private MobileFileLinkService fileLinkService;
     private MobileDraftService draftService;
+    private AuthorizationService authorizationService;
 
     @BeforeEach
     void setUp() {
@@ -46,11 +49,13 @@ class FormDataServiceTest {
             Mockito.mock(FormGrantService.class));
         fileLinkService = Mockito.mock(MobileFileLinkService.class);
         draftService = Mockito.mock(MobileDraftService.class);
+        authorizationService = Mockito.mock(AuthorizationService.class);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
-            formalNumberService, Mockito.mock(AuthorizationService.class), userMapper,
+            formalNumberService, authorizationService, userMapper,
             formDefinitionMapper, fileLinkService, draftService);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
+        Mockito.when(authorizationService.currentUserId()).thenReturn(7L);
         Mockito.when(formDataMapper.insert(any(FormData.class))).thenAnswer(invocation -> {
             FormData data = invocation.getArgument(0);
             data.setId(100L);
@@ -78,6 +83,8 @@ class FormDataServiceTest {
         assertThat(json.readTree(saved.getData()).path("applicant").asText()).isEqualTo("张三");
         assertThat(json.readTree(saved.getData()).path("reason").asText()).isEqualTo("报销");
         assertThat(json.readTree(saved.getData()).has("row")).isFalse();
+        Mockito.verify(authorizationService).requireFormAction(10L,
+            PermissionCodes.FORM_RUNTIME_READ);
     }
 
     @Test
@@ -100,6 +107,17 @@ class FormDataServiceTest {
             Map.of("applicant", "张三", "reason", "报销"), 7L, List.of(), 101L);
 
         Mockito.verify(draftService).deleteAfterSubmit(101L, 10L, 7L);
+    }
+
+    @Test
+    void directSubmitRejectsMismatchedCaller() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+        Mockito.when(authorizationService.currentUserId()).thenReturn(8L);
+
+        assertThatThrownBy(() -> service.submit("expense", "SUBMITTED",
+            Map.of("applicant", "张三", "reason", "报销"), 7L))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
     }
 
     @Test

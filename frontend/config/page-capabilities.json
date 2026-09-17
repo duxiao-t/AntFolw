@@ -1,0 +1,19 @@
+{
+  "workplace": [],
+  "org.contacts": ["org:company:read", "org:department:read", "org:user:read"],
+  "approval.forms": ["form:definition:read"],
+  "approval.records": ["workflow:instance:read"],
+  "approval.monitor": ["workflow:monitor:read"],
+  "report.center": ["form:data:read"],
+  "report.view": ["form:data:read"],
+  "report.export": ["form:data:export"],
+  "security.roles": ["security:role:read"],
+  "security.user-permissions": ["security:user_role:read"],
+  "security.audit-log": ["audit:event:read"],
+  "security.menu": ["security:menu:manage"],
+  "settings.company": ["org:company:read"],
+  "settings.s3": ["integration:storage:manage"],
+  "settings.wecom": ["integration:wecom:manage"],
+  "settings.identity-providers": ["integration:identity_provider:manage"],
+  "settings.backup": ["system:backup:manage"]
+}

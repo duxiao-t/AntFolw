@@ -48,7 +48,8 @@ class MapperSqlParseGuardTest {
 
     @Test
     void generatedPermissionFragmentsAreParseable() {
-        var scope = new AuthorizationService.DataScopeFilter(false, true, 42L, java.util.Set.of(3L, 5L));
+        var scope = new AuthorizationService.DataScopeFilter(
+            false, false, true, 42L, java.util.Set.of(3L, 5L));
         List.of(DataPermissionRules.FORM_DATA, DataPermissionRules.FORM_DEFINITION).forEach(rule ->
             assertThatCode(() -> CCJSqlParserUtil.parseCondExpression(
                 DataPermissionPolicyHandler.buildSegment(

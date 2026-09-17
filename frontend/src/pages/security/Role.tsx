@@ -24,6 +24,7 @@ import {
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import { useEffect, useMemo, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../authz';
 import './Security.less';
 
 type Permission = {
@@ -93,7 +94,7 @@ export default function RolePage() {
     | { roles?: string[]; permissions?: string[] }
     | undefined;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const canWrite = isAdmin || (currentUser?.permissions ?? []).includes('security:role:manage');
+  const canWrite = hasCapability(currentUser, CAPABILITY.securityRoleManage);
 
   const load = async () => {
     const [roleRows, permissionRows] = await Promise.all([

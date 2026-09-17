@@ -4,6 +4,8 @@ import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.FormGrantService;
 import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.authz.RoleAdminService;
 import com.antflow.engine.BizException;
 import com.antflow.engine.NoAssigneeFoundException;
@@ -12,9 +14,13 @@ import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormProcessPublishService;
 import com.antflow.form.FormDefinitionMapper;
+import com.antflow.form.FormDefinitionService;
+import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
+import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.navigation.MenuService;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.User;
@@ -42,6 +48,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -60,6 +68,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest(properties = {
@@ -68,7 +77,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     "antflow.automation.recovery-interval-ms=3600000",
     "antflow.outbox.poll-interval-ms=3600000",
     "antflow.wecom.schedule-poll-interval-ms=3600000",
-    "antflow.mobile.files.storage=test"
+    "antflow.mobile.files.storage=test",
+    "antflow.jwt.secret=test-secret-0123456789-test-secret-0123456789"
 })
 @Import(PostgresTransactionalIntegrityIntegrationTest.TestFileStorageConfig.class)
 class PostgresTransactionalIntegrityIntegrationTest {
@@ -144,6 +154,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private DataSource dataSource;
     @Autowired private ProcessEngine processEngine;
     @Autowired private UserService userService;
     @Autowired private AuditService auditService;
@@ -156,6 +167,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private RoleAdminService roleAdminService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
     @Autowired private FormDataService formDataService;
+    @Autowired private FormDataMapper formDataMapper;
+    @Autowired private FormDefinitionService formDefinitionService;
+    @Autowired private MobileDraftService mobileDraftService;
+    @Autowired private MenuService menuService;
     @Autowired private WecomService wecomService;
 
     @Test
@@ -166,19 +181,239 @@ class PostgresTransactionalIntegrityIntegrationTest {
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
         long draftId = insertDraft(formId, adminId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
+                List.of(), draftId);
 
-        formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
-            List.of(), draftId);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
 
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
+            long invalidDraftId = insertDraft(formId, adminId);
+            assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
+                List.of(), invalidDraftId)).isInstanceOf(BizException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, invalidDraftId))
+                .isEqualTo(1L);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
 
-        long invalidDraftId = insertDraft(formId, adminId);
-        assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
-            List.of(), invalidDraftId)).isInstanceOf(BizException.class);
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, invalidDraftId))
+    @Test
+    void allScopeStillRequiresFormGrantForFormDataPage() {
+        long userId = insertUser("all-scope-" + UUID.randomUUID());
+        long roleId = insertRole("all_scope_" + UUID.randomUUID().toString().replace("-", ""));
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long dataId = insertSubmittedData(formId, userId("admin"));
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, 'form:data:read', 'ALL')
+                """, roleId);
+            setPrincipal(userId);
+
+            Page<com.antflow.form.runtime.FormData> hidden = formDataService.authorizedPage(
+                1, 20, null, null, null, userId, false);
+            assertThat(hidden.getTotal()).isZero();
+            assertThat(hidden.getRecords()).isEmpty();
+
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'USER', ?, ?)
+                """, formId, userId, userId("admin"));
+            Page<com.antflow.form.runtime.FormData> visible = formDataService.authorizedPage(
+                1, 20, null, null, null, userId, false);
+            assertThat(visible.getRecords()).extracting(com.antflow.form.runtime.FormData::getId)
+                .contains(dataId);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void directSubmissionRequiresGrantAndDraftListRemainsSelfService() {
+        long userId = insertUser("direct-submit-" + UUID.randomUUID());
+        long allowedForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long deniedForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long deniedDraft = insertDraft(deniedForm, userId);
+        assignRole(userId, roleId("employee"));
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+            VALUES (?, 'USER', ?, ?)
+            """, allowedForm, userId, userId("admin"));
+        String allowedCode = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, allowedForm);
+        String deniedCode = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, deniedForm);
+        try {
+            setPrincipal(userId);
+            assertThat(mobileDraftService.list(userId))
+                .extracting(com.antflow.mobile.workflow.MobileDraftDto::id)
+                .containsExactly(deniedDraft);
+            assertThat(mobileDraftService.count(userId)).isEqualTo(1L);
+
+            assertThatThrownBy(() -> formDataService.submit(deniedCode, "SUBMITTED",
+                Map.of("subject", "blocked"), userId, List.of(), deniedDraft))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, deniedDraft))
+                .isEqualTo(1L);
+
+            FormDataService.SubmitResult submitted = formDataService.submit(allowedCode,
+                "SUBMITTED", Map.of("subject", "allowed"), userId, List.of());
+            assertThat(submitted.dataId()).isNotNull();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id IN (?, ?)",
+                allowedForm, deniedForm);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
+                allowedForm, deniedForm);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
+                allowedForm, deniedForm);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void formDefinitionListAndActionsShareGrantAndScopePredicate() {
+        long userId = insertUser("form-scope-" + UUID.randomUUID());
+        long roleId = insertRole("form_scope_" + UUID.randomUUID().toString().replace("-", ""));
+        long ownForm = insertForm("DRAFT", VALID_SCHEMA, userId);
+        long otherForm = insertForm("DRAFT", VALID_SCHEMA);
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, 'form:definition:read', 'SELF'),
+                       (?, 'form:definition:manage', 'SELF')
+                """, roleId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)
+                """, ownForm, userId, userId("admin"),
+                otherForm, userId, userId("admin"));
+            setPrincipal(userId);
+
+            Page<FormDefinitionMapper.Summary> page = formDefinitionService.list(
+                1, 100, null, null, userId, false);
+            assertThat(page.getRecords()).extracting(FormDefinitionMapper.Summary::id)
+                .contains(ownForm).doesNotContain(otherForm);
+            page.getRecords().forEach(row -> authorizationService.requireFormAction(
+                row.id(), PermissionCodes.FORM_DEFINITION_READ));
+            assertThatCode(() -> authorizationService.requireFormAction(
+                ownForm, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
+            assertThatThrownBy(() -> authorizationService.requireFormAction(
+                otherForm, PermissionCodes.FORM_DEFINITION_MANAGE))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
+                ownForm, otherForm);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
+                ownForm, otherForm);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void menuReplacementUsesCanonicalCapabilitiesAndAtomicVersion() throws Exception {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        MenuService.MenuDocument original;
+        try {
+            original = menuService.menu();
+            assertThatThrownBy(() -> menuService.replace(
+                new MenuService.MenuDocument(original.version(), List.of())))
+                .isInstanceOfSatisfying(BizException.class, error ->
+                    assertThat(error.getCode()).isEqualTo("MENU_REQUIRED"));
+            MenuService.MenuNode unknown = new MenuService.MenuNode(
+                "ghost", null, "PAGE", "ghost", "幽灵页", null,
+                List.of(), 10, true, List.of());
+            assertThatThrownBy(() -> menuService.replace(
+                new MenuService.MenuDocument(original.version(), List.of(unknown))))
+                .isInstanceOfSatisfying(BizException.class, error ->
+                    assertThat(error.getCode()).isEqualTo("MENU_PAGE_KEY_UNKNOWN"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+        MenuService.MenuNode forged = new MenuService.MenuNode(
+            "workplace", null, "PAGE", "workplace", "工作台", "home",
+            List.of("security:role:manage"), 10, true, List.of());
+        MenuService.MenuDocument request = new MenuService.MenuDocument(
+            original.version(), List.of(forged));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Object>> futures = List.of(
+            executor.submit(() -> replaceMenu(request, ready, start)),
+            executor.submit(() -> replaceMenu(request, ready, start)));
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        List<Object> outcomes;
+        try {
+            outcomes = List.of(futures.get(0).get(20, TimeUnit.SECONDS),
+                futures.get(1).get(20, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(outcomes.stream().filter(MenuService.MenuDocument.class::isInstance).count())
             .isEqualTo(1L);
+        assertThat(outcomes.stream().filter(BizException.class::isInstance)
+            .map(BizException.class::cast).map(BizException::getCode))
+            .containsExactly("MENU_VERSION_CONFLICT");
+        MenuService.MenuDocument saved = outcomes.stream()
+            .filter(MenuService.MenuDocument.class::isInstance)
+            .map(MenuService.MenuDocument.class::cast).findFirst().orElseThrow();
+        assertThat(saved.nodes().get(0).requiredPermissions()).isEmpty();
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        try {
+            menuService.replace(new MenuService.MenuDocument(saved.version(), original.nodes()));
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void v41RemovesLegacyAdminOnlyAndPageDerivedGrants() {
+        String schema = "migration_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("40").load().migrate();
+            Long employeeRoleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_role WHERE code = 'employee'", Long.class);
+            Long bobId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'bob'", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code) VALUES "
+                + "(?, 'security:user_role:read'), (?, 'integration:storage:manage')",
+                employeeRoleId, employeeRoleId);
+            Long before = jdbcTemplate.queryForObject(
+                "SELECT authz_version FROM " + schema + ".t_user WHERE id = ?", Long.class, bobId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
+                + ".t_role_permission WHERE role_id = ? AND permission_code IN "
+                + "('security:user_role:read', 'integration:storage:manage')",
+                Long.class, employeeRoleId)).isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT authz_version FROM " + schema + ".t_user WHERE id = ?", Long.class, bobId))
+                .isEqualTo(before + 1);
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
     }
 
     @Test
@@ -1391,7 +1626,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     void concurrentAdminDisableAndRoleRemovalLeaveAnActiveAdmin() throws Exception {
         long seedAdminId = userId("admin");
         long adminRoleId = roleId("admin");
-        long userRoleId = roleId("user");
+        long userRoleId = roleId("employee");
         long firstAdminId = insertUser("concurrent-admin-a-" + UUID.randomUUID());
         long secondAdminId = insertUser("concurrent-admin-b-" + UUID.randomUUID());
         assignRole(firstAdminId, adminRoleId);
@@ -1676,13 +1911,17 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     private long insertForm(String status, String schema) {
+        return insertForm(status, schema, userId("admin"));
+    }
+
+    private long insertForm(String status, String schema, long creatorId) {
         String code = "IT_" + UUID.randomUUID().toString().replace("-", "");
         return jdbcTemplate.queryForObject("""
             INSERT INTO t_form_definition(code, name, version, schema, settings, status,
                                           created_by, deleted)
             VALUES (?, 'Integration form', 1, ?::jsonb, '{}'::jsonb, ?, ?, 0)
             RETURNING id
-            """, Long.class, code, schema, status, userId("admin"));
+            """, Long.class, code, schema, status, creatorId);
     }
 
     private long insertSubmittedData(long formId, long creatorId) {
@@ -1808,6 +2047,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, Long.class, username, username);
     }
 
+    private long insertRole(String code) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_role(code, name, enabled, builtin, version)
+            VALUES (?, ?, true, false, 0) RETURNING id
+            """, Long.class, code, code);
+    }
+
     private long insertDepartment(long companyId, String name) {
         String path = "test_" + UUID.randomUUID().toString().replace("-", "");
         return jdbcTemplate.queryForObject("""
@@ -1820,6 +2066,24 @@ class PostgresTransactionalIntegrityIntegrationTest {
     private void assignRole(long userId, long roleId) {
         jdbcTemplate.update("INSERT INTO t_user_role(user_id, role_id) VALUES (?, ?)",
             userId, roleId);
+    }
+
+    private void setPrincipal(long userId) {
+        PrincipalHolder.set(authorizationService.principalForRequest(userId, null).orElseThrow());
+    }
+
+    private Object replaceMenu(MenuService.MenuDocument request, CountDownLatch ready,
+                               CountDownLatch start) throws InterruptedException {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        ready.countDown();
+        start.await(10, TimeUnit.SECONDS);
+        try {
+            return menuService.replace(request);
+        } catch (Throwable error) {
+            return error;
+        } finally {
+            PrincipalHolder.clear();
+        }
     }
 
     private long userId(String username) {

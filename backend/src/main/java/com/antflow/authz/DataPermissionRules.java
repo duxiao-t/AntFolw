@@ -22,7 +22,7 @@ public final class DataPermissionRules {
 
     public record Rule(String table, String capability, Set<String> statements,
                        String ownerColumn, String departmentExpression,
-                       String requiredCondition, boolean combineWithOr) {
+                       String requiredCondition) {
 
         boolean appliesTo(String tableName, String mappedStatementId) {
             return table.equalsIgnoreCase(tableName)
@@ -38,9 +38,15 @@ public final class DataPermissionRules {
         // @InterceptorIgnore 排除，见 FormDataMapper.selectMySubmissions）
         Set.of("com.antflow.form.runtime.FormDataMapper.selectList"),
         "created_by",
-        "EXISTS (SELECT 1 FROM t_process_instance scope_pi"
+        "(EXISTS (SELECT 1 FROM t_process_instance scope_pi"
             + " WHERE scope_pi.form_data_id = {alias}.id"
-            + " AND scope_pi.started_dept_id IN ({departments}))",
+            + " AND scope_pi.started_dept_id IN ({departments}))"
+            + " OR (NOT EXISTS (SELECT 1 FROM t_process_instance scope_pi_known"
+            + " WHERE scope_pi_known.form_data_id = {alias}.id"
+            + " AND scope_pi_known.started_dept_id IS NOT NULL)"
+            + " AND EXISTS (SELECT 1 FROM t_user scope_submitter"
+            + " WHERE scope_submitter.id = {alias}.created_by"
+            + " AND scope_submitter.dept_id IN ({departments}))))",
         // 表单数据：既要"该表单的使用授权"，又要落在数据范围内（与 canReadFormData 一致）
         "EXISTS (SELECT 1 FROM t_form_resource_grant scope_grant"
             + " WHERE scope_grant.form_def_id = {alias}.form_def_id"
@@ -49,14 +55,17 @@ public final class DataPermissionRules {
             + "   SELECT scope_ur.role_id FROM t_user_role scope_ur"
             + "   JOIN t_role scope_role ON scope_role.id = scope_ur.role_id"
             + "     AND scope_role.enabled = true"
-            + "   WHERE scope_ur.user_id = {userId}))))",
-        false);
+            + "   WHERE scope_ur.user_id = {userId}))"
+            + " OR (scope_grant.subject_type = 'DEPARTMENT' AND EXISTS ("
+            + "   SELECT 1 FROM t_user scope_viewer"
+            + "   JOIN t_department scope_viewer_dept ON scope_viewer_dept.id = scope_viewer.dept_id"
+            + "   JOIN t_department scope_grant_dept ON scope_grant_dept.id = scope_grant.subject_id"
+            + "   WHERE scope_viewer.id = {userId}"
+            + "     AND scope_viewer_dept.path <@ scope_grant_dept.path))))"
+    );
 
     /**
-     * 表单定义列表：**显式授权可见 ∪ 部门范围可见**。
-     *
-     * <p>表单管理处的语义是"我能管的表单"：被逐表授权的人必须能看到它，
-     * 即使创建人不在自己的部门范围内（范围只用来覆盖"没有逐表授权但负责该部门"的人）。
+     * 表单定义列表：表单授权与能力数据范围必须同时满足。
      */
     public static final Rule FORM_DEFINITION = new Rule(
         "t_form_definition",
@@ -80,8 +89,8 @@ public final class DataPermissionRules {
             + "   JOIN t_department scope_viewer_dept ON scope_viewer_dept.id = scope_viewer.dept_id"
             + "   JOIN t_department scope_grant_dept ON scope_grant_dept.id = scope_grant.subject_id"
             + "   WHERE scope_viewer.id = {userId}"
-            + "     AND scope_viewer_dept.path <@ scope_grant_dept.path))))",
-        true);
+            + "     AND scope_viewer_dept.path <@ scope_grant_dept.path))))"
+    );
 
     public static final List<Rule> RULES = List.of(FORM_DATA, FORM_DEFINITION);
 

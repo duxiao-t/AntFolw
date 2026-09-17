@@ -26,7 +26,7 @@ class DataPermissionPolicyHandlerTest {
     private final DataPermissionPolicyHandler handler =
         new DataPermissionPolicyHandler(authorizationService);
     private static final String FORM_DATA_STATEMENT =
-        "com.antflow.form.runtime.FormDataMapper.selectPage";
+        "com.antflow.form.runtime.FormDataMapper.selectList";
     private static final Table FORM_DATA_TABLE = new Table("t_form_data");
     private static final Table FORM_DEFINITION_TABLE = new Table("t_form_definition");
 
@@ -40,7 +40,7 @@ class DataPermissionPolicyHandlerTest {
         assertThat(handler.getSqlSegment(new Table("t_task"), null, FORM_DATA_STATEMENT))
             .as("未配置的表不注入").isNull();
         assertThat(handler.getSqlSegment(FORM_DATA_TABLE, null,
-            "com.antflow.form.runtime.FormDataMapper.selectList"))
+            "com.antflow.form.runtime.FormDataMapper.selectById"))
             .as("未开启的语句不注入").isNull();
     }
 
@@ -51,23 +51,35 @@ class DataPermissionPolicyHandlerTest {
     }
 
     @Test
-    void administratorAndAllScopeInjectNothing() {
+    void administratorInjectsNothing() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                true, false, 7L, Set.of())));
+                true, true, false, 7L, Set.of())));
 
         assertThat(handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)).isNull();
+    }
+
+    @Test
+    void nonAdminAllScopeStillInjectsRequiredGrant() {
+        when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
+            .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
+                false, true, false, 7L, Set.of())));
+
+        String segment = handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)
+            .toString();
+
+        assertThat(segment).contains("t_form_resource_grant").doesNotContain("1 = 0");
     }
 
     @Test
     void missingCapabilityFailsClosed() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, 7L, Set.of())));
+                false, false, false, 7L, Set.of())));
 
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, 7L, Set.of()));
+            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of()));
 
         assertThat(segment).contains("1 = 0");
     }
@@ -76,7 +88,7 @@ class DataPermissionPolicyHandlerTest {
     void selfScopeUsesOwnerColumnAndKeepsFormGrantRequirement() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, true, 7L, Set.of()));
+            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of()));
 
         assertThat(segment).contains("t_form_data.created_by = 7");
         assertThat(segment).contains("t_form_resource_grant");
@@ -90,7 +102,7 @@ class DataPermissionPolicyHandlerTest {
         aliased.setAlias(new net.sf.jsqlparser.expression.Alias("fd"));
         String segment = DataPermissionPolicyHandler.buildSegment(aliased,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, 7L, Set.of(3L, 5L)));
+            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(3L, 5L)));
 
         assertThat(segment).contains("scope_pi.form_data_id = fd.id");
         assertThat(segment).contains("scope_pi.started_dept_id IN (3,5)");
@@ -102,7 +114,7 @@ class DataPermissionPolicyHandlerTest {
     void selfAndDepartmentScopesAreUnioned() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, true, 7L, Set.of(3L)));
+            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(3L)));
 
         assertThat(segment).contains(" OR ");
         assertThat(segment).contains("t_form_data.created_by = 7");
@@ -110,13 +122,12 @@ class DataPermissionPolicyHandlerTest {
     }
 
     @Test
-    void formDefinitionListUnionsExplicitGrantWithDepartmentScope() {
-        // 表单管理处："被逐表授权"必须可见，即使创建人不在自己的部门范围内
+    void formDefinitionListRequiresGrantAndDepartmentScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DEFINITION_TABLE,
             DataPermissionRules.FORM_DEFINITION,
-            new AuthorizationService.DataScopeFilter(false, false, 5L, Set.of(5L)));
+            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
 
-        assertThat(segment).contains(" OR ");
+        assertThat(segment).contains(") AND (");
         assertThat(segment).contains("t_form_resource_grant");
         assertThat(segment).contains("scope_owner.id = t_form_definition.created_by");
         assertThatCode(() -> CCJSqlParserUtil.parseCondExpression(segment))
@@ -127,12 +138,12 @@ class DataPermissionPolicyHandlerTest {
     void formDataListStillRequiresGrantAndScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, 5L, Set.of(5L)));
+            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
 
         assertThat(segment).contains(" AND ");
         // 顶层是「授权 AND 范围」：授权子查询之后紧跟 AND，再接范围子查询
         assertThat(segment).startsWith("(EXISTS (SELECT 1 FROM t_form_resource_grant");
-        assertThat(segment).contains(") AND (EXISTS (SELECT 1 FROM t_process_instance");
+        assertThat(segment).contains("AND ((EXISTS (SELECT 1 FROM t_process_instance");
     }
 
     @Test
@@ -154,5 +165,16 @@ class DataPermissionPolicyHandlerTest {
         assertThat(scope).isPresent();
         assertThat(scope.get().unrestricted()).isFalse();
         assertThat(scope.get().departmentIds()).containsExactly(3L);
+    }
+
+    @Test
+    void controlledStatementRegistryChangesExplicitly() {
+        assertThat(DataPermissionRules.RULES)
+            .extracting(DataPermissionRules.Rule::table, DataPermissionRules.Rule::statements)
+            .containsExactly(
+                org.assertj.core.groups.Tuple.tuple("t_form_data",
+                    Set.of("com.antflow.form.runtime.FormDataMapper.selectList")),
+                org.assertj.core.groups.Tuple.tuple("t_form_definition",
+                    Set.of("com.antflow.form.FormDefinitionMapper.selectSummaryPage")));
     }
 }

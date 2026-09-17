@@ -14,8 +14,9 @@ import org.springframework.stereotype.Component;
  * 把"当前用户在某能力上的有效数据范围"翻译成 SQL 条件，交给 MyBatis-Plus 的
  * {@code DataPermissionInterceptor} 注入到受控查询上。
  *
- * <p>策略：admin 或不限制 → 不注入；有主体但无该能力 → 注入 {@code 1=0}（宁可查不到，
- * 不可全量泄漏）；无主体（调度/同步等系统上下文）→ 不注入。
+ * <p>策略：admin → 不注入；非 admin 的 ALL 只省略范围条件，资源授权仍保留；
+ * 有主体但无该能力 → 注入 {@code 1=0}（宁可查不到，不可全量泄漏）；
+ * 无主体（调度/同步等系统上下文）→ 不注入。
  */
 @Component
 @RequiredArgsConstructor
@@ -32,7 +33,7 @@ public class DataPermissionPolicyHandler implements MultiDataPermissionHandler {
             return null;
         }
         var scope = authorizationService.currentDataScope(rule.capability());
-        if (scope.isEmpty() || scope.get().unrestricted()) {
+        if (scope.isEmpty() || scope.get().admin()) {
             return null;
         }
         String segment = buildSegment(table, rule, scope.get());
@@ -60,19 +61,16 @@ public class DataPermissionPolicyHandler implements MultiDataPermissionHandler {
                     .replace("{alias}", alias).replace("{departments}", departments));
             }
         }
-        String scopePart = conditions.isEmpty()
+        String scopePart = scope.unrestricted() ? null : conditions.isEmpty()
             ? "1 = 0"
-            : conditions.size() == 1
-                ? conditions.get(0) : "(" + String.join(" OR ", conditions) + ")";
+            : conditions.size() == 1 ? conditions.get(0)
+                : "(" + String.join(" OR ", conditions) + ")";
         if (rule.requiredCondition() == null) {
-            return scopePart;
+            return scopePart == null ? "1 = 1" : scopePart;
         }
         String required = "(" + rule.requiredCondition()
             .replace("{alias}", alias).replace("{userId}", String.valueOf(scope.userId())) + ")";
-        // 表单定义列表是"授权 ∪ 范围"；表单数据是"授权 ∩ 范围"（与 canReadFormData 一致）
-        return rule.combineWithOr()
-            ? required + " OR (" + scopePart + ")"
-            : required + " AND (" + scopePart + ")";
+        return scopePart == null ? required : required + " AND (" + scopePart + ")";
     }
 
     private static Expression parse(String segment) {

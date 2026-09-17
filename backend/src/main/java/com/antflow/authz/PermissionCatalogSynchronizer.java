@@ -24,6 +24,7 @@ public class PermissionCatalogSynchronizer implements ApplicationRunner {
     private final JdbcTemplate jdbcTemplate;
 
     @Override
+    @Transactional
     public void run(ApplicationArguments args) {
         sync();
     }

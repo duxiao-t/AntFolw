@@ -26,6 +26,7 @@ import {
 } from 'antd';
 import { useEffect, useMemo } from 'react';
 import { createStyles } from 'antd-style';
+import { CAPABILITY, hasCapability } from '../../authz';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
@@ -283,9 +284,7 @@ export default function FormManagementWizard() {
   const formId = isNew ? null : Number(id);
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const canManageGrants =
-    isAdmin ||
-    (currentUser?.permissions ?? []).includes('form:authorization:manage');
+  const canManageGrants = hasCapability(currentUser, CAPABILITY.formAuthorizationManage);
 
   const { data: definition } = useQuery<FormDefinition>({
     queryKey: ['form-management-definition', formId],

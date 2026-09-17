@@ -4,6 +4,7 @@ import com.antflow.org.Department;
 import com.antflow.org.DepartmentMapper;
 import com.antflow.org.Role;
 import com.antflow.org.RoleMapper;
+import com.antflow.org.PickerRoleDto;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -76,7 +77,7 @@ public class MobileOrgService {
     }
 
     /** 角色选择器：只暴露 id/code/name，供流程配置里的"审批角色"选择使用。 */
-    public List<MobilePickerRoleDto> searchRoles(String keyword) {
+    public List<PickerRoleDto> searchRoles(String keyword) {
         QueryWrapper<Role> query = new QueryWrapper<>();
         query.select("id", "code", "name").eq("enabled", true);
         String trimmedKeyword = normalizeKeyword(keyword);
@@ -86,7 +87,7 @@ public class MobileOrgService {
         }
         query.orderByAsc("id").last("LIMIT " + SEARCH_LIMIT);
         return roleMapper.selectList(query).stream()
-            .map(role -> new MobilePickerRoleDto(role.getId(), role.getCode(), role.getName()))
+            .map(role -> new PickerRoleDto(role.getId(), role.getCode(), role.getName()))
             .toList();
     }
 

@@ -45,14 +45,6 @@ public class MobileOrgController {
         return service.department(id);
     }
 
-    /** 流程配置里的角色选择器：登录即可用，只返回 id/code/name。 */
-    @GetMapping("/roles")
-    @AuthenticatedOnly
-    public List<MobilePickerRoleDto> roles(@RequestParam(required = false) String keyword) {
-        principal();
-        return service.searchRoles(keyword);
-    }
-
     private static PrincipalHolder.Principal principal() {
         return PrincipalHolder.current()
             .orElseThrow(() -> new AccessDeniedException("authentication required"));

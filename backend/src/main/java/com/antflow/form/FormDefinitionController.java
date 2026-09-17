@@ -40,7 +40,8 @@ public class FormDefinitionController {
     @PreAuthorize("@authz.consoleAny('" + PermissionCodes.FORM_DEFINITION_READ
         + "', '" + PermissionCodes.WORKFLOW_DEFINITION_READ + "')")
     public FormDefinition get(@PathVariable Long id) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_READ);
+        authorizationService.requireFormActionAny(id, PermissionCodes.FORM_DEFINITION_READ,
+            PermissionCodes.WORKFLOW_DEFINITION_READ);
         FormDefinition definition = mapper.selectById(id);
         if (definition == null) throw new com.antflow.authz.HiddenResourceException("form not found");
         return definition;
@@ -63,7 +64,8 @@ public class FormDefinitionController {
         var p = PrincipalHolder.current().orElseThrow();
         boolean creating = body.id() == null;
         if (creating) {
-            authorizationService.requirePermission(PermissionCodes.FORM_DEFINITION_MANAGE);
+            authorizationService.requireCurrentDataScope(PermissionCodes.FORM_DEFINITION_MANAGE,
+                p.userId(), p.departmentId());
         } else {
             authorizationService.requireFormAction(body.id(), PermissionCodes.FORM_DEFINITION_MANAGE);
         }

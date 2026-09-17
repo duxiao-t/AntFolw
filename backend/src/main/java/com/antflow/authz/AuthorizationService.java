@@ -124,7 +124,7 @@ public class AuthorizationService {
      * 供数据权限拦截器使用：某能力在当前请求下的行级过滤条件。
      *
      * <p>返回空表示"无请求主体"（系统内部任务），调用方应跳过注入；
-     * unrestricted 表示不需要过滤（admin 或 ALL 范围）；
+     * admin 表示管理员旁路；unrestricted 表示非管理员的 ALL 范围；
      * 既无 selfAllowed 又无 departmentIds 表示该能力缺失 → 调用方应注入 1=0（fail-closed）。
      */
     public Optional<DataScopeFilter> currentDataScope(String permissionCode) {
@@ -133,17 +133,19 @@ public class AuthorizationService {
         }
         AuthzSnapshot snapshot = currentSnapshot();
         if (snapshot.admin()) {
-            return Optional.of(new DataScopeFilter(true, false, snapshot.userId(), Set.of()));
+            return Optional.of(new DataScopeFilter(true, true, false,
+                snapshot.userId(), Set.of()));
         }
         List<RoleGrant> grants = snapshot.permissionRoles().getOrDefault(permissionCode, List.of());
         boolean all = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.ALL);
         boolean self = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.SELF);
         Set<Long> departments = all ? Set.of() : manageableDepartments(snapshot, permissionCode);
-        return Optional.of(new DataScopeFilter(all, self, snapshot.userId(), departments));
+        return Optional.of(new DataScopeFilter(false, all, self,
+            snapshot.userId(), departments));
     }
 
-    public record DataScopeFilter(boolean unrestricted, boolean selfAllowed, long userId,
-                                  Set<Long> departmentIds) {
+    public record DataScopeFilter(boolean admin, boolean unrestricted, boolean selfAllowed,
+                                  long userId, Set<Long> departmentIds) {
     }
 
     public boolean inCurrentDataScope(String permission, Long ownerId, Long departmentId) {
@@ -237,6 +239,16 @@ public class AuthorizationService {
         if (!hasFormGrant(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
         }
+        if (!PermissionCatalog.isScopeable(permission)) {
+            return;
+        }
+        FormManagementAccess resource = formManagementAccess(formId);
+        if (resource == null) throw new HiddenResourceException("form not found");
+        if (!inDataScope(currentSnapshot(), permission,
+            resource.createdBy(), resource.departmentId())) {
+            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
+                "form is outside the permitted data scope");
+        }
     }
 
     /** 能力满足其一即可，但仍要求该表单的使用授权（未授权按不存在处理）。 */
@@ -245,27 +257,56 @@ public class AuthorizationService {
         if (principal.isAdmin()) {
             return;
         }
-        requireAnyPermission(permissions);
+        AuthzSnapshot snapshot = currentSnapshot();
+        boolean hasAny = java.util.Arrays.stream(permissions)
+            .anyMatch(snapshot.permissions()::contains);
+        if (!hasAny) {
+            throw new AuthorizationFailureException("MISSING_PERMISSION",
+                "missing permission: " + String.join(" or ", permissions));
+        }
         if (!hasFormGrant(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
         }
+        if (java.util.Arrays.stream(permissions)
+            .filter(snapshot.permissions()::contains)
+            .anyMatch(permission -> !PermissionCatalog.isScopeable(permission))) {
+            return;
+        }
+        FormManagementAccess resource = formManagementAccess(formId);
+        if (resource == null) throw new HiddenResourceException("form not found");
+        boolean allowed = java.util.Arrays.stream(permissions)
+            .filter(snapshot.permissions()::contains)
+            .anyMatch(permission -> inDataScope(snapshot, permission,
+                resource.createdBy(), resource.departmentId()));
+        if (!allowed) {
+            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
+                "form is outside the permitted data scope");
+        }
+    }
+
+    public boolean canFormActionAny(long formId, long userId, String... permissions) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        if (snapshot.admin()) {
+            return true;
+        }
+        if (!hasFormGrant(formId, userId)) {
+            return false;
+        }
+        if (java.util.Arrays.stream(permissions)
+            .filter(snapshot.permissions()::contains)
+            .anyMatch(permission -> !PermissionCatalog.isScopeable(permission))) {
+            return true;
+        }
+        FormManagementAccess resource = formManagementAccess(formId);
+        return resource != null
+            && java.util.Arrays.stream(permissions)
+                .filter(snapshot.permissions()::contains)
+                .anyMatch(permission -> inDataScope(snapshot, permission,
+                    resource.createdBy(), resource.departmentId()));
     }
 
     public void requireFormManagementScope(long formId, String permission) {
         requireFormAction(formId, permission);
-        if (isAdmin()) return;
-        FormManagementAccess resource = jdbcTemplate.query("""
-            SELECT form.created_by, creator.dept_id
-            FROM t_form_definition form
-            LEFT JOIN t_user creator ON creator.id = form.created_by
-            WHERE form.id = ? AND form.deleted = 0
-            """, rs -> rs.next() ? new FormManagementAccess(
-                nullableLong(rs, "created_by"), nullableLong(rs, "dept_id")) : null, formId);
-        if (resource == null) throw new HiddenResourceException("form not found");
-        if (!inCurrentDataScope(permission, resource.createdBy(), resource.departmentId())) {
-            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
-                "form is outside the permitted data scope");
-        }
     }
 
     /**
@@ -529,6 +570,7 @@ public class AuthorizationService {
                 FROM t_role_permission granted
                 JOIN t_permission permission ON permission.code = granted.permission_code
                 WHERE granted.role_id = ? AND permission.deprecated_at IS NULL
+                  AND permission.admin_only = false
                 ORDER BY granted.permission_code
                 """, (rs, row) -> new GrantRow(rs.getString("permission_code"),
                 rs.getString("scope_override")), role.roleId());
@@ -548,6 +590,16 @@ public class AuthorizationService {
         return new AuthzSnapshot(user.userId(), user.departmentId(), admin,
             Collections.unmodifiableSet(roleCodes), Collections.unmodifiableSet(permissions),
             Collections.unmodifiableMap(immutableGrants));
+    }
+
+    private FormManagementAccess formManagementAccess(long formId) {
+        return jdbcTemplate.query("""
+            SELECT form.created_by, creator.dept_id
+            FROM t_form_definition form
+            LEFT JOIN t_user creator ON creator.id = form.created_by
+            WHERE form.id = ? AND form.deleted = 0
+            """, rs -> rs.next() ? new FormManagementAccess(
+                nullableLong(rs, "created_by"), nullableLong(rs, "dept_id")) : null, formId);
     }
 
     /** 覆盖值优先；未覆盖时取能力声明的默认范围；能力不支持范围管理时视为不限制。 */

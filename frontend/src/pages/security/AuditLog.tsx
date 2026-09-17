@@ -3,6 +3,7 @@ import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-
 import { App, Button, Descriptions, Drawer, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { request, useModel } from '@umijs/max';
 import { useRef, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../authz';
 
 type AuditEvent = {
   id: number;
@@ -70,11 +71,8 @@ export default function AuditLogPage() {
   const [detail, setDetail] = useState<AuditEvent | null>(null);
   const [archives, setArchives] = useState<Archive[]>([]);
   const currentUser = initialState?.currentUser as any;
-  const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const permissions: string[] = currentUser?.permissions ?? [];
-  const canExport = isAdmin || permissions.includes('audit:event:export');
-  const canDownloadArchive = isAdmin
-    || permissions.includes('audit:archive:download');
+  const canExport = hasCapability(currentUser, CAPABILITY.auditEventExport);
+  const canDownloadArchive = hasCapability(currentUser, CAPABILITY.auditArchiveDownload);
 
   const exportEvents = async () => {
     const blob = await request<Blob>('/api/audit/export', {

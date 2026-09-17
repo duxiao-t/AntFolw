@@ -2,7 +2,6 @@ package com.antflow.navigation;
 
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthorizationService;
-import com.antflow.authz.PermissionCatalog;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -33,6 +32,7 @@ public class MenuService {
     private final JdbcTemplate jdbcTemplate;
     private final AuthorizationService authorizationService;
     private final ObjectMapper objectMapper;
+    private final PageCapabilityRegistry pageCapabilities;
 
     public List<NavNode> navigation() {
         PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
@@ -49,16 +49,20 @@ public class MenuService {
     @Transactional
     public MenuDocument replace(MenuDocument request) {
         authorizationService.requirePermission(PermissionCodes.SECURITY_MENU_MANAGE);
-        if (request == null || request.nodes() == null) {
+        if (request == null || request.nodes() == null || request.nodes().isEmpty()) {
             throw new BizException("MENU_REQUIRED", "菜单树不能为空");
         }
-        if (request.pageKeys() == null || request.pageKeys().isEmpty()) {
-            throw new BizException("MENU_PAGE_KEYS_REQUIRED", "保存菜单需要携带当前前端的页面注册表");
-        }
         List<MenuNode> flat = new ArrayList<>();
-        flatten(request.nodes(), new LinkedHashSet<>(request.pageKeys()), 1, flat,
-            new LinkedHashSet<>(), null, new int[] {0});
-        if (currentVersion() != request.version()) {
+        Set<String> pageKeys = new LinkedHashSet<>();
+        flatten(request.nodes(), 1, flat, pageKeys, null, new int[] {0});
+        if (pageKeys.isEmpty()) {
+            throw new BizException("MENU_PAGE_REQUIRED", "菜单至少包含一个页面");
+        }
+        int updated = jdbcTemplate.update("""
+            UPDATE t_menu_revision SET version = version + 1, updated_at = now()
+            WHERE id = 1 AND version = ?
+            """, request.version());
+        if (updated != 1) {
             throw new BizException("MENU_VERSION_CONFLICT", "菜单已被其他人修改，请刷新后重试");
         }
         jdbcTemplate.update("DELETE FROM t_menu");
@@ -80,8 +84,8 @@ public class MenuService {
     }
 
     /** 展开并校验：能力码必须存在、pageKey 必须属于前端注册表、目录节点不能带 pageKey。 */
-    private void flatten(List<MenuNode> nodes, Set<String> registered, int depth,
-                         List<MenuNode> flat, Set<String> pageKeys, String parentKey,
+    private void flatten(List<MenuNode> nodes, int depth, List<MenuNode> flat,
+                         Set<String> pageKeys, String parentKey,
                          int[] directoryCounter) {
         if (depth > MAX_DEPTH) {
             throw new BizException("MENU_TOO_DEEP", "菜单最多 " + MAX_DEPTH + " 层");
@@ -102,26 +106,18 @@ public class MenuService {
                 if (node.pageKey() == null || node.pageKey().isBlank()) {
                     throw new BizException("MENU_PAGE_KEY_REQUIRED", "页面菜单必须指定 pageKey");
                 }
-                if (!registered.contains(node.pageKey())) {
-                    throw new BizException("MENU_PAGE_KEY_UNKNOWN",
-                        "当前前端版本不存在该页面: " + node.pageKey());
-                }
                 if (!pageKeys.add(node.pageKey())) {
                     throw new BizException("MENU_PAGE_DUPLICATED", "同一页面不能出现在多处");
                 }
             }
-            for (String code : node.requiredPermissions() == null
-                ? List.<String>of() : node.requiredPermissions()) {
-                if (!PermissionCatalog.isKnown(code)) {
-                    throw new BizException("PERMISSION_UNKNOWN", "未知能力点: " + code);
-                }
-            }
+            List<String> requiredPermissions = directory
+                ? List.of() : pageCapabilities.require(node.pageKey());
             String nodeKey = node.pageKey() != null && !node.pageKey().isBlank()
                 ? node.pageKey() : "dir-" + (++directoryCounter[0]);
             flat.add(new MenuNode(nodeKey, parentKey, node.type(), node.pageKey(), node.name(),
-                node.icon(), node.requiredPermissions(), node.sortOrder(), node.visible(), null));
+                node.icon(), requiredPermissions, node.sortOrder(), node.visible(), null));
             if (node.children() != null && !node.children().isEmpty()) {
-                flatten(node.children(), registered, depth + 1, flat, pageKeys, nodeKey,
+                flatten(node.children(), depth + 1, flat, pageKeys, nodeKey,
                     directoryCounter);
             }
         }
@@ -148,7 +144,8 @@ public class MenuService {
         return byParent.getOrDefault(parentId, List.of()).stream()
             .map(row -> new MenuNode(row.pageKey() != null ? row.pageKey() : "dir-" + row.id(),
                 parentId == null ? null : String.valueOf(parentId), row.type(), row.pageKey(),
-                row.nameOverride(), row.iconOverride(), row.requiredPermissions(), row.sortOrder(),
+                row.nameOverride(), row.iconOverride(), row.pageKey() == null ? List.of()
+                    : pageCapabilities.require(row.pageKey()), row.sortOrder(),
                 row.visible(), build(byParent, row.id())))
             .toList();
     }
@@ -181,7 +178,7 @@ public class MenuService {
 
     private int currentVersion() {
         Integer version = jdbcTemplate.queryForObject(
-            "SELECT COALESCE(MAX(version), 0) FROM t_menu", Integer.class);
+            "SELECT version FROM t_menu_revision WHERE id = 1", Integer.class);
         return version == null ? 0 : version;
     }
 
@@ -225,11 +222,7 @@ public class MenuService {
                            String name, String icon, List<String> requiredPermissions,
                            int sortOrder, Boolean visible, List<MenuNode> children) { }
 
-    public record MenuDocument(int version, List<MenuNode> nodes, Set<String> pageKeys) {
-        public MenuDocument(int version, List<MenuNode> nodes) {
-            this(version, nodes, Set.of());
-        }
-    }
+    public record MenuDocument(int version, List<MenuNode> nodes) { }
 
     /** 下发给前端渲染的导航节点。 */
     public record NavNode(String pageKey, String type, String name, String icon,

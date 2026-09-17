@@ -70,10 +70,7 @@ public class MobileDraftService {
     }
 
     public List<MobileDraftDto> list(long userId) {
-        List<FormData> drafts = formDataMapper.selectList(new QueryWrapper<FormData>()
-            .eq("created_by", userId)
-            .eq("status", DRAFT_STATUS)
-            .orderByDesc("updated_at"));
+        List<FormData> drafts = formDataMapper.selectMyDrafts(userId);
         return drafts.stream().map(this::toDto).toList();
     }
 

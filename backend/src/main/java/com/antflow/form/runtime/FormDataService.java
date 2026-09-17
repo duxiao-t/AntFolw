@@ -3,6 +3,7 @@ package com.antflow.form.runtime;
 import com.antflow.common.FormalNumberService;
 import com.antflow.common.BusinessNumberService;
 import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
@@ -18,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Map;
@@ -61,6 +63,10 @@ public class FormDataService {
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
         }
+        if (userId == null || authorizationService.currentUserId() != userId) {
+            throw new AccessDeniedException("submission user does not match current principal");
+        }
+        authorizationService.requireFormAction(fd.getId(), PermissionCodes.FORM_RUNTIME_READ);
         formDefinitionService.validateSubmission(fd.getSchema(), data);
         String normalizedStatus = status == null ? "SUBMITTED" : status;
         Object storedData = "DRAFT".equals(normalizedStatus)

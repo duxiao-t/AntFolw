@@ -8,6 +8,7 @@
  * 必须是纯数据（不引入 React/JSX），Umi 配置文件也会 import 它。
  */
 import type { MenuDataItem } from '@ant-design/pro-components';
+import pageCapabilities from '../../config/page-capabilities.json';
 
 export type PageDef = {
   /** 与后端 t_menu.page_key 对应的稳定标识 */
@@ -21,44 +22,45 @@ export type PageDef = {
 
 /** 只读能力集允许为空：工作台只要求进入管理端 */
 export const CONSOLE_ENTRY = 'console:entry:access';
+export const PAGE_CAPABILITIES = pageCapabilities as Record<string, string[]>;
 
 export const PAGES: PageDef[] = [
   { key: 'workplace', path: '/workplace', component: './dashboard/workplace', icon: 'home',
-    readCapabilities: [] },
+    readCapabilities: PAGE_CAPABILITIES.workplace },
   { key: 'org.contacts', path: '/org/contacts', component: './org/Contacts', icon: 'contacts',
-    readCapabilities: ['org:company:read', 'org:department:read', 'org:user:read'] },
+    readCapabilities: PAGE_CAPABILITIES['org.contacts'] },
   { key: 'approval.forms', path: '/approval/forms', component: './approval/FormManagementList',
-    icon: 'form', readCapabilities: ['form:definition:read'] },
+    icon: 'form', readCapabilities: PAGE_CAPABILITIES['approval.forms'] },
   { key: 'approval.records', path: '/approval/records', component: './approval/RecordList',
-    icon: 'search', readCapabilities: ['workflow:instance:read'] },
+    icon: 'search', readCapabilities: PAGE_CAPABILITIES['approval.records'] },
   { key: 'approval.monitor', path: '/approval/monitor', component: './approval/WorkflowMonitor',
-    icon: 'dashboard', readCapabilities: ['workflow:monitor:read'] },
+    icon: 'dashboard', readCapabilities: PAGE_CAPABILITIES['approval.monitor'] },
   { key: 'report.center', path: '/report/center', component: './report/Center', icon: 'fund',
-    readCapabilities: ['form:data:read'] },
+    readCapabilities: PAGE_CAPABILITIES['report.center'] },
   { key: 'report.view', path: '/report/view', component: './report/Dashboard', icon: 'dashboard',
-    readCapabilities: ['form:data:read'] },
+    readCapabilities: PAGE_CAPABILITIES['report.view'] },
   { key: 'report.export', path: '/report/export', component: './report/Export', icon: 'export',
-    readCapabilities: ['form:data:export'] },
+    readCapabilities: PAGE_CAPABILITIES['report.export'] },
   { key: 'security.roles', path: '/security/roles', component: './security/Role', icon: 'idcard',
-    readCapabilities: ['security:role:read'] },
+    readCapabilities: PAGE_CAPABILITIES['security.roles'] },
   { key: 'security.user-permissions', path: '/security/user-permissions',
     component: './security/UserPermission', icon: 'key',
-    readCapabilities: ['security:user_role:read'] },
+    readCapabilities: PAGE_CAPABILITIES['security.user-permissions'] },
   { key: 'security.audit-log', path: '/security/audit-log', component: './security/AuditLog',
-    icon: 'fileSearch', readCapabilities: ['audit:event:read'] },
+    icon: 'fileSearch', readCapabilities: PAGE_CAPABILITIES['security.audit-log'] },
   { key: 'security.menu', path: '/security/menu', component: './security/Menu', icon: 'menu',
-    readCapabilities: ['security:menu:manage'] },
+    readCapabilities: PAGE_CAPABILITIES['security.menu'] },
   { key: 'settings.company', path: '/settings/company', component: './settings/Company',
-    icon: 'bank', readCapabilities: ['org:company:read'] },
+    icon: 'bank', readCapabilities: PAGE_CAPABILITIES['settings.company'] },
   { key: 'settings.s3', path: '/settings/s3', component: './settings/S3Storage', icon: 'cloud',
-    readCapabilities: ['integration:storage:manage'] },
+    readCapabilities: PAGE_CAPABILITIES['settings.s3'] },
   { key: 'settings.wecom', path: '/settings/wecom', component: './settings/Wecom',
-    icon: 'wechat', readCapabilities: ['integration:wecom:manage'] },
+    icon: 'wechat', readCapabilities: PAGE_CAPABILITIES['settings.wecom'] },
   { key: 'settings.identity-providers', path: '/settings/identity-providers',
     component: './settings/IdentityProviders', icon: 'safetyCertificate',
-    readCapabilities: ['integration:identity_provider:manage'] },
+    readCapabilities: PAGE_CAPABILITIES['settings.identity-providers'] },
   { key: 'settings.backup', path: '/settings/backup', component: './settings/Backup',
-    icon: 'database', readCapabilities: ['system:backup:manage'] },
+    icon: 'database', readCapabilities: PAGE_CAPABILITIES['settings.backup'] },
 ];
 
 export const PAGE_BY_KEY: Record<string, PageDef> = Object.fromEntries(
@@ -69,36 +71,9 @@ export const PAGE_BY_KEY: Record<string, PageDef> = Object.fromEntries(
 export const HIDDEN_CAPABILITIES: Record<string, string> = {
   canReadForms: 'form:definition:read',
   canCreateForm: 'form:definition:manage',
-  canDesignProcess: 'workflow:definition:manage',
   canUseRuntime: 'form:runtime:read',
   canUseTasks: 'workflow:task:read',
   canUseProcesses: 'workflow:instance:read',
-  canApproveTask: 'workflow:task:approve',
-  canRejectTask: 'workflow:task:reject',
-  canWithdrawInstance: 'workflow:instance:withdraw',
-  canOverrideWorkflow: 'workflow:instance:override',
-  canRetryAutomation: 'workflow:automation:retry',
-  canWriteDepartments: 'org:department:manage',
-  canWriteUsers: 'org:user:manage',
-  canManageRoles: 'security:role:read',
-  canAssignRoles: 'security:user_role:manage',
-  canReadAudit: 'audit:event:read',
-  canExportAudit: 'audit:event:export',
-  canDownloadArchive: 'audit:archive:download',
-  canReadReports: 'form:data:read',
-  canReadReportCenter: 'form:data:read',
-  canReadReportExport: 'form:data:export',
-  canReadReportDashboard: 'form:data:read',
-  canManageCompany: 'system:company:manage',
-  canReadCompany: 'org:company:read',
-  canManageS3: 'integration:storage:manage',
-  canManageWecom: 'integration:wecom:manage',
-  canManageIdentityProviders: 'integration:identity_provider:manage',
-  canManageBackup: 'system:backup:manage',
-  canManageMenu: 'security:menu:manage',
-  canManageOrg: 'org:user:read',
-  canManageSecurity: 'security:role:read',
-  canAccessWorkplace: CONSOLE_ENTRY,
 };
 
 /** 「任一能力即可」的入口（流程详情：审批人或记录查看者都能打开） */
@@ -115,17 +90,13 @@ export function accessKey(pageKey: string): string {
 
 export function pageAllowed(page: PageDef, roles: string[], permissions: string[]): boolean {
   if (roles.includes('admin')) return true;
-  return page.readCapabilities.every((code) => permissions.includes(code));
+  return permissions.includes(CONSOLE_ENTRY)
+    && page.readCapabilities.every((code) => permissions.includes(code));
 }
 
 /** 保持稳定顺序的第一个可访问页面，用于登录后落地。 */
 export function firstAccessiblePath(roles: string[], permissions: string[]): string | undefined {
   return PAGES.find((page) => pageAllowed(page, roles, permissions))?.path;
-}
-
-/** 当前前端版本已注册的 pageKey：保存菜单时下发，后端据此拒绝幽灵页面。 */
-export function registeredPageKeys(): string[] {
-  return PAGES.map((page) => page.key);
 }
 
 export type NavNode = {

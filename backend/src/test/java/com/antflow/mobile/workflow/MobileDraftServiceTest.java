@@ -128,9 +128,8 @@ class MobileDraftServiceTest {
     }
 
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
     void listReturnsOnlyOwnedDraftsWithReadOnlyFlag() {
-        Mockito.when(formDataMapper.selectList(any(QueryWrapper.class)))
+        Mockito.when(formDataMapper.selectMyDrafts(7L))
             .thenReturn(List.of(draft(101L, 7L, "DRAFT"), draft(102L, 7L, "DRAFT")));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
 
@@ -139,10 +138,7 @@ class MobileDraftServiceTest {
         assertThat(drafts).hasSize(2);
         assertThat(drafts).allSatisfy(draft -> assertThat(draft.readOnly()).isFalse());
         assertThat(drafts.get(0).schema().get(1).path("id").asText()).isEqualTo("days");
-        ArgumentCaptor<QueryWrapper<FormData>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
-        Mockito.verify(formDataMapper).selectList(captor.capture());
-        assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("CREATED_BY");
-        assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("STATUS");
+        Mockito.verify(formDataMapper).selectMyDrafts(7L);
     }
 
     @Test

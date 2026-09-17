@@ -26,7 +26,13 @@ public class ProcessDefinitionController {
     public List<ProcessDefinition> list() {
         authorizationService.requireAnyPermission(PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         var principal = PrincipalHolder.current().orElseThrow();
-        return service.listAuthorized(principal.userId(), principal.isAdmin());
+        // ponytail: current process count is small; move this predicate into SQL if list latency grows.
+        return service.list().stream()
+            .filter(definition -> authorizationService.canFormActionAny(
+                definition.getFormDefId(), principal.userId(),
+                PermissionCodes.WORKFLOW_DEFINITION_READ,
+                PermissionCodes.FORM_DEFINITION_READ))
+            .toList();
     }
 
     @GetMapping("/by-form/{formDefId}")

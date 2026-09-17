@@ -54,6 +54,7 @@ describe('app getInitialState', () => {
       hash: '',
     };
     window.history.pushState({}, '', '/welcome');
+    localStorage.setItem('antflow-token', 'test-token');
   });
 
   it('should fetch currentUser when not on login page', async () => {

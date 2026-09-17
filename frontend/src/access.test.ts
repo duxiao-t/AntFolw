@@ -10,8 +10,10 @@ describe('access', () => {
     const result = access({ currentUser: currentUser(['admin'], []) });
     expect(result.canAdmin).toBe(true);
     expect(result.canEnterConsole).toBe(true);
-    PAGES.forEach((page) => expect(result[accessKey(page.key)]).toBe(true));
-    expect(result.canManageBackup).toBe(true);
+    PAGES.forEach((page) => {
+      expect(result[accessKey(page.key)]).toBe(true);
+    });
+    expect((result.can as (permission: string) => boolean)('system:backup:manage')).toBe(true);
   });
 
   it('derives page visibility from capabilities (employee sees console + workplace only)', () => {
@@ -35,7 +37,7 @@ describe('access', () => {
     });
 
     expect(result.canEnterConsole).toBe(false);
-    expect(result.canAccessWorkplace).toBe(false);
+    expect(result[accessKey('workplace')]).toBe(false);
   });
 
   it('requires all read capabilities for 通讯录 and keeps 用户权限分配 administrator-only', () => {
@@ -50,7 +52,7 @@ describe('access', () => {
       ]),
     });
     expect(full[accessKey('org.contacts')]).toBe(true);
-    expect(full.canAssignRoles).toBe(false);
+    expect((full.can as (permission: string) => boolean)('security:user_role:manage')).toBe(false);
   });
 
   it('lets an approver open task detail without record-query capability', () => {
@@ -61,7 +63,7 @@ describe('access', () => {
     });
 
     expect(result.canUseProcessDetail).toBe(true);
-    expect(result.canApproveTask).toBe(true);
+    expect((result.can as (permission: string) => boolean)('workflow:task:approve')).toBe(true);
     expect(result[accessKey('approval.records')]).toBe(false);
   });
 
@@ -87,8 +89,6 @@ describe('access', () => {
       currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'workflow:definition:manage']),
     });
     expect(workflowAdmin.canDesigner).toBe(true);
-    expect(workflowAdmin.canDesignProcess).toBe(true);
-
     const unrelated = access({
       currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'workflow:task:read']),
     });

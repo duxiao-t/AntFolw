@@ -56,7 +56,31 @@
         <dependency><groupId>org.testcontainers</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
     </dependencies>
     <build>
+        <resources>
+            <resource><directory>src/main/resources</directory></resource>
+            <resource>
+                <directory>../frontend/config</directory>
+                <targetPath>antflow</targetPath>
+                <includes><include>page-capabilities.json</include></includes>
+            </resource>
+        </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <spring.datasource.password>antflow-test</spring.datasource.password>
+                        <antflow.jwt.secret>antflow-test-jwt-secret-0123456789abcdef</antflow.jwt.secret>
+                        <antflow.audit.archive-access-key>antflow-test</antflow.audit.archive-access-key>
+                        <antflow.audit.archive-secret-key>antflow-test-secret</antflow.audit.archive-secret-key>
+                        <antflow.audit.archive-encryption-secret>antflow-test-audit-encryption-secret</antflow.audit.archive-encryption-secret>
+                        <antflow.mobile.files.minio.access-key>antflow-test</antflow.mobile.files.minio.access-key>
+                        <antflow.mobile.files.minio.secret-key>antflow-test-secret</antflow.mobile.files.minio.secret-key>
+                        <antflow.wecom.encryption-key>antflow-test-integration-encryption-key</antflow.wecom.encryption-key>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

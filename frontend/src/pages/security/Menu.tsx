@@ -14,7 +14,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Select,
   Space,
   Switch,
   Tag,
@@ -22,7 +21,7 @@ import {
   Typography,
 } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
-import { PAGES, registeredPageKeys } from '../registry';
+import { PAGES } from '../registry';
 import './Security.less';
 
 type MenuNode = {
@@ -37,8 +36,7 @@ type MenuNode = {
   children: MenuNode[];
 };
 
-type MenuDocument = { version: number; nodes: MenuNode[]; pageKeys?: string[] };
-type Permission = { code: string; name: string; domainLabel: string };
+type MenuDocument = { version: number; nodes: MenuNode[] };
 
 /** 后端返回的树补齐可编辑字段与稳定 key。 */
 function normalize(nodes: MenuNode[], prefix = 'n'): MenuNode[] {
@@ -95,18 +93,13 @@ export default function MenuPage() {
   const [form] = Form.useForm();
   const [version, setVersion] = useState(0);
   const [nodes, setNodes] = useState<MenuNode[]>([]);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedKey, setSelectedKey] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
-    const [menu, permissionRows] = await Promise.all([
-      request<MenuDocument>('/api/menu'),
-      request<Permission[]>('/api/security/permissions'),
-    ]);
+    const menu = await request<MenuDocument>('/api/menu');
     setVersion(menu.version);
     setNodes(normalize(menu.nodes ?? []));
-    setPermissions(permissionRows);
     setSelectedKey('');
   };
 
@@ -188,7 +181,7 @@ export default function MenuPage() {
     try {
       const saved = await request<MenuDocument>('/api/menu', {
         method: 'PUT',
-        data: { version, pageKeys: registeredPageKeys(), nodes },
+        data: { version, nodes },
       });
       setVersion(saved.version);
       setNodes(normalize(saved.nodes ?? []));
@@ -313,20 +306,13 @@ export default function MenuPage() {
                 </div>
                 <Form.Item
                   label="所需能力（全部满足才显示）"
-                  name="requiredPermissions"
-                  extra="工作台可留空：只要拥有管理端入口即可见。"
+                  extra="由页面注册表统一定义，菜单编辑器不能修改。"
                 >
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    placeholder="不限制"
-                    options={permissions.map((permission) => ({
-                      value: permission.code,
-                      label: `${permission.domainLabel} / ${permission.name} (${permission.code})`,
-                    }))}
-                    onChange={(value) => setNodes((rows) => replaceNode(rows, selected.nodeKey,
-                      { requiredPermissions: value ?? [] }))}
-                  />
+                  <Space wrap>
+                    {selected.requiredPermissions.length
+                      ? selected.requiredPermissions.map((code) => <Tag key={code}>{code}</Tag>)
+                      : <Tag>仅需管理端入口</Tag>}
+                  </Space>
                 </Form.Item>
               </Form>
             </>

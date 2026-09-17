@@ -28,4 +28,13 @@ public interface FormDataMapper extends BaseMapper<FormData> {
         """)
     List<FormData> selectMySubmissions(@Param("userId") long userId,
                                        @Param("formDefId") Long formDefId);
+
+    /** 本人草稿是自助数据，不依赖管理端的 form:data:read 能力。 */
+    @InterceptorIgnore(dataPermission = "true")
+    @Select("""
+        SELECT * FROM t_form_data
+        WHERE created_by = #{userId} AND status = 'DRAFT'
+        ORDER BY updated_at DESC, id DESC
+        """)
+    List<FormData> selectMyDrafts(@Param("userId") long userId);
 }

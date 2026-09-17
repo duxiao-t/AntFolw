@@ -7,6 +7,7 @@ import {
 import { history, request, useModel } from '@umijs/max';
 import { App, Button, Input, Modal, Popconfirm, Space, Tag } from 'antd';
 import { useRef, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../authz';
 import type { SchemaNode } from '../../registry/types';
 import {
   buildFormTemplate,
@@ -47,9 +48,7 @@ export default function FormManagementList() {
   const { message } = App.useApp();
   const { initialState } = useModel('@@initialState');
   const currentUser = initialState?.currentUser as any;
-  const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const can = (permission: string) =>
-    isAdmin || (currentUser?.permissions ?? []).includes(permission);
+  const can = (permission: string) => hasCapability(currentUser, permission);
 
   const handleDelete = async (record: FormDefinition) => {
     try {
@@ -163,7 +162,7 @@ export default function FormManagementList() {
               const deprecated = record.status === 'DEPRECATED';
               return (
                 <Space>
-                  {can('form:definition:manage') && (
+                  {can(CAPABILITY.formDefinitionManage) && (
                     <a
                       onClick={() =>
                         history.push(
@@ -175,7 +174,7 @@ export default function FormManagementList() {
                     </a>
                   )}
                   <a onClick={() => void handleExport(record)}>导出</a>
-                  {can('form:definition:publish') && (
+                  {can(CAPABILITY.formDefinitionPublish) && (
                     <Popconfirm
                       title="确认停用该表单？"
                       description="停用后表单将不再可发起填报。"
@@ -194,7 +193,7 @@ export default function FormManagementList() {
                       </a>
                     </Popconfirm>
                   )}
-                  {can('form:definition:delete') && (
+                  {can(CAPABILITY.formDefinitionDelete) && (
                     <Popconfirm
                       title="确认删除该表单？"
                       description="删除后列表不再展示，历史提交数据仍会保留。"
@@ -205,7 +204,7 @@ export default function FormManagementList() {
                       <a style={{ color: '#ff4d4f' }}>删除</a>
                     </Popconfirm>
                   )}
-                  {can('form:data:read') && (
+                  {can(CAPABILITY.formDataRead) && (
                     <a
                       onClick={() =>
                         history.push(
@@ -240,7 +239,7 @@ export default function FormManagementList() {
         search={false}
         options={false}
         toolBarRender={() =>
-          can('form:definition:manage')
+          can(CAPABILITY.formDefinitionManage)
             ? [
                 <Button
                   key="import"

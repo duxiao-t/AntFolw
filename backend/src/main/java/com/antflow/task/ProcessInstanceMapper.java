@@ -42,6 +42,14 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
                     JOIN t_role granted_role ON granted_role.id = user_role.role_id
                       AND granted_role.enabled = true
                     WHERE user_role.user_id = #{userId}
+                  ))
+                  OR (form_grant.subject_type = 'DEPARTMENT' AND EXISTS (
+                    SELECT 1 FROM t_user grant_user
+                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
+                    JOIN t_department grant_department
+                      ON grant_department.id = form_grant.subject_id
+                    WHERE grant_user.id = #{userId}
+                      AND grant_department.path @> user_department.path
                   )))
             )
             AND EXISTS (
@@ -53,18 +61,18 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
                 AND permission.deprecated_at IS NULL
               LEFT JOIN t_user viewer ON viewer.id = #{userId}
               WHERE user_role.user_id = #{userId}
-                AND (COALESCE(role_permission.scope_override, permission.default_scope) = 'ALL'
-                  OR (COALESCE(role_permission.scope_override, permission.default_scope) = 'SELF'
+                AND (COALESCE(role_permission.scope_override, permission.default_scope, 'ALL') = 'ALL'
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope, 'ALL') = 'SELF'
                     AND pi.started_by = #{userId})
-                  OR (COALESCE(role_permission.scope_override, permission.default_scope) = 'DEPARTMENT'
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope, 'ALL') = 'DEPARTMENT'
                     AND viewer.dept_id IS NOT NULL AND viewer.dept_id = pi.started_dept_id)
-                  OR (COALESCE(role_permission.scope_override, permission.default_scope)
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope, 'ALL')
                       = 'DEPARTMENT_AND_DESCENDANTS' AND EXISTS (
                     SELECT 1 FROM t_department child, t_department parent
                     WHERE child.id = pi.started_dept_id AND parent.id = viewer.dept_id
                       AND parent.path @> child.path
                   ))
-                  OR (COALESCE(role_permission.scope_override, permission.default_scope) = 'CUSTOM'
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope, 'ALL') = 'CUSTOM'
                     AND EXISTS (
                     SELECT 1 FROM t_role_permission_department scope_department
                     WHERE scope_department.role_id = role.id
