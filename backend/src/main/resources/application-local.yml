@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    password: ${SPRING_DATASOURCE_PASSWORD:Tao@1234}
+
+antflow:
+  jwt:
+    secret: ${JWT_SECRET:devsecret0123456789devsecret0123456789devsecret}
+  audit:
+    archive-access-key: ${AUDIT_ARCHIVE_ACCESS_KEY:${MINIO_ACCESS_KEY:minioadmin}}
+    archive-secret-key: ${AUDIT_ARCHIVE_SECRET_KEY:${MINIO_SECRET_KEY:minioadmin}}
+    archive-encryption-secret: ${AUDIT_ARCHIVE_ENCRYPTION_SECRET:antflow-dev-audit-archive-key-change-me}
+  mobile:
+    files:
+      minio:
+        access-key: ${MINIO_ACCESS_KEY:minioadmin}
+        secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  wecom:
+    encryption-key: ${ANTFLOW_INTEGRATION_ENCRYPTION_KEY:antflow-dev-integration-key-change-me}

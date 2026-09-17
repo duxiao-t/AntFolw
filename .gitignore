@@ -26,6 +26,8 @@ ant-design-pro-master/
 wflow-master/
 
 # Build outputs / infra
+/.env
+.env.docker.local
 infra/.env
 infra/data/
 

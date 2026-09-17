@@ -34,13 +34,8 @@ AntFlow 是一套自研审批平台，包含可视化表单设计、流程设计
 
 ### 1. 配置本地密钥
 
-`.env.docker.local` 包含密钥且不能提交。首次使用时先将它加入当前仓库的本地 Git 排除文件：
-
-```powershell
-Add-Content .git/info/exclude '.env.docker.local'
-```
-
-在仓库根目录创建 `.env.docker.local`，并把所有 `replace-with-*` 替换为独立的高强度随机值：
+`.env.docker.local` 已由仓库 `.gitignore` 排除。请在仓库根目录创建它，
+并把所有 `replace-with-*` 替换为独立的高强度随机值：
 
 ```dotenv
 POSTGRES_PASSWORD=replace-with-postgres-password
@@ -142,6 +137,7 @@ BACKUP_ENCRYPTION_SECRET='与备份时相同的密钥' backend/backup/restore-ba
 
 ```powershell
 Set-Location backend
+$env:SPRING_PROFILES_ACTIVE='local'
 $env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/antflow?stringtype=unspecified'
 $env:SPRING_DATASOURCE_USERNAME='postgres'
 $env:SPRING_DATASOURCE_PASSWORD='your-password'
@@ -203,7 +199,7 @@ npm run test:e2e
 
 `check:enterprise` 依次执行 lint、单元测试、类型检查、生产构建和 bundle 预算检查。
 
-当前 CI 行为：后端测试和桌面端构建为阻断门禁；桌面端 Biome/TypeScript 检查暂为非阻断；移动端 lint、测试、构建和 bundle 预算均为阻断门禁。
+当前 CI 行为：后端测试、桌面端 TypeScript/测试/构建为阻断门禁；桌面端 Biome 暂为非阻断；移动端 lint、测试、构建和 bundle 预算均为阻断门禁。
 
 ## 写路径压测
 

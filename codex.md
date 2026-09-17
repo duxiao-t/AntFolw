@@ -6,7 +6,7 @@ Agent / Codex 在本仓库工作时的速查说明。更完整的领域约定见
 
 ```text
 ant-flow/
-├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway V1–V21 + PostgreSQL + MinIO；审批引擎 + RBAC/审计/自动化
+├── backend/     # Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway V1–V41 + PostgreSQL + MinIO；审批引擎 + RBAC/审计/自动化
 ├── frontend/    # Umi Max 4 桌面管理端（表单/流程设计、组织、任务、权限安全、报表、系统设置）
 ├── mobile/      # 独立移动端（Vite + React + Ant Design Mobile），base `/mobile/`
 ├── infra/       # nginx 示例
@@ -15,7 +15,7 @@ ant-flow/
 
 **先 `cd` 进模块再执行命令**，不要在仓库根直接跑 `mvn` / `npm`。
 
-## 当前后端能力（Flyway V1–V21）
+## 当前后端能力（Flyway V1–V41）
 
 - 审批引擎：树流程 + `PARALLEL` 并行网关 + `DELAY`/`TRIGGER` 自动化节点 + `REWORK` 原单重提。
 - 权限审计：操作/页面权限（`t_permission`）、角色授权（`t_role_permission`）、表单资源授权（`t_form_resource_grant`，发起/填报/草稿均校验）、追加只读审计（`t_audit_event`）与归档（`t_audit_archive`）。
@@ -25,6 +25,8 @@ ant-flow/
 
 
 ## 本地运行
+
+源码模式使用 `local` profile；生产配置没有数据库口令、JWT、MinIO 或集成密钥默认值。
 
 ### 数据库与对象存储
 
@@ -43,6 +45,7 @@ MinIO，不能落项目目录。
 
 ```powershell
 Set-Location backend
+$env:SPRING_PROFILES_ACTIVE='local'
 $env:PORT='8081'
 $env:MOBILE_FILE_STORAGE='minio'
 $env:MINIO_ENDPOINT='http://localhost:9000'
@@ -117,6 +120,14 @@ E2E 默认端口优先 `5174`（`E2E_PORT`），避免与本机 5173 冲突。
 中文约定：`类型(范围): 描述`  
 示例：`功能(移动端): …` / `测试(移动端): …` / `文档: 更新企业级移动端运行与验收说明`  
 作者历史常用：`AntFlow Bot <bot@antflow.local>`。
+
+## 权限与迁移约定
+
+- 鉴权分三层：端点能力、资源授权、数据范围；菜单和前端路由不是安全边界。
+- 能力码只增不改；废弃码由目录同步器标记，不复用旧码表达新语义。
+- 受控表的通用 mapper 语句保持默认拒绝；自助查询使用专用语句 id，并显式标注 `@InterceptorIgnore(dataPermission = "true")`。
+- 已执行的 Flyway 文件禁止修改；V40 已冻结，后续变更从 V41 前滚。
+- `/api/mobile/users|departments` 是移动端已登录用户的产品能力；桌面选择器使用 `/api/pickers/**`。
 
 ## 移动端 UI 设计稿对齐（2026-07-31 完成）
 

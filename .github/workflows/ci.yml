@@ -59,7 +59,9 @@ jobs:
       - name: Lint (Biome)
         run: npm run biome:lint || true   # non-blocking during MVP polish
       - name: Type-check
-        run: npx tsc --noEmit || true      # non-blocking during MVP wiring
+        run: npm run tsc
+      - name: Test
+        run: npm test
       - name: Build
         run: npm run build
 
