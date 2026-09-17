@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/instances")
@@ -37,6 +38,7 @@ public class InstanceController {
     private DefinitionVersionRepository definitionVersions;
 
     @PostMapping("/start")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_RUNTIME_READ + "')")
     public Map<String, Object> start(@RequestBody StartCmd cmd) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
@@ -52,6 +54,7 @@ public class InstanceController {
     }
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_READ + "')")
     public WorkflowPage<ProcessInstance> list(
             @RequestParam(defaultValue = "authorized") String scope,
             @RequestParam(defaultValue = "1") int page,
@@ -85,6 +88,7 @@ public class InstanceController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.consoleEntry()")
     public Map<String, Object> detail(@PathVariable Long id) {
         var principal = PrincipalHolder.current().orElseThrow();
         var visibility = authorizationService.instanceVisibility(id, principal.userId());
@@ -134,6 +138,7 @@ public class InstanceController {
     }
 
     @GetMapping("/{id}/history")
+    @PreAuthorize("@authz.consoleEntry()")
     public List<TaskHistoryEntity> history(@PathVariable Long id) {
         authorizationService.requireReadableInstance(id);
         return historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
@@ -141,6 +146,7 @@ public class InstanceController {
     }
 
     @PostMapping("/{id}/withdraw")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW + "')")
     public void withdraw(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW);
         var p = PrincipalHolder.current().orElseThrow();
@@ -152,6 +158,7 @@ public class InstanceController {
     }
 
     @PostMapping("/{id}/jobs/{jobId}/retry")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_AUTOMATION_RETRY + "')")
     public void retryAutomationJob(@PathVariable Long id, @PathVariable Long jobId) {
         authorizationService.requireManageInstance(id, PermissionCodes.WORKFLOW_AUTOMATION_RETRY);
         auditService.execute(() -> workflowJobService.retryFailed(id, jobId),
@@ -163,6 +170,7 @@ public class InstanceController {
     }
 
     @PostMapping("/{id}/terminate")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE + "')")
     public void terminate(@PathVariable Long id, @RequestBody AdminTerminateRequest request) {
         authorizationService.requireManageInstance(id, PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE);
         if (request == null || request.ticketNo() == null || request.ticketNo().isBlank()

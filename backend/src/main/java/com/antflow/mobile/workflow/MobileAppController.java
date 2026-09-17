@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import com.antflow.authz.AuthenticatedOnly;
 
 @RestController
 @RequestMapping("/api/mobile")
@@ -20,6 +21,7 @@ public class MobileAppController {
     private final MobileAppService mobileAppService;
 
     @GetMapping("/apps")
+    @AuthenticatedOnly
     public List<MobileAppDto> apps(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String category) {
@@ -28,6 +30,7 @@ public class MobileAppController {
     }
 
     @PutMapping("/preferences/apps")
+    @AuthenticatedOnly
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void saveFavorites(@RequestBody FavoriteAppsRequest request) {
         mobileAppService.saveFavorites(principal().userId(), request.formIds());

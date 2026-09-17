@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 /** Small operational view for stuck, overdue and rejection hot spots. */
 @RestController
@@ -20,8 +21,9 @@ public class WorkflowMonitoringController {
     private final AuthorizationService authorization;
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_MONITOR_READ + "')")
     public Map<String, Object> overview(@RequestParam(defaultValue = "50") int limit) {
-        authorization.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE);
+        authorization.requirePermission(PermissionCodes.WORKFLOW_MONITOR_READ);
         int safeLimit = Math.min(100, Math.max(1, limit));
         List<Map<String, Object>> stuck = jdbc.queryForList("""
             SELECT instance.id, instance.current_node_id, instance.started_at

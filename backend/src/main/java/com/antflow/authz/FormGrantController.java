@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/forms")
@@ -16,21 +17,25 @@ public class FormGrantController {
     private final FormGrantService formGrantService;
 
     @GetMapping("/{formId}/grants")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
     public FormGrantService.FormGrantDto get(@PathVariable long formId) {
         return formGrantService.get(formId);
     }
 
     @GetMapping("/{formId}/grants/candidates")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
     public FormGrantService.FormGrantCandidates candidates(@PathVariable long formId) {
         return formGrantService.candidates(formId);
     }
 
     @GetMapping("/grant-candidates")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
     public FormGrantService.FormGrantCandidates candidates() {
         return formGrantService.candidates();
     }
 
     @GetMapping("/{formId}/grants/user-candidates")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
     public FormGrantService.GrantUserPage userCandidates(
             @PathVariable long formId,
             @RequestParam(defaultValue = "1") int page,
@@ -41,6 +46,7 @@ public class FormGrantController {
     }
 
     @GetMapping("/grant-user-candidates")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
     public FormGrantService.GrantUserPage userCandidates(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -50,6 +56,7 @@ public class FormGrantController {
     }
 
     @PutMapping("/{formId}/grants")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
     public FormGrantService.FormGrantDto replace(
             @PathVariable long formId,
             @RequestBody FormGrantService.FormGrantWriteRequest request) {

@@ -62,7 +62,7 @@ console.log(JSON.stringify({ poolSize, mode: report.mode, acceptance,
 async function setupFixture() {
   const admin = await login('admin', 'ant.design');
   const roles = await expectOk(await request('/api/roles', { token: admin }), 'list roles');
-  const userRole = roles.json.find((role) => role.code === 'user');
+  const userRole = roles.json.find((role) => role.code === 'employee');
   assert(userRole?.id, 'seed user role not found');
   const password = 'LoadTest1!';
   const users = {};

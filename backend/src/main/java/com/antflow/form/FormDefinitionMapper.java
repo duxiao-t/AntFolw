@@ -22,19 +22,6 @@ public interface FormDefinitionMapper extends BaseMapper<FormDefinition> {
         <if test="status != null and status != ''">
           AND form.status = #{status}
         </if>
-        <if test="!admin">
-          AND form.id IN (
-            SELECT grant_row.form_def_id
-            FROM t_form_resource_grant grant_row
-            WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = #{userId})
-               OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
-                 SELECT user_role.role_id
-                 FROM t_user_role user_role
-                 JOIN t_role role ON role.id = user_role.role_id AND role.enabled = true
-                 WHERE user_role.user_id = #{userId}
-               ))
-          )
-        </if>
         ORDER BY form.updated_at DESC, form.id DESC
         </script>
         """)

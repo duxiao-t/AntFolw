@@ -85,12 +85,12 @@ public class FormDataService {
     public record SubmitResult(Long dataId, String businessNo) { }
 
     public List<FormData> mySubmissions(Long userId, String formCode) {
-        var q = new QueryWrapper<FormData>().eq("created_by", userId);
+        Long formDefId = null;
         if (formCode != null) {
             var fd = formDefinitionService.getByCode(formCode);
-            if (fd != null) q.eq("form_def_id", fd.getId());
+            if (fd != null) formDefId = fd.getId();
         }
-        return mapper.selectList(q);
+        return mapper.selectMySubmissions(userId, formDefId);
     }
 
     public Page<FormData> adminPage(long page, long size, Long formDefId,
@@ -108,24 +108,9 @@ public class FormDataService {
     public Page<FormData> authorizedPage(long page, long size, Long formDefId,
                                          String status, Long createdBy,
                                          long userId, boolean admin) {
-        if (admin) {
-            return adminPage(page, size, formDefId, status, createdBy);
-        }
-        var q = new QueryWrapper<FormData>();
-        if (formDefId != null) q.eq("form_def_id", formDefId);
-        if (status != null && !status.isBlank()) q.eq("status", status);
-        if (createdBy != null) q.eq("created_by", createdBy);
-        q.orderByDesc("created_at").orderByDesc("id");
-        List<FormData> readable = mapper.selectList(q).stream()
-            .filter(data -> authorizationService.canReadFormData(data.getId(), userId))
-            .toList();
-        long safePage = Math.max(page, 1);
-        long safeSize = Math.min(Math.max(size, 1), 100);
-        int from = (int) Math.min((safePage - 1) * safeSize, readable.size());
-        int to = (int) Math.min(from + safeSize, readable.size());
-        Page<FormData> result = Page.of(safePage, safeSize, readable.size());
-        result.setRecords(readable.subList(from, to));
-        return enrichAdminPage(result);
+        // 非 admin 的行级范围（含表单使用授权）由 DataPermissionPolicyHandler 在 SQL 层注入，
+        // 这里统一走 SQL 分页，避免把整表读进内存再过滤。
+        return adminPage(page, size, formDefId, status, createdBy);
     }
 
     public FormData getById(Long id) {

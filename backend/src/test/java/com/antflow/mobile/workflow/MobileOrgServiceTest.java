@@ -2,6 +2,7 @@ package com.antflow.mobile.workflow;
 
 import com.antflow.org.Department;
 import com.antflow.org.DepartmentMapper;
+import com.antflow.org.RoleMapper;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -19,6 +20,7 @@ class MobileOrgServiceTest {
     void returnsNameDepartmentAndEmployeeNumberForPickerRows() {
         UserMapper users = Mockito.mock(UserMapper.class);
         DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        RoleMapper roles = Mockito.mock(RoleMapper.class);
         User user = user(7L, 20L, "张三", "zhangsan", "000007");
         Department department = new Department();
         department.setId(20L);
@@ -26,7 +28,7 @@ class MobileOrgServiceTest {
         Mockito.when(users.selectList(any())).thenReturn(List.of(user));
         Mockito.when(departments.selectBatchIds(any())).thenReturn(List.of(department));
 
-        MobilePickerUserDto row = new MobileOrgService(users, departments).searchUsers("张").get(0);
+        MobilePickerUserDto row = new MobileOrgService(users, departments, roles).searchUsers("张").get(0);
 
         assertThat(row).isEqualTo(new MobilePickerUserDto(7L, "zhangsan", "张三", "研发部", "000007"));
     }
@@ -35,6 +37,7 @@ class MobileOrgServiceTest {
     void readsSelectedUserIdentityById() {
         UserMapper users = Mockito.mock(UserMapper.class);
         DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        RoleMapper roles = Mockito.mock(RoleMapper.class);
         User user = user(7L, 20L, "张三", "zhangsan", "000007");
         Department department = new Department();
         department.setId(20L);
@@ -42,7 +45,7 @@ class MobileOrgServiceTest {
         Mockito.when(users.selectById(7L)).thenReturn(user);
         Mockito.when(departments.selectById(20L)).thenReturn(department);
 
-        MobilePickerUserDto row = new MobileOrgService(users, departments).user(7L);
+        MobilePickerUserDto row = new MobileOrgService(users, departments, roles).user(7L);
 
         assertThat(row.department()).isEqualTo("研发部");
         assertThat(row.employeeNo()).isEqualTo("000007");
@@ -52,12 +55,13 @@ class MobileOrgServiceTest {
     void readsSelectedDepartmentById() {
         UserMapper users = Mockito.mock(UserMapper.class);
         DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        RoleMapper roles = Mockito.mock(RoleMapper.class);
         Department department = new Department();
         department.setId(20L);
         department.setName("研发部");
         Mockito.when(departments.selectById(20L)).thenReturn(department);
 
-        MobilePickerDepartmentDto row = new MobileOrgService(users, departments).department(20L);
+        MobilePickerDepartmentDto row = new MobileOrgService(users, departments, roles).department(20L);
 
         assertThat(row).isEqualTo(new MobilePickerDepartmentDto(20L, "研发部"));
     }
@@ -66,8 +70,9 @@ class MobileOrgServiceTest {
     void hidesMissingSelectedDepartment() {
         UserMapper users = Mockito.mock(UserMapper.class);
         DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        RoleMapper roles = Mockito.mock(RoleMapper.class);
 
-        assertThatThrownBy(() -> new MobileOrgService(users, departments).department(404L))
+        assertThatThrownBy(() -> new MobileOrgService(users, departments, roles).department(404L))
             .isInstanceOf(com.antflow.authz.HiddenResourceException.class);
     }
 
@@ -76,6 +81,7 @@ class MobileOrgServiceTest {
     void searchesUsersByMatchingDepartmentName() {
         UserMapper users = Mockito.mock(UserMapper.class);
         DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        RoleMapper roles = Mockito.mock(RoleMapper.class);
         User user = user(7L, 20L, "张三", "zhangsan", "000007");
         Department department = new Department();
         department.setId(20L);
@@ -84,7 +90,7 @@ class MobileOrgServiceTest {
         Mockito.when(users.selectList(any(QueryWrapper.class))).thenReturn(List.of(user));
         Mockito.when(departments.selectBatchIds(any())).thenReturn(List.of(department));
 
-        new MobileOrgService(users, departments).searchUsers("研发");
+        new MobileOrgService(users, departments, roles).searchUsers("研发");
 
         ArgumentCaptor<QueryWrapper> query = ArgumentCaptor.forClass(QueryWrapper.class);
         Mockito.verify(users).selectList(query.capture());

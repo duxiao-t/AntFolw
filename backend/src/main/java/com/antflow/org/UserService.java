@@ -50,7 +50,7 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds, String rawPassword) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         List<Long> normalizedRoleIds = new LinkedHashSet<>(roleIds == null ? List.of() : roleIds)
             .stream().toList();
         if (!normalizedRoleIds.isEmpty() && !authorizationService.isAdmin()) {
@@ -62,7 +62,7 @@ public class UserService {
         validateDisplayName(u.getDisplayName());
         validateDepartment(u.getDeptId());
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, u.getDeptId());
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, u.getDeptId());
         validateManager(null, u.getManagerId(), u.getDeptId());
         validatePassword(rawPassword);
         u.setEmployeeNo(formalNumberService.employeeNo(u.getEmployeeNo(), null));
@@ -111,7 +111,7 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         User u = userMapper.selectById(userId);
         if (u == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -121,7 +121,7 @@ public class UserService {
             throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
         }
         authorizationService.requireCurrentDataScope(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, u.getDeptId());
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, userId, u.getDeptId());
         if (!authorizationService.isAdmin() && authorizationService.currentUserId() == userId) {
             throw new BizException("SELF_USER_PROTECTED", "不能删除当前登录账号");
         }
@@ -312,7 +312,7 @@ public class UserService {
 
     public List<User> managerCandidates(Long departmentId, Long excludedUserId, String keyword) {
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
         Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);
         if (department == null) {
             throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
@@ -404,7 +404,7 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public User update(Long userId, Map<String, Object> body) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -417,7 +417,7 @@ public class UserService {
             throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
         }
         authorizationService.requireCurrentDataScope(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, user.getDeptId());
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, userId, user.getDeptId());
         Long originalDepartmentId = user.getDeptId();
         if (body.containsKey("status") && rolesOf(userId).contains("admin")) {
             lockAdminRole();
@@ -439,7 +439,7 @@ public class UserService {
                 ? null : ((Number) body.get("deptId")).longValue();
             validateDepartment(departmentId);
             authorizationService.requireManageableDepartment(
-                com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
+                com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
             user.setDeptId(departmentId);
         }
         if (body.containsKey("managerId")) {

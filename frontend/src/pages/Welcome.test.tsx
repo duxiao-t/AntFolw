@@ -19,7 +19,7 @@ vi.mock('@umijs/max', () => ({
       currentUser: {
         displayName: '运营员',
         roles: ['operator'],
-        permissions: ['page.workplace', 'workflow.instance.read', 'workflow.task.approve', 'workflow.task.reject', 'page.approval.records'],
+        permissions: ['console:entry:access', 'workflow:instance:read', 'workflow:task:approve', 'workflow:task:reject', 'workflow:instance:read'],
       },
     },
   }),

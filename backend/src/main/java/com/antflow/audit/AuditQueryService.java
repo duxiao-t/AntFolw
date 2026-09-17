@@ -23,7 +23,7 @@ public class AuditQueryService {
     private final ObjectMapper objectMapper;
 
     public AuditPage search(AuditSearch search) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_AUDIT_READ);
+        authorizationService.requirePermission(PermissionCodes.AUDIT_EVENT_READ);
         QueryParts parts = where(search);
         int page = Math.max(1, search.page());
         int size = Math.min(100, Math.max(1, search.size()));
@@ -40,7 +40,7 @@ public class AuditQueryService {
     }
 
     public AuditEventDto detail(long id) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_AUDIT_READ);
+        authorizationService.requirePermission(PermissionCodes.AUDIT_EVENT_READ);
         AuditEventDto event = jdbcTemplate.query("SELECT * FROM t_audit_event WHERE id = ?",
             rs -> rs.next() ? event(rs) : null, id);
         if (event == null) throw new com.antflow.authz.HiddenResourceException("audit event not found");
@@ -48,7 +48,7 @@ public class AuditQueryService {
     }
 
     public byte[] export(AuditSearch search) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_AUDIT_EXPORT);
+        authorizationService.requirePermission(PermissionCodes.AUDIT_EVENT_EXPORT);
         QueryParts parts = where(search);
         List<AuditEventDto> records = jdbcTemplate.query("""
             SELECT * FROM t_audit_event

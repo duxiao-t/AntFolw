@@ -285,7 +285,7 @@ export default function FormManagementWizard() {
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
   const canManageGrants =
     isAdmin ||
-    (currentUser?.permissions ?? []).includes('form.authorization.manage');
+    (currentUser?.permissions ?? []).includes('form:authorization:manage');
 
   const { data: definition } = useQuery<FormDefinition>({
     queryKey: ['form-management-definition', formId],
@@ -331,7 +331,7 @@ export default function FormManagementWizard() {
       ),
     enabled: canManageGrants,
   });
-  const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'user')?.id;
+  const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'employee')?.id;
   const visibilitySummary = allCompanyRoleId && formGrant?.roleIds.includes(allCompanyRoleId)
     ? '全公司'
     : [

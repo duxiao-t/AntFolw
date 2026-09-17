@@ -93,7 +93,7 @@ public class WecomService {
     }
 
     public SettingsDto settings(long companyId) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         requireCompany(companyId);
         Config config = config(companyId);
         return new SettingsDto(companyId, config == null ? "" : config.corpId(),
@@ -130,7 +130,7 @@ public class WecomService {
                                     Boolean jsSdkEnabled, Boolean messageEnabled,
                                     Boolean scheduleEnabled, String scheduleTime,
                                     String scheduleMode) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         requireCompany(companyId);
         String normalizedCorpId = corpId == null ? "" : corpId.trim();
         if (normalizedCorpId.isBlank() || normalizedCorpId.length() > 128) {
@@ -206,9 +206,9 @@ public class WecomService {
 
     @Transactional(rollbackFor = Exception.class)
     public JobDto start(long companyId, String syncMode) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
-        authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_WRITE);
-        authorization.requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
+        authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_MANAGE);
+        authorization.requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
         requireCompany(companyId);
         if (config(companyId) == null) {
             throw new BizException("WECOM_NOT_CONFIGURED", "请先保存企业微信连接配置");
@@ -240,7 +240,7 @@ public class WecomService {
     }
 
     public JobDto job(long id) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         return job(id, true);
     }
 
@@ -406,8 +406,8 @@ public class WecomService {
     private SyncContext loadContext(long companyId, List<WecomUser> externalUsers, boolean full) {
         SyncContext context = new SyncContext();
         context.roleId = jdbc.queryForObject(
-            "SELECT id FROM t_role WHERE code = 'user' AND enabled = true", Long.class);
-        if (context.roleId == 0) throw new SyncUserException("内置 user 角色不存在");
+            "SELECT id FROM t_role WHERE code = 'employee' AND enabled = true", Long.class);
+        if (context.roleId == 0) throw new SyncUserException("内置 employee 角色不存在");
         List<LocalUserState> localUsers = jdbc.query("""
             SELECT u.id, u.username, u.employee_no, u.phone, u.email, u.display_name,
                    u.position, u.gender, u.status, m.wecom_user_id,

@@ -2,6 +2,8 @@ package com.antflow.mobile.workflow;
 
 import com.antflow.org.Department;
 import com.antflow.org.DepartmentMapper;
+import com.antflow.org.Role;
+import com.antflow.org.RoleMapper;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -19,6 +21,7 @@ public class MobileOrgService {
 
     private final UserMapper userMapper;
     private final DepartmentMapper departmentMapper;
+    private final RoleMapper roleMapper;
 
     public List<MobilePickerUserDto> searchUsers(String keyword) {
         QueryWrapper<User> query = new QueryWrapper<>();
@@ -69,6 +72,21 @@ public class MobileOrgService {
         query.orderByAsc("name").last("LIMIT " + SEARCH_LIMIT);
         return departmentMapper.selectList(query).stream()
             .map(department -> new MobilePickerDepartmentDto(department.getId(), department.getName()))
+            .toList();
+    }
+
+    /** 角色选择器：只暴露 id/code/name，供流程配置里的"审批角色"选择使用。 */
+    public List<MobilePickerRoleDto> searchRoles(String keyword) {
+        QueryWrapper<Role> query = new QueryWrapper<>();
+        query.select("id", "code", "name").eq("enabled", true);
+        String trimmedKeyword = normalizeKeyword(keyword);
+        if (!trimmedKeyword.isEmpty()) {
+            query.and(wrapper -> wrapper.like("code", trimmedKeyword)
+                .or().like("name", trimmedKeyword));
+        }
+        query.orderByAsc("id").last("LIMIT " + SEARCH_LIMIT);
+        return roleMapper.selectList(query).stream()
+            .map(role -> new MobilePickerRoleDto(role.getId(), role.getCode(), role.getName()))
             .toList();
     }
 

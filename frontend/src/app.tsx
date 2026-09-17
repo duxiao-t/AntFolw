@@ -23,6 +23,7 @@ import {
   VersionDropdown,
 } from '@/components';
 import { WorkflowEventsSubscriber } from '@/components/WorkflowEventsSubscriber';
+import { navToMenuData, type NavNode } from '@/pages/registry';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -55,11 +56,16 @@ function AuthzRefresh() {
   const refresh = React.useCallback(() => {
     if (!initialState?.currentUser || !initialState.fetchUserInfo) return;
     if (!refreshing.current) {
-      refreshing.current = initialState.fetchUserInfo().then((currentUser: API.CurrentUser | undefined) => {
-        if (currentUser && (currentUser as any).authzVersion !==
-          (initialState.currentUser as any).authzVersion) {
-          setInitialState((state: any) => ({ ...state, currentUser }));
-        }
+      refreshing.current = Promise.all([
+        initialState.fetchUserInfo(),
+        fetchNavigation(),
+      ]).then(([currentUser, navigation]) => {
+        // 菜单编排在服务端：能力变更或管理员改菜单后需要一起刷新。
+        setInitialState((state: any) => ({
+          ...state,
+          currentUser: currentUser ?? state.currentUser,
+          navigation: navigation ?? state.navigation,
+        }));
       }).finally(() => { refreshing.current = null; });
     }
   }, [initialState, setInitialState]);
@@ -74,12 +80,23 @@ function AuthzRefresh() {
   return null;
 }
 
+/** 当前用户可见菜单（服务端按能力过滤；未注册 pageKey 由 navToMenuData 跳过）。 */
+async function fetchNavigation(): Promise<NavNode[] | undefined> {
+  try {
+    if (!localStorage.getItem(TOKEN_KEY)) return undefined;
+    return await umiRequest<NavNode[]>('/api/navigation', { skipErrorHandler: true });
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * @see https://umijs.org/docs/api/runtime-config#getinitialstate
  * */
 export async function getInitialState(): Promise<{
   settings?: Partial<LayoutSettings>;
   currentUser?: API.CurrentUser;
+  navigation?: NavNode[];
   loading?: boolean;
   fetchUserInfo?: () => Promise<API.CurrentUser | undefined>;
   settingDrawerOpen?: boolean;
@@ -114,9 +131,11 @@ export async function getInitialState(): Promise<{
     )
   ) {
     const currentUser = await fetchUserInfo();
+    const navigation = currentUser ? await fetchNavigation() : undefined;
     return {
       fetchUserInfo,
       currentUser,
+      navigation,
       settings: defaultSettings as Partial<LayoutSettings>,
       settingDrawerOpen: false,
     };
@@ -134,6 +153,8 @@ export const layout: RunTimeLayoutConfig = ({
   setInitialState,
 }) => {
   return {
+    // 菜单来自服务端编排（t_menu + 能力过滤），未注册 pageKey 会被跳过。
+    menuDataRender: () => navToMenuData(initialState?.navigation ?? []),
     menuItemRender: (item, dom) => {
       if (item.path) {
         return (

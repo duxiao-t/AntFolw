@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 @RequestMapping("/api/integrations/wecom")
@@ -24,11 +26,13 @@ public class WecomController {
     }
 
     @GetMapping("/settings")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
     public WecomService.SettingsDto settings(@RequestParam long companyId) {
         return service.settings(companyId);
     }
 
     @PutMapping("/settings")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
     public WecomService.SettingsDto save(@Valid @RequestBody SaveSettingsRequest request) {
         if (request.agentId() == null && request.agentSecret() == null
             && request.oauthEnabled() == null && request.jsSdkEnabled() == null
@@ -43,11 +47,13 @@ public class WecomController {
     }
 
     @PostMapping("/sync-jobs")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
     public WecomService.JobDto start(@Valid @RequestBody StartJobRequest request) {
         return service.start(request.companyId(), request.mode());
     }
 
     @GetMapping("/sync-jobs/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
     public WecomService.JobDto job(@PathVariable long id) {
         return service.job(id);
     }

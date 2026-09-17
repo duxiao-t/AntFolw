@@ -67,12 +67,32 @@ public class AuthorizationService {
         cache.remove(userId);
     }
 
+    /** 全局授权变更（菜单编排、能力目录）后一次性失效所有快照。 */
+    public void evictAll() {
+        cache.clear();
+    }
+
     public void requirePermission(String permission) {
         PrincipalHolder.Principal principal = principal();
         if (!principal.isAdmin() && !principal.permissions().contains(permission)) {
             throw new AuthorizationFailureException("MISSING_PERMISSION",
                 "missing permission: " + permission);
         }
+    }
+
+    /** 多个能力任一即可（例如"表单管理员或流程管理员"都能配置流程）。 */
+    public void requireAnyPermission(String... permissions) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        for (String permission : permissions) {
+            if (principal.permissions().contains(permission)) {
+                return;
+            }
+        }
+        throw new AuthorizationFailureException("MISSING_PERMISSION",
+            "missing permission: " + String.join(" or ", permissions));
     }
 
     public void requireAdmin() {
@@ -98,6 +118,32 @@ public class AuthorizationService {
     public AuthzSnapshot currentSnapshot() {
         PrincipalHolder.Principal principal = principal();
         return snapshot(principal.userId());
+    }
+
+    /**
+     * 供数据权限拦截器使用：某能力在当前请求下的行级过滤条件。
+     *
+     * <p>返回空表示"无请求主体"（系统内部任务），调用方应跳过注入；
+     * unrestricted 表示不需要过滤（admin 或 ALL 范围）；
+     * 既无 selfAllowed 又无 departmentIds 表示该能力缺失 → 调用方应注入 1=0（fail-closed）。
+     */
+    public Optional<DataScopeFilter> currentDataScope(String permissionCode) {
+        if (PrincipalHolder.current().isEmpty()) {
+            return Optional.empty();
+        }
+        AuthzSnapshot snapshot = currentSnapshot();
+        if (snapshot.admin()) {
+            return Optional.of(new DataScopeFilter(true, false, snapshot.userId(), Set.of()));
+        }
+        List<RoleGrant> grants = snapshot.permissionRoles().getOrDefault(permissionCode, List.of());
+        boolean all = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.ALL);
+        boolean self = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.SELF);
+        Set<Long> departments = all ? Set.of() : manageableDepartments(snapshot, permissionCode);
+        return Optional.of(new DataScopeFilter(all, self, snapshot.userId(), departments));
+    }
+
+    public record DataScopeFilter(boolean unrestricted, boolean selfAllowed, long userId,
+                                  Set<Long> departmentIds) {
     }
 
     public boolean inCurrentDataScope(String permission, Long ownerId, Long departmentId) {
@@ -188,6 +234,18 @@ public class AuthorizationService {
             return;
         }
         requirePermission(permission);
+        if (!hasFormGrant(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    /** 能力满足其一即可，但仍要求该表单的使用授权（未授权按不存在处理）。 */
+    public void requireFormActionAny(long formId, String... permissions) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        requireAnyPermission(permissions);
         if (!hasFormGrant(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
         }
@@ -444,30 +502,42 @@ public class AuthorizationService {
     }
 
     private AuthzSnapshot loadSnapshot(UserState user) {
-        List<RoleGrant> roles = jdbcTemplate.query("""
-            SELECT role.id, role.code, role.data_scope
+        List<RoleBase> roles = jdbcTemplate.query("""
+            SELECT role.id, role.code
             FROM t_user_role ur
             JOIN t_role role ON role.id = ur.role_id
             WHERE ur.user_id = ? AND role.enabled = true
             ORDER BY role.id
-            """, (rs, row) -> new RoleGrant(
-                rs.getLong("id"),
-                rs.getString("code"),
-                DataScope.valueOf(rs.getString("data_scope")),
-                customDepartments(rs.getLong("id"))), user.userId());
+            """, (rs, row) -> new RoleBase(rs.getLong("id"), rs.getString("code")),
+            user.userId());
         boolean admin = roles.stream().anyMatch(role -> "admin".equals(role.code()));
 
+        // 数据范围按「角色 × 能力」解析：覆盖值优先，否则取能力目录声明的默认范围。
         Map<String, List<RoleGrant>> permissionRoles = new HashMap<>();
-        for (RoleGrant role : roles) {
-            List<String> rolePermissions = admin && "admin".equals(role.code())
-                ? jdbcTemplate.queryForList("SELECT code FROM t_permission ORDER BY sort_order, code",
-                    String.class)
-                : jdbcTemplate.queryForList("""
-                    SELECT permission_code FROM t_role_permission
-                    WHERE role_id = ? ORDER BY permission_code
-                    """, String.class, role.roleId());
-            for (String permission : rolePermissions) {
-                permissionRoles.computeIfAbsent(permission, key -> new ArrayList<>()).add(role);
+        for (RoleBase role : roles) {
+            if (admin && "admin".equals(role.code())) {
+                jdbcTemplate.queryForList("""
+                    SELECT code FROM t_permission WHERE deprecated_at IS NULL
+                    ORDER BY sort_order, code
+                    """, String.class).forEach(code -> permissionRoles
+                    .computeIfAbsent(code, key -> new ArrayList<>())
+                    .add(new RoleGrant(role.roleId(), role.code(), DataScope.ALL, Set.of())));
+                continue;
+            }
+            List<GrantRow> grants = jdbcTemplate.query("""
+                SELECT granted.permission_code, granted.scope_override
+                FROM t_role_permission granted
+                JOIN t_permission permission ON permission.code = granted.permission_code
+                WHERE granted.role_id = ? AND permission.deprecated_at IS NULL
+                ORDER BY granted.permission_code
+                """, (rs, row) -> new GrantRow(rs.getString("permission_code"),
+                rs.getString("scope_override")), role.roleId());
+            for (GrantRow grant : grants) {
+                DataScope scope = effectiveScope(grant);
+                permissionRoles.computeIfAbsent(grant.permissionCode(), key -> new ArrayList<>())
+                    .add(new RoleGrant(role.roleId(), role.code(), scope,
+                        scope == DataScope.CUSTOM
+                            ? customDepartments(role.roleId(), grant.permissionCode()) : Set.of()));
             }
         }
         Set<String> permissions = new LinkedHashSet<>(permissionRoles.keySet());
@@ -480,10 +550,21 @@ public class AuthorizationService {
             Collections.unmodifiableMap(immutableGrants));
     }
 
-    private Set<Long> customDepartments(long roleId) {
+    /** 覆盖值优先；未覆盖时取能力声明的默认范围；能力不支持范围管理时视为不限制。 */
+    private static DataScope effectiveScope(GrantRow grant) {
+        if (grant.scopeOverride() != null && !grant.scopeOverride().isBlank()) {
+            return DataScope.valueOf(grant.scopeOverride());
+        }
+        PermissionCatalog.Entry entry = PermissionCatalog.require(grant.permissionCode());
+        return entry.defaultScope() == null ? DataScope.ALL : entry.defaultScope();
+    }
+
+    private Set<Long> customDepartments(long roleId, String permissionCode) {
         return Collections.unmodifiableSet(new LinkedHashSet<>(jdbcTemplate.queryForList(
-            "SELECT department_id FROM t_role_department WHERE role_id = ? ORDER BY department_id",
-            Long.class, roleId)));
+            """
+            SELECT department_id FROM t_role_permission_department
+            WHERE role_id = ? AND permission_code = ? ORDER BY department_id
+            """, Long.class, roleId, permissionCode)));
     }
 
     private UserState userState(long userId) {
@@ -517,6 +598,8 @@ public class AuthorizationService {
     }
 
     private record CachedSnapshot(long version, AuthzSnapshot snapshot) { }
+    private record RoleBase(long roleId, String code) { }
+    private record GrantRow(String permissionCode, String scopeOverride) { }
     private record UserState(long userId, String username, String displayName, String status,
                              long authzVersion, Long departmentId) { }
     private record InstanceAccess(Long startedBy, Long startedDepartmentId, Long formDefId) { }

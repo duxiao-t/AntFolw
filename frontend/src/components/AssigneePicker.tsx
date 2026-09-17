@@ -9,7 +9,10 @@ export function AssigneePicker({ mode, value, onChange }: {
   onChange: (v: any) => void;
 }) {
   const [kw, setKw] = useState('');
-  const url = mode === 'user' ? `/api/users?keyword=${kw}` : `/api/roles`;
+  // 选择器语义：只需要 id 与展示名，走最小字段接口；组织/权限域接口对流程配置者不可见。
+  const url = mode === 'user'
+    ? `/api/mobile/users?keyword=${encodeURIComponent(kw)}`
+    : '/api/mobile/roles';
   const { data, isFetching } = useQuery({
     queryKey: ['assignee', mode, kw],
     queryFn: () => request(url).then((r: any) => r ?? []),

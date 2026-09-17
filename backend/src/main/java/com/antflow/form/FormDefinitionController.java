@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/forms/definitions")
@@ -23,6 +24,7 @@ public class FormDefinitionController {
     private final FormProcessPublishService formProcessPublishService;
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_READ + "')")
     public Page<FormDefinitionMapper.Summary> list(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "20") long size,
@@ -35,6 +37,8 @@ public class FormDefinitionController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.FORM_DEFINITION_READ
+        + "', '" + PermissionCodes.WORKFLOW_DEFINITION_READ + "')")
     public FormDefinition get(@PathVariable Long id) {
         authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_READ);
         FormDefinition definition = mapper.selectById(id);
@@ -43,6 +47,7 @@ public class FormDefinitionController {
     }
 
     @GetMapping("/by-code/{code}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_RUNTIME_READ + "')")
     public FormDefinition byCode(@PathVariable String code) {
         FormDefinition fd = service.getPublishedByCode(code);
         if (fd == null) {
@@ -53,13 +58,14 @@ public class FormDefinitionController {
     }
 
     @PostMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public FormDefinition save(@RequestBody SaveBody body) {
         var p = PrincipalHolder.current().orElseThrow();
         boolean creating = body.id() == null;
         if (creating) {
-            authorizationService.requirePermission(PermissionCodes.FORM_DEFINITION_CREATE);
+            authorizationService.requirePermission(PermissionCodes.FORM_DEFINITION_MANAGE);
         } else {
-            authorizationService.requireFormAction(body.id(), PermissionCodes.FORM_DEFINITION_DESIGN);
+            authorizationService.requireFormAction(body.id(), PermissionCodes.FORM_DEFINITION_MANAGE);
         }
         return auditService.execute(
             () -> service.saveDraft(body.id(), body.code(), body.name(), body.description(),
@@ -72,8 +78,9 @@ public class FormDefinitionController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public FormDefinition update(@PathVariable Long id, @RequestBody SaveBody body) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_DESIGN);
+        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_MANAGE);
         return auditService.execute(
             () -> service.update(id, body.name(), body.description(), body.status(),
                 body.schema(), body.settings()),
@@ -84,6 +91,7 @@ public class FormDefinitionController {
     }
 
     @PostMapping("/{id}/publish")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public FormDefinition publish(@PathVariable Long id) {
         authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
         return auditService.execute(() -> service.publish(id),
@@ -94,6 +102,7 @@ public class FormDefinitionController {
     }
 
     @PostMapping("/{id}/publish-with-process")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public FormProcessPublishService.PublishResult publishWithProcess(
             @PathVariable Long id, @RequestBody PublishWithProcessBody body) {
         authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
@@ -105,6 +114,7 @@ public class FormDefinitionController {
     }
 
     @PostMapping("/{id}/disable")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public FormDefinition disable(@PathVariable Long id) {
         authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
         return auditService.execute(() -> service.disable(id),
@@ -114,6 +124,7 @@ public class FormDefinitionController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_DELETE + "')")
     public void delete(@PathVariable Long id) {
         authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_DELETE);
         auditService.execute(() -> service.softDelete(id),

@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/mobile/files")
@@ -30,25 +31,28 @@ public class MobileFileController {
     private final AuthorizationService authorizationService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FILE_ATTACHMENT_UPLOAD + "')")
     public MobileFileDto upload(
         @RequestPart("file") MultipartFile file,
         @RequestParam(name = "watermark", defaultValue = "false") boolean watermark,
         @RequestParam(name = "watermarkText", required = false) String watermarkText) {
-        authorizationService.requirePermission(PermissionCodes.FILE_UPLOAD);
+        authorizationService.requirePermission(PermissionCodes.FILE_ATTACHMENT_UPLOAD);
         PrincipalHolder.Principal principal = principal();
         return fileService.upload(file, principal.userId(), watermark, watermarkText);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FILE_ATTACHMENT_READ + "')")
     public MobileFileDto metadata(@PathVariable UUID id) {
-        authorizationService.requirePermission(PermissionCodes.FILE_READ);
+        authorizationService.requirePermission(PermissionCodes.FILE_ATTACHMENT_READ);
         PrincipalHolder.Principal principal = principal();
         return fileService.getMetadata(id, principal.userId(), principal.roles());
     }
 
     @GetMapping("/{id}/content")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FILE_ATTACHMENT_READ + "')")
     public ResponseEntity<Resource> content(@PathVariable UUID id) {
-        authorizationService.requirePermission(PermissionCodes.FILE_READ);
+        authorizationService.requirePermission(PermissionCodes.FILE_ATTACHMENT_READ);
         PrincipalHolder.Principal principal = principal();
         MobileFileContent content = fileService.readContent(id, principal.userId(), principal.roles());
         return ResponseEntity.ok()
@@ -63,8 +67,9 @@ public class MobileFileController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FILE_ATTACHMENT_UPLOAD + "')")
     public void delete(@PathVariable UUID id) {
-        authorizationService.requirePermission(PermissionCodes.FILE_UPLOAD);
+        authorizationService.requirePermission(PermissionCodes.FILE_ATTACHMENT_UPLOAD);
         fileService.delete(id, principal().userId());
     }
 

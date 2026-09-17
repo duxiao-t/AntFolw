@@ -212,7 +212,7 @@ class OperationAuditControllerTest {
 
         controller.setLoginAccess(71L, new UserController.LoginAccessRequest(true));
 
-        verify(authorization).requireAdmin();
+        verify(authorization).requirePermission("org:user_credentials:manage");
         verify(auditService).success(eq("org.user.login_access.update"), eq("USER"), eq(71L),
             eq(AuditService.RiskLevel.CRITICAL), any(),
             eq(Map.of("enabled", true, "sessionsRevoked", false)));

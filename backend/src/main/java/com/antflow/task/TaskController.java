@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/tasks")
@@ -30,6 +31,7 @@ public class TaskController {
     private ProcessDefinitionService processDefinitionService;
 
     @GetMapping("/{id}/comment-presets")
+    @PreAuthorize("@authz.consoleEntry()")
     public ApprovalCommentPresets commentPresets(@PathVariable Long id) {
         authorizationService.requireReadableTask(id);
         TaskEntity task = taskMapper.selectById(id);
@@ -43,6 +45,7 @@ public class TaskController {
     }
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public WorkflowPage<TaskEntity> myInbox(
             @RequestParam(required = false) String view,
             @RequestParam(required = false) String status,
@@ -62,6 +65,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/approve")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_APPROVE + "')")
     public void approve(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_APPROVE);
         var p = PrincipalHolder.current().orElseThrow();
@@ -75,6 +79,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/reject")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_REJECT + "')")
     public void reject(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_REJECT);
         var p = PrincipalHolder.current().orElseThrow();
@@ -89,6 +94,7 @@ public class TaskController {
     }
 
     @PostMapping("/instances/{id}/withdraw")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW + "')")
     public void withdraw(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW);
         var p = PrincipalHolder.current().orElseThrow();
@@ -101,6 +107,7 @@ public class TaskController {
 
     /** 转交：把任务给另一个人。原任务 SKIPPED；新任务 PENDING。 */
     @PostMapping("/{id}/transfer")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_TRANSFER + "')")
     public Map<String, Object> transfer(@PathVariable Long id,
                                          @RequestBody Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_TRANSFER);
@@ -117,6 +124,7 @@ public class TaskController {
 
     /** 委托：把任务镜像给另一个人。原任务不动。 */
     @PostMapping("/{id}/delegate")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_DELEGATE + "')")
     public Map<String, Object> delegate(@PathVariable Long id,
                                          @RequestBody Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_DELEGATE);
@@ -133,6 +141,7 @@ public class TaskController {
 
     /** 加签：在原任务基础上加一个 PENDING 子任务，与原任务一起 OR/AND 判定。 */
     @PostMapping("/{id}/add-assignee")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_ADD_ASSIGNEE + "')")
     public Map<String, Object> addAssignee(@PathVariable Long id,
                                             @RequestBody Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_ADD_ASSIGNEE);
@@ -152,6 +161,7 @@ public class TaskController {
 
     /** 撤回子任务。TRANSFER 类型会恢复父任务；DELEGATE/ADD_ASSIGNEE 仅关闭子任务。 */
     @PostMapping("/{id}/recall-child")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_RECALL + "')")
     public void recallChild(@PathVariable Long id,
                             @RequestBody(required = false) Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_RECALL);
@@ -165,6 +175,7 @@ public class TaskController {
 
     /** 列出某父任务的所有子任务（用于详情页展开转交/加签链路）。 */
     @GetMapping("/{id}/children")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public List<TaskEntity> children(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         authorizationService.requireReadableTask(id);
@@ -172,6 +183,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/recall-approval")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_RECALL + "')")
     public void recallApproval(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_RECALL);
         var principal = PrincipalHolder.current().orElseThrow();
@@ -183,6 +195,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/override")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE + "')")
     public void override(@PathVariable Long id, @RequestBody OverrideRequest body) {
         authorizationService.requireManageTask(id, PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE);
         if (body == null || body.action() == null
@@ -215,6 +228,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/reassign")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE + "')")
     public void reassign(@PathVariable Long id, @RequestBody ReassignRequest body) {
         if (body == null || body.targetUserId() == null || body.ticketNo() == null
             || body.ticketNo().isBlank() || body.reason() == null || body.reason().isBlank()) {

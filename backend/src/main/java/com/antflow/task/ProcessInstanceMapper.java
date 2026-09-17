@@ -48,28 +48,35 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
               SELECT 1 FROM t_user_role user_role
               JOIN t_role role ON role.id = user_role.role_id AND role.enabled = true
               JOIN t_role_permission role_permission ON role_permission.role_id = role.id
-                AND role_permission.permission_code = 'workflow.instance.read'
+                AND role_permission.permission_code = 'workflow:instance:read'
+              JOIN t_permission permission ON permission.code = role_permission.permission_code
+                AND permission.deprecated_at IS NULL
               LEFT JOIN t_user viewer ON viewer.id = #{userId}
               WHERE user_role.user_id = #{userId}
-                AND (role.data_scope = 'ALL'
-                  OR (role.data_scope = 'SELF' AND pi.started_by = #{userId})
-                  OR (role.data_scope = 'DEPARTMENT'
+                AND (COALESCE(role_permission.scope_override, permission.default_scope) = 'ALL'
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope) = 'SELF'
+                    AND pi.started_by = #{userId})
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope) = 'DEPARTMENT'
                     AND viewer.dept_id IS NOT NULL AND viewer.dept_id = pi.started_dept_id)
-                  OR (role.data_scope = 'DEPARTMENT_AND_DESCENDANTS' AND EXISTS (
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope)
+                      = 'DEPARTMENT_AND_DESCENDANTS' AND EXISTS (
                     SELECT 1 FROM t_department child, t_department parent
                     WHERE child.id = pi.started_dept_id AND parent.id = viewer.dept_id
                       AND parent.path @> child.path
                   ))
-                  OR (role.data_scope = 'CUSTOM' AND EXISTS (
-                    SELECT 1 FROM t_role_department role_department
-                    WHERE role_department.role_id = role.id
-                      AND role_department.department_id = pi.started_dept_id
+                  OR (COALESCE(role_permission.scope_override, permission.default_scope) = 'CUSTOM'
+                    AND EXISTS (
+                    SELECT 1 FROM t_role_permission_department scope_department
+                    WHERE scope_department.role_id = role.id
+                      AND scope_department.permission_code = role_permission.permission_code
+                      AND scope_department.department_id = pi.started_dept_id
                   )))
             ))
         )
         """;
 
     @Select("SELECT * FROM t_process_instance WHERE id = #{id} FOR UPDATE")
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     ProcessInstance selectForUpdate(@Param("id") Long id);
 
     @Select("""

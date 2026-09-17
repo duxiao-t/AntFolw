@@ -88,7 +88,11 @@ export const errorConfig: RequestConfig = {
             OUTSIDE_DATA_SCOPE: '当前资源超出你的数据范围',
             NOT_TASK_ASSIGNEE: '该任务不属于当前账号或已转交',
           };
-          message.error(messages[code] ?? '无权限');
+          // 后端会带上缺失的能力码，直接显示出来，避免排查时只能靠猜。
+          const detail = error.response.data?.message as string | undefined;
+          const missing = detail?.match(/missing permission:\s*(.+)$/)?.[1]?.trim();
+          const base = messages[code] ?? '无权限';
+          message.error(missing ? `${base}（缺少能力：${missing}）` : base);
           window.dispatchEvent(new Event('antflow:refresh-authz'));
           return;
         }

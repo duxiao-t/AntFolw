@@ -26,13 +26,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class MobileOrgControllerTest {
     private UserMapper userMapper;
     private DepartmentMapper departmentMapper;
+    private com.antflow.org.RoleMapper roleMapper;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         userMapper = Mockito.mock(UserMapper.class);
         departmentMapper = Mockito.mock(DepartmentMapper.class);
-        MobileOrgService service = new MobileOrgService(userMapper, departmentMapper);
+        roleMapper = Mockito.mock(com.antflow.org.RoleMapper.class);
+        MobileOrgService service = new MobileOrgService(userMapper, departmentMapper, roleMapper);
         mockMvc = MockMvcBuilders.standaloneSetup(new MobileOrgController(service)).build();
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "mobile-user", List.of("user")));
     }

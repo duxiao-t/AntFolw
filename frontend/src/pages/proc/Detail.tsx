@@ -109,11 +109,11 @@ export default function DetailPage() {
   const roles = (initialState?.currentUser as any)?.roles ?? [];
   const permissions = (initialState?.currentUser as any)?.permissions ?? [];
   const isAdmin = roles.includes('admin');
-  const canOverride = isAdmin || permissions.includes('workflow.instance.override');
-  const canRetryAutomation = isAdmin || permissions.includes('workflow.automation.retry');
-  const canApprove = isAdmin || permissions.includes('workflow.task.approve');
-  const canReject = isAdmin || permissions.includes('workflow.task.reject');
-  const canWithdraw = isAdmin || permissions.includes('workflow.instance.withdraw');
+  const canOverride = isAdmin || permissions.includes('workflow:instance:override');
+  const canRetryAutomation = isAdmin || permissions.includes('workflow:automation:retry');
+  const canApprove = isAdmin || permissions.includes('workflow:task:approve');
+  const canReject = isAdmin || permissions.includes('workflow:task:reject');
+  const canWithdraw = isAdmin || permissions.includes('workflow:instance:withdraw');
 
   const detailQuery = useQuery<{
     runtime: Record<string, any>;

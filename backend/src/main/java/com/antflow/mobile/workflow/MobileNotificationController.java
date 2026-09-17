@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.antflow.authz.AuthenticatedOnly;
 
 @RestController
 @RequestMapping("/api/mobile/notifications")
@@ -21,6 +22,7 @@ public class MobileNotificationController {
     private final AuthorizationService authorization;
 
     @GetMapping
+    @AuthenticatedOnly
     public NotificationPage notifications(@RequestParam(defaultValue = "1") int page,
                                           @RequestParam(defaultValue = "20") int pageSize,
                                           @RequestParam(defaultValue = "false") boolean unreadOnly) {
@@ -34,6 +36,7 @@ public class MobileNotificationController {
     }
 
     @PostMapping("/{id}/read")
+    @AuthenticatedOnly
     public void markRead(@PathVariable long id) {
         long userId = userId();
         if (mapper.markNotificationRead(id, userId) == 0) {

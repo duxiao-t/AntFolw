@@ -14,6 +14,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PublicEndpoint;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 public class OidcController {
@@ -24,11 +27,13 @@ public class OidcController {
     }
 
     @GetMapping("/api/public/auth/providers")
+    @PublicEndpoint
     public List<OidcService.PublicProvider> publicProviders() {
         return service.publicProviders();
     }
 
     @GetMapping("/api/public/auth/oidc/{code}/authorize")
+    @PublicEndpoint
     public void authorize(@PathVariable String code,
                           @RequestParam(required = false) String returnUrl,
                           HttpServletResponse response) throws IOException {
@@ -36,6 +41,7 @@ public class OidcController {
     }
 
     @GetMapping("/api/public/auth/oidc/{provider}/callback")
+    @PublicEndpoint
     public void callback(@PathVariable String provider, @RequestParam String state,
                          @RequestParam String code, HttpServletRequest request,
                          HttpServletResponse response) throws IOException {
@@ -43,33 +49,39 @@ public class OidcController {
     }
 
     @GetMapping("/api/security/identity-providers")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE + "')")
     public List<OidcService.ProviderDto> providers() {
         return service.providers();
     }
 
     @PostMapping("/api/security/identity-providers")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE + "')")
     public OidcService.ProviderDto create(@RequestBody OidcService.SaveProvider request) {
         return service.save(null, request);
     }
 
     @PutMapping("/api/security/identity-providers/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE + "')")
     public OidcService.ProviderDto update(@PathVariable long id,
                                           @RequestBody OidcService.SaveProvider request) {
         return service.save(id, request);
     }
 
     @DeleteMapping("/api/security/identity-providers/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE + "')")
     public ResponseEntity<Void> delete(@PathVariable long id) {
         service.delete(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/security/identity-providers/{id}/bindings")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE + "')")
     public List<OidcService.BindingDto> bindings(@PathVariable long id) {
         return service.bindings(id);
     }
 
     @DeleteMapping("/api/security/identity-providers/{providerId}/bindings/{bindingId}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE + "')")
     public ResponseEntity<Void> unbind(@PathVariable long providerId, @PathVariable long bindingId) {
         service.unbind(providerId, bindingId);
         return ResponseEntity.noContent().build();

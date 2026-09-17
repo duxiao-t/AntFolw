@@ -33,19 +33,19 @@ class WecomServicePermissionTest {
     @Test
     void settingsRequireCompanyManagement() {
         doThrow(new AccessDeniedException("denied")).when(authorization)
-            .requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+            .requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
 
         assertThatThrownBy(() -> service.settings(1)).isInstanceOf(AccessDeniedException.class);
-        verify(authorization).requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        verify(authorization).requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
     }
 
     @Test
     void startingSyncRequiresFullDepartmentAndUserScopes() {
         doThrow(new AccessDeniedException("user scope")).when(authorization)
-            .requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
+            .requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
 
         assertThatThrownBy(() -> service.start(1, "FULL")).isInstanceOf(AccessDeniedException.class);
-        verify(authorization).requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_WRITE);
-        verify(authorization).requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
+        verify(authorization).requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_MANAGE);
+        verify(authorization).requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
     }
 }

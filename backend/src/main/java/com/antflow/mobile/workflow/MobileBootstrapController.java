@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
+import com.antflow.authz.AuthenticatedOnly;
 
 @RestController
 @RequestMapping("/api/mobile")
@@ -15,6 +16,7 @@ public class MobileBootstrapController {
     private final MobileBootstrapService bootstrapService;
 
     @GetMapping("/bootstrap")
+    @AuthenticatedOnly
     public MobileBootstrapDto bootstrap() {
         PrincipalHolder.Principal principal = principal();
         return bootstrapService.bootstrap(principal.userId(), principal.roles());

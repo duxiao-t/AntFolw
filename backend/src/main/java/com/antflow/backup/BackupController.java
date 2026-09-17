@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 @RequestMapping("/api/system/backups")
@@ -22,23 +24,29 @@ public class BackupController {
     private final BackupService service;
 
     @GetMapping("/settings")
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public BackupService.Settings settings() { return service.settings(); }
 
     @PutMapping("/settings")
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public BackupService.Settings settings(@RequestBody BackupService.SettingsWrite request) {
         return service.updateSettings(request);
     }
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public java.util.List<BackupService.BackupFile> list() { return service.list(); }
 
     @PostMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public BackupService.Status create() { return service.create(); }
 
     @GetMapping("/status")
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public BackupService.Status status() { return service.status(); }
 
     @GetMapping("/{name}/download")
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public ResponseEntity<org.springframework.core.io.Resource> download(@PathVariable String name) {
         BackupService.Download download = service.download(name);
         return ResponseEntity.ok()
@@ -50,5 +58,6 @@ public class BackupController {
     }
 
     @DeleteMapping("/{name}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
     public void delete(@PathVariable String name) { service.delete(name); }
 }

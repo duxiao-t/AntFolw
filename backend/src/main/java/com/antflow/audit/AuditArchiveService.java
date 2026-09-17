@@ -90,7 +90,7 @@ public class AuditArchiveService implements HealthIndicator {
     }
 
     public List<ArchiveDto> list() {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_AUDIT_READ);
+        authorizationService.requirePermission(PermissionCodes.AUDIT_EVENT_READ);
         return jdbcTemplate.query("""
             SELECT id, range_start, range_end, event_count, object_key, key_id, sha256,
                    status, error_message, created_at, verified_at
@@ -105,7 +105,7 @@ public class AuditArchiveService implements HealthIndicator {
     }
 
     public ArchiveDownload download(UUID id) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_AUDIT_ARCHIVE_DOWNLOAD);
+        authorizationService.requirePermission(PermissionCodes.AUDIT_ARCHIVE_DOWNLOAD);
         ArchiveDto archive = jdbcTemplate.query("""
             SELECT id, range_start, range_end, event_count, object_key, key_id, sha256,
                    status, error_message, created_at, verified_at

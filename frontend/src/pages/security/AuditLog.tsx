@@ -72,9 +72,9 @@ export default function AuditLogPage() {
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
   const permissions: string[] = currentUser?.permissions ?? [];
-  const canExport = isAdmin || permissions.includes('security.audit.export');
+  const canExport = isAdmin || permissions.includes('audit:event:export');
   const canDownloadArchive = isAdmin
-    || permissions.includes('security.audit.archive.download');
+    || permissions.includes('audit:archive:download');
 
   const exportEvents = async () => {
     const blob = await request<Blob>('/api/audit/export', {

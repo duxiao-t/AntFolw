@@ -163,7 +163,7 @@ export default function FormManagementList() {
               const deprecated = record.status === 'DEPRECATED';
               return (
                 <Space>
-                  {can('form.definition.design') && (
+                  {can('form:definition:manage') && (
                     <a
                       onClick={() =>
                         history.push(
@@ -175,7 +175,7 @@ export default function FormManagementList() {
                     </a>
                   )}
                   <a onClick={() => void handleExport(record)}>导出</a>
-                  {can('form.definition.publish') && (
+                  {can('form:definition:publish') && (
                     <Popconfirm
                       title="确认停用该表单？"
                       description="停用后表单将不再可发起填报。"
@@ -194,7 +194,7 @@ export default function FormManagementList() {
                       </a>
                     </Popconfirm>
                   )}
-                  {can('form.definition.delete') && (
+                  {can('form:definition:delete') && (
                     <Popconfirm
                       title="确认删除该表单？"
                       description="删除后列表不再展示，历史提交数据仍会保留。"
@@ -205,7 +205,7 @@ export default function FormManagementList() {
                       <a style={{ color: '#ff4d4f' }}>删除</a>
                     </Popconfirm>
                   )}
-                  {can('form.data.read') && (
+                  {can('form:data:read') && (
                     <a
                       onClick={() =>
                         history.push(
@@ -240,7 +240,7 @@ export default function FormManagementList() {
         search={false}
         options={false}
         toolBarRender={() =>
-          can('form.definition.create')
+          can('form:definition:manage')
             ? [
                 <Button
                   key="import"

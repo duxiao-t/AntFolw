@@ -386,7 +386,7 @@ public class OidcService {
     }
 
     private void requireManage() {
-        authorization.requirePermission(PermissionCodes.PAGE_SETTINGS_IDENTITY_PROVIDERS);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE);
     }
 
     private void requireActiveUser(long id) {

@@ -71,12 +71,12 @@ const statusMeta: Record<string, { label: string; color: string; icon: ReactNode
 };
 
 const managementLinks = [
-  { href: '/approval/forms', label: '表单管理', detail: '维护表单与流程配置', icon: <FileTextOutlined />, permission: 'page.approval.forms' },
-  { href: '/approval/records', label: '审批记录', detail: '查询实例与审批轨迹', icon: <AuditOutlined />, permission: 'page.approval.records' },
-  { href: '/approval/monitor', label: '流程监控', detail: '定位卡死、超时和消息积压', icon: <AlertOutlined />, permission: 'workflow.instance.override' },
-  { href: '/org/contacts', label: '组织架构', detail: '管理部门与人员信息', icon: <TeamOutlined />, permission: 'page.org.contacts' },
-  { href: '/security/roles', label: '权限与安全', detail: '角色、权限与审计入口', icon: <SafetyCertificateOutlined />, permission: 'page.security.roles' },
-  { href: '/report/center', label: '报表中心', detail: '查看业务数据报表', icon: <BarChartOutlined />, permission: 'page.report.center' },
+  { href: '/approval/forms', label: '表单管理', detail: '维护表单与流程配置', icon: <FileTextOutlined />, permission: 'form:definition:read' },
+  { href: '/approval/records', label: '审批记录', detail: '查询实例与审批轨迹', icon: <AuditOutlined />, permission: 'workflow:instance:read' },
+  { href: '/approval/monitor', label: '流程监控', detail: '定位卡死、超时和消息积压', icon: <AlertOutlined />, permission: 'workflow:instance:override' },
+  { href: '/org/contacts', label: '组织架构', detail: '管理部门与人员信息', icon: <TeamOutlined />, permission: 'org:user:read' },
+  { href: '/security/roles', label: '权限与安全', detail: '角色、权限与审计入口', icon: <SafetyCertificateOutlined />, permission: 'security:role:read' },
+  { href: '/report/center', label: '报表中心', detail: '查看业务数据报表', icon: <BarChartOutlined />, permission: 'form:data:read' },
 ];
 
 function formatDate(value?: string) {
@@ -103,8 +103,8 @@ export default function Workplace() {
   const roles = user?.roles ?? [];
   const permissions = user?.permissions ?? [];
   const can = (permission: string) => roles.includes('admin') || permissions.includes(permission);
-  const canApprove = roles.includes('admin') || permissions.includes('workflow.task.approve');
-  const canReject = roles.includes('admin') || permissions.includes('workflow.task.reject');
+  const canApprove = roles.includes('admin') || permissions.includes('workflow:task:approve');
+  const canReject = roles.includes('admin') || permissions.includes('workflow:task:reject');
   const displayName = user?.displayName ?? user?.name ?? user?.username ?? '当前用户';
   const [pendingPage, setPendingPage] = useState(1);
   const [pendingSize, setPendingSize] = useState(8);

@@ -29,7 +29,7 @@ class AuthorizationServiceTest {
     @Test
     void requireAdminDoesNotAcceptDelegatedPermissions() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
-            Set.of("manager"), Set.of("org.user.write", "security.user_role.write"),
+            Set.of("manager"), Set.of("org:user:manage", "security:user_role:manage"),
             1L, 10L, null));
 
         assertThatThrownBy(service::requireAdmin)
@@ -46,14 +46,14 @@ class AuthorizationServiceTest {
         var unrelatedAllRole = new AuthorizationService.RoleGrant(2L, "reporter",
             DataScope.ALL, Set.of());
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, 10L, false,
-            Set.of("operator", "reporter"), Set.of("workflow.instance.read", "form.data.export"),
+            Set.of("operator", "reporter"), Set.of("workflow:instance:read", "form:data:export"),
             Map.of(
-                "workflow.instance.read", List.of(selfRole),
-                "form.data.export", List.of(unrelatedAllRole)
+                "workflow:instance:read", List.of(selfRole),
+                "form:data:export", List.of(unrelatedAllRole)
             ));
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 10L)).isFalse();
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 7L, 99L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 10L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 7L, 99L)).isTrue();
     }
 
     @Test
@@ -61,11 +61,11 @@ class AuthorizationServiceTest {
         var role = new AuthorizationService.RoleGrant(3L, "custom-manager",
             DataScope.CUSTOM, Set.of(20L, 30L));
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, 10L, false,
-            Set.of("custom-manager"), Set.of("form.data.read"),
-            Map.of("form.data.read", List.of(role)));
+            Set.of("custom-manager"), Set.of("form:data:read"),
+            Map.of("form:data:read", List.of(role)));
 
-        assertThat(service.inDataScope(snapshot, "form.data.read", 8L, 20L)).isTrue();
-        assertThat(service.inDataScope(snapshot, "form.data.read", 8L, 21L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "form:data:read", 8L, 20L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "form:data:read", 8L, 21L)).isFalse();
     }
 
     @Test
@@ -74,8 +74,8 @@ class AuthorizationServiceTest {
             DataScope.DEPARTMENT, Set.of());
         var snapshot = snapshot(role, 10L, false);
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 10L)).isTrue();
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 11L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 10L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 11L)).isFalse();
     }
 
     @Test
@@ -88,8 +88,8 @@ class AuthorizationServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), eq(30L), eq(10L)))
             .thenReturn(false);
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 20L)).isTrue();
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 30L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 20L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 30L)).isFalse();
     }
 
     @Test
@@ -98,7 +98,7 @@ class AuthorizationServiceTest {
             DataScope.ALL, Set.of());
         var snapshot = snapshot(role, 10L, false);
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 99L, 999L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 99L, 999L)).isTrue();
     }
 
     @Test
@@ -106,13 +106,13 @@ class AuthorizationServiceTest {
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, null, true,
             Set.of("admin"), Set.of(), Map.of());
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 99L, null)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 99L, null)).isTrue();
     }
 
     @Test
     void requireFormUseByCodeAllowsGrantedPublishedForm() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
-            Set.of("user"), Set.of("form.runtime.read"), 1L, 10L, null));
+            Set.of("user"), Set.of("form:runtime:read"), 1L, 10L, null));
         AuthorizationService spied = Mockito.spy(service);
         Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
         when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
@@ -124,7 +124,7 @@ class AuthorizationServiceTest {
     @Test
     void requireFormUseByCodeHidesUngrantedPublishedForm() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
-            Set.of("user"), Set.of("form.runtime.read"), 1L, 10L, null));
+            Set.of("user"), Set.of("form:runtime:read"), 1L, 10L, null));
         AuthorizationService spied = Mockito.spy(service);
         Mockito.doReturn(false).when(spied).hasFormGrant(10L, 7L);
         when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
@@ -184,7 +184,7 @@ class AuthorizationServiceTest {
     private static AuthorizationService.AuthzSnapshot snapshot(
             AuthorizationService.RoleGrant role, Long departmentId, boolean admin) {
         return new AuthorizationService.AuthzSnapshot(7L, departmentId, admin,
-            Set.of(role.code()), Set.of("workflow.instance.read"),
-            Map.of("workflow.instance.read", List.of(role)));
+            Set.of(role.code()), Set.of("workflow:instance:read"),
+            Map.of("workflow:instance:read", List.of(role)));
     }
 }

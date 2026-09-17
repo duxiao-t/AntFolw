@@ -81,7 +81,8 @@ export async function submitMobileFormData({
   values: MobileFormValues;
   draftId: number | null;
 }) {
-  return apiRequest<DirectSubmitResult>('/api/forms/data', {
+  // 移动端专用入口：桌面端提交走 /api/forms/data，移动端走 /api/mobile/submissions
+  return apiRequest<DirectSubmitResult>('/api/mobile/submissions', {
     method: 'POST',
     body: JSON.stringify({
       formCode,

@@ -69,7 +69,7 @@ class UserServiceTest {
 
         assertEquals(List.of(candidate), candidates);
         verify(authorizationService).requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, 10L);
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, 10L);
     }
 
     @Test
