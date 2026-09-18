@@ -21,7 +21,7 @@ public class FormGrantService {
     private final AuditService auditService;
 
     public FormGrantDto get(long formId) {
-        authorizationService.requireFormManagementScope(formId,
+        authorizationService.requireFormMaintenance(formId,
             PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         Integer version = version(formId);
         List<Long> userIds = jdbcTemplate.queryForList("""
@@ -41,7 +41,7 @@ public class FormGrantService {
     }
 
     public FormGrantCandidates candidates(long formId) {
-        authorizationService.requireFormManagementScope(formId,
+        authorizationService.requireFormMaintenance(formId,
             PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         return loadCandidates();
     }
@@ -65,7 +65,7 @@ public class FormGrantService {
         if (formId == null) {
             authorizationService.requirePermission(PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         } else {
-            authorizationService.requireFormManagementScope(formId,
+            authorizationService.requireFormMaintenance(formId,
                 PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         }
         AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
@@ -88,20 +88,23 @@ public class FormGrantService {
 
     @Transactional
     public FormGrantDto replace(long formId, FormGrantWriteRequest request) {
-        authorizationService.requireFormManagementScope(formId,
+        authorizationService.requireFormMaintenance(formId,
             PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         if (request == null || request.version() == null) {
             throw new BizException("FORM_GRANT_VERSION_REQUIRED", "grant version is required");
         }
         validateSubjects(request.userIds(), request.roleIds(), request.departmentIds());
         boolean admin = authorizationService.isAdmin();
+        lockFormAuthorization(formId);
+        authorizationService.requireFormMaintenance(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
         int updated = jdbcTemplate.update("""
             UPDATE t_form_definition SET authz_version = authz_version + 1
-            WHERE id = ? AND authz_version = ?
+            WHERE id = ? AND deleted = 0 AND authz_version = ?
             """, formId, request.version());
         if (updated != 1) {
             throw new BizException("FORM_GRANT_VERSION_CONFLICT",
-                "form administrators were changed by another user");
+                "form usage scope or maintainers were changed by another user");
         }
         jdbcTemplate.update(admin
             ? "DELETE FROM t_form_resource_grant WHERE form_def_id = ?"
@@ -146,6 +149,80 @@ public class FormGrantService {
             VALUES (?, 'USER', ?, ?)
             ON CONFLICT (form_def_id, subject_type, subject_id) DO NOTHING
             """, formId, creatorId, creatorId);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+            VALUES (?, ?, ?)
+            ON CONFLICT (form_def_id, user_id) DO NOTHING
+            """, formId, creatorId, creatorId);
+    }
+
+    public FormMaintainerDto getMaintainers(long formId) {
+        authorizationService.requireFormMaintenance(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        List<GrantUser> users = selectedMaintainers(formId);
+        return new FormMaintainerDto(version(formId),
+            users.stream().map(GrantUser::id).toList(), users);
+    }
+
+    @Transactional
+    public FormMaintainerDto replaceMaintainers(long formId,
+                                                FormMaintainerWriteRequest request) {
+        authorizationService.requireFormMaintenance(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        if (request == null || request.version() == null) {
+            throw new BizException("FORM_MAINTAINER_VERSION_REQUIRED",
+                "maintainer version is required");
+        }
+        if (request.userIds().isEmpty()) {
+            throw new BizException("FORM_MAINTAINER_REQUIRED",
+                "at least one active maintainer is required");
+        }
+        lockFormAuthorization(formId);
+        validateMaintainers(request.userIds());
+        authorizationService.requireFormMaintenance(formId,
+            PermissionCodes.FORM_AUTHORIZATION_MANAGE);
+        int updated = jdbcTemplate.update("""
+            UPDATE t_form_definition SET authz_version = authz_version + 1
+            WHERE id = ? AND deleted = 0 AND authz_version = ?
+            """, formId, request.version());
+        if (updated != 1) {
+            throw new BizException("FORM_MAINTAINER_VERSION_CONFLICT",
+                "form maintainers were changed by another user");
+        }
+        jdbcTemplate.update("DELETE FROM t_form_maintainer WHERE form_def_id = ?", formId);
+        long actorId = PrincipalHolder.current().orElseThrow().userId();
+        request.userIds().forEach(userId -> jdbcTemplate.update("""
+            INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+            VALUES (?, ?, ?)
+            """, formId, userId, actorId));
+        auditService.success("form.maintainer.update", "FORM", formId,
+            AuditService.RiskLevel.HIGH,
+            Map.of("changedFields", List.of("maintainerIds")),
+            Map.of("maintainerCount", request.userIds().size()));
+        List<GrantUser> users = selectedMaintainers(formId);
+        return new FormMaintainerDto(request.version() + 1,
+            users.stream().map(GrantUser::id).toList(), users);
+    }
+
+    private void validateMaintainers(Set<Long> userIds) {
+        for (Long userId : userIds) {
+            String status = jdbcTemplate.query("""
+                SELECT status FROM t_user WHERE id = ? FOR SHARE
+                """, rs -> rs.next() ? rs.getString(1) : null, userId);
+            if (!"ACTIVE".equals(status)) {
+                throw new BizException("FORM_MAINTAINER_INVALID",
+                    "maintainer must be an active user");
+            }
+        }
+    }
+
+    private void lockFormAuthorization(long formId) {
+        Long id = jdbcTemplate.query("""
+            SELECT id FROM t_form_definition WHERE id = ? AND deleted = 0 FOR UPDATE
+            """, rs -> rs.next() ? rs.getLong(1) : null, formId);
+        if (id == null) {
+            throw new HiddenResourceException("form not found");
+        }
     }
 
     private void validateSubjects(Set<Long> userIds, Set<Long> roleIds,
@@ -295,6 +372,18 @@ public class FormGrantService {
             """, (rs, row) -> grantUser(rs), formId);
     }
 
+    private List<GrantUser> selectedMaintainers(long formId) {
+        return jdbcTemplate.query("""
+            SELECT user_row.id, user_row.username, user_row.display_name,
+                   user_row.employee_no, user_row.dept_id, department.name AS department_name
+            FROM t_form_maintainer maintainer
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+            LEFT JOIN t_department department ON department.id = user_row.dept_id
+            WHERE maintainer.form_def_id = ? AND user_row.status = 'ACTIVE'
+            ORDER BY user_row.display_name, user_row.id
+            """, (rs, row) -> grantUser(rs), formId);
+    }
+
     private List<GrantRole> selectedRoles(long formId) {
         return jdbcTemplate.query("""
             SELECT role.id, role.code, role.name
@@ -354,6 +443,12 @@ public class FormGrantService {
             roleIds = roleIds == null ? Set.of() : new LinkedHashSet<>(roleIds);
             departmentIds = departmentIds == null
                 ? Set.of() : new LinkedHashSet<>(departmentIds);
+        }
+    }
+    public record FormMaintainerDto(int version, List<Long> userIds, List<GrantUser> users) { }
+    public record FormMaintainerWriteRequest(Integer version, Set<Long> userIds) {
+        public FormMaintainerWriteRequest {
+            userIds = userIds == null ? Set.of() : new LinkedHashSet<>(userIds);
         }
     }
 }

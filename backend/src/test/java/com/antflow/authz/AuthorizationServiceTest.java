@@ -145,6 +145,38 @@ class AuthorizationServiceTest {
     }
 
     @Test
+    void formMaintenanceRequiresBothAtomicCapabilityAndMaintainerMembership() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
+            Set.of("manager"), Set.of(PermissionCodes.FORM_DEFINITION_MANAGE),
+            1L, 10L, null));
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(true).when(spied).hasFormMaintainer(10L, 7L);
+
+        assertThatCode(() -> spied.requireFormMaintenance(
+            10L, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
+
+        Mockito.doReturn(false).when(spied).hasFormMaintainer(10L, 7L);
+        assertThatThrownBy(() -> spied.requireFormMaintenance(
+            10L, PermissionCodes.FORM_DEFINITION_MANAGE))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
+    void usageGrantDoesNotMakeUserAFormMaintainer() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
+            Set.of("manager"), Set.of(PermissionCodes.FORM_DEFINITION_MANAGE,
+                PermissionCodes.FORM_RUNTIME_READ), 1L, 10L, null));
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
+        Mockito.doReturn(false).when(spied).hasFormMaintainer(10L, 7L);
+
+        assertThatCode(() -> spied.requireFormUse(10L)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> spied.requireFormMaintenance(
+            10L, PermissionCodes.FORM_DEFINITION_MANAGE))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
     void completedActualApproverKeepsFullTaskVisibility() {
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
             eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(1L);

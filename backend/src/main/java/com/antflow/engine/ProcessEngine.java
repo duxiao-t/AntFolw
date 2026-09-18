@@ -89,7 +89,7 @@ public class ProcessEngine {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + cmd.formCode());
         }
         // 表单使用授权：未获得 t_form_resource_grant 授权的用户不能发起该表单的流程。
-        authorizationService.requireFormAction(fd.getId(), PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(fd.getId());
         ProcessDefinition pd = processDefinitionService.latestPublishedForForm(fd.getId());
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());

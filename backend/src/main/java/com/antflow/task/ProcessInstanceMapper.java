@@ -34,25 +34,6 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
           ))
           OR (#{canReadInstances}
             AND EXISTS (
-              SELECT 1 FROM t_form_resource_grant form_grant
-              WHERE form_grant.form_def_id = form_data.form_def_id
-                AND ((form_grant.subject_type = 'USER' AND form_grant.subject_id = #{userId})
-                  OR (form_grant.subject_type = 'ROLE' AND form_grant.subject_id IN (
-                    SELECT user_role.role_id FROM t_user_role user_role
-                    JOIN t_role granted_role ON granted_role.id = user_role.role_id
-                      AND granted_role.enabled = true
-                    WHERE user_role.user_id = #{userId}
-                  ))
-                  OR (form_grant.subject_type = 'DEPARTMENT' AND EXISTS (
-                    SELECT 1 FROM t_user grant_user
-                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
-                    JOIN t_department grant_department
-                      ON grant_department.id = form_grant.subject_id
-                    WHERE grant_user.id = #{userId}
-                      AND grant_department.path @> user_department.path
-                  )))
-            )
-            AND EXISTS (
               SELECT 1 FROM t_user_role user_role
               JOIN t_role role ON role.id = user_role.role_id AND role.enabled = true
               JOIN t_role_permission role_permission ON role_permission.role_id = role.id

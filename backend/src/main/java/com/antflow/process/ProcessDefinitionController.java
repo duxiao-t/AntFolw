@@ -28,7 +28,7 @@ public class ProcessDefinitionController {
         var principal = PrincipalHolder.current().orElseThrow();
         // ponytail: current process count is small; move this predicate into SQL if list latency grows.
         return service.list().stream()
-            .filter(definition -> authorizationService.canFormActionAny(
+            .filter(definition -> authorizationService.canMaintainFormAny(
                 definition.getFormDefId(), principal.userId(),
                 PermissionCodes.WORKFLOW_DEFINITION_READ,
                 PermissionCodes.FORM_DEFINITION_READ))
@@ -39,7 +39,7 @@ public class ProcessDefinitionController {
     @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_READ
         + "', '" + PermissionCodes.FORM_DEFINITION_READ + "')")
     public ProcessDefinition byForm(@PathVariable Long formDefId) {
-        authorizationService.requireFormActionAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
+        authorizationService.requireFormMaintenanceAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         return service.latestPublishedForForm(formDefId);
     }
 
@@ -47,7 +47,7 @@ public class ProcessDefinitionController {
     @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_MANAGE
         + "', '" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public ProcessDefinition draftByForm(@PathVariable Long formDefId) {
-        authorizationService.requireFormActionAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_MANAGE, PermissionCodes.FORM_DEFINITION_MANAGE);
+        authorizationService.requireFormMaintenanceAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_MANAGE, PermissionCodes.FORM_DEFINITION_MANAGE);
         return service.findByForm(formDefId);
     }
 
@@ -57,7 +57,7 @@ public class ProcessDefinitionController {
     public ProcessDefinition get(@PathVariable Long id) {
         ProcessDefinition definition = service.getById(id);
         if (definition == null) throw new com.antflow.authz.HiddenResourceException("process not found");
-        authorizationService.requireFormActionAny(definition.getFormDefId(),
+        authorizationService.requireFormMaintenanceAny(definition.getFormDefId(),
             PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         return definition;
     }
@@ -67,7 +67,7 @@ public class ProcessDefinitionController {
         + "', '" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public ProcessDefinition save(@RequestBody SaveBody body) {
         var p = PrincipalHolder.current().orElseThrow();
-        authorizationService.requireFormActionAny(body.formDefId(),
+        authorizationService.requireFormMaintenanceAny(body.formDefId(),
             PermissionCodes.WORKFLOW_DEFINITION_MANAGE, PermissionCodes.FORM_DEFINITION_MANAGE);
         return auditService.execute(
             () -> service.saveOrUpdateDraft(body.id(), body.formDefId(), body.process(),
@@ -84,7 +84,7 @@ public class ProcessDefinitionController {
     public ProcessDefinition publish(@PathVariable Long id) {
         ProcessDefinition definition = service.getById(id);
         if (definition == null) throw new com.antflow.authz.HiddenResourceException("process not found");
-        authorizationService.requireFormActionAny(definition.getFormDefId(),
+        authorizationService.requireFormMaintenanceAny(definition.getFormDefId(),
             PermissionCodes.WORKFLOW_DEFINITION_PUBLISH, PermissionCodes.FORM_DEFINITION_PUBLISH);
         return auditService.execute(() -> service.publish(id),
             published -> auditService.success("workflow.definition.publish",
@@ -98,7 +98,7 @@ public class ProcessDefinitionController {
     @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_DELETE
         + "', '" + PermissionCodes.FORM_DEFINITION_DELETE + "')")
     public void deleteByForm(@PathVariable Long formDefId) {
-        authorizationService.requireFormActionAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_DELETE, PermissionCodes.FORM_DEFINITION_DELETE);
+        authorizationService.requireFormMaintenanceAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_DELETE, PermissionCodes.FORM_DEFINITION_DELETE);
         ProcessDefinition existing = service.findByForm(formDefId);
         auditService.execute(() -> service.deleteByForm(formDefId),
             () -> auditService.success("workflow.definition.delete", "PROCESS_DEFINITION",

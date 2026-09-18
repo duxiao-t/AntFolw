@@ -2,6 +2,7 @@ package com.antflow.mobile.workflow;
 
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
+import com.antflow.authz.AuthorizationService;
 import com.antflow.form.FormDefinitionMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -24,19 +25,23 @@ class MobileAppServiceTest {
     private FormDefinitionMapper formDefinitionMapper;
     @Mock
     private MobileAppPreferenceMapper preferenceMapper;
+    @Mock
+    private AuthorizationService authorizationService;
 
     private MobileAppService service;
 
     @BeforeEach
     void setUp() {
-        service = new MobileAppService(formDefinitionMapper, preferenceMapper, new ObjectMapper());
+        service = new MobileAppService(formDefinitionMapper, preferenceMapper, new ObjectMapper(),
+            authorizationService);
     }
 
     @Test
     void listsPublishedFormsAsMobileApps() {
+        allowForms(3L, 4L);
         when(formDefinitionMapper.selectList(any())).thenReturn(List.of(form(3L), form(4L)));
 
-        List<MobileAppDto> result = service.list("请假", null);
+        List<MobileAppDto> result = service.list(7L, "请假", null);
 
         assertEquals(List.of(3L, 4L), result.stream().map(MobileAppDto::formId).toList());
         assertEquals("其他", result.get(0).categoryLabel());
@@ -44,6 +49,7 @@ class MobileAppServiceTest {
 
     @Test
     void usesPublishedFormsAsDefaultsBeforePreferencesAreSaved() {
+        allowForms(3L);
         when(preferenceMapper.selectById(7L)).thenReturn(null);
         when(formDefinitionMapper.selectList(any())).thenReturn(List.of(form(3L)));
 
@@ -52,6 +58,7 @@ class MobileAppServiceTest {
 
     @Test
     void preservesSavedFavoriteOrderAndDropsUnavailableForms() {
+        allowForms(3L, 4L);
         MobileAppPreference preference = new MobileAppPreference();
         preference.setUserId(7L);
         preference.setFormIds("[4,3,99]");
@@ -82,6 +89,17 @@ class MobileAppServiceTest {
         assertEquals("TOO_MANY_FAVORITES", exception.getCode());
     }
 
+    @Test
+    void rejectsFavoriteOutsideCurrentUsageScope() {
+        when(formDefinitionMapper.selectList(any())).thenReturn(List.of(form(3L), form(4L)));
+        when(authorizationService.canUseForm(3L, 7L)).thenReturn(true);
+
+        BizException exception = assertThrows(BizException.class,
+            () -> service.saveFavorites(7L, List.of(3L, 4L)));
+
+        assertEquals("INVALID_FAVORITES", exception.getCode());
+    }
+
     private FormDefinition form(long id) {
         FormDefinition form = new FormDefinition();
         form.setId(id);
@@ -90,5 +108,11 @@ class MobileAppServiceTest {
         form.setDescription("测试表单");
         form.setStatus("PUBLISHED");
         return form;
+    }
+
+    private void allowForms(Long... ids) {
+        for (Long id : ids) {
+            when(authorizationService.canUseForm(id, 7L)).thenReturn(true);
+        }
     }
 }

@@ -66,7 +66,7 @@ public class FormDataService {
         if (userId == null || authorizationService.currentUserId() != userId) {
             throw new AccessDeniedException("submission user does not match current principal");
         }
-        authorizationService.requireFormAction(fd.getId(), PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(fd.getId());
         formDefinitionService.validateSubmission(fd.getSchema(), data);
         String normalizedStatus = status == null ? "SUBMITTED" : status;
         Object storedData = "DRAFT".equals(normalizedStatus)
@@ -114,7 +114,7 @@ public class FormDataService {
     public Page<FormData> authorizedPage(long page, long size, Long formDefId,
                                          String status, Long createdBy,
                                          long userId, boolean admin) {
-        // 非 admin 的行级范围（含表单使用授权）由 DataPermissionPolicyHandler 在 SQL 层注入，
+        // 非 admin 的能力数据范围由 DataPermissionPolicyHandler 在 SQL 层注入，
         // 这里统一走 SQL 分页，避免把整表读进内存再过滤。
         return adminPage(page, size, formDefId, status, createdBy);
     }

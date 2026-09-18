@@ -390,10 +390,36 @@ public class UserService {
             && rolesOf(user.getId()).contains("admin") && activeAdminCount() <= 1) {
             throw new BizException("LAST_ADMIN_PROTECTED", "至少保留一个启用的管理员");
         }
+        if ("ACTIVE".equals(user.getStatus()) && "DISABLED".equals(status)
+            && lastActiveFormMaintainer(user.getId())) {
+            throw new BizException("LAST_FORM_MAINTAINER_PROTECTED",
+                "该用户是部分表单的最后一名有效维护人，请先转交维护职责");
+        }
         user.setStatus(status);
         if (!"ACTIVE".equals(status)) {
             authSessionService.revokeAll(user.getId());
         }
+    }
+
+    private boolean lastActiveFormMaintainer(Long userId) {
+        Boolean result = jdbcTemplate.queryForObject("""
+            SELECT EXISTS (
+              SELECT 1
+              FROM t_form_maintainer own_maintenance
+              JOIN t_form_definition form
+                ON form.id = own_maintenance.form_def_id AND form.deleted = 0
+              WHERE own_maintenance.user_id = ?
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM t_form_maintainer other_maintenance
+                  JOIN t_user other_user ON other_user.id = other_maintenance.user_id
+                  WHERE other_maintenance.form_def_id = own_maintenance.form_def_id
+                    AND other_maintenance.user_id <> ?
+                    AND other_user.status = 'ACTIVE'
+                )
+            )
+            """, Boolean.class, userId, userId);
+        return Boolean.TRUE.equals(result);
     }
 
     public void authorizationChanged(Long userId) {
@@ -595,6 +621,7 @@ public class UserService {
 
     private boolean hasWorkflowReferences(Long userId) {
         return countUserReferences("SELECT COUNT(*) FROM t_form_definition WHERE created_by = ?", userId) > 0
+            || countUserReferences("SELECT COUNT(*) FROM t_form_maintainer WHERE user_id = ?", userId) > 0
             || countUserReferences("SELECT COUNT(*) FROM t_form_data WHERE created_by = ?", userId) > 0
             || countUserReferences("SELECT COUNT(*) FROM t_process_definition WHERE created_by = ?", userId) > 0
             || countUserReferences("SELECT COUNT(*) FROM t_process_instance WHERE started_by = ?", userId) > 0

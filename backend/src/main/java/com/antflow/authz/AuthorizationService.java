@@ -230,83 +230,72 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
-    public void requireFormAction(long formId, String permission) {
+    /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
+    public void requireFormUse(long formId) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        requirePermission(PermissionCodes.FORM_RUNTIME_READ);
+        if (!hasFormGrant(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    public boolean canUseForm(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        return snapshot.admin()
+            || (snapshot.permissions().contains(PermissionCodes.FORM_RUNTIME_READ)
+                && hasFormGrant(formId, userId));
+    }
+
+    public boolean hasFormMaintainer(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        if (snapshot.admin()) {
+            return true;
+        }
+        Long count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*)
+            FROM t_form_maintainer maintainer
+            JOIN t_form_definition form ON form.id = maintainer.form_def_id
+              AND form.deleted = 0
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+              AND user_row.status = 'ACTIVE'
+            WHERE maintainer.form_def_id = ? AND maintainer.user_id = ?
+            """, Long.class, formId, userId);
+        return count != null && count > 0;
+    }
+
+    /** 模板操作入口：非管理员必须同时是维护人并持有对应原子能力。 */
+    public void requireFormMaintenance(long formId, String permission) {
         PrincipalHolder.Principal principal = principal();
         if (principal.isAdmin()) {
             return;
         }
         requirePermission(permission);
-        if (!hasFormGrant(formId, principal.userId())) {
+        if (!hasFormMaintainer(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
-        }
-        if (!PermissionCatalog.isScopeable(permission)) {
-            return;
-        }
-        FormManagementAccess resource = formManagementAccess(formId);
-        if (resource == null) throw new HiddenResourceException("form not found");
-        if (!inDataScope(currentSnapshot(), permission,
-            resource.createdBy(), resource.departmentId())) {
-            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
-                "form is outside the permitted data scope");
         }
     }
 
-    /** 能力满足其一即可，但仍要求该表单的使用授权（未授权按不存在处理）。 */
-    public void requireFormActionAny(long formId, String... permissions) {
+    public void requireFormMaintenanceAny(long formId, String... permissions) {
         PrincipalHolder.Principal principal = principal();
         if (principal.isAdmin()) {
             return;
         }
-        AuthzSnapshot snapshot = currentSnapshot();
-        boolean hasAny = java.util.Arrays.stream(permissions)
-            .anyMatch(snapshot.permissions()::contains);
-        if (!hasAny) {
-            throw new AuthorizationFailureException("MISSING_PERMISSION",
-                "missing permission: " + String.join(" or ", permissions));
-        }
-        if (!hasFormGrant(formId, principal.userId())) {
+        requireAnyPermission(permissions);
+        if (!hasFormMaintainer(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
-        }
-        if (java.util.Arrays.stream(permissions)
-            .filter(snapshot.permissions()::contains)
-            .anyMatch(permission -> !PermissionCatalog.isScopeable(permission))) {
-            return;
-        }
-        FormManagementAccess resource = formManagementAccess(formId);
-        if (resource == null) throw new HiddenResourceException("form not found");
-        boolean allowed = java.util.Arrays.stream(permissions)
-            .filter(snapshot.permissions()::contains)
-            .anyMatch(permission -> inDataScope(snapshot, permission,
-                resource.createdBy(), resource.departmentId()));
-        if (!allowed) {
-            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
-                "form is outside the permitted data scope");
         }
     }
 
-    public boolean canFormActionAny(long formId, long userId, String... permissions) {
+    public boolean canMaintainFormAny(long formId, long userId, String... permissions) {
         AuthzSnapshot snapshot = snapshot(userId);
         if (snapshot.admin()) {
             return true;
         }
-        if (!hasFormGrant(formId, userId)) {
-            return false;
-        }
-        if (java.util.Arrays.stream(permissions)
-            .filter(snapshot.permissions()::contains)
-            .anyMatch(permission -> !PermissionCatalog.isScopeable(permission))) {
-            return true;
-        }
-        FormManagementAccess resource = formManagementAccess(formId);
-        return resource != null
-            && java.util.Arrays.stream(permissions)
-                .filter(snapshot.permissions()::contains)
-                .anyMatch(permission -> inDataScope(snapshot, permission,
-                    resource.createdBy(), resource.departmentId()));
-    }
-
-    public void requireFormManagementScope(long formId, String permission) {
-        requireFormAction(formId, permission);
+        return java.util.Arrays.stream(permissions).anyMatch(snapshot.permissions()::contains)
+            && hasFormMaintainer(formId, userId);
     }
 
     /**
@@ -321,7 +310,7 @@ public class AuthorizationService {
         if (formId == null) {
             throw new HiddenResourceException("form not found");
         }
-        requireFormAction(formId, PermissionCodes.FORM_RUNTIME_READ);
+        requireFormUse(formId);
     }
 
     public void requireReadableInstance(long instanceId) {
@@ -353,7 +342,6 @@ public class AuthorizationService {
             return InstanceVisibility.FULL;
         }
         if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_INSTANCE_READ)
-            && hasFormGrant(resource.formDefId(), userId)
             && inDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
                 resource.startedBy(), resource.startedDepartmentId())) {
             return InstanceVisibility.FULL;
@@ -390,8 +378,7 @@ public class AuthorizationService {
         }
         requirePermission(permission);
         AuthzSnapshot snapshot = snapshot(principal.userId());
-        if (!hasFormGrant(resource.formDefId(), principal.userId())
-            || !inDataScope(snapshot, permission, resource.startedBy(),
+        if (!inDataScope(snapshot, permission, resource.startedBy(),
                 resource.startedDepartmentId())) {
             throw new AccessDeniedException("instance is outside your management scope");
         }
@@ -414,7 +401,6 @@ public class AuthorizationService {
             return true;
         }
         return snapshot.permissions().contains(PermissionCodes.FORM_DATA_READ)
-            && hasFormGrant(resource.formDefId(), userId)
             && inDataScope(snapshot, PermissionCodes.FORM_DATA_READ,
                 resource.createdBy(), resource.startedDepartmentId());
     }
@@ -514,19 +500,17 @@ public class AuthorizationService {
 
     private InstanceAccess instanceAccess(long instanceId) {
         return jdbcTemplate.query("""
-            SELECT pi.started_by, pi.started_dept_id, data.form_def_id
+            SELECT pi.started_by, pi.started_dept_id
             FROM t_process_instance pi
-            JOIN t_form_data data ON data.id = pi.form_data_id
             WHERE pi.id = ?
             """, rs -> rs.next() ? new InstanceAccess(
                 nullableLong(rs, "started_by"),
-                nullableLong(rs, "started_dept_id"),
-                rs.getLong("form_def_id")) : null, instanceId);
+                nullableLong(rs, "started_dept_id")) : null, instanceId);
     }
 
     private FormDataAccess formDataAccess(long formDataId) {
         return jdbcTemplate.query("""
-            SELECT data.created_by, data.form_def_id, pi.started_dept_id,
+            SELECT data.created_by, pi.started_dept_id,
                    submitter.dept_id AS submitter_dept_id
             FROM t_form_data data
             LEFT JOIN t_process_instance pi ON pi.form_data_id = data.id
@@ -536,7 +520,6 @@ public class AuthorizationService {
             LIMIT 1
             """, rs -> rs.next() ? new FormDataAccess(
                 nullableLong(rs, "created_by"),
-                rs.getLong("form_def_id"),
                 nullableLong(rs, "started_dept_id") != null
                     ? nullableLong(rs, "started_dept_id")
                     : nullableLong(rs, "submitter_dept_id")) : null, formDataId);
@@ -592,16 +575,6 @@ public class AuthorizationService {
             Collections.unmodifiableMap(immutableGrants));
     }
 
-    private FormManagementAccess formManagementAccess(long formId) {
-        return jdbcTemplate.query("""
-            SELECT form.created_by, creator.dept_id
-            FROM t_form_definition form
-            LEFT JOIN t_user creator ON creator.id = form.created_by
-            WHERE form.id = ? AND form.deleted = 0
-            """, rs -> rs.next() ? new FormManagementAccess(
-                nullableLong(rs, "created_by"), nullableLong(rs, "dept_id")) : null, formId);
-    }
-
     /** 覆盖值优先；未覆盖时取能力声明的默认范围；能力不支持范围管理时视为不限制。 */
     private static DataScope effectiveScope(GrantRow grant) {
         if (grant.scopeOverride() != null && !grant.scopeOverride().isBlank()) {
@@ -654,9 +627,8 @@ public class AuthorizationService {
     private record GrantRow(String permissionCode, String scopeOverride) { }
     private record UserState(long userId, String username, String displayName, String status,
                              long authzVersion, Long departmentId) { }
-    private record InstanceAccess(Long startedBy, Long startedDepartmentId, Long formDefId) { }
-    private record FormDataAccess(Long createdBy, Long formDefId, Long startedDepartmentId) { }
-    private record FormManagementAccess(Long createdBy, Long departmentId) { }
+    private record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
+    private record FormDataAccess(Long createdBy, Long startedDepartmentId) { }
 
     public record RoleGrant(long roleId, String code, DataScope dataScope,
                             Set<Long> customDepartmentIds) { }

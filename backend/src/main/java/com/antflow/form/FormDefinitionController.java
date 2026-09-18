@@ -40,7 +40,7 @@ public class FormDefinitionController {
     @PreAuthorize("@authz.consoleAny('" + PermissionCodes.FORM_DEFINITION_READ
         + "', '" + PermissionCodes.WORKFLOW_DEFINITION_READ + "')")
     public FormDefinition get(@PathVariable Long id) {
-        authorizationService.requireFormActionAny(id, PermissionCodes.FORM_DEFINITION_READ,
+        authorizationService.requireFormMaintenanceAny(id, PermissionCodes.FORM_DEFINITION_READ,
             PermissionCodes.WORKFLOW_DEFINITION_READ);
         FormDefinition definition = mapper.selectById(id);
         if (definition == null) throw new com.antflow.authz.HiddenResourceException("form not found");
@@ -54,7 +54,7 @@ public class FormDefinitionController {
         if (fd == null) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
-        authorizationService.requireFormAction(fd.getId(), PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(fd.getId());
         return fd;
     }
 
@@ -63,11 +63,8 @@ public class FormDefinitionController {
     public FormDefinition save(@RequestBody SaveBody body) {
         var p = PrincipalHolder.current().orElseThrow();
         boolean creating = body.id() == null;
-        if (creating) {
-            authorizationService.requireCurrentDataScope(PermissionCodes.FORM_DEFINITION_MANAGE,
-                p.userId(), p.departmentId());
-        } else {
-            authorizationService.requireFormAction(body.id(), PermissionCodes.FORM_DEFINITION_MANAGE);
+        if (!creating) {
+            authorizationService.requireFormMaintenance(body.id(), PermissionCodes.FORM_DEFINITION_MANAGE);
         }
         return auditService.execute(
             () -> service.saveDraft(body.id(), body.code(), body.name(), body.description(),
@@ -82,7 +79,7 @@ public class FormDefinitionController {
     @PutMapping("/{id}")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public FormDefinition update(@PathVariable Long id, @RequestBody SaveBody body) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_MANAGE);
+        authorizationService.requireFormMaintenance(id, PermissionCodes.FORM_DEFINITION_MANAGE);
         return auditService.execute(
             () -> service.update(id, body.name(), body.description(), body.status(),
                 body.schema(), body.settings()),
@@ -95,7 +92,7 @@ public class FormDefinitionController {
     @PostMapping("/{id}/publish")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public FormDefinition publish(@PathVariable Long id) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
+        authorizationService.requireFormMaintenance(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
         return auditService.execute(() -> service.publish(id),
             published -> auditService.success("form.definition.publish", "FORM_DEFINITION", id,
                 AuditService.RiskLevel.HIGH,
@@ -107,7 +104,7 @@ public class FormDefinitionController {
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public FormProcessPublishService.PublishResult publishWithProcess(
             @PathVariable Long id, @RequestBody PublishWithProcessBody body) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
+        authorizationService.requireFormMaintenance(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
         if (body == null || body.processDefinitionId() == null) {
             throw new BizException("PROCESS_DEFINITION_REQUIRED",
                 "processDefinitionId is required");
@@ -118,7 +115,7 @@ public class FormDefinitionController {
     @PostMapping("/{id}/disable")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public FormDefinition disable(@PathVariable Long id) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
+        authorizationService.requireFormMaintenance(id, PermissionCodes.FORM_DEFINITION_PUBLISH);
         return auditService.execute(() -> service.disable(id),
             disabled -> auditService.success("form.definition.disable", "FORM_DEFINITION", id,
                 AuditService.RiskLevel.HIGH,
@@ -128,7 +125,7 @@ public class FormDefinitionController {
     @DeleteMapping("/{id}")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_DELETE + "')")
     public void delete(@PathVariable Long id) {
-        authorizationService.requireFormAction(id, PermissionCodes.FORM_DEFINITION_DELETE);
+        authorizationService.requireFormMaintenance(id, PermissionCodes.FORM_DEFINITION_DELETE);
         auditService.execute(() -> service.softDelete(id),
             () -> auditService.success("form.definition.delete", "FORM_DEFINITION", id,
                 AuditService.RiskLevel.CRITICAL,

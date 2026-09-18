@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import com.antflow.authz.AuthenticatedOnly;
+import com.antflow.authz.PermissionCodes;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/mobile")
@@ -21,12 +23,11 @@ public class MobileAppController {
     private final MobileAppService mobileAppService;
 
     @GetMapping("/apps")
-    @AuthenticatedOnly
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FORM_RUNTIME_READ + "')")
     public List<MobileAppDto> apps(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String category) {
-        principal();
-        return mobileAppService.list(keyword, category);
+        return mobileAppService.list(principal().userId(), keyword, category);
     }
 
     @PutMapping("/preferences/apps")

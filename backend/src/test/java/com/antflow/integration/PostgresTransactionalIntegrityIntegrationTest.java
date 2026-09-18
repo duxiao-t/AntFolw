@@ -20,6 +20,7 @@ import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.mobile.workflow.MobileAppService;
 import com.antflow.navigation.MenuService;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
@@ -170,6 +171,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private FormDataMapper formDataMapper;
     @Autowired private FormDefinitionService formDefinitionService;
     @Autowired private MobileDraftService mobileDraftService;
+    @Autowired private MobileAppService mobileAppService;
     @Autowired private MenuService menuService;
     @Autowired private WecomService wecomService;
 
@@ -201,7 +203,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void allScopeStillRequiresFormGrantForFormDataPage() {
+    void formDataPageUsesCapabilityScopeWithoutFormUsageGrant() {
         long userId = insertUser("all-scope-" + UUID.randomUUID());
         long roleId = insertRole("all_scope_" + UUID.randomUUID().toString().replace("-", ""));
         long formId = insertForm("PUBLISHED", VALID_SCHEMA);
@@ -214,15 +216,6 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 """, roleId);
             setPrincipal(userId);
 
-            Page<com.antflow.form.runtime.FormData> hidden = formDataService.authorizedPage(
-                1, 20, null, null, null, userId, false);
-            assertThat(hidden.getTotal()).isZero();
-            assertThat(hidden.getRecords()).isEmpty();
-
-            jdbcTemplate.update("""
-                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
-                VALUES (?, 'USER', ?, ?)
-                """, formId, userId, userId("admin"));
             Page<com.antflow.form.runtime.FormData> visible = formDataService.authorizedPage(
                 1, 20, null, null, null, userId, false);
             assertThat(visible.getRecords()).extracting(com.antflow.form.runtime.FormData::getId)
@@ -255,9 +248,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, deniedForm);
         try {
             setPrincipal(userId);
-            assertThat(mobileDraftService.list(userId))
+            var drafts = mobileDraftService.list(userId);
+            assertThat(drafts)
                 .extracting(com.antflow.mobile.workflow.MobileDraftDto::id)
                 .containsExactly(deniedDraft);
+            assertThat(drafts.get(0).readOnly()).isTrue();
             assertThat(mobileDraftService.count(userId)).isEqualTo(1L);
 
             assertThatThrownBy(() -> formDataService.submit(deniedCode, "SUBMITTED",
@@ -284,7 +279,49 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void formDefinitionListAndActionsShareGrantAndScopePredicate() {
+    void mobileCatalogAndDetailUseTheSameFormUsageGrant() {
+        long grantedUser = insertUser("mobile-granted-" + UUID.randomUUID());
+        long ungrantedUser = insertUser("mobile-ungranted-" + UUID.randomUUID());
+        long roleId = insertRole("mobile_runtime_"
+            + UUID.randomUUID().toString().replace("-", ""));
+        long firstForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long secondForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code)
+                VALUES (?, 'form:runtime:read')
+                """, roleId);
+            assignRole(grantedUser, roleId);
+            assignRole(ungrantedUser, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)
+                """, firstForm, grantedUser, userId("admin"),
+                secondForm, grantedUser, userId("admin"));
+
+            assertThat(mobileAppService.list(grantedUser, null, null))
+                .extracting("formId")
+                .contains(firstForm, secondForm);
+            assertThat(mobileAppService.list(ungrantedUser, null, null)).isEmpty();
+            assertThat(authorizationService.canUseForm(firstForm, grantedUser)).isTrue();
+            assertThat(authorizationService.canUseForm(firstForm, ungrantedUser)).isFalse();
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
+                firstForm, secondForm);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
+                firstForm, secondForm);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id IN (?, ?)",
+                grantedUser, ungrantedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)",
+                grantedUser, ungrantedUser);
+            authorizationService.evict(grantedUser);
+            authorizationService.evict(ungrantedUser);
+        }
+    }
+
+    @Test
+    void formDefinitionListAndActionsShareMaintainerPredicate() {
         long userId = insertUser("form-scope-" + UUID.randomUUID());
         long roleId = insertRole("form_scope_" + UUID.randomUUID().toString().replace("-", ""));
         long ownForm = insertForm("DRAFT", VALID_SCHEMA, userId);
@@ -301,21 +338,38 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)
                 """, ownForm, userId, userId("admin"),
                 otherForm, userId, userId("admin"));
+            jdbcTemplate.update("""
+                INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+                VALUES (?, ?, ?)
+                """, ownForm, userId, userId("admin"));
             setPrincipal(userId);
 
             Page<FormDefinitionMapper.Summary> page = formDefinitionService.list(
                 1, 100, null, null, userId, false);
             assertThat(page.getRecords()).extracting(FormDefinitionMapper.Summary::id)
                 .contains(ownForm).doesNotContain(otherForm);
-            page.getRecords().forEach(row -> authorizationService.requireFormAction(
+            page.getRecords().forEach(row -> authorizationService.requireFormMaintenance(
                 row.id(), PermissionCodes.FORM_DEFINITION_READ));
-            assertThatCode(() -> authorizationService.requireFormAction(
+            assertThatCode(() -> authorizationService.requireFormMaintenance(
                 ownForm, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
-            assertThatThrownBy(() -> authorizationService.requireFormAction(
+            assertThatThrownBy(() -> authorizationService.requireFormMaintenance(
                 otherForm, PermissionCodes.FORM_DEFINITION_MANAGE))
-                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+                .isInstanceOf(HiddenResourceException.class);
+
+            jdbcTemplate.update("""
+                INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+                VALUES (?, ?, ?)
+                """, otherForm, userId, userId("admin"));
+            Page<FormDefinitionMapper.Summary> expanded = formDefinitionService.list(
+                1, 100, null, null, userId, false);
+            assertThat(expanded.getRecords()).extracting(FormDefinitionMapper.Summary::id)
+                .contains(ownForm, otherForm);
+            assertThatCode(() -> authorizationService.requireFormMaintenance(
+                otherForm, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
         } finally {
             PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_maintainer WHERE form_def_id IN (?, ?)",
+                ownForm, otherForm);
             jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
                 ownForm, otherForm);
             jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
@@ -402,7 +456,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "SELECT authz_version FROM " + schema + ".t_user WHERE id = ?", Long.class, bobId);
 
             Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
-                .locations("classpath:db/migration").load().migrate();
+                .locations("classpath:db/migration").target("41").load().migrate();
 
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
                 + ".t_role_permission WHERE role_id = ? AND permission_code IN "
@@ -411,6 +465,112 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT authz_version FROM " + schema + ".t_user WHERE id = ?", Long.class, bobId))
                 .isEqualTo(before + 1);
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v42BackfillsCreatorsAndQualifiedManagersWithoutPromotingOrdinaryUsers() {
+        String schema = "maintainer_migration_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("41").load().migrate();
+            Long adminId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'admin'", Long.class);
+            Long bobId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'bob'", Long.class);
+            Long managerRoleId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_role(code, name) VALUES ('migration_manager', 'Migration manager') "
+                + "RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_user_role(user_id, role_id) VALUES (?, ?)", bobId, managerRoleId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:definition:manage', 'SELF')", managerRoleId);
+            Long plainUserId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_user(employee_no, username, password_hash, display_name, status) "
+                + "SELECT '990001', 'migration_plain', password_hash, 'Migration plain', 'ACTIVE' "
+                + "FROM " + schema + ".t_user WHERE id = ? RETURNING id", Long.class, bobId);
+            Long employeeRoleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_role WHERE code = 'employee'", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_user_role(user_id, role_id) VALUES (?, ?)", plainUserId, employeeRoleId);
+            Long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status, created_by) "
+                + "VALUES ('maintainer_migration', 'Maintainer migration', '[]', '{}', "
+                + "'DRAFT', ?) RETURNING id", Long.class, adminId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by) "
+                + "VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)",
+                formId, bobId, adminId, formId, plainUserId, adminId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForList("SELECT user_id FROM " + schema
+                + ".t_form_maintainer WHERE form_def_id = ? ORDER BY user_id",
+                Long.class, formId)).containsExactlyInAnyOrder(adminId, bobId)
+                .doesNotContain(plainUserId);
+            assertThat(jdbcTemplate.queryForObject("SELECT scopeable FROM " + schema
+                + ".t_permission WHERE code = 'form:definition:manage'", Boolean.class)).isFalse();
+            assertThat(jdbcTemplate.queryForObject("SELECT scope_override FROM " + schema
+                + ".t_role_permission WHERE role_id = ? "
+                + "AND permission_code = 'form:definition:manage'", String.class, managerRoleId))
+                .isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT scopeable FROM " + schema
+                + ".t_permission WHERE code = 'form:data:read'", Boolean.class)).isTrue();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v43ProtectsTheLastActiveMaintainerOnAV42Database() throws Exception {
+        String schema = "last_maintainer_migration_"
+            + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("42").load().migrate();
+            Long adminId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'admin'", Long.class);
+            Long bobId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'bob'", Long.class);
+            Long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status, created_by) "
+                + "VALUES ('last_maintainer', 'Last maintainer', '[]', '{}', 'DRAFT', ?) "
+                + "RETURNING id", Long.class, adminId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_maintainer(form_def_id, user_id, granted_by) VALUES (?, ?, ?)",
+                formId, adminId, adminId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThatThrownBy(() -> jdbcTemplate.update("UPDATE " + schema
+                + ".t_user SET status = 'DISABLED' WHERE id = ?", adminId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_maintainer(form_def_id, user_id, granted_by) VALUES (?, ?, ?)",
+                formId, bobId, adminId);
+            assertThat(jdbcTemplate.update("UPDATE " + schema
+                + ".t_user SET status = 'DISABLED' WHERE id = ?", adminId)).isEqualTo(1);
+
+            jdbcTemplate.update("UPDATE " + schema
+                + ".t_user SET status = 'ACTIVE' WHERE id = ?", adminId);
+            List<Throwable> outcomes = runConcurrently(adminId,
+                () -> jdbcTemplate.update("UPDATE " + schema
+                    + ".t_user SET status = 'DISABLED' WHERE id = ?", adminId),
+                () -> jdbcTemplate.update("UPDATE " + schema
+                    + ".t_user SET status = 'DISABLED' WHERE id = ?", bobId));
+            assertThat(outcomes.stream().filter(Objects::isNull).count()).isEqualTo(1L);
+            assertThat(outcomes.stream().filter(Objects::nonNull).toList())
+                .singleElement().isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
+                + ".t_form_maintainer maintenance JOIN " + schema
+                + ".t_user user_row ON user_row.id = maintenance.user_id "
+                + "WHERE maintenance.form_def_id = ? AND user_row.status = 'ACTIVE'",
+                Long.class, formId)).isEqualTo(1L);
         } finally {
             jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
@@ -1914,6 +2074,98 @@ class PostgresTransactionalIntegrityIntegrationTest {
         return insertForm(status, schema, userId("admin"));
     }
 
+    @Test
+    void instanceReadScopeDoesNotDependOnFormUsageGrant() {
+        long viewerId = insertUser("instance-scope-" + UUID.randomUUID());
+        long roleId = insertRole("instance_scope_"
+            + UUID.randomUUID().toString().replace("-", ""));
+        long ownerId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(ownerId));
+        long dataId = insertSubmittedData(formId, ownerId);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
+            VALUES (?, ?, 'RUNNING', ?) RETURNING id
+            """, Long.class, processId, dataId, ownerId);
+        try {
+            assignRole(viewerId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, 'workflow:instance:read', 'ALL')
+                """, roleId);
+            setPrincipal(viewerId);
+
+            assertThat(authorizationService.instanceVisibility(instanceId, viewerId))
+                .isEqualTo(AuthorizationService.InstanceVisibility.FULL);
+            assertThat(processInstanceMapper.selectInstancePage(viewerId, false, false, true,
+                "authorized", null, null, null, 20, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).contains(instanceId);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_process_instance WHERE id = ?", instanceId);
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", viewerId);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", viewerId);
+            authorizationService.evict(viewerId);
+        }
+    }
+
+    @Test
+    void formMaintainersCannotBeEmptyAndConcurrentReplacementConflicts() throws Exception {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = formDefinitionService.saveDraft(null,
+            "maintainer_" + UUID.randomUUID().toString().replace("-", ""),
+            "Maintainer test", "", List.of(), Map.of(), adminId).getId();
+        var staleDefinition = formDefinitionMapper.selectById(formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        int version;
+        try {
+            version = formGrantService.getMaintainers(formId).version();
+            assertThatThrownBy(() -> formGrantService.replaceMaintainers(formId,
+                new FormGrantService.FormMaintainerWriteRequest(version, Set.of())))
+                .isInstanceOfSatisfying(BizException.class, error ->
+                    assertThat(error.getCode()).isEqualTo("FORM_MAINTAINER_REQUIRED"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        List<Future<Object>> futures = List.of(
+            executor.submit(() -> replaceMaintainers(formId, version, Set.of(adminId), ready, start)),
+            executor.submit(() -> replaceMaintainers(formId, version, Set.of(bobId), ready, start)));
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        try {
+            List<Object> outcomes = List.of(futures.get(0).get(20, TimeUnit.SECONDS),
+                futures.get(1).get(20, TimeUnit.SECONDS));
+            assertThat(outcomes.stream()
+                .filter(FormGrantService.FormMaintainerDto.class::isInstance).count())
+                .isEqualTo(1L);
+            assertThat(outcomes.stream().filter(BizException.class::isInstance)
+                .map(BizException.class::cast).map(BizException::getCode))
+                .containsExactly("FORM_MAINTAINER_VERSION_CONFLICT");
+            assertThat(jdbcTemplate.queryForList("""
+                SELECT user_id FROM t_form_maintainer WHERE form_def_id = ?
+                """, Long.class, formId)).hasSize(1);
+            staleDefinition.setName("Renamed after authorization update");
+            formDefinitionMapper.updateById(staleDefinition);
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT authz_version FROM t_form_definition WHERE id = ?
+                """, Integer.class, formId)).isEqualTo(version + 1);
+        } finally {
+            executor.shutdownNow();
+            jdbcTemplate.update("DELETE FROM t_form_maintainer WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
     private long insertForm(String status, String schema, long creatorId) {
         String code = "IT_" + UUID.randomUUID().toString().replace("-", "");
         return jdbcTemplate.queryForObject("""
@@ -2079,6 +2331,22 @@ class PostgresTransactionalIntegrityIntegrationTest {
         start.await(10, TimeUnit.SECONDS);
         try {
             return menuService.replace(request);
+        } catch (Throwable error) {
+            return error;
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    private Object replaceMaintainers(long formId, int version, Set<Long> userIds,
+                                      CountDownLatch ready, CountDownLatch start)
+            throws InterruptedException {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        ready.countDown();
+        start.await(10, TimeUnit.SECONDS);
+        try {
+            return formGrantService.replaceMaintainers(formId,
+                new FormGrantService.FormMaintainerWriteRequest(version, userIds));
         } catch (Throwable error) {
             return error;
         } finally {

@@ -1,5 +1,6 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.authz.AuthorizationService;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
@@ -12,9 +13,6 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,8 +27,9 @@ public class MobileAppService {
     private final FormDefinitionMapper formDefinitionMapper;
     private final MobileAppPreferenceMapper preferenceMapper;
     private final ObjectMapper objectMapper;
+    private final AuthorizationService authorizationService;
 
-    public List<MobileAppDto> list(String keyword, String category) {
+    public List<MobileAppDto> list(long userId, String keyword, String category) {
         if (category != null && !category.isBlank() && !DEFAULT_CATEGORY.equals(category)) {
             return List.of();
         }
@@ -42,7 +41,7 @@ public class MobileAppService {
                 .or().like("description", trimmed));
         }
         query.orderByDesc("updated_at").orderByDesc("id");
-        return formDefinitionMapper.selectList(query).stream()
+        return usableForms(userId, query).stream()
             .map(MobileAppService::toMobileApp)
             .toList();
     }
@@ -50,16 +49,15 @@ public class MobileAppService {
     public List<MobileAppDto> favorites(long userId) {
         MobileAppPreference preference = preferenceMapper.selectById(userId);
         if (preference == null) {
-            return list(null, null).stream().limit(MAX_FAVORITE_APPS).toList();
+            return list(userId, null, null).stream().limit(MAX_FAVORITE_APPS).toList();
         }
         List<Long> formIds = readFormIds(preference.getFormIds());
         if (formIds.isEmpty()) {
             return List.of();
         }
-        Map<Long, FormDefinition> publishedForms = formDefinitionMapper.selectList(
-                publishedFormsQuery().in("id", formIds))
-            .stream()
-            .collect(Collectors.toMap(FormDefinition::getId, Function.identity()));
+        var publishedForms = usableForms(userId, publishedFormsQuery().in("id", formIds)).stream()
+            .collect(java.util.stream.Collectors.toMap(FormDefinition::getId,
+                java.util.function.Function.identity()));
         return formIds.stream()
             .map(publishedForms::get)
             .filter(java.util.Objects::nonNull)
@@ -83,9 +81,8 @@ public class MobileAppService {
             throw new BizException("TOO_MANY_FAVORITES", "at most 8 apps can be favorited");
         }
         if (!formIds.isEmpty()) {
-            Long publishedCount = formDefinitionMapper.selectCount(
-                publishedFormsQuery().in("id", formIds));
-            if (publishedCount != formIds.size()) {
+            if (usableForms(userId, publishedFormsQuery().in("id", formIds)).size()
+                    != formIds.size()) {
                 throw new BizException("INVALID_FAVORITES", "favorite app is unavailable");
             }
         }
@@ -106,8 +103,14 @@ public class MobileAppService {
     }
 
     private QueryWrapper<FormDefinition> publishedFormsQuery() {
-        return new QueryWrapper<FormDefinition>()
-            .eq("status", PUBLISHED_STATUS);
+        return new QueryWrapper<FormDefinition>().eq("status", PUBLISHED_STATUS);
+    }
+
+    private List<FormDefinition> usableForms(long userId, QueryWrapper<FormDefinition> query) {
+        // ponytail: catalog is small; move the shared predicate into SQL only if measured growth warrants it.
+        return formDefinitionMapper.selectList(query).stream()
+            .filter(form -> authorizationService.canUseForm(form.getId(), userId))
+            .toList();
     }
 
     private List<Long> readFormIds(String value) {

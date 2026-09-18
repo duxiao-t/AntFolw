@@ -83,8 +83,7 @@ class FormDataServiceTest {
         assertThat(json.readTree(saved.getData()).path("applicant").asText()).isEqualTo("张三");
         assertThat(json.readTree(saved.getData()).path("reason").asText()).isEqualTo("报销");
         assertThat(json.readTree(saved.getData()).has("row")).isFalse();
-        Mockito.verify(authorizationService).requireFormAction(10L,
-            PermissionCodes.FORM_RUNTIME_READ);
+        Mockito.verify(authorizationService).requireFormUse(10L);
     }
 
     @Test

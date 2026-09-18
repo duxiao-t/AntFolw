@@ -62,4 +62,18 @@ public class FormGrantController {
             @RequestBody FormGrantService.FormGrantWriteRequest request) {
         return formGrantService.replace(formId, request);
     }
+
+    @GetMapping("/{formId}/maintainers")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
+    public FormGrantService.FormMaintainerDto maintainers(@PathVariable long formId) {
+        return formGrantService.getMaintainers(formId);
+    }
+
+    @PutMapping("/{formId}/maintainers")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_AUTHORIZATION_MANAGE + "')")
+    public FormGrantService.FormMaintainerDto replaceMaintainers(
+            @PathVariable long formId,
+            @RequestBody FormGrantService.FormMaintainerWriteRequest request) {
+        return formGrantService.replaceMaintainers(formId, request);
+    }
 }

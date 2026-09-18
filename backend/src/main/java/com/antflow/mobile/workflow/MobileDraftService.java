@@ -38,8 +38,7 @@ public class MobileDraftService {
     @Transactional(rollbackFor = Exception.class)
     public Long create(String formCode, JsonNode data, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
-        authorizationService.requireFormAction(formDefinition.getId(),
-            PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(formDefinition.getId());
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
@@ -55,8 +54,7 @@ public class MobileDraftService {
     public FormData update(long draftId, JsonNode data, long userId) {
         FormData draft = requireOwnedDraft(draftId, userId);
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
-        authorizationService.requireFormAction(formDefinition.getId(),
-            PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(formDefinition.getId());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.updateById(draft);
@@ -71,7 +69,7 @@ public class MobileDraftService {
 
     public List<MobileDraftDto> list(long userId) {
         List<FormData> drafts = formDataMapper.selectMyDrafts(userId);
-        return drafts.stream().map(this::toDto).toList();
+        return drafts.stream().map(draft -> toDto(draft, userId)).toList();
     }
 
     public long count(long userId) {
@@ -81,7 +79,7 @@ public class MobileDraftService {
     }
 
     public MobileDraftDto get(long draftId, long userId) {
-        return toDto(requireOwnedDraft(draftId, userId));
+        return toDto(requireOwnedDraft(draftId, userId), userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -128,17 +126,18 @@ public class MobileDraftService {
         return formDefinition;
     }
 
-    private MobileDraftDto toDto(FormData draft) {
+    private MobileDraftDto toDto(FormData draft, long userId) {
         FormDefinition formDefinition = formDefinitionService.getById(draft.getFormDefId());
         boolean readOnly = formDefinition == null
-            || !PUBLISHED_STATUS.equals(formDefinition.getStatus());
-        Object process = processOf(draft.getFormDefId());
+            || !PUBLISHED_STATUS.equals(formDefinition.getStatus())
+            || !authorizationService.canUseForm(draft.getFormDefId(), userId);
+        Object process = formDefinition == null ? null : processOf(draft.getFormDefId());
         JsonNode schema = readJsonArray(formDefinition == null ? null : formDefinition.getSchema());
         return new MobileDraftDto(
             draft.getId(),
             draft.getFormDefId(),
-            formDefinition == null ? null : formDefinition.getCode(),
-            formDefinition == null ? null : formDefinition.getName(),
+            formDefinition == null ? "" : formDefinition.getCode(),
+            formDefinition == null ? "已下线表单" : formDefinition.getName(),
             draft.getFormDefVersion(),
             formDefinitionService.projectStarterData(draft.getData(), schema, process),
             formDefinitionService.projectStarterSchema(schema, process),

@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * 把"当前用户在某能力上的有效数据范围"翻译成 SQL 条件，交给 MyBatis-Plus 的
  * {@code DataPermissionInterceptor} 注入到受控查询上。
  *
- * <p>策略：admin → 不注入；非 admin 的 ALL 只省略范围条件，资源授权仍保留；
+ * <p>策略：admin → 不注入；非 admin 的 ALL 只省略能力范围条件，规则要求的资源条件仍保留；
  * 有主体但无该能力 → 注入 {@code 1=0}（宁可查不到，不可全量泄漏）；
  * 无主体（调度/同步等系统上下文）→ 不注入。
  */
@@ -35,6 +35,9 @@ public class DataPermissionPolicyHandler implements MultiDataPermissionHandler {
         var scope = authorizationService.currentDataScope(rule.capability());
         if (scope.isEmpty() || scope.get().admin()) {
             return null;
+        }
+        if (!rule.dataScoped() && !authorizationService.hasPermission(rule.capability())) {
+            return parse("1 = 0");
         }
         String segment = buildSegment(table, rule, scope.get());
         if (log.isDebugEnabled()) {
@@ -61,7 +64,7 @@ public class DataPermissionPolicyHandler implements MultiDataPermissionHandler {
                     .replace("{alias}", alias).replace("{departments}", departments));
             }
         }
-        String scopePart = scope.unrestricted() ? null : conditions.isEmpty()
+        String scopePart = !rule.dataScoped() || scope.unrestricted() ? null : conditions.isEmpty()
             ? "1 = 0"
             : conditions.size() == 1 ? conditions.get(0)
                 : "(" + String.join(" OR ", conditions) + ")";

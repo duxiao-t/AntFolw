@@ -60,7 +60,7 @@ class DataPermissionPolicyHandlerTest {
     }
 
     @Test
-    void nonAdminAllScopeStillInjectsRequiredGrant() {
+    void nonAdminAllScopeDoesNotDependOnFormUsageGrant() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
                 false, true, false, 7L, Set.of())));
@@ -68,7 +68,7 @@ class DataPermissionPolicyHandlerTest {
         String segment = handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)
             .toString();
 
-        assertThat(segment).contains("t_form_resource_grant").doesNotContain("1 = 0");
+        assertThat(segment).isEqualTo("1 = 1").doesNotContain("t_form_resource_grant");
     }
 
     @Test
@@ -85,13 +85,13 @@ class DataPermissionPolicyHandlerTest {
     }
 
     @Test
-    void selfScopeUsesOwnerColumnAndKeepsFormGrantRequirement() {
+    void selfScopeUsesOwnerColumnWithoutFormUsageGrant() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
             new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of()));
 
         assertThat(segment).contains("t_form_data.created_by = 7");
-        assertThat(segment).contains("t_form_resource_grant");
+        assertThat(segment).doesNotContain("t_form_resource_grant");
         assertThatCode(() -> CCJSqlParserUtil.parseCondExpression(segment))
             .doesNotThrowAnyException();
     }
@@ -122,28 +122,26 @@ class DataPermissionPolicyHandlerTest {
     }
 
     @Test
-    void formDefinitionListRequiresGrantAndDepartmentScope() {
+    void formDefinitionListRequiresMaintainerAndIgnoresDepartmentScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DEFINITION_TABLE,
             DataPermissionRules.FORM_DEFINITION,
             new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
 
-        assertThat(segment).contains(") AND (");
-        assertThat(segment).contains("t_form_resource_grant");
-        assertThat(segment).contains("scope_owner.id = t_form_definition.created_by");
+        assertThat(segment).contains("t_form_maintainer");
+        assertThat(segment).contains("maintainer.user_id = 5");
+        assertThat(segment).doesNotContain("t_form_resource_grant", "scope_owner");
         assertThatCode(() -> CCJSqlParserUtil.parseCondExpression(segment))
             .doesNotThrowAnyException();
     }
 
     @Test
-    void formDataListStillRequiresGrantAndScope() {
+    void formDataListRequiresOnlyCapabilityScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
             new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
 
-        assertThat(segment).contains(" AND ");
-        // 顶层是「授权 AND 范围」：授权子查询之后紧跟 AND，再接范围子查询
-        assertThat(segment).startsWith("(EXISTS (SELECT 1 FROM t_form_resource_grant");
-        assertThat(segment).contains("AND ((EXISTS (SELECT 1 FROM t_process_instance");
+        assertThat(segment).startsWith("(EXISTS (SELECT 1 FROM t_process_instance");
+        assertThat(segment).doesNotContain("t_form_resource_grant");
     }
 
     @Test

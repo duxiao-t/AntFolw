@@ -297,6 +297,35 @@ class UserServiceTest {
     }
 
     @Test
+    void lastActiveFormMaintainerCannotBeDisabled() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        UserService service = new UserService(userMapper, userRoleMapper,
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            jdbcTemplate, Mockito.mock(FormalNumberService.class),
+            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class));
+        User user = user(9L, 10L, null, "ACTIVE");
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
+            Mockito.<ResultSetExtractor<UserService.WecomLoginState>>any(), eq(9L)))
+            .thenReturn(new UserService.WecomLoginState(1L, 1, true));
+        when(jdbcTemplate.queryForObject(contains("t_form_maintainer"),
+            eq(Boolean.class), eq(9L), eq(9L))).thenReturn(true);
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.setWecomLoginAccess(9L, false));
+
+        assertEquals("LAST_FORM_MAINTAINER_PROTECTED", error.getCode());
+        assertEquals("ACTIVE", user.getStatus());
+        verify(userMapper, never()).updateById(any(User.class));
+        verify(sessions, never()).revokeAll(9L);
+    }
+
+    @Test
     void hardDisabledWecomUserCannotBeManuallyAllowed() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
