@@ -31,6 +31,7 @@ import { validateSchemaValues } from "./schema/fieldRegistry";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldMode, FieldValidationErrors, MobileFormValues } from "./schema/types";
 import { fetchReworkTask, saveReworkTask } from "./rework.api";
+import { isApiError } from "../../shared/api/errors";
 
 export function FormFillPage() {
   const { code = "" } = useParams();
@@ -223,6 +224,9 @@ export function FormFillPage() {
   }
 
   if (formQuery.isError || draftQuery.isError || reworkQuery.isError) {
+    if (isApiError(formQuery.error) && (formQuery.error.status === 403 || formQuery.error.status === 404)) {
+      return <PageError title="表单不可用" message="你当前没有此表单的使用权限，请返回工作台选择其他表单。" />;
+    }
     return <PageError onRetry={() => void formQuery.refetch()} />;
   }
 
@@ -265,7 +269,7 @@ export function FormFillPage() {
         <button
           type="button"
           className="btn btn--ghost btn--lg"
-          disabled={saveMutation.isPending}
+          disabled={saveMutation.isPending || draftQuery.data?.readOnly}
           onPointerDown={(event) => {
             if (event.pointerType === "mouse") return;
             event.preventDefault();
@@ -276,7 +280,7 @@ export function FormFillPage() {
         >
           {saveMutation.isPending ? "保存中" : reworkTaskId ? "保存原单" : "保存草稿"}
         </button>
-        <button type="button" className="btn btn--success btn--lg" onClick={submitForm}>
+        <button type="button" className="btn btn--success btn--lg" disabled={draftQuery.data?.readOnly} onClick={submitForm}>
           提交
         </button>
       </div>

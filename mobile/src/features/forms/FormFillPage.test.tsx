@@ -122,6 +122,17 @@ beforeEach(() => {
 });
 
 describe('FormFillPage', () => {
+  it('explains when the current account no longer has form usage access', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      code: 'NOT_FOUND', message: 'form not found',
+    }), { status: 404, headers: { 'content-type': 'application/json' } }));
+
+    renderForm();
+
+    expect(await screen.findByRole('heading', { name: '表单不可用' })).toBeInTheDocument();
+    expect(screen.getByText(/当前没有此表单的使用权限/)).toBeInTheDocument();
+  });
+
   it('loads a form, validates required fields and creates a server draft', async () => {
     const { queryClient, router } = renderForm();
     queryClient.setQueryData(queryKeys.drafts, []);

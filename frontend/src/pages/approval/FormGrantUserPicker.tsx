@@ -28,10 +28,11 @@ type Props = {
   users?: GrantUser[];
   departments: GrantDepartment[];
   endpoint: string;
+  title?: string;
 };
 
 export default function FormGrantUserPicker({
-  value = [], onChange, users = [], departments, endpoint,
+  value = [], onChange, users = [], departments, endpoint, title = '选择人员',
 }: Props) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -94,7 +95,7 @@ export default function FormGrantUserPicker({
       </Space>
 
       <Modal
-        title="选择可见人员"
+        title={title}
         open={open}
         width={920}
         onCancel={() => setOpen(false)}

@@ -84,6 +84,11 @@ type FormGrantCandidates = {
   roles: { id: number; code: string; name: string }[];
   departments: GrantDepartment[];
 };
+type FormMaintainers = {
+  version: number;
+  userIds: number[];
+  users: GrantUser[];
+};
 
 const allSteps = [
   { key: 'basic', title: '表单属性' },
@@ -320,6 +325,12 @@ export default function FormManagementWizard() {
     enabled: !!formId && canManageGrants,
   });
 
+  const { data: formMaintainers } = useQuery<FormMaintainers>({
+    queryKey: ['form-management-maintainers', formId],
+    queryFn: () => request<FormMaintainers>(`/api/forms/${formId}/maintainers`),
+    enabled: !!formId && canManageGrants,
+  });
+
   const { data: grantCandidates } = useQuery<FormGrantCandidates>({
     queryKey: ['form-management-grant-candidates', formId ?? 'new'],
     queryFn: () =>
@@ -354,6 +365,8 @@ export default function FormManagementWizard() {
           },
         ]
       : []);
+  const initialMaintainerUsers: GrantUser[] =
+    formMaintainers?.users ?? initialGrantUsers;
 
   const schema = useMemo(
     () => parseJsonValue<SchemaNode[]>(definition?.schema, []),
@@ -475,13 +488,18 @@ export default function FormManagementWizard() {
         allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
         departmentIds: formGrant.departmentIds,
       });
+    }
+    if (canManageGrants && formMaintainers) {
+      form.setFieldValue('maintainerIds', formMaintainers.userIds);
     } else if (
       canManageGrants &&
       isNew &&
-      form.getFieldValue('userIds') === undefined
+      (form.getFieldValue('userIds') === undefined ||
+        form.getFieldValue('maintainerIds') === undefined)
     ) {
       form.setFieldsValue({
         userIds: currentUser?.id ? [currentUser.id] : [],
+        maintainerIds: currentUser?.id ? [currentUser.id] : [],
         roleIds: [],
         allCompany: false,
         departmentIds: [],
@@ -494,6 +512,7 @@ export default function FormManagementWizard() {
     definition,
     form,
     formGrant,
+    formMaintainers,
     isAdmin,
     isNew,
   ]);
@@ -506,6 +525,9 @@ export default function FormManagementWizard() {
   const saveBasic = useMutation({
     mutationFn: async () => {
       const values = await form.validateFields();
+      if (!isNew && canManageGrants && (!formGrant || !formMaintainers)) {
+        throw new Error('权限设置尚未加载完成，请稍后重试');
+      }
       const settings = {
         ...parseJsonValue<Record<string, any>>(definition?.settings, {}),
         workflowEnabled: !!values.workflowEnabled,
@@ -524,9 +546,16 @@ export default function FormManagementWizard() {
       if (!canManageGrants) return saved;
 
       try {
-        const latestGrant = await request<FormGrant>(
-          `/api/forms/${saved.id}/grants`,
-        );
+        const latestGrant = isNew
+          ? await request<FormGrant>(`/api/forms/${saved.id}/grants`)
+          : formGrant;
+        const latestMaintainers = isNew
+          ? await request<FormMaintainers>(`/api/forms/${saved.id}/maintainers`)
+          : formMaintainers;
+        if (!latestGrant || !latestMaintainers
+            || latestGrant.version !== latestMaintainers.version) {
+          throw new Error('权限设置已被修改，请刷新后重试');
+        }
         const userIds = Array.isArray(values.userIds)
           ? values.userIds
           : latestGrant.userIds;
@@ -541,15 +570,29 @@ export default function FormManagementWizard() {
         const departmentIds = Array.isArray(values.departmentIds)
           ? values.departmentIds
           : latestGrant.departmentIds;
-        await request<FormGrant>(`/api/forms/${saved.id}/grants`, {
+        const maintainerIds = Array.isArray(values.maintainerIds)
+          ? values.maintainerIds
+          : latestMaintainers.userIds;
+        const updatedGrant = await request<FormGrant>(
+          `/api/forms/${saved.id}/grants`, {
+            method: 'PUT',
+            data: {
+              userIds,
+              roleIds,
+              departmentIds,
+              version: latestGrant.version,
+            },
+          },
+        );
+        await request<FormMaintainers>(`/api/forms/${saved.id}/maintainers`, {
           method: 'PUT',
-          data: { userIds, roleIds, departmentIds, version: latestGrant.version },
+          data: { userIds: maintainerIds, version: updatedGrant.version },
         });
       } catch (error: any) {
         const grantError =
           error instanceof Error
             ? error
-            : new Error(error?.message ?? '表单管理员保存失败');
+            : new Error(error?.message ?? '表单权限设置保存失败');
         (grantError as any).formId = saved.id;
         throw grantError;
       }
@@ -562,6 +605,13 @@ export default function FormManagementWizard() {
           : '表单属性已保存',
       );
       qc.invalidateQueries({ queryKey: ['form-management-definition'] });
+      qc.invalidateQueries({ queryKey: ['form-management-grant'] });
+      qc.invalidateQueries({ queryKey: ['form-management-maintainers'] });
+      if (canManageGrants && !isAdmin
+          && !form.getFieldValue('maintainerIds')?.includes(currentUser?.id)) {
+        history.push('/approval/forms');
+        return;
+      }
       goStep('designer', res.id);
     },
     onError: (error: any) => {
@@ -571,6 +621,9 @@ export default function FormManagementWizard() {
         });
         qc.invalidateQueries({
           queryKey: ['form-management-grant', error.formId],
+        });
+        qc.invalidateQueries({
+          queryKey: ['form-management-maintainers', error.formId],
         });
         goStep('basic', error.formId);
       }
@@ -737,8 +790,38 @@ export default function FormManagementWizard() {
             <div className={styles.sectionHeader}>
               <span className={styles.sectionMarker} aria-hidden="true" />
               <div>
-                <h2 className={styles.sectionTitle}>表单可见范围</h2>
-                <span className={styles.sectionDescription}>全公司、部门、角色和指定人员取并集；部门授权包含所有下级部门。</span>
+                <h2 className={styles.sectionTitle}>指定维护人员</h2>
+                <span className={styles.sectionDescription}>只有名单内且持有对应表单或流程能力的人员才能设计、发布或删除模板；至少保留一人。</span>
+              </div>
+            </div>
+            <Form.Item
+              label="维护人员"
+              name="maintainerIds"
+              rules={[{
+                validator: (_rule, value?: number[]) =>
+                  value?.length ? Promise.resolve() : Promise.reject(new Error('至少选择一名维护人员')),
+              }]}
+            >
+              <FormGrantUserPicker
+                title="选择维护人员"
+                users={initialMaintainerUsers}
+                departments={grantCandidates?.departments ?? []}
+                endpoint={
+                  formId
+                    ? `/api/forms/${formId}/grants/user-candidates`
+                    : '/api/forms/grant-user-candidates'
+                }
+              />
+            </Form.Item>
+          </section>
+        )}
+        {canManageGrants && (
+          <section className={`${styles.propertiesSection} ${styles.dividedSection}`}>
+            <div className={styles.sectionHeader}>
+              <span className={styles.sectionMarker} aria-hidden="true" />
+              <div>
+                <h2 className={styles.sectionTitle}>表单使用范围</h2>
+                <span className={styles.sectionDescription}>控制手机端目录、打开和发起；不授予模板维护或业务数据查看权限。各范围取并集，部门包含所有下级部门。</span>
               </div>
             </div>
             {isAdmin && (
@@ -762,6 +845,7 @@ export default function FormManagementWizard() {
                 name="userIds"
               >
                 <FormGrantUserPicker
+                  title="选择可使用表单的人员"
                   users={initialGrantUsers}
                   departments={grantCandidates?.departments ?? []}
                   endpoint={
@@ -877,7 +961,10 @@ export default function FormManagementWizard() {
               <Descriptions.Item label="提交后行为">
                 {workflowEnabled ? '提交后进入审批' : '提交成功后直接完成'}
               </Descriptions.Item>
-              <Descriptions.Item label="可见范围">{visibilitySummary}</Descriptions.Item>
+              <Descriptions.Item label="使用范围">{visibilitySummary}</Descriptions.Item>
+              <Descriptions.Item label="维护人员">
+                {formMaintainers?.userIds.length ?? 1} 人
+              </Descriptions.Item>
               {workflowEnabled && (
                 <Descriptions.Item label="流程状态">
                   {processDefinition?.status ?? '未保存'}
