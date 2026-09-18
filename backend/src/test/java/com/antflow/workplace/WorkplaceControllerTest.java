@@ -69,7 +69,7 @@ class WorkplaceControllerTest {
         when(tasks.countMyInbox(7L, "PENDING")).thenReturn(1L);
         var instances = mock(ProcessInstanceMapper.class);
         when(instances.selectInstancePage(7L, false, true, true, "authorized",
-            null, null, null, 50, 100))
+            null, null, null, null, null, 50, 100))
             .thenReturn(List.of(instance));
         when(instances.selectBatchIds(any())).thenReturn(List.of(instance));
         when(instances.selectWorkplaceStatusCounts(eq(7L), eq(false), eq(true), eq(true),

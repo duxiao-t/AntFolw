@@ -1433,11 +1433,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, visibleInstanceId, ownerId, viewerId);
 
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
-            "authorized", null, ownerId, null, 1, 0))
+            "authorized", null, ownerId, null, null, null, 1, 0))
             .extracting(com.antflow.task.ProcessInstance::getId)
             .containsExactly(visibleInstanceId);
         assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
-            "authorized", null, ownerId, null)).isEqualTo(1L);
+            "authorized", null, ownerId, null, null, null)).isEqualTo(1L);
 
         long mineDataId = insertSubmittedData(formId, viewerId);
         long reworkDataId = insertSubmittedData(formId, viewerId);
@@ -1452,11 +1452,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, ?, 'RUNNING', '__rework__', ?, now() + interval '1 minute')
             """, processId, reworkDataId, viewerId);
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
-            "mine", null, null, null, 10, 0))
+            "mine", null, null, null, null, null, 10, 0))
             .extracting(com.antflow.task.ProcessInstance::getId)
             .containsExactly(mineInstanceId);
         assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
-            "mine", null, null, null)).isEqualTo(1L);
+            "mine", null, null, null, null, null)).isEqualTo(1L);
 
         jdbcTemplate.update("""
             INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, approval_mode, task_type)
@@ -1472,6 +1472,86 @@ class PostgresTransactionalIntegrityIntegrationTest {
             .extracting(com.antflow.task.TaskEntity::getStatus)
             .containsExactlyInAnyOrder("APPROVED", "RESUBMITTED");
         assertThat(taskMapper.countTaskPage(viewerId, "done", "APPROVED")).isEqualTo(1L);
+    }
+
+    @Test
+    void desktopRecordSearchUsesBusinessFieldsDateBoundsAndTheOriginalVisibilityPredicate() {
+        long viewerId = insertUser("record_viewer_" + UUID.randomUUID());
+        long applicantId = insertUser("record_applicant_" + UUID.randomUUID());
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long departmentId = insertDepartment(companyId, "记录查询测试部门");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(viewerId));
+        OffsetDateTime from = OffsetDateTime.parse("2026-09-01T00:00:00+08:00");
+        OffsetDateTime to = from.plusDays(1);
+        List<Long> instanceIds = new java.util.ArrayList<>();
+        try {
+            jdbcTemplate.update("UPDATE t_form_definition SET name = '记录查询采购申请' WHERE id = ?",
+                formId);
+            jdbcTemplate.update("UPDATE t_user SET display_name = '记录查询申请人' WHERE id = ?",
+                applicantId);
+            for (OffsetDateTime time : List.of(from, from.minusSeconds(1), to, from.plusHours(1))) {
+                long dataId = insertSubmittedData(formId, applicantId);
+                instanceIds.add(jdbcTemplate.queryForObject("""
+                    INSERT INTO t_process_instance(proc_def_id, form_data_id, status,
+                        current_node_id, started_by, started_dept_id, started_at)
+                    VALUES (?, ?, 'RUNNING', 'record_manager', ?, ?, ?) RETURNING id
+                    """, Long.class, processId, dataId, applicantId, departmentId, time));
+            }
+            for (long instanceId : instanceIds.subList(0, 3)) {
+                jdbcTemplate.update("""
+                    INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status,
+                        approval_mode, task_type)
+                    VALUES (?, 'record_manager', ?, 'PENDING', 'OR_SIGN', 'APPROVAL')
+                    """, instanceId, viewerId);
+            }
+            long visibleId = instanceIds.get(0);
+            String businessNo = jdbcTemplate.queryForObject("""
+                SELECT data.business_no FROM t_form_data data
+                JOIN t_process_instance pi ON pi.form_data_id = data.id WHERE pi.id = ?
+                """, String.class, visibleId);
+            String formCode = jdbcTemplate.queryForObject(
+                "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+            var applicant = jdbcTemplate.queryForMap(
+                "SELECT username, employee_no FROM t_user WHERE id = ?", applicantId);
+
+            for (String keyword : List.of("记录查询采购", formCode, businessNo, "记录查询申请人",
+                String.valueOf(applicant.get("username")), String.valueOf(applicant.get("employee_no")),
+                "记录查询测试部门", "record_manager", String.valueOf(visibleId), "#" + visibleId)) {
+                var records = processInstanceMapper.selectInstancePage(viewerId, false, true, false,
+                    "authorized", "RUNNING", null, keyword, from, to, 20, 0);
+                assertThat(records).as("keyword %s", keyword)
+                    .extracting(com.antflow.task.ProcessInstance::getId).containsExactly(visibleId);
+                assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
+                    "authorized", "RUNNING", null, keyword, from, to)).isEqualTo(records.size());
+                assertThat(records.get(0).getFormName()).isEqualTo("记录查询采购申请");
+                assertThat(records.get(0).getFormCode()).isEqualTo(formCode);
+                assertThat(records.get(0).getBusinessNo()).isEqualTo(businessNo);
+                assertThat(records.get(0).getApplicantName()).isEqualTo("记录查询申请人");
+                assertThat(records.get(0).getApplicantEmployeeNo())
+                    .isEqualTo(applicant.get("employee_no"));
+                assertThat(records.get(0).getApplicantDepartment()).isEqualTo("记录查询测试部门");
+            }
+
+            jdbcTemplate.update("UPDATE t_process_instance SET current_node_id = '__rework__' WHERE id = ?",
+                visibleId);
+            assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
+                "authorized", "REWORK", null, null, from, to, 20, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).containsExactly(visibleId);
+            assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
+                "authorized", "REWORK", null, null, from, to)).isEqualTo(1L);
+            assertThat(processInstanceMapper.selectInstancePage(viewerId, false, false, false,
+                "authorized", null, null, "记录查询", from, to, 20, 0)).isEmpty();
+        } finally {
+            instanceIds.forEach(id -> jdbcTemplate.update("DELETE FROM t_task WHERE proc_inst_id = ?", id));
+            instanceIds.forEach(id -> jdbcTemplate.update("DELETE FROM t_process_instance WHERE id = ?", id));
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", viewerId, applicantId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", departmentId);
+        }
     }
 
     @Test
@@ -2098,7 +2178,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(authorizationService.instanceVisibility(instanceId, viewerId))
                 .isEqualTo(AuthorizationService.InstanceVisibility.FULL);
             assertThat(processInstanceMapper.selectInstancePage(viewerId, false, false, true,
-                "authorized", null, null, null, 20, 0))
+                "authorized", null, null, null, null, null, 20, 0))
                 .extracting(com.antflow.task.ProcessInstance::getId).contains(instanceId);
         } finally {
             PrincipalHolder.clear();

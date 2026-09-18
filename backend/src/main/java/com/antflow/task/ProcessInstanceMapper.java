@@ -78,10 +78,13 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         @Param("canReadInstances") boolean canReadInstances,
         @Param("dayStart") OffsetDateTime dayStart, @Param("dayEnd") OffsetDateTime dayEnd);
 
-    @Select("""
-        <script>
-        SELECT pi.*
-        """ + INSTANCE_FROM + """
+    String INSTANCE_PAGE_FROM = INSTANCE_FROM + """
+        LEFT JOIN t_user applicant ON applicant.id = pi.started_by
+        LEFT JOIN t_department applicant_department ON applicant_department.id = pi.started_dept_id
+        """;
+
+    // 列表与 count 共用筛选，确保授权、关键词和时间范围先于分页生效。
+    String INSTANCE_PAGE_WHERE = """
         WHERE
         <choose>
           <when test="scope == 'mine'">
@@ -93,16 +96,43 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
           </otherwise>
         </choose>
         <if test="status != null and status != ''">
-          AND pi.status = #{status}
+          <choose>
+            <when test="status == 'REWORK'">
+              AND pi.status = 'RUNNING' AND pi.current_node_id = '__rework__'
+            </when>
+            <otherwise> AND pi.status = #{status} </otherwise>
+          </choose>
         </if>
         <if test="startedBy != null">
           AND pi.started_by = #{startedBy}
         </if>
         <if test="keyword != null and keyword != ''">
-          AND (form_def.name ILIKE CONCAT('%', #{keyword}, '%')
-            OR form_data.business_no ILIKE CONCAT('%', #{keyword}, '%')
-            OR pi.current_node_id ILIKE CONCAT('%', #{keyword}, '%'))
+          AND (form_def.name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR form_def.code ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR form_data.business_no ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR applicant.display_name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR applicant.username ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR applicant.employee_no ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR applicant_department.name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR pi.current_node_id ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR CAST(pi.id AS text) = LTRIM(#{keyword}, '#'))
         </if>
+        <if test="from != null">
+          AND pi.started_at &gt;= #{from}
+        </if>
+        <if test="to != null">
+          AND pi.started_at &lt; #{to}
+        </if>
+        """;
+
+    @Select("""
+        <script>
+        SELECT pi.*, form_def.code AS form_code, form_def.name AS form_name,
+               form_data.business_no,
+               COALESCE(NULLIF(applicant.display_name, ''), applicant.username) AS applicant_name,
+               applicant.employee_no AS applicant_employee_no,
+               applicant_department.name AS applicant_department
+        """ + INSTANCE_PAGE_FROM + INSTANCE_PAGE_WHERE + """
         ORDER BY pi.started_at DESC, pi.id DESC
         LIMIT #{limit} OFFSET #{offset}
         </script>
@@ -111,39 +141,20 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         @Param("admin") boolean admin, @Param("canReadTasks") boolean canReadTasks,
         @Param("canReadInstances") boolean canReadInstances, @Param("scope") String scope,
         @Param("status") String status, @Param("startedBy") Long startedBy,
-        @Param("keyword") String keyword, @Param("limit") int limit,
+        @Param("keyword") String keyword, @Param("from") OffsetDateTime from,
+        @Param("to") OffsetDateTime to, @Param("limit") int limit,
         @Param("offset") int offset);
 
     @Select("""
         <script>
         SELECT COUNT(*)
-        """ + INSTANCE_FROM + """
-        WHERE
-        <choose>
-          <when test="scope == 'mine'">
-            pi.started_by = #{userId}
-            AND pi.current_node_id IS DISTINCT FROM '__rework__'
-          </when>
-          <otherwise>
-        """ + FULL_VISIBLE + """
-          </otherwise>
-        </choose>
-        <if test="status != null and status != ''">
-          AND pi.status = #{status}
-        </if>
-        <if test="startedBy != null">
-          AND pi.started_by = #{startedBy}
-        </if>
-        <if test="keyword != null and keyword != ''">
-          AND (form_def.name ILIKE CONCAT('%', #{keyword}, '%')
-            OR form_data.business_no ILIKE CONCAT('%', #{keyword}, '%')
-            OR pi.current_node_id ILIKE CONCAT('%', #{keyword}, '%'))
-        </if>
+        """ + INSTANCE_PAGE_FROM + INSTANCE_PAGE_WHERE + """
         </script>
         """)
     long countInstancePage(@Param("userId") long userId,
         @Param("admin") boolean admin, @Param("canReadTasks") boolean canReadTasks,
         @Param("canReadInstances") boolean canReadInstances, @Param("scope") String scope,
         @Param("status") String status, @Param("startedBy") Long startedBy,
-        @Param("keyword") String keyword);
+        @Param("keyword") String keyword, @Param("from") OffsetDateTime from,
+        @Param("to") OffsetDateTime to);
 }

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.OffsetDateTime;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
@@ -61,13 +62,18 @@ public class InstanceController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long startedBy,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) OffsetDateTime from,
+            @RequestParam(required = false) OffsetDateTime to) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_READ);
         var p = PrincipalHolder.current().orElseThrow();
         String normalizedScope = scope == null ? "authorized"
             : scope.trim().toLowerCase(java.util.Locale.ROOT);
         if (!"authorized".equals(normalizedScope) && !"mine".equals(normalizedScope)) {
             throw new BizException("BAD_QUERY", "instance scope must be authorized or mine");
+        }
+        if (from != null && to != null && !from.isBefore(to)) {
+            throw new BizException("BAD_QUERY", "from must be earlier than to");
         }
         int normalizedPage = Math.max(1, page);
         int normalizedSize = Math.min(100, Math.max(1, size));
@@ -81,10 +87,10 @@ public class InstanceController {
         String normalizedKeyword = normalized(keyword);
         return new WorkflowPage<>(instanceMapper.selectInstancePage(p.userId(), admin,
                 canReadTasks, canReadInstances, normalizedScope, normalizedStatus, startedBy,
-                normalizedKeyword, normalizedSize, offset),
+                normalizedKeyword, from, to, normalizedSize, offset),
             instanceMapper.countInstancePage(p.userId(), admin, canReadTasks,
                 canReadInstances, normalizedScope, normalizedStatus, startedBy,
-                normalizedKeyword), normalizedPage, normalizedSize);
+                normalizedKeyword, from, to), normalizedPage, normalizedSize);
     }
 
     @GetMapping("/{id}")

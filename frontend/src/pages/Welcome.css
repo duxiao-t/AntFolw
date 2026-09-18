@@ -150,7 +150,8 @@
 .section-heading > a { color: var(--af-color-primary-action); font-size: 13px; }
 .section-count { color: var(--af-color-muted); font-size: 12px; white-space: nowrap; }
 .table-scroll { overflow-x: auto; }
-.table-scroll .ant-table { min-width: 620px; }
+.workplace-page .table-scroll { padding: 0 16px 16px; }
+.workplace-page .table-scroll .ant-table-pagination { margin: 16px 0 0; }
 .primary-cell strong,
 .primary-cell small { display: block; }
 .primary-cell strong { color: var(--af-color-text); font-size: 13px; }
@@ -205,6 +206,7 @@
   .metric { min-height: 126px; padding: 18px 16px; }
   .metric strong { font-size: 29px; }
   .section-heading { padding: 20px 18px 16px; }
+  .workplace-page .table-scroll { padding: 0 10px 16px; }
   .status-summary,
   .status-list { padding-left: 18px; padding-right: 18px; }
 }

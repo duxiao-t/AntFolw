@@ -72,7 +72,7 @@ public class WorkplaceController {
         boolean admin = authorizationService.isAdmin();
         List<ProcessInstance> recentInstances = instanceMapper.selectInstancePage(
             userId, admin, canSeeTasks, canReadInstances, "authorized", null, null, null,
-            safeRecentSize, pageOffset(safeRecentPage, safeRecentSize));
+            null, null, safeRecentSize, pageOffset(safeRecentPage, safeRecentSize));
         Set<Long> pendingInstanceIds = pendingTasks.stream().map(TaskEntity::getProcInstId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         List<ProcessInstance> pendingInstances = pendingInstanceIds.isEmpty() ? List.of()
