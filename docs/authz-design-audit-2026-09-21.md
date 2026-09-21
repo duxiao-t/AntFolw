@@ -8,12 +8,12 @@
 ## 1. 结论摘要
 
 - **端点层**：结构清晰、`AuthorizationCoverageTest` 兜底"端点必须声明鉴权"，但注解与服务层双重校验之间无一致性对账，`consoleEntry()` 被挪用于非自助端点。
-- **资源层**：语义正确（fail-closed、隐藏资源返回 404），但 `requireManageTask` 与 `requireManageInstance` 对同一"可读但越范围"情形返回不同状态码。
+- **资源层**：语义正确（fail-closed、隐藏资源返回 404）；`requireManageTask` 委托 `requireManageInstance`，两入口状态码一致（详见 D3，已由「校订记录」第 4 条改为撤回原判）。
 - **数据范围层**：规则表驱动是对的，但同一范围语义存在 3+1 处实现（Java / MyBatis handler / Mapper SQL / SELF 特判），且无 principal 时不注入条件（隐性全表）。
 - **配置层**：角色/菜单编辑器功能可用，但能力树无搜索、改动无影响面提示、同一枚举在三个页面有三种文案、菜单与角色两个编辑器互不解释。
 - **最该先动的三件事**：
   1. 修 `Contacts.tsx:471` 死键 `canWriteDepartments`（一行注册 + 一次回归，约 10 分钟）。
-  2. 拍板"越范围"状态码语义并统一 `requireManageTask`/`requireManageInstance`（半天，含测试）。
+  2. 拍板"越范围"状态码语义（已核实无需统一——两入口本就一致）并固化进 `DECISIONS.md`。
   3. 拍板员工是否应持有 `console:entry:access`（决定桌面入口语义与 403 页的真正受众，不写代码，先决策）。
 
 ## 2. 基线：系统里到底有谁
@@ -72,15 +72,19 @@
 - 代价：约 3 行；需同步检查 Role.tsx:96 的同型 isAdmin（Role.tsx 也有硬编码，且其菜单码 security:role:read 非 admin_only，语义上是「security:role:manage 才能写」——见 D2 备注）。
 - 置信度：已复核（较原计划"自相矛盾"下调，见附录 B）
 
-### D3 同一"越范围"情形，两个入口返回不同状态码
-- 问题：`requireManageTask`（AuthorizationService.java:361-368）在不可读时抛 HiddenResourceException → 404；`requireManageInstance`（:370-386）在可读但数据范围外抛 AccessDeniedException → 403。对"范围外管理"这同一情形，任务入口 404、实例入口 403。
-- 证据：backend/src/main/java/com/antflow/authz/AuthorizationService.java:361-368,370-386；GlobalExceptionHandler.java:37-46（Hidden→404 NOT_FOUND）、:93-100（AccessDenied→403 FORBIDDEN）。
-- 受影响人群：前端与第三方集成（错误分支）；桌面用户（重试/报错文案）。
-- 现状行为：同一授权状态，HTTP 语义随入口不同。
-- 影响：前端无法用状态码区分"不存在"与"越权"，容易把越权当数据 bug 处理；审计里 404/403 语义被稀释。
-- 建议：定一条规则写进 DECISIONS："范围内可读资源的管理越权=403；任何不可读=404（隐藏资源）"，然后按规则统一 requireManageTask 路径（可读但越范围应 403——现状 404 是把 readable 检查提前吞了）。
-- 代价：0.5 天含回归测试。
-- 置信度：已复核
+### D3 ~~同一"越范围"情形，两个入口返回不同状态码~~ → **撤回：是误报，两个入口本来就一致**
+- 原判：`requireManageTask`（AuthorizationService.java:361-368）在不可读时抛 404；`requireManageInstance`（:370-386）在可读但越范围时抛 403，故"同情形两状态码"。
+- **实际**：`requireManageTask:367` 在通过 `canReadInstance` 之后**委托给** `requireManageInstance`，而后者自己也有同一句 `!canReadInstance → 404`（:373）。对同一个 (instance, user) 二者结果必然相同：
+
+  | 情形 | `requireManageInstance` | `requireManageTask` |
+  | --- | --- | --- |
+  | 不可读 | :373 → 404 | :364 → 404 |
+  | 可读但越范围 | :383 → 403 | 委托 → :383 → 403 |
+  | 可读且在范围内 | 通过 | 通过 |
+
+  所谓"任务入口 404"只是不可读那一格，与实例入口一致；不存在分歧。
+- 结论：这不是缺陷，而是**已符合预期的不变量**——只是此前没人把它写下来。已固化进 `docs/DECISIONS.md` 的 `D-20260921-hidden-vs-out-of-scope-status`（"可读但越范围=403；任何不可读=404"），**无代码改动**。
+- 置信度：已复核（逐行读 `requireManageTask` 与 `requireManageInstance` 全文得出）
 
 ## 4. 命名与文案可读性
 
@@ -238,16 +242,18 @@
 - 代价：0.5 天（可选）。
 - 置信度：触发器范围=已复核；死锁风险=推断（低）
 
-### F6 前端 biome 门禁实际是阻塞的（修正代理结论）
-- 证据：frontend/package.json:13-16，`lint = biome:lint && tsc`，`biome:lint = biome lint`，无 `|| true`。
-- 影响：此前"lint 非阻塞"的判断已过期，无需整改。
-- 置信度：已复核
+### F6 前端 biome 门禁在 CI 里是非阻塞的（修正本文档先前结论）
+- 证据：`frontend/package.json:13` 的 `lint = biome:lint && tsc` 确实没有 `|| true`，**但 CI 从不调用 `npm run lint`**——`.github/workflows/ci.yml:60` 是 `run: npm run biome:lint || true   # non-blocking during MVP polish`，`:62` 才是阻塞的 `npm run tsc`。
+- 实测：`npm run biome:lint` 退出码 0（4 warning、0 error），所以 `|| true` 当时是空操作——语义上非阻塞成立，只是尚未造成红。
+- 附带：`npx antd lint ./src` 在 CI 中完全缺席（实测 90 条 findings：47 deprecated + 43 usage，退出码 0，属提示性质，直接接入也不会形成门禁）。
+- **mobile 侧更严重**：`ci.yml:85` 的 `npm run lint` 是阻塞门禁，而它**在 HEAD 上就是红的**——10 个 error（`dynamicOptions.ts` 的 `useExhaustiveDependencies`、`FileUploadField.tsx` 的 `useTemplate` 等），与本次改动无关。
+- 置信度：已复核。处置见「校订记录」。
 
 ## 10. 建议的优先级排序（供拍板）
 
 | 批次 | 内容 | 说明 |
 | --- | --- | --- |
-| P0（先做，无迁移） | D1 死键修复；D3 状态码定案 + 统一；N2/N3 标签修正；红线 1/2 回归测试补齐 | 合计约 1.5 天，全部低风险 |
+| P0（先做，无迁移） | D1 死键修复；D3 状态码规则固化（无需统一代码）；N2/N3 标签修正；红线 1/2 回归测试补齐；C1 补回 `validateGrantCeiling`；C2 修 CI 门禁 | 见「校订记录」——本轮已全部完成 |
 | P1 | E1 能力树搜索；E2 保存确认 + 影响面端点；S5 CoverageTest 两层对账；F2 ACTIVE 过滤 | 合计约 2 天，纯增量 |
 | P2（含 V45，已获批） | S1 清 t_menu 死列；S4 注释随迁；N1 拆 form:authorization:manage（新码 + 换算）；F1 员工 4 项任务能力回收（或接线，先拍板） | V45 一个迁移打包，约 1.5 天 |
 | P3（结构） | S2 范围逻辑真值表测试 → 长期生成；S3 admin 收敛；F4 DPH fail-closed；F3 门禁语义统一 | 按需排期，建议单独立项 |
@@ -259,7 +265,7 @@
 | 提交 | 日期 | 结论 |
 | --- | --- | --- |
 | 9e76add wip(authz) | 09-17 | 自带提权漏洞（A1），不可部署；可编译、不破坏 bisect，但绝不可上线 |
-| dea150d fix(authz) | 09-17 | V41 + PageCapabilityRegistry；修复 A1，引入 F3 的 consoleEntry 挪用 |
+| dea150d fix(authz) | 09-17 | V41 + PageCapabilityRegistry；**仅修复 A1 的 `admin_only` 一半**（ceiling 未恢复），引入 F3 的 consoleEntry 挪用 |
 | 69d84d3 chore(security) | 09-17 | 生产净改善；但开发密钥落入被跟踪的 application-local.yml（A3）；CI 门禁问题见 A4 |
 | 5d13e46 chore(repo) | 09-17 | .gitattributes 漏 *.bat；未 renormalize（工作区 CRLF 警告至今可见） |
 | a558471 feat(authz) | 09-18 | V42+V43 同车；V42 回填漏 form:authorization:manage（A5） |
@@ -268,9 +274,10 @@
 | a5833eb feat(workflow) | 09-18 | scope=='mine' 与 __rework__ 互斥（A6），待产品确认 |
 
 ### A1（高，已复核）9e76add 提权漏洞
-- `git log -S validateGrantCeiling`：82d7caf 引入、9e76add 消失、dea150d 恢复。
+- `validateGrantCeiling` 出现次数：`82d7caf:3 → 9e76add:0 → dea150d:0 → a558471:0 → a5833eb:0 → d968799:0`，**至今为 0**。
 - 9e76add 的快照加载器（AuthorizationService 快照查询，约 :528-537）缺 `AND permission.admin_only = false`——非 admin 角色若持有 admin_only 能力即被快照展开为可用；叠加 ceiling 校验删除，非管理员可自我授予任意非 admin_only 能力。
-- dea150d 起当前代码恢复 `admin_only = false` 过滤与 ceiling 校验。两提交是一个逻辑单元被拆成两半，bisect 时 9e76add 是"已知坏点"。
+- **dea150d 只恢复了 `admin_only = false` 过滤（0→1），`validateGrantCeiling` 从未恢复。** 两提交是一个逻辑单元被拆成两半，bisect 时 9e76add 是"已知坏点"。
+- **当前不可利用**：角色配置入口由 `security:role:manage` 把守，而该能力 `adminOnly=true`（PermissionCatalog:89）+ `RoleAdminService:313` 禁止授予普通角色 → 非管理员根本到不了 `validateRequest`。属防御纵深缺口，已由本轮修复（见「校订记录」）。
 
 ### A2（中，已复核并修正）/api/pickers 与目录暴露
 - 三个事实成立：searchUsers 无 requirePermission/无 inDataScope/无 ACTIVE 过滤（F2）；keyword 为空时跳过整个 WHERE 直接 LIMIT 20（MobileOrgService.java:31-53）；consoleEntry 用于非自助端点与 AuthzPolicy javadoc 矛盾（F3）。
@@ -280,10 +287,15 @@
 - `git ls-files` 确认 backend/src/main/resources/application-local.yml 与 application-local-sql-debug.yml 均被跟踪；前者含 jwt.secret、audit.archive-*、minio access/secret-key、wecom encryption-key 等键（值不在此引用）。
 - 公允说明：值原就在 application.yml，非新增泄露；但现位于 src/main/resources 随 jar 发布，.gitignore 未覆盖，ProductionAuditCredentialValidator 仅 prod 生效。建议：迁移到环境变量 + 本地 profile 模板文件（*.example）。
 
-### A4（待实测）CI 占位符风险
-- 已复核部分：ci.yml 的 backend job 只注入 JWT_SECRET + 3 个 PG 变量；backend/src/test/resources 下仅有 media 目录、无 application*.yml；MinioFileStorage 有 @ConditionalOnProperty。
-- 推断部分：audit 归档/企微集成等占位符持有类无 @Conditional，占位符不可解析会使全上下文测试在 CI 失败；分支从未推送（无 upstream），风险是"首次推送才暴露"。
-- 处置：不改代码，首次推送前本地以 CI 同等 env 跑一次 `mvn -B test` 即可证实或证伪。
+### A4（**已实测 —— 证伪**）CI 占位符风险
+- 已复核部分：`ci.yml` 的 backend job 只注入 `JWT_SECRET` + 3 个 PG 变量（`ANTFLOW_TEST_POSTGRES_URL/USERNAME/PASSWORD`）；`backend/src/test/resources/` 下仅有 `media/`、无 `application*.yml`。
+- **修正（原论证挂错类）**：本文档先前用 `MinioFileStorage` 带 `@ConditionalOnProperty` 来淡化 `MINIO_ACCESS_KEY` 风险，但占位符不住在那个类里——它在 `MobileFileProperties`（`@Component @ConfigurationProperties`，**无 `@Conditional`**），照样绑定 `antflow.mobile.files.minio.access-key: ${MINIO_ACCESS_KEY}`。存储 bean 的条件注解挡不住属性 bean 的绑定。持有类实为三个且均无 `@Conditional`：`TrustedProxyProperties`、`MobileFileProperties`、`WecomProperties`。
+- 推断部分：上列属性的占位符不可解析会使全上下文测试在 CI 失败。注意 Java 字段默认值救不了——属性在 `application.yml` 里**存在**（值即未解析的占位符），绑定会抛 `Could not resolve placeholder`，回不到字段默认。
+- **范围收窄**：`compose.yaml` 对 7 个变量用了 `${VAR:?}` 强制要求（`JWT_SECRET`、`POSTGRES_PASSWORD`、`AUDIT_ARCHIVE_ENCRYPTION_SECRET`、`BACKUP_ENCRYPTION_SECRET`、`ANTFLOW_INTEGRATION_ENCRYPTION_KEY`、`MINIO_ROOT_USER/PASSWORD`）→ **Docker 部署路径是强制的，A4 的风险只在 CI 侧**。
+- ~~处置：不改代码。首推前本地以 CI 同等 env 跑一次 `mvn -B test` 证实或证伪。~~
+- **实测结论（证伪）**：以 CI 同等条件运行（`env -u AUDIT_ARCHIVE_ENCRYPTION_SECRET -u MINIO_ACCESS_KEY -u ANTFLOW_INTEGRATION_ENCRYPTION_KEY mvn -B test`）→ **441 个测试全过、BUILD SUCCESS**；其中需要完整 Spring 上下文的 `PostgresTransactionalIntegrityIntegrationTest` 实跑 **54 个用例、0 error、0 skip**（Docker Testcontainers 起真库）。**上下文加载并未因占位符不可解析而失败**，CI 的 backend job 不会因此变红。
+- 说明：上面那段"属性存在即绑定报错"是按 `@ConfigurationProperties` 常规语义的推断，实测不成立——Spring 对配置文件中未解析的嵌套占位符并不在上下文刷新时抛错。**结论以实测为准。**
+- 置信度：**已实测**（不再是推断）。分支从未推送（无 upstream），首次推送仍会首次真正跑 CI，但 A4 不再是风险项。
 
 ### A5（中，已复核）V42 回填漏 form:authorization:manage
 - V42:47-63 的 IN 列表仅 6 个 definition/workflow 模板能力码，不含 form:authorization:manage；持有该能力的角色在 V42 后的维护人回填中一无所获（之后仅创建人回填 + 管理员兜底补位，V42:67-105）。
@@ -303,10 +315,53 @@
 2. **F1 翻转**：原判断「转交/加签能力已授、功能不存在」→ TaskController 四个端点均已实现且有权限校验；真实缺口是前端无入口 + CLAUDE.md 过期。
 3. **F6 纠错**：原判断「biome lint || true 非阻塞」→ 当前 package.json 无 `|| true`，lint 为阻塞门禁。
 4. **行号校准**：Contacts.tsx 与 UserPermission.tsx 实际路径在 pages/org/ 与 pages/security/（原计划路径缺一级目录）；MenuService 精确行号 113/126-141/148；员工能力链由 4 个迁移逐行闭环（第 2.2 节）。
-5. **置信度升级**：原计划中标注"代理探查"的 DataPermissionPolicyHandler、V43 触发器范围、biome 三项均已升级为已复核（F4/F5/F6）；A4 维持待实测，A6 维持待产品确认。
+5. **置信度升级**：原计划中标注"代理探查"的 DataPermissionPolicyHandler、V43 触发器范围、biome 三项均已升级为已复核（F4/F5/F6）；A6 维持待产品确认。**A4 已实测证伪**（见校订记录第 3 条）。
 
 ## 附录 C：与本次交付相关的仓库注意事项
 
 - `frontend/src/services/ant-design-pro/` 是 `npm run openapi` 的生成目录（frontend/CLAUDE.md 禁改）。本次 auth.ts 迁移有意手改了该目录下 api.ts（删除生成的 outLogin），并同步删除 oneapi.json 中的接口定义防止再生成时回退——已在提交 5c710c4 的 message 中注明。后续整改若涉及登出接口，改 `frontend/src/services/auth.ts`，不要改生成目录。
 - Flyway 前滚约束：V40-V44 已冻结，S1/N1/F1 等涉及 schema 的整改一律走新迁移（V45 已获批）。
 - 本报告交付前已完成：4 个主题提交（5c710c4 logout/CSRF、3f19f95 SSE、46acf47 account 重定向、623102c V44 共享选项数据源），后端 433 / 前端 209 / 移动端 324 个测试全绿，frontend tsc 通过。
+
+## 附录 D：两条部署阻断缺陷（现场定位，已修复）
+
+这两条不在原审计范围内——是在「改代码后重新部署到 Docker，表单无法编辑」的现场排查中定位的，**均为功能阻断级**，且都与 V44 那次改动相关。
+
+### R1（高）表单编辑入口路由被误删
+
+- **现象**：表单管理列表点「编辑」→ 跳 `/approval/forms/14/wizard?step=basic` → 渲染前端 404 页。
+- **根因**：`623102c`（V44 共享选项数据源）在 `frontend/config/routes.ts` 里**误替换**了一行——本意是插入新路由，却把向导路由顶掉了：
+
+  ```diff
+  -  { path: '/approval/forms/:id/wizard', component: './approval/FormManagementWizard', ... },
+  +  { path: '/approval/option-sources', component: './approval/OptionSources', ... },
+  ```
+
+  一增一删，diff 看似干净；路由表无测试覆盖，所以一路未被发现。
+- **波及范围**：所有表单编辑入口都落到 `routes.ts` 末尾的兜底 `{ path: '/*', component: './exception/404' }`——列表页「编辑」按钮、「新建表单」后续步骤、以及 `FormDesigner.tsx:546-551` 旧入口 `/designer/form/:id` 的重定向目标（它 `navigate` 到的正是这条已死的路径）。
+- **证据链**：① 浏览器复现且**控制台零报错**（排除模块加载失败，确认为路由不存在）；② `git log -S` 追溯该行 `9b4f69f` 引入、`master`→`46acf47` 均在、`623102c` 起消失；③ 后端 admin 对 `/api/forms/definitions/{12,13,14}` 全 200、Flyway 已 V44 且 up-to-date、启动日志零异常（排除后端与迁移）。
+- **修复**：恢复该行 + 新增 `frontend/src/pages/routes.test.ts`（编辑入口存在、静态段先于同前缀动态段、叶子路径不重复）。
+- **置信度**：已复核（浏览器端到端验证通过）
+
+### R2（中）`optionSource: {}` 空对象让表单无法发布
+
+- **根因**：`OptionSourceSettings.tsx:50` 在「选项来源」切到「已导入的数据」时先写入 `optionSource: {}`，必须再选一次版本才补上 `sourceId`；而后端 `FormDefinitionService:946` 与 `OptionRuntimeService` 用 `isObject()` 判定是否走外部数据源 → `{}` 被当成已绑定 → `validateBinding({})` → `requireVersion` → **`BAD_SCHEMA: 数据源和版本不能为空`**。`publish()` → `validateSchema` → `validatePublishingNode` → `validateSelectOptions` 正是这条路径，`radio`/`checkbox`/`multi_select` 同理。
+- **为什么能存进去**：`saveDraft`/`update` 不做 schema 校验，只有 `publish` 才校验 → 中途保存就留下了脏数据。
+- **实测**：往 `/api/runtime/form-options/preview/14` 传 `optionSource: {}` → 422 `数据源和版本不能为空`（对照组去掉该键 → 422 `字段没有外部数据配置`，属该接口自身对非动态字段的限定）。线上仅 form 14 处于该状态。
+- **修复**：统一「已绑定」判据为**带正整数 `sourceId`**——后端 `OptionRuntimeService.isBound` 作为单一真源（6 处调用点 + `FormDefinitionService` 复用）；前端桌面 `isBoundOptionSource`（`SelectField`/`MultiSelectField` 派发、`Inspector` 的静态选项编辑器、`FormManagementWizard` 的前端校验共 5 处）；移动端同款判据（`SelectField`/`MultiSelectField`）；设计器改为把「已选外部数据源但未选版本」只留在组件内 state，不再写进 schema。**无需数据迁移**——`{}` 现在回退到内置 `options`，form 14 自愈。
+- **置信度**：已复核
+
+## 校订记录（2026-09-21）
+
+本轮对原文的改动，逐条可复现。**本节以外的原文结论未改动**；计数类陈述均为时点数。
+
+1. **C1 — A1 修正（事实错误）**：原文称 `dea150d` 恢复了 ceiling 校验。实测 `validateGrantCeiling` 计数为 `82d7caf:3 → 9e76add:0 → dea150d:0 → … → HEAD:0`，**从未恢复**；dea150d 恢复的只是 `admin_only = false` 过滤（0→1）。已改正正文与附录 A 的表格行，并把该风险从"已修复"移回待办。
+2. **C2 — F6 改写**：原文依据 `frontend/package.json:13` 判定 Biome 门禁已阻塞，但未检查 CI 如何调用——`ci.yml:60` 实为 `npm run biome:lint || true`。已补充「CI 不调用 `npm run lint`」的证据、`|| true` 当时是空操作（退出码 0）的实测，以及**新发现**：mobile 侧 `ci.yml:85` 的 `npm run lint` 是阻塞门禁且 **HEAD 上已红（10 个 error）**。
+3. **C3 — A4 论证修正并实测证伪**：原文以 `MinioFileStorage` 的 `@ConditionalOnProperty` 淡化 `MINIO_ACCESS_KEY` 风险，属于挂错类——占位符在无条件的 `MobileFileProperties` 里。已改为列出三个无 `@Conditional` 的属性持有类，并补入「`compose.yaml` 用 `${VAR:?}` 强制 7 个变量 → Docker 路径安全、风险仅在 CI 侧」。**随后实测（CI 同等 env、不设三个密钥变量）→ 441 测试全过、集成测试实跑 54 例 0 error；A4 证伪，不再是风险项。**
+4. **C4 — D3 撤回（误报）**：原文与 §1 均称两个入口状态码不一致。逐行读 `requireManageTask` 与其委托目标 `requireManageInstance` 后确认：两者对不可读都抛 404、对可读但越范围都由 `:383` 抛 403，**不存在分歧**。D3 已从"缺陷"改为"已符合预期的不变量"，只补 `DECISIONS.md` 固化规则，无代码改动。
+5. **新增 R1/R2**：见附录 D（表单向导路由误删、`optionSource: {}`），均为部署阻断级，已修复并加回归测试。
+6. **D1 已修复**：`registry.ts` 的 `HIDDEN_CAPABILITIES` 注册 `canOrgDepartmentManage: 'org:department:manage'`，`Contacts.tsx:471` 改用该键（附注释说明建一级部门后端另需 ALL 数据范围，前端门禁只是近似），`access.test.ts` 增加回归断言。
+7. **N2/N3 已修复**：`PermissionCatalog` 标签改为「查看被指派任务」「查看表单配置」「查看填报数据」（仅字符串；`PermissionCatalogSynchronizer` 启动时按 `name = EXCLUDED.name` 同步进库，无需迁移）。
+8. **红线 1/2 已补测试**：`AuthorizationServiceTest` 新增两条哨兵。为直接钉住 `effectiveScope` 的 `null → ALL` 分支与 `instanceVisibility` 的被指派人分支，把 `effectiveScope`/`GrantRow`/`instanceAccess`/`InstanceAccess` 由 `private` 放宽为**包内可见**（各一行，已在代码注释写明原因）——这是为可测性做的最小放宽。
+9. **C1 已修（代码）**：`RoleAdminService.validateRequest` 重新施加授权天花板——非管理员必须已持有待授予的能力，且显式 `scopeOverride` 不得宽于自身有效范围。原版基于已废弃的 `security.role.write` 旧码与已删除的 `t_role.data_scope`，**无法照搬**，故按 V40 后的"能力 + 每能力范围"模型重写。新增 `RoleAdminServiceTest`（4 例，覆盖两方向 + admin 绕过）。
+10. **C2 已修（代码）**：`ci.yml:60` 去掉 `|| true`，Biome error 自此阻塞。`npx antd lint ./src` **未**接入——实测 90 条 findings 且退出码 0，接入不构成门禁，记为待办。
