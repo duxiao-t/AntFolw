@@ -3,6 +3,7 @@ import { history, useModel } from '@umijs/max';
 import { Button, Result } from 'antd';
 import { useEffect, useMemo } from 'react';
 import { CONSOLE_ENTRY, firstAccessiblePath } from './registry';
+import { outLogin } from '@/services/auth';
 
 export { firstAccessiblePath };
 
@@ -18,6 +19,12 @@ export default function AuthorizedHome() {
     () => (canEnterConsole ? firstAccessiblePath(roles, permissions) : undefined),
     [canEnterConsole, roles, permissions],
   );
+  const logout = () => {
+    void outLogin().catch(() => undefined).finally(() => {
+      localStorage.removeItem('antflow-token');
+      history.push('/user/login');
+    });
+  };
 
   useEffect(() => {
     if (target) history.replace(target);
@@ -40,10 +47,7 @@ export default function AuthorizedHome() {
           </Button>,
           <Button
             key="logout"
-            onClick={() => {
-              localStorage.removeItem('antflow-token');
-              history.push('/user/login');
-            }}
+            onClick={logout}
           >
             退出登录
           </Button>,
@@ -58,10 +62,7 @@ export default function AuthorizedHome() {
       subTitle="请联系管理员为当前账号分配能力。"
       extra={
         <Button
-          onClick={() => {
-            localStorage.removeItem('antflow-token');
-            history.push('/user/login');
-          }}
+          onClick={logout}
         >
           退出登录
         </Button>
