@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 import java.util.Map;
 
@@ -80,6 +81,12 @@ class GlobalExceptionHandlerTest {
     @Test
     void ignoresDisconnectedSseClient() {
         assertEquals(null, handler.handleAny(new IOException("Broken pipe")));
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void treatsSseTimeoutAsNormalCompletion() {
+        assertEquals(204, handler.handleAsyncTimeout().getStatusCode().value());
         verifyNoInteractions(auditService);
     }
 }

@@ -23,6 +23,7 @@ import {
   VersionDropdown,
 } from '@/components';
 import { WorkflowEventsSubscriber } from '@/components/WorkflowEventsSubscriber';
+import { CAPABILITY, hasCapability } from './authz';
 import { navToMenuData, type NavNode } from '@/pages/registry';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
@@ -152,6 +153,10 @@ export const layout: RunTimeLayoutConfig = ({
   initialState,
   setInitialState,
 }) => {
+  const workflowEventsEnabled = hasCapability(
+    initialState?.currentUser,
+    CAPABILITY.workflowTaskRead,
+  );
   return {
     // 菜单来自服务端编排（t_menu + 能力过滤），未注册 pageKey 会被跳过。
     menuDataRender: () => navToMenuData(initialState?.navigation ?? []),
@@ -178,7 +183,10 @@ export const layout: RunTimeLayoutConfig = ({
     },
     avatarProps: {
       src: initialState?.currentUser?.avatar,
-      title: 'ProUser',
+      title: initialState?.currentUser?.name
+        ?? initialState?.currentUser?.displayName
+        ?? initialState?.currentUser?.username
+        ?? '当前用户',
       render: (_, avatarChildren) => (
         <AvatarDropdown>{avatarChildren}</AvatarDropdown>
       ),
@@ -216,7 +224,7 @@ export const layout: RunTimeLayoutConfig = ({
       return (
         <>
           <AuthzRefresh />
-          <WorkflowEventsSubscriber enabled={!!initialState?.currentUser} />
+          <WorkflowEventsSubscriber enabled={workflowEventsEnabled} />
           {children}
           <SettingDrawer
             disableUrlParams
