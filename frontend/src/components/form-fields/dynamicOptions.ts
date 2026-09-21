@@ -18,8 +18,19 @@ type Page = {
   total: number;
 };
 
+/**
+ * 只有带正整数 sourceId 的 optionSource 才算"已绑定"。
+ * 设计器在"选择数据源版本"之前会写入空对象 {}，那不是绑定：若按绑定额处理，
+ * 前端会去查选项、后端会报"数据源和版本不能为空"，表单既存不了版本也发不出去。
+ */
+export function isBoundOptionSource(props: SchemaNode['props'] | undefined) {
+  const source = props?.optionSource as { sourceId?: unknown } | undefined;
+  return Boolean(source) && typeof source === 'object'
+    && Number.isInteger(source?.sourceId) && (source?.sourceId as number) > 0;
+}
+
 export function isDynamicOption(node: SchemaNode) {
-  return node.props?.optionSource && typeof node.props.optionSource === 'object';
+  return isBoundOptionSource(node.props);
 }
 
 export function useLinkedValue(

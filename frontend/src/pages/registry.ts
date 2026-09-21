@@ -75,6 +75,7 @@ export const HIDDEN_CAPABILITIES: Record<string, string> = {
   canUseRuntime: 'form:runtime:read',
   canUseTasks: 'workflow:task:read',
   canUseProcesses: 'workflow:instance:read',
+  canOrgDepartmentManage: 'org:department:manage',
 };
 
 /** 「任一能力即可」的入口（流程详情：审批人或记录查看者都能打开） */

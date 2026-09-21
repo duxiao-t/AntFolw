@@ -134,11 +134,11 @@ public class OptionRuntimeService {
         String parentId = parentId(node);
         if (parentId.isEmpty()) return;
         JsonNode parent = field(scope, parentId);
-        if (parent == null || !"select".equals(parent.path("type").asText()) || !parent.path("props").path("optionSource").isObject()) bad("联动来源必须是同一表单或明细行内的外部单选下拉");
+        if (parent == null || !"select".equals(parent.path("type").asText()) || !isBound(parent.path("props").path("optionSource"))) bad("联动来源必须是同一表单或明细行内的外部单选下拉");
         JsonNode source = source(node, scope), parentSource = source(parent, scope);
         if (!Objects.equals(source.get("versionId"), parentSource.get("versionId"))
             || !Objects.equals(source.get("sourceId"), parentSource.get("sourceId"))) bad("联动字段必须使用相同数据源版本");
-        if (node.path("props").path("optionSource").isObject()
+        if (isBound(node.path("props").path("optionSource"))
             && !text(source.path("dependency"), "matchColumn").equals(text(parentSource, "valueColumn"))) bad("联动匹配列必须等于上游下拉的值列");
         validateChain(parent, scope, visited);
     }
@@ -150,7 +150,7 @@ public class OptionRuntimeService {
             if ("table_list".equals(node.path("type").asText()) && value instanceof List<?> rows) {
                 for (Object row : rows) if (row instanceof Map<?, ?> map) validateSubmission(node.path("children"), map);
             }
-            if (!node.path("props").path("optionSource").isObject() || empty(value)) continue;
+            if (!isBound(node.path("props").path("optionSource")) || empty(value)) continue;
             JsonNode source = source(node, scope);
             requireVersion(source, false);
             boolean multiple = "multi_select".equals(node.path("type").asText());
@@ -184,14 +184,14 @@ public class OptionRuntimeService {
 
     private JsonNode source(JsonNode field, List<JsonNode> scope) {
         JsonNode props = field.path("props");
-        if (props.path("optionSource").isObject()) {
+        if (isBound(props.path("optionSource"))) {
             if (!Set.of("select", "multi_select").contains(field.path("type").asText())) bad("外部选项仅支持下拉组件");
             return props.path("optionSource");
         }
         JsonNode link = props.path("dataLinkage");
         if (!link.isObject() || !Set.of("text", "textarea", "number").contains(field.path("type").asText())) bad("字段没有外部数据配置");
         JsonNode parent = field(scope, text(link, "fieldId"));
-        if (parent == null || !parent.path("props").path("optionSource").isObject()) bad("联动来源字段无效");
+        if (parent == null || !isBound(parent.path("props").path("optionSource"))) bad("联动来源字段无效");
         ObjectNode source = parent.path("props").path("optionSource").deepCopy();
         source.remove(List.of("cascade", "dependency"));
         source.put("valueColumn", text(link, "valueColumn"));
@@ -351,7 +351,16 @@ public class OptionRuntimeService {
     private JsonNode field(List<JsonNode> scope, String id) { return scope.stream().filter(n -> n.path("id").asText().equals(id)).findFirst().orElse(null); }
     private static String parentId(JsonNode node) { return node.path("props").path("dataLinkage").isObject()
         ? text(node.path("props").path("dataLinkage"), "fieldId") : text(node.path("props").path("optionSource").path("dependency"), "fieldId"); }
-    private static boolean dynamic(JsonNode node) { return node.path("props").path("optionSource").isObject() || node.path("props").path("dataLinkage").isObject(); }
+    /**
+     * 只有带正整数 sourceId 的 optionSource 才算"已绑定"。
+     * 设计器在"选择数据源版本"之前会写入空对象 {@code {}}，那不是绑定，必须按未绑定处理：
+     * 否则它会被当成外部数据源走进 requireVersion，报"数据源和版本不能为空"，导致表单无法发布。
+     */
+    public static boolean isBound(JsonNode source) {
+        return source.isObject() && source.path("sourceId").isIntegralNumber()
+            && source.path("sourceId").asLong() > 0;
+    }
+    private static boolean dynamic(JsonNode node) { return isBound(node.path("props").path("optionSource")) || node.path("props").path("dataLinkage").isObject(); }
     private JsonNode parse(String raw) { try { return json.readTree(raw == null ? "{}" : raw); } catch (Exception e) { throw new IllegalStateException("invalid stored schema", e); } }
     private static String text(JsonNode node, String key) { return node.path(key).asText("").trim(); }
     private static boolean empty(Object v) { return v == null || "".equals(v) || v instanceof List<?> list && list.isEmpty(); }

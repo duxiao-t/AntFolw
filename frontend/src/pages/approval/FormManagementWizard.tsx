@@ -29,6 +29,7 @@ import { createStyles } from 'antd-style';
 import { CAPABILITY, hasCapability } from '../../authz';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
+import { isBoundOptionSource } from '../../components/form-fields/dynamicOptions';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
 import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
 import type { TreeNode } from '../designer/process/types';
@@ -235,7 +236,7 @@ function collectOptionErrors(nodes: SchemaNode[]) {
   nodes.forEach((node) => {
     if (
       optionTypes.has(node.type) &&
-      !node.props?.optionSource && (!Array.isArray(node.props?.options) || node.props.options.length === 0)
+      !isBoundOptionSource(node.props) && (!Array.isArray(node.props?.options) || node.props.options.length === 0)
     ) {
       errors.push(getNodeLabel(node));
     }

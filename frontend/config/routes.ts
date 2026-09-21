@@ -33,6 +33,7 @@ export default [
   { path: '/approval/templates', component: './approval/TemplateList', hideInMenu: true, access: 'canReadForms' },
   { path: '/approval/designer', component: './approval/DesignerEntry', hideInMenu: true, access: 'canDesigner' },
   { path: '/approval/forms/new', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canCreateForm' },
+  { path: '/approval/forms/:id/wizard', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canDesigner' },
   { path: '/approval/option-sources', component: './approval/OptionSources', hideInMenu: true, access: 'canManageOptionSources' },
   { path: '/designer/form/:id', component: './designer/form/FormDesigner', hideInMenu: true, access: 'canDesigner' },
   { path: '/designer/process/:formDefId', component: './designer/process/ProcessDesigner', hideInMenu: true, access: 'canDesigner' },

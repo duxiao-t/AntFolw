@@ -943,7 +943,9 @@ public class FormDefinitionService {
     private record MatrixAxisItem(String id, String label) {}
 
     private void validateSelectOptions(com.fasterxml.jackson.databind.JsonNode node) {
-        if (node.path("props").path("optionSource").isObject()) {
+        // 空对象 {} 是设计器"已选外部数据源但尚未选版本"的中途状态，按未绑定回退到内置 options；
+        // 只有带 sourceId 才走外部数据源校验（sourceId 在但 versionId 缺失仍会由 requireVersion 报错）。
+        if (com.antflow.form.options.OptionRuntimeService.isBound(node.path("props").path("optionSource"))) {
             if (optionRuntimeService == null) {
                 throw new BizException("BAD_SCHEMA", "共享选项服务不可用");
             }

@@ -468,7 +468,9 @@ export default function ContactsPage() {
           <div className="ct-left-top">
             <Input prefix={<SearchOutlined />} placeholder="搜索部门" allowClear
               value={search} onChange={e => setSearch(e.target.value)} />
-            <Button aria-label="新建一级部门" icon={<PlusOutlined />} disabled={!access.canWriteDepartments}
+            {/* 这里只是"够不够格看到按钮"的近似：建一级部门后端还要求该能力具 ALL 数据范围
+                （DepartmentController 的 requireAllDataScope），而前端看不到范围，越范围时由后端返回 403。 */}
+            <Button aria-label="新建一级部门" icon={<PlusOutlined />} disabled={!access.canOrgDepartmentManage}
               onClick={() => { setDeptAddParentId(null); setDeptAddOpen(true); }} />
           </div>
           <div className="ct-tree-wrap">

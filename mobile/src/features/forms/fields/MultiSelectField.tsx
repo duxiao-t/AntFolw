@@ -14,11 +14,12 @@ import {
 } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 import { DynamicSelectField } from './DynamicSelectField';
+import { isBoundOptionSource } from './dynamicOptions';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
 
 export function MultiSelectField(props: MobileFieldProps) {
-  if (props.node.props?.optionSource) return <DynamicSelectField {...props} multiple />;
+  if (isBoundOptionSource(props.node.props)) return <DynamicSelectField {...props} multiple />;
   return <StaticMultiSelectField {...props} />;
 }
 

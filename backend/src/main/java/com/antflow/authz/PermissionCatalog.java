@@ -46,14 +46,14 @@ public final class PermissionCatalog {
         entry(PermissionCodes.ORG_USER_CREDENTIALS_MANAGE, "重置密码与登录控制", Risk.CRITICAL,
             true),
 
-        entry(PermissionCodes.FORM_DEFINITION_READ, "查看表单", Risk.NORMAL),
+        entry(PermissionCodes.FORM_DEFINITION_READ, "查看表单配置", Risk.NORMAL),
         entry(PermissionCodes.FORM_DEFINITION_MANAGE, "创建与设计表单", Risk.HIGH),
         entry(PermissionCodes.FORM_DEFINITION_PUBLISH, "发布与停用表单", Risk.HIGH),
         entry(PermissionCodes.FORM_DEFINITION_DELETE, "删除表单", Risk.CRITICAL),
         entry(PermissionCodes.FORM_AUTHORIZATION_MANAGE, "管理表单使用范围与维护人员", Risk.HIGH),
         entry(PermissionCodes.FORM_OPTION_SOURCE_MANAGE, "管理共享选项数据源", Risk.HIGH, true),
         entry(PermissionCodes.FORM_RUNTIME_READ, "使用已发布表单", Risk.NORMAL),
-        entry(PermissionCodes.FORM_DATA_READ, "查看表单数据", Risk.HIGH, DataScope.SELF),
+        entry(PermissionCodes.FORM_DATA_READ, "查看填报数据", Risk.HIGH, DataScope.SELF),
         entry(PermissionCodes.FORM_DATA_EXPORT, "导出表单数据", Risk.HIGH, DataScope.SELF),
 
         entry(PermissionCodes.WORKFLOW_DEFINITION_READ, "查看流程配置", Risk.NORMAL),
@@ -66,7 +66,9 @@ public final class PermissionCatalog {
         entry(PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE, "紧急干预审批", Risk.CRITICAL,
             DataScope.ALL),
         entry(PermissionCodes.WORKFLOW_MONITOR_READ, "查看流程监控", Risk.HIGH, DataScope.ALL),
-        entry(PermissionCodes.WORKFLOW_TASK_READ, "查看本人任务", Risk.NORMAL),
+        // 名称只描述"看到被指派给我的任务"这一实际用法；裁决在 AuthorizationService.instanceVisibility，
+        // 靠"能力存在 + 我是被指派人"授予可见性，与数据范围无关，不得改成按范围过滤。
+        entry(PermissionCodes.WORKFLOW_TASK_READ, "查看被指派任务", Risk.NORMAL),
         entry(PermissionCodes.WORKFLOW_TASK_APPROVE, "审批任务", Risk.HIGH),
         entry(PermissionCodes.WORKFLOW_TASK_REJECT, "驳回任务", Risk.HIGH),
         entry(PermissionCodes.WORKFLOW_TASK_TRANSFER, "转交任务", Risk.HIGH),

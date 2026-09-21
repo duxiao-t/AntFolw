@@ -29,6 +29,7 @@ import { SelectOptionsEditor } from './SelectOptionsEditor';
 import { MatrixAxisEditor } from './MatrixAxisEditor';
 import { DisplayRulesEditor } from './DisplayRulesEditor';
 import { normalizeMatrixProps } from '../../../components/form-fields/matrixFill';
+import { isBoundOptionSource } from '../../../components/form-fields/dynamicOptions';
 import {
   normalizeSelectDisplayStyle,
   type SelectDisplayStyle,
@@ -649,7 +650,7 @@ function renderComponentSettings(
     case 'multi_select':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          {!props.optionSource && <SelectOptionsEditor
+          {!isBoundOptionSource(node.props) && <SelectOptionsEditor
             value={props.options}
             multiple={node.type === 'multi_select'}
             defaultValue={props.defaultValue}

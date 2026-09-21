@@ -313,7 +313,53 @@ public class RoleAdminService {
                 throw new BizException("ADMIN_ONLY_PERMISSION", "超管专属能力不能授予普通角色");
             }
             validateScope(grant);
+            validateGrantCeiling(grant);
         }
+    }
+
+    /**
+     * 授权天花板：非管理员不得把自己不具备的能力/更宽的数据范围授予他人。
+     *
+     * <p>本方法在 {@code 9e76add} 被删除且一直未恢复（原版基于已废弃的
+     * {@code security.role.write} 旧码与已删除的 {@code t_role.data_scope}，无法照搬），
+     * 此处按 V40 之后的"能力 + 每能力范围"模型重写。
+     *
+     * <p>今天对非管理员不可达——角色配置入口由 {@code security:role:manage} 把守且该能力
+     * 是超管专属；保留它是防御纵深：一旦该能力放开给普通角色，这层校验就是唯一的兜底。
+     */
+    void validateGrantCeiling(PermissionGrantWriteRequest grant) {
+        PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
+        if (principal.isAdmin()) {
+            return;
+        }
+        if (!principal.permissions().contains(grant.code())) {
+            throw new AccessDeniedException("cannot grant permissions you do not hold");
+        }
+        String requested = grant.scopeOverride();
+        // 不写覆盖值即"使用能力默认范围"，是推荐用法，不在此处收紧。
+        if (requested == null || requested.isBlank()) {
+            return;
+        }
+        DataScope requestedScope = parseScope(requested);
+        AuthorizationService.AuthzSnapshot snapshot = authorizationService.snapshot(principal.userId());
+        boolean allowed = snapshot.permissionRoles().getOrDefault(grant.code(), List.of()).stream()
+            .anyMatch(held -> covers(held.dataScope(), requestedScope));
+        if (!allowed) {
+            throw new AccessDeniedException("cannot grant a wider data scope than you hold");
+        }
+    }
+
+    /** 授予方持有的范围是否覆盖被请求的范围。 */
+    private static boolean covers(DataScope held, DataScope requested) {
+        return switch (requested) {
+            case SELF -> true;
+            case DEPARTMENT -> held == DataScope.DEPARTMENT
+                || held == DataScope.DEPARTMENT_AND_DESCENDANTS || held == DataScope.ALL;
+            case DEPARTMENT_AND_DESCENDANTS -> held == DataScope.DEPARTMENT_AND_DESCENDANTS
+                || held == DataScope.ALL;
+            case ALL -> held == DataScope.ALL;
+            case CUSTOM -> held == DataScope.CUSTOM || held == DataScope.DEPARTMENT;
+        };
     }
 
     private void validateScope(PermissionGrantWriteRequest grant) {

@@ -1,6 +1,8 @@
 import { request } from '@umijs/max';
 import { useQuery } from '@tanstack/react-query';
 import { Input, Select, Space, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { isBoundOptionSource } from '../../../components/form-fields/dynamicOptions';
 import type { SchemaNode } from '../../../registry/types';
 
 type Source = { id: number; code: string; name: string; versionId: number;
@@ -31,11 +33,17 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
   const scope = siblings(schema, node.id);
   const isSelect = node.type === 'select' || node.type === 'multi_select';
   const binding = node.props?.optionSource as Record<string, any> | undefined;
+  const bound = isBoundOptionSource(node.props);
+  // 「已选外部数据源、还没选版本」是编辑途中的临时状态：只留在组件内，不写进 schema，
+  // 否则会留下 optionSource: {} 这种脏数据让表单发布失败。
+  const [draftMode, setDraftMode] = useState<'source' | null>(null);
+  const sourceMode = draftMode ?? (bound ? 'source' : 'static');
+  useEffect(() => { setDraftMode(null); }, [node.id]);
   const link = node.props?.dataLinkage as Record<string, any> | undefined;
   const selected = sources.find((s) => s.id === binding?.sourceId && s.versionId === binding?.versionId);
   const columns = selected?.columns ?? [];
   const parents = scope.filter((candidate) => candidate.type === 'select'
-    && candidate.id !== node.id && !!candidate.props?.optionSource);
+    && candidate.id !== node.id && isBoundOptionSource(candidate.props));
   const currentParent = parents.find((parent) => parent.id === (isSelect ? binding?.dependency?.fieldId : link?.fieldId));
 
   if (!formId) return <Typography.Text type="secondary">保存表单后，可以配置数据源。</Typography.Text>;
@@ -45,17 +53,24 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
   return <Space direction="vertical" style={{ width: '100%' }}>
     {isSelect && <>
       <Typography.Text strong>选项来源</Typography.Text>
-      <Select value={binding ? 'source' : 'static'} options={[{ label: '手动设置', value: 'static' }, { label: '已导入的数据', value: 'source' }]}
-        onChange={(value) => update(value === 'source'
-          ? { optionSource: {}, displayStyle: 'dropdown', defaultValue: undefined }
-          : { optionSource: undefined, defaultValue: undefined })} />
-      {binding && <>
+      <Select value={sourceMode} options={[{ label: '手动设置', value: 'static' }, { label: '已导入的数据', value: 'source' }]}
+        onChange={(value) => {
+          if (value === 'source') {
+            setDraftMode('source');
+            update({ displayStyle: 'dropdown', defaultValue: undefined });
+            return;
+          }
+          setDraftMode(null);
+          update({ optionSource: undefined, defaultValue: undefined });
+        }} />
+      {sourceMode === 'source' && <>
         <Typography.Text type="secondary">选择已发布版本。更新数据后，重新发布表单才能切换版本。</Typography.Text>
         <Select placeholder="选择数据源与版本" value={selected?.versionId}
           options={sources.map((s) => ({ value: s.versionId, label: `${s.name} · v${s.versionNo} (${s.rowCount} 行)` }))}
           onChange={(versionId) => {
             const source = sources.find((s) => s.versionId === versionId);
             if (!source) return;
+            setDraftMode(null);
             update({ optionSource: { sourceId: source.id, versionId: source.versionId,
               valueColumn: source.columns[0], labelColumn: source.columns[0] }, defaultValue: undefined });
           }} />

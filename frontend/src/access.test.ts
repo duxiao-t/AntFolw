@@ -79,6 +79,20 @@ describe('access', () => {
     expect(withIntegration[accessKey('settings.wecom')]).toBe(true);
   });
 
+  it('exposes 新建一级部门 only to holders of org:department:manage', () => {
+    // 回归：该按钮曾绑定到一个从不存在的 access 键（access.canWriteDepartments），
+    // 取值恒为 undefined，导致对所有角色（含 admin）永久禁用。
+    const without = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:department:read']),
+    });
+    expect(without.canOrgDepartmentManage).toBe(false);
+
+    const withCapability = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:department:manage']),
+    });
+    expect(withCapability.canOrgDepartmentManage).toBe(true);
+  });
+
   it('lets either 表单管理员 or 流程管理员 open the designers', () => {
     const formAdmin = access({
       currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'form:definition:manage']),

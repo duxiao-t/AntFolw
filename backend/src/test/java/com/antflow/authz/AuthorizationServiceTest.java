@@ -213,6 +213,65 @@ class AuthorizationServiceTest {
             .doesNotContain("delegated_from");
     }
 
+    // ===== 红线回归：这两条钉住的行为一旦被"顺手修正"，审批人会立刻看不到待办 =====
+
+    /**
+     * 红线 1：审批人靠「持有 workflow:task:read + 我是被指派人」拿到实例全量可见性，
+     * 与数据范围无关。因此该能力的标签是「查看被指派任务」而不是按范围裁剪；
+     * 若有人把它改成按数据范围过滤，这个测试会失败。
+     */
+    @Test
+    void redLineTaskAssigneeSeesAssignedInstanceWithoutInstanceReadCapability() {
+        var assigneeGrant = new AuthorizationService.RoleGrant(2L, "employee",
+            DataScope.SELF, Set.of());
+        // 关键：只有 workflow:task:read，没有 workflow:instance:read，
+        // 且实例发起人是别人（99L）、发起部门也超出 SELF 范围。
+        var assignee = new AuthorizationService.AuthzSnapshot(8L, 10L, false,
+            Set.of("employee"), Set.of(PermissionCodes.WORKFLOW_TASK_READ),
+            Map.of(PermissionCodes.WORKFLOW_TASK_READ, List.of(assigneeGrant)));
+
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(assignee).when(spied).snapshot(8L);
+        Mockito.doReturn(new AuthorizationService.InstanceAccess(99L, 42L))
+            .when(spied).instanceAccess(501L);
+        Mockito.doReturn(true).when(spied).isReadableTaskAssignee(501L, 8L);
+
+        assertThat(spied.canReadFullInstance(501L, 8L)).isTrue();
+
+        // 对照：摘掉该能力后同一实例不再全量可见，证明可见性确实来自被指派人分支。
+        var withoutCapability = new AuthorizationService.AuthzSnapshot(8L, 10L, false,
+            Set.of("employee"), Set.of(), Map.of());
+        Mockito.doReturn(withoutCapability).when(spied).snapshot(8L);
+        assertThat(spied.canReadFullInstance(501L, 8L)).isFalse();
+        assertThat(spied.instanceVisibility(501L, 8L))
+            .isEqualTo(AuthorizationService.InstanceVisibility.NONE);
+    }
+
+    /**
+     * 红线 2：非可配范围的能力（defaultScope == null）解析为 ALL。
+     * 这是惰性正确的——这些能力的范围只被当布尔用、从不消费；一旦改成 SELF/NONE，
+     * 会波及 workflow:task:approve 等员工路径。
+     */
+    @Test
+    void redLineNonScopeableCapabilityResolvesToUnrestrictedScope() {
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.WORKFLOW_TASK_READ, null)))
+            .isEqualTo(DataScope.ALL);
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.WORKFLOW_TASK_APPROVE, null)))
+            .isEqualTo(DataScope.ALL);
+
+        // 可配范围的能力取目录默认值，而不是 ALL。
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.FORM_DATA_READ, null)))
+            .isEqualTo(DataScope.SELF);
+
+        // 显式覆盖值优先于目录默认。
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.FORM_DATA_READ, "ALL")))
+            .isEqualTo(DataScope.ALL);
+    }
+
     private static AuthorizationService.AuthzSnapshot snapshot(
             AuthorizationService.RoleGrant role, Long departmentId, boolean admin) {
         return new AuthorizationService.AuthzSnapshot(7L, departmentId, admin,

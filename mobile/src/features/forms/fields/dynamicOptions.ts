@@ -15,6 +15,17 @@ export type OptionPage = { stage: 'LEVEL' | 'OPTIONS'; level: number; totalLevel
 export type OptionRequest = { fieldId: string; values?: MobileFormValues; path?: string[];
   keyword?: string; page?: number; size?: number; selectedValues?: string[] };
 
+/**
+ * 只有带正整数 sourceId 的 optionSource 才算"已绑定"。
+ * 设计器在"选择数据源版本"之前会写入空对象 {}，那不是绑定；按绑定额处理会去查选项并拿到
+ * "数据源和版本不能为空"的后端错误。
+ */
+export function isBoundOptionSource(props: { optionSource?: unknown } | undefined): boolean {
+  const source = props?.optionSource as { sourceId?: unknown } | undefined;
+  return Boolean(source) && typeof source === 'object'
+    && Number.isInteger(source?.sourceId) && (source?.sourceId as number) > 0;
+}
+
 export function queryOptions(context: OptionContext, query: OptionRequest): Promise<OptionPage> {
   const { previewFormId, ...publicContext } = context;
   if (!previewFormId) return apiRequest('/api/runtime/form-options/query', {

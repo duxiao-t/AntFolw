@@ -498,7 +498,7 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
-    private InstanceAccess instanceAccess(long instanceId) {
+    InstanceAccess instanceAccess(long instanceId) {
         return jdbcTemplate.query("""
             SELECT pi.started_by, pi.started_dept_id
             FROM t_process_instance pi
@@ -575,8 +575,13 @@ public class AuthorizationService {
             Collections.unmodifiableMap(immutableGrants));
     }
 
-    /** 覆盖值优先；未覆盖时取能力声明的默认范围；能力不支持范围管理时视为不限制。 */
-    private static DataScope effectiveScope(GrantRow grant) {
+    /**
+     * 覆盖值优先；未覆盖时取能力声明的默认范围；能力不支持范围管理时视为不限制。
+     *
+     * <p>包内可见（而非 private）是为了让 {@code AuthorizationServiceTest} 直接钉住
+     * "defaultScope == null → ALL" 这一分支：它是红线，改动会波及审批人待办可见性。
+     */
+    static DataScope effectiveScope(GrantRow grant) {
         if (grant.scopeOverride() != null && !grant.scopeOverride().isBlank()) {
             return DataScope.valueOf(grant.scopeOverride());
         }
@@ -622,12 +627,14 @@ public class AuthorizationService {
         }
     }
 
+    // GrantRow / InstanceAccess 与下面对应的取数方法包内可见，供红线回归测试构造与打桩
+    // （AuthorizationServiceTest 直接驱动 instanceVisibility 的被指派人分支）。
     private record CachedSnapshot(long version, AuthzSnapshot snapshot) { }
     private record RoleBase(long roleId, String code) { }
-    private record GrantRow(String permissionCode, String scopeOverride) { }
+    record GrantRow(String permissionCode, String scopeOverride) { }
     private record UserState(long userId, String username, String displayName, String status,
                              long authzVersion, Long departmentId) { }
-    private record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
+    record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
     private record FormDataAccess(Long createdBy, Long startedDepartmentId) { }
 
     public record RoleGrant(long roleId, String code, DataScope dataScope,
