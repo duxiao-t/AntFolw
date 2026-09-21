@@ -71,6 +71,7 @@ export const PAGE_BY_KEY: Record<string, PageDef> = Object.fromEntries(
 export const HIDDEN_CAPABILITIES: Record<string, string> = {
   canReadForms: 'form:definition:read',
   canCreateForm: 'form:definition:manage',
+  canManageOptionSources: 'form:option_source:manage',
   canUseRuntime: 'form:runtime:read',
   canUseTasks: 'workflow:task:read',
   canUseProcesses: 'workflow:instance:read',

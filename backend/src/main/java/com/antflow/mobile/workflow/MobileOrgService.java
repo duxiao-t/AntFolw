@@ -44,7 +44,16 @@ public class MobileOrgService {
             });
         }
         query.orderByAsc("display_name").last("LIMIT " + SEARCH_LIMIT);
-        List<User> users = userMapper.selectList(query);
+        return pickerUsers(userMapper.selectList(query));
+    }
+
+    public List<MobilePickerUserDto> selectedUsers(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+        return pickerUsers(userMapper.selectList(new QueryWrapper<User>()
+            .select("id", "username", "display_name", "employee_no", "dept_id").in("id", ids)));
+    }
+
+    private List<MobilePickerUserDto> pickerUsers(List<User> users) {
         Set<Long> departmentIds = users.stream().map(User::getDeptId)
             .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
         Map<Long, String> departments = departmentIds.isEmpty() ? Map.of()
@@ -87,6 +96,14 @@ public class MobileOrgService {
         }
         query.orderByAsc("id").last("LIMIT " + SEARCH_LIMIT);
         return roleMapper.selectList(query).stream()
+            .map(role -> new PickerRoleDto(role.getId(), role.getCode(), role.getName()))
+            .toList();
+    }
+
+    public List<PickerRoleDto> selectedRoles(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+        return roleMapper.selectList(new QueryWrapper<Role>()
+            .select("id", "code", "name").in("id", ids)).stream()
             .map(role -> new PickerRoleDto(role.getId(), role.getCode(), role.getName()))
             .toList();
     }

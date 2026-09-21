@@ -14,10 +14,16 @@ import {
   selectDisplayStyle,
 } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
+import { DynamicSelectField } from './DynamicSelectField';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
 
 export function SelectField(props: MobileFieldProps) {
+  if (props.node.props?.optionSource) return <DynamicSelectField {...props} />;
+  return <StaticSelectField {...props} />;
+}
+
+function StaticSelectField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const value = selectedValue(props.value);
   const [selected, setSelected] = useState<string | number | null>(value);

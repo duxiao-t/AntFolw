@@ -258,6 +258,9 @@ export function FormFillPage() {
         <DynamicFormRenderer
           schema={formSchema}
           values={values}
+          optionContext={reworkTaskId != null
+            ? { instanceId: reworkQuery.data?.instanceId }
+            : { formCode: code, formVersion: formQuery.data?.version }}
           mode={fieldMode}
           modeOverride={starterModeOverride}
           errors={errors}

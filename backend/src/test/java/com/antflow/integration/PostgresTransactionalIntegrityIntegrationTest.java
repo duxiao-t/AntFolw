@@ -1408,6 +1408,18 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void authorizationSnapshotUsesTheMigratedCapabilitySchema() {
+        long adminId = userId("admin");
+        authorizationService.evict(adminId);
+
+        assertThat(authorizationService.principalForRequest(adminId, null))
+            .hasValueSatisfying(principal -> {
+                assertThat(principal.roles()).contains("admin");
+                assertThat(principal.permissions()).contains(PermissionCodes.CONSOLE_ACCESS);
+            });
+    }
+
+    @Test
     void desktopWorkflowPagesFilterPermissionsBeforeLimitAndCount() {
         long viewerId = insertUser("page_viewer_" + UUID.randomUUID());
         long ownerId = insertUser("page_owner_" + UUID.randomUUID());

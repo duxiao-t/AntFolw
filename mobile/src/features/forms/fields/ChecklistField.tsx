@@ -7,6 +7,7 @@ import { ReadonlyMediaList } from '../components/MediaPreview';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldDescription } from '../schema/validators';
 import { fieldError, fieldLabel, isRequired } from './fieldShared';
+import { usePlatformAdapter } from '../../../shared/platform/PlatformProvider';
 
 export type ChecklistResultOption = { id: string; label: string; color: string };
 export type ChecklistItemDef = { id: string; label: string; required: boolean };
@@ -373,6 +374,7 @@ function ChecklistPhotoUpload({
   maxCount: number;
   onChange(photos: MobileFileDto[]): void;
 }) {
+  const platform = usePlatformAdapter();
   const cameraRef = useRef<HTMLInputElement>(null);
   const albumRef = useRef<HTMLInputElement>(null);
   const [viewerIndex, setViewerIndex] = useState(-1);
@@ -442,6 +444,26 @@ function ChecklistPhotoUpload({
     setUploading(false);
   };
 
+  const chooseImages = async (source: 'camera' | 'album') => {
+    const remaining = maxCount - photosRef.current.length;
+    if (remaining <= 0 || uploading) return;
+    if (!platform.chooseImages) {
+      (source === 'camera' ? cameraRef : albumRef).current?.click();
+      return;
+    }
+    setUploading(true);
+    try {
+      const selected = await platform.chooseImages(remaining, source);
+      const next = [...photosRef.current, ...selected].slice(0, maxCount);
+      photosRef.current = next;
+      onChange(next);
+    } catch {
+      Toast.show({ icon: 'fail', content: '图片选择或上传失败' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const removePhoto = (id: string) => {
     const url = previewUrlsRef.current.get(id);
     if (url) {
@@ -466,7 +488,7 @@ function ChecklistPhotoUpload({
           type="button"
           className="af-check__upload-btn"
           disabled={!canAdd || uploading}
-          onClick={() => cameraRef.current?.click()}
+          onClick={() => void chooseImages('camera')}
         >
           <IconCamera />
           <span>拍照</span>
@@ -475,7 +497,7 @@ function ChecklistPhotoUpload({
           type="button"
           className="af-check__upload-btn"
           disabled={!canAdd || uploading}
-          onClick={() => albumRef.current?.click()}
+          onClick={() => void chooseImages('album')}
         >
           <IconImage />
           <span>相册上传</span>

@@ -34,6 +34,7 @@ import {
   type SelectDisplayStyle,
 } from '../../../registry/selectOptions';
 import { useFormDesignerStore } from './useFormDesignerStore';
+import { OptionSourceSettings } from './OptionSourceSettings';
 
 const selectDisplayStyles: Array<{
   value: SelectDisplayStyle;
@@ -220,7 +221,7 @@ function InspectorHeader({
   );
 }
 
-export function Inspector() {
+export function Inspector({ formId }: { formId?: number }) {
   const selectedId = useFormDesignerStore((s) => s.selectedId);
   const schema = useFormDesignerStore((s) => s.schema);
   const updateNode = useFormDesignerStore((s) => s.updateNode);
@@ -353,6 +354,10 @@ export function Inspector() {
               </Typography.Text>
             ),
           },
+          ...(['select', 'multi_select', 'text', 'textarea', 'number'].includes(node.type) ? [{
+            key: 'option-source', label: '外部数据与联动',
+            children: <OptionSourceSettings key={node.id} formId={formId} node={node} schema={schema} update={updateProps} />,
+          }] : []),
           ...(isSelect
             ? [
                 {
@@ -644,7 +649,7 @@ function renderComponentSettings(
     case 'multi_select':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <SelectOptionsEditor
+          {!props.optionSource && <SelectOptionsEditor
             value={props.options}
             multiple={node.type === 'multi_select'}
             defaultValue={props.defaultValue}
@@ -654,7 +659,7 @@ function renderComponentSettings(
             onEnableColorsChange={(enableOptionColor, options) =>
               updateProps({ enableOptionColor, options })
             }
-          />
+          />}
           <Checkbox
             checked={props.allowClear !== false}
             onChange={(event) => updateProps({ allowClear: event.target.checked })}

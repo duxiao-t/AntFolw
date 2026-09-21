@@ -13,10 +13,16 @@ import {
   selectDisplayStyle,
 } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
+import { DynamicSelectField } from './DynamicSelectField';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
 
 export function MultiSelectField(props: MobileFieldProps) {
+  if (props.node.props?.optionSource) return <DynamicSelectField {...props} multiple />;
+  return <StaticMultiSelectField {...props} />;
+}
+
+function StaticMultiSelectField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const values = useMemo(() => arrayValue(props.value), [props.value]);
   const [selected, setSelected] = useState<Array<string | number>>(values);

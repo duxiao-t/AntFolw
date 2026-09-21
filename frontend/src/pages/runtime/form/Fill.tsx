@@ -165,6 +165,7 @@ export default function Fill() {
         schema={parseJsonValue(fd.schema, [])}
         mode="runtime-fill"
         fieldModes={fieldModes}
+        optionContext={{ formCode: code, formVersion: fd.version }}
         value={val}
         onChange={setVal}
       />

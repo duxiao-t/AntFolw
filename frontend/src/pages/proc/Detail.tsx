@@ -562,6 +562,7 @@ export default function DetailPage() {
                         schema={formSchema}
                         mode="readonly"
                         fieldModes={currentFormModes}
+                        optionContext={{ instanceId: Number(id) }}
                         value={myPending ? editableValues : initialFormData}
                         onChange={hasEditableFields ? setEditableValues : undefined}
                       />

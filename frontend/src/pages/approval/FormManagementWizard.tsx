@@ -208,17 +208,17 @@ function getNodeLabel(node: SchemaNode) {
 }
 
 function grantDepartmentTree(departments: GrantDepartment[]) {
-  const children = new Map<number | undefined, GrantDepartment[]>();
+  const children = new Map<number | null, GrantDepartment[]>();
   departments.forEach((department) => {
-    children.set(department.parentId,
-      [...(children.get(department.parentId) ?? []), department]);
+    const parentId = department.parentId ?? null;
+    children.set(parentId, [...(children.get(parentId) ?? []), department]);
   });
-  const build = (parentId?: number): any[] => (children.get(parentId) ?? []).map((department) => ({
+  const build = (parentId: number | null): any[] => (children.get(parentId) ?? []).map((department) => ({
     value: department.id,
     title: department.name,
     children: build(department.id),
   }));
-  return build();
+  return build(null);
 }
 
 function enrichSchemaLabels(nodes: SchemaNode[]): SchemaNode[] {
@@ -235,7 +235,7 @@ function collectOptionErrors(nodes: SchemaNode[]) {
   nodes.forEach((node) => {
     if (
       optionTypes.has(node.type) &&
-      (!Array.isArray(node.props?.options) || node.props.options.length === 0)
+      !node.props?.optionSource && (!Array.isArray(node.props?.options) || node.props.options.length === 0)
     ) {
       errors.push(getNodeLabel(node));
     }
@@ -525,9 +525,6 @@ export default function FormManagementWizard() {
   const saveBasic = useMutation({
     mutationFn: async () => {
       const values = await form.validateFields();
-      if (!isNew && canManageGrants && (!formGrant || !formMaintainers)) {
-        throw new Error('权限设置尚未加载完成，请稍后重试');
-      }
       const settings = {
         ...parseJsonValue<Record<string, any>>(definition?.settings, {}),
         workflowEnabled: !!values.workflowEnabled,
@@ -543,15 +540,13 @@ export default function FormManagementWizard() {
           settings,
         },
       });
-      if (!canManageGrants) return saved;
+      if (!isNew || !canManageGrants) return saved;
 
       try {
-        const latestGrant = isNew
-          ? await request<FormGrant>(`/api/forms/${saved.id}/grants`)
-          : formGrant;
-        const latestMaintainers = isNew
-          ? await request<FormMaintainers>(`/api/forms/${saved.id}/maintainers`)
-          : formMaintainers;
+        const latestGrant = await request<FormGrant>(`/api/forms/${saved.id}/grants`);
+        const latestMaintainers = await request<FormMaintainers>(
+          `/api/forms/${saved.id}/maintainers`,
+        );
         if (!latestGrant || !latestMaintainers
             || latestGrant.version !== latestMaintainers.version) {
           throw new Error('权限设置已被修改，请刷新后重试');
@@ -607,11 +602,6 @@ export default function FormManagementWizard() {
       qc.invalidateQueries({ queryKey: ['form-management-definition'] });
       qc.invalidateQueries({ queryKey: ['form-management-grant'] });
       qc.invalidateQueries({ queryKey: ['form-management-maintainers'] });
-      if (canManageGrants && !isAdmin
-          && !form.getFieldValue('maintainerIds')?.includes(currentUser?.id)) {
-        history.push('/approval/forms');
-        return;
-      }
       goStep('designer', res.id);
     },
     onError: (error: any) => {
@@ -629,6 +619,56 @@ export default function FormManagementWizard() {
       }
       message.error(error?.message ?? '保存失败');
     },
+  });
+
+  const saveUsageScope = useMutation({
+    mutationFn: async () => {
+      if (!formId || !formGrant) throw new Error('请先保存表单属性');
+      const values = await form.validateFields(['userIds', 'roleIds', 'departmentIds', 'allCompany']);
+      let roleIds = Array.isArray(values.roleIds) ? values.roleIds : formGrant.roleIds;
+      if (isAdmin && allCompanyRoleId) {
+        roleIds = values.allCompany
+          ? [...new Set([...roleIds, allCompanyRoleId])]
+          : roleIds.filter((roleId: number) => roleId !== allCompanyRoleId);
+      }
+      return request<FormGrant>(`/api/forms/${formId}/grants`, {
+        method: 'PUT',
+        data: {
+          version: formGrant.version,
+          userIds: Array.isArray(values.userIds) ? values.userIds : formGrant.userIds,
+          roleIds,
+          departmentIds: Array.isArray(values.departmentIds)
+            ? values.departmentIds : formGrant.departmentIds,
+        },
+      });
+    },
+    onSuccess: async () => {
+      message.success('使用范围已保存，无需重新发布表单');
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['form-management-grant', formId] }),
+        qc.invalidateQueries({ queryKey: ['form-management-maintainers', formId] }),
+      ]);
+    },
+    onError: (error: any) => message.error(error?.message ?? '使用范围保存失败'),
+  });
+
+  const saveMaintainers = useMutation({
+    mutationFn: async () => {
+      if (!formId || !formMaintainers) throw new Error('请先保存表单属性');
+      const values = await form.validateFields(['maintainerIds']);
+      return request<FormMaintainers>(`/api/forms/${formId}/maintainers`, {
+        method: 'PUT',
+        data: { version: formMaintainers.version, userIds: values.maintainerIds },
+      });
+    },
+    onSuccess: async () => {
+      message.success('维护人员已保存');
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['form-management-grant', formId] }),
+        qc.invalidateQueries({ queryKey: ['form-management-maintainers', formId] }),
+      ]);
+    },
+    onError: (error: any) => message.error(error?.message ?? '维护人员保存失败'),
   });
 
   const saveDraft = useMutation({
@@ -813,6 +853,13 @@ export default function FormManagementWizard() {
                 }
               />
             </Form.Item>
+            <Button
+              disabled={!formId}
+              loading={saveMaintainers.isPending}
+              onClick={() => saveMaintainers.mutate()}
+            >
+              保存维护人员
+            </Button>
           </section>
         )}
         {canManageGrants && (
@@ -867,11 +914,19 @@ export default function FormManagementWizard() {
               )}
               <Form.Item label="部门及下级部门" name="departmentIds">
                 <TreeSelect treeCheckable treeCheckStrictly={false} showCheckedStrategy={TreeSelect.SHOW_PARENT}
-                  maxTagCount="responsive" allowClear treeDefaultExpandAll
+                  maxTagCount="responsive" allowClear
                   treeData={grantDepartmentTree(grantCandidates?.departments ?? [])}
                   placeholder="选择部门后自动包含其下级部门" />
               </Form.Item>
             </div>
+            <Button
+              style={{ marginTop: 18 }}
+              disabled={!formId}
+              loading={saveUsageScope.isPending}
+              onClick={() => saveUsageScope.mutate()}
+            >
+              保存使用范围
+            </Button>
           </section>
         )}
         <section className={`${styles.propertiesSection} ${styles.dividedSection}`}>
@@ -891,7 +946,7 @@ export default function FormManagementWizard() {
           loading={saveBasic.isPending}
           onClick={() => saveBasic.mutate()}
         >
-          保存并进入表单制作
+          保存表单属性
         </Button>
         <Button onClick={() => history.push('/approval/forms')}>
           返回列表
@@ -924,6 +979,7 @@ export default function FormManagementWizard() {
       >
         <Card title="手机端预览">
           <MobileFormPreview
+            formId={formId ?? undefined}
             title={definition?.name ?? '未命名表单'}
             description={definition?.description}
             schema={previewSchema}

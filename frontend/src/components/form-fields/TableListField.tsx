@@ -15,7 +15,7 @@ export const TableListField: FieldType = {
     addButtonText: '新增一行',
     mobileMode: 'card',
   },
-  Component: ({ node, mode, value, onChange, fieldModes }) => {
+  Component: ({ node, mode, value, onChange, fieldModes, optionContext }) => {
     const createDefaultRows = () =>
       Array.from({ length: node.props?.defaultRows ?? node.props?.minRows ?? 1 }).map(
         () => ({}),
@@ -87,6 +87,7 @@ export const TableListField: FieldType = {
                   onChange={(nextRow: any) => update(index, nextRow)}
                   mode={mode}
                   fieldModes={fieldModes}
+                  optionContext={optionContext}
                 />
               </Card>
             ))}
@@ -103,8 +104,10 @@ export const TableListField: FieldType = {
                 render: (_: any, r: any) => (
                   <FormRenderer
                     schema={[c]}
-                    value={r[c.id]}
-                    onChange={(v: any) => update(r._idx, { ...r, [c.id]: v })}
+                    value={r}
+                    scopeSchema={children}
+                    optionContext={optionContext}
+                    onChange={(v: any) => update(r._idx, v)}
                     mode={mode}
                     fieldModes={fieldModes}
                   />

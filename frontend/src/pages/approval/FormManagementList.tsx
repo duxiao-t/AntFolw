@@ -241,6 +241,11 @@ export default function FormManagementList() {
         toolBarRender={() =>
           can(CAPABILITY.formDefinitionManage)
             ? [
+                ...(can(CAPABILITY.formOptionSourceManage) ? [
+                  <Button key="sources" onClick={() => history.push('/approval/option-sources')}>
+                    选项数据源
+                  </Button>,
+                ] : []),
                 <Button
                   key="import"
                   icon={<UploadOutlined />}

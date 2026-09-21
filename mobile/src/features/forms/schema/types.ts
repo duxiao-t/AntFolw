@@ -62,6 +62,7 @@ export type MobileFieldProps = {
   error?: string;
   onValueChange: (fieldId: string, value: unknown) => void;
   renderChildren?: (children: MobileSchemaNode[]) => ReactNode;
+  optionContext?: import('../fields/dynamicOptions').OptionContext;
 };
 
 export type MobileFieldDefinition = {

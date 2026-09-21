@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getFieldDefinition } from '../schema/fieldRegistry';
 import type { MobileFormValues, MobileFieldProps, MobileSchemaNode } from '../schema/types';
+import { clearLinkedValues } from './clearLinkedValues';
 import { fieldLabel, FieldShell } from './fieldShared';
 
 type RowValue = Record<string, unknown>;
@@ -117,9 +118,13 @@ export function TableListField(props: MobileFieldProps) {
     const value = row[child.id];
     const values: MobileFormValues = row;
     const updateRow = (fieldId: string, nextValue: unknown) => {
+      const nextRow = clearLinkedValues(props.node.children ?? [], fieldId, {
+        ...row,
+        [fieldId]: nextValue,
+      });
       const nextRows = rows.map((current, currentIndex) =>
         currentIndex === rowIndex
-          ? { ...current, value: { ...current.value, [fieldId]: nextValue } }
+          ? { ...current, value: nextRow }
           : current,
       );
       setRows(nextRows);
@@ -134,6 +139,7 @@ export function TableListField(props: MobileFieldProps) {
         mode={effectiveMode}
         modeOverride={props.modeOverride}
         onValueChange={updateRow}
+        optionContext={props.optionContext}
         renderChildren={(nestedChildren) =>
           nestedChildren.map((nestedChild) => renderChild(nestedChild, row, rowIndex, effectiveMode))
         }

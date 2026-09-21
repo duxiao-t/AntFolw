@@ -23,6 +23,12 @@ public class PickerController {
         return service.searchUsers(keyword);
     }
 
+    @GetMapping("/users/selected")
+    @PreAuthorize("@authz.consoleEntry()")
+    public List<MobilePickerUserDto> selectedUsers(@RequestParam List<Long> ids) {
+        return service.selectedUsers(ids);
+    }
+
     @GetMapping("/users/{id}")
     @PreAuthorize("@authz.consoleEntry()")
     public MobilePickerUserDto user(@PathVariable long id) {
@@ -33,5 +39,11 @@ public class PickerController {
     @PreAuthorize("@authz.consoleEntry()")
     public List<PickerRoleDto> roles(@RequestParam(required = false) String keyword) {
         return service.searchRoles(keyword);
+    }
+
+    @GetMapping("/roles/selected")
+    @PreAuthorize("@authz.consoleEntry()")
+    public List<PickerRoleDto> selectedRoles(@RequestParam List<Long> ids) {
+        return service.selectedRoles(ids);
     }
 }

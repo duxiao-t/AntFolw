@@ -26,6 +26,14 @@ export type FieldComponentProps<_TProps = any, TValue = any> = {
   onChange?(value: TValue): void;
   fieldModes?: Record<string, FieldMode>;
   visibleIds?: ReadonlySet<string>;
+  values?: Record<string, any>;
+  optionContext?: {
+    formCode?: string;
+    formVersion?: number;
+    instanceId?: number;
+    dataId?: number;
+  };
+  scopeSchema?: SchemaNode[];
 };
 
 export type FieldType<TProps = any, TValue = any> = {

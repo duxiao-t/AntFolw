@@ -51,6 +51,7 @@ public final class PermissionCatalog {
         entry(PermissionCodes.FORM_DEFINITION_PUBLISH, "发布与停用表单", Risk.HIGH),
         entry(PermissionCodes.FORM_DEFINITION_DELETE, "删除表单", Risk.CRITICAL),
         entry(PermissionCodes.FORM_AUTHORIZATION_MANAGE, "管理表单使用范围与维护人员", Risk.HIGH),
+        entry(PermissionCodes.FORM_OPTION_SOURCE_MANAGE, "管理共享选项数据源", Risk.HIGH, true),
         entry(PermissionCodes.FORM_RUNTIME_READ, "使用已发布表单", Risk.NORMAL),
         entry(PermissionCodes.FORM_DATA_READ, "查看表单数据", Risk.HIGH, DataScope.SELF),
         entry(PermissionCodes.FORM_DATA_EXPORT, "导出表单数据", Risk.HIGH, DataScope.SELF),

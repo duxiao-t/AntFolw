@@ -521,7 +521,7 @@ export function FormDesignerSurface({
             />
           </main>
           <aside className="form-designer__inspector">
-            <Inspector />
+            <Inspector formId={Number.isFinite(Number(id)) ? Number(id) : undefined} />
           </aside>
         </div>
         <DragOverlay dropAnimation={null}>

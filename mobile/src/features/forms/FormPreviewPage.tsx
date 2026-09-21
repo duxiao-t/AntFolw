@@ -11,6 +11,7 @@ type PreviewPayload = {
   title: string;
   description?: string;
   schema: MobileSchemaNode[];
+  formId?: number;
 };
 
 export function FormPreviewPage() {
@@ -48,6 +49,7 @@ export function FormPreviewPage() {
           schema={schema}
           values={values}
           mode="fill"
+          optionContext={preview.formId ? { previewFormId: preview.formId } : undefined}
           errors={errors}
           onValueChange={(fieldId, value) => {
             setValues((current) => ({ ...current, [fieldId]: value }));

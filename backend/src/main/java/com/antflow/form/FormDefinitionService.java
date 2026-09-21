@@ -30,6 +30,8 @@ public class FormDefinitionService {
     private DefinitionVersionRepository versions;
     @Autowired(required = false)
     private BusinessNumberService businessNumbers;
+    @Autowired(required = false)
+    private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
@@ -151,6 +153,9 @@ public class FormDefinitionService {
         }
         if (!"DRAFT".equals(fd.getStatus())) return fd;
         validateSchema(fd.getSchema());
+        if (optionRuntimeService != null) {
+            optionRuntimeService.validateSchema(json.valueToTree(parseSchema(fd.getSchema())));
+        }
         if (businessNumbers != null) businessNumbers.validate(fd);
         fd.setStatus("PUBLISHED");
         fd.setVersion(fd.getVersion() + 1);
@@ -619,6 +624,14 @@ public class FormDefinitionService {
         if ("dept_picker".equals(type) && !isEmpty(value)) {
             validateDepartmentPickerValue(node, value);
         }
+        if (Set.of("select", "multi_select").contains(type) && !isEmpty(value)
+            && node.path("props").path("optionSource").isObject()
+            ) {
+            if (optionRuntimeService == null) {
+                throw new BizException("FORM_DATA_INVALID", "共享选项服务不可用");
+            }
+            optionRuntimeService.validateValue(node, value, values);
+        }
         int maxLength = rules.path("maxLength").asInt(props.path("maxLength").asInt(-1));
         if (maxLength > -1 && value instanceof String s && s.length() > maxLength) {
             throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " exceeds maxLength");
@@ -930,6 +943,13 @@ public class FormDefinitionService {
     private record MatrixAxisItem(String id, String label) {}
 
     private void validateSelectOptions(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node.path("props").path("optionSource").isObject()) {
+            if (optionRuntimeService == null) {
+                throw new BizException("BAD_SCHEMA", "共享选项服务不可用");
+            }
+            optionRuntimeService.validateBinding(node.path("props").path("optionSource"));
+            return;
+        }
         var options = node.path("props").path("options");
         if (!options.isArray() || options.isEmpty()) {
             throw new BizException("BAD_SCHEMA", node.path("label").asText(node.path("id").asText()) + " requires options");

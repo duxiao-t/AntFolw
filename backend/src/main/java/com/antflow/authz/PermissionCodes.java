@@ -26,6 +26,7 @@ public final class PermissionCodes {
     public static final String FORM_DEFINITION_PUBLISH = "form:definition:publish";
     public static final String FORM_DEFINITION_DELETE = "form:definition:delete";
     public static final String FORM_AUTHORIZATION_MANAGE = "form:authorization:manage";
+    public static final String FORM_OPTION_SOURCE_MANAGE = "form:option_source:manage";
     public static final String FORM_RUNTIME_READ = "form:runtime:read";
     public static final String FORM_DATA_READ = "form:data:read";
     public static final String FORM_DATA_EXPORT = "form:data:export";

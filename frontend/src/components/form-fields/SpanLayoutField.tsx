@@ -13,7 +13,7 @@ export const SpanLayoutField: FieldType = {
     dividerColor: '#d9d9d9',
     mobileSingleColumn: true,
   },
-  Component: ({ node, mode, value, onChange, fieldModes, visibleIds }) => {
+  Component: ({ node, mode, value, onChange, fieldModes, visibleIds, optionContext, scopeSchema }) => {
     const cols = node.props?.columns ?? 2;
     const span = Math.floor(24 / cols);
     return (
@@ -49,6 +49,8 @@ export const SpanLayoutField: FieldType = {
                   mode={mode}
                   fieldModes={fieldModes}
                   visibleIds={visibleIds}
+                  optionContext={optionContext}
+                  scopeSchema={scopeSchema}
                 />
               </Col>
             ))}
