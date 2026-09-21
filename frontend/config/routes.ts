@@ -46,7 +46,7 @@ export default [
   { path: '/proc', component: './proc/Sent', hideInMenu: true, access: 'canUseProcesses' },
   { path: '/proc/:id', component: './proc/Detail', hideInMenu: true, access: 'canUseProcessDetail' },
   { path: '/account/settings', component: './account/settings', hideInMenu: true },
-  { path: '/account/center', component: './account/center', hideInMenu: true },
+  { path: '/account/center', redirect: '/account/settings' },
 
   // ===== 默认 =====
   { path: '/', component: './AuthorizedHome' },

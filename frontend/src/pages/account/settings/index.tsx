@@ -1,114 +1,60 @@
-import { GridContent } from '@ant-design/pro-components';
-import { Menu } from 'antd';
-import React, { useLayoutEffect, useRef, useState } from 'react';
-import BaseView from './components/base';
-import BindingView from './components/binding';
-import NotificationView from './components/notification';
-import SecurityView from './components/security';
-import useStyles from './style.style';
+import { PageContainer } from '@ant-design/pro-components';
+import { useQuery } from '@tanstack/react-query';
+import { request } from '@umijs/max';
+import { Alert, Card, Descriptions, Skeleton, Tag } from 'antd';
 
-type SettingsStateKeys = 'base' | 'security' | 'binding' | 'notification';
-type SettingsState = {
-  mode: 'inline' | 'horizontal';
-  selectKey: SettingsStateKeys;
+type AccountProfile = {
+  id: number;
+  username: string;
+  displayName: string;
+  employeeNo?: string | null;
+  departmentName?: string | null;
+  position?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  roles: string[];
 };
 
-const menuMap: Record<string, React.ReactNode> = {
-  base: '基本设置',
-  security: '安全设置',
-  binding: '账号绑定',
-  notification: '新消息通知',
-};
-const menuItems = Object.keys(menuMap).map((item) => ({
-  key: item,
-  label: menuMap[item],
-}));
-
-const SettingsContent: React.FC<{ selectKey: SettingsStateKeys }> = ({
-  selectKey,
-}) => {
-  switch (selectKey) {
-    case 'base':
-      return <BaseView />;
-    case 'security':
-      return <SecurityView />;
-    case 'binding':
-      return <BindingView />;
-    case 'notification':
-      return <NotificationView />;
-    default:
-      return null;
-  }
-};
-
-const Settings: React.FC = () => {
-  const { styles } = useStyles();
-  const [initConfig, setInitConfig] = useState<SettingsState>({
-    mode: 'inline',
-    selectKey: 'base',
+export default function AccountSettings() {
+  const profile = useQuery<AccountProfile>({
+    queryKey: ['account-profile'],
+    queryFn: () => request('/api/account/profile'),
+    retry: 0,
   });
-  const dom = useRef<HTMLDivElement>(null);
 
-  const resize = () => {
-    requestAnimationFrame(() => {
-      if (!dom.current) {
-        return;
-      }
-      let mode: 'inline' | 'horizontal' = 'inline';
-      const { offsetWidth } = dom.current;
-      if (dom.current.offsetWidth < 641 && offsetWidth > 400) {
-        mode = 'horizontal';
-      }
-      if (window.innerWidth < 768 && offsetWidth > 400) {
-        mode = 'horizontal';
-      }
-      setInitConfig((prev) => ({
-        ...prev,
-        mode: mode as SettingsState['mode'],
-      }));
-    });
-  };
-
-  const resizeRef = useRef(resize);
-  resizeRef.current = resize;
-
-  useLayoutEffect(() => {
-    const handler = () => resizeRef.current();
-    window.addEventListener('resize', handler);
-    handler();
-    return () => {
-      window.removeEventListener('resize', handler);
-    };
-  }, []);
   return (
-    <GridContent>
-      <div
-        className={styles.main}
-        ref={(ref) => {
-          if (ref) {
-            dom.current = ref;
-          }
-        }}
-      >
-        <div className={styles.leftMenu}>
-          <Menu
-            mode={initConfig.mode}
-            selectedKeys={[initConfig.selectKey]}
-            onClick={({ key }) => {
-              setInitConfig((prev) => ({
-                ...prev,
-                selectKey: key as SettingsStateKeys,
-              }));
-            }}
-            items={menuItems}
-          />
-        </div>
-        <div className={styles.right}>
-          <div className={styles.title}>{menuMap[initConfig.selectKey]}</div>
-          <SettingsContent selectKey={initConfig.selectKey} />
-        </div>
-      </div>
-    </GridContent>
+    <PageContainer title="个人设置" subTitle="查看当前账号与组织资料">
+      <Card style={{ maxWidth: 900 }}>
+        {profile.isPending ? <Skeleton active paragraph={{ rows: 7 }} /> : null}
+        {profile.isError ? (
+          <Alert type="error" showIcon title="个人资料加载失败" description="请刷新页面后重试。" />
+        ) : null}
+        {profile.data ? (
+          <>
+            <Alert
+              type="info"
+              showIcon
+              title="资料由组织管理员维护"
+              description="如姓名、部门、职务或联系方式有误，请联系组织管理员修改。"
+              style={{ marginBottom: 20 }}
+            />
+            <Descriptions bordered column={{ xs: 1, sm: 2 }}>
+              <Descriptions.Item label="姓名">{profile.data.displayName}</Descriptions.Item>
+              <Descriptions.Item label="登录账号">{profile.data.username}</Descriptions.Item>
+              <Descriptions.Item label="工号">{profile.data.employeeNo || '未设置'}</Descriptions.Item>
+              <Descriptions.Item label="部门">{profile.data.departmentName || '未设置'}</Descriptions.Item>
+              <Descriptions.Item label="职务">{profile.data.position || '未设置'}</Descriptions.Item>
+              <Descriptions.Item label="手机号">{profile.data.phone || '未设置'}</Descriptions.Item>
+              <Descriptions.Item label="邮箱" span={2}>{profile.data.email || '未设置'}</Descriptions.Item>
+              <Descriptions.Item label="角色" span={2}>
+                {profile.data.roles.length
+                  ? profile.data.roles.map((role) => <Tag key={role}>{role}</Tag>)
+                  : '未分配角色'}
+              </Descriptions.Item>
+            </Descriptions>
+          </>
+        ) : null}
+      </Card>
+    </PageContainer>
   );
-};
-export default Settings;
+}
