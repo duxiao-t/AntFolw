@@ -33,10 +33,6 @@ vi.mock('@ant-design/pro-components', () => ({
   SettingDrawer: () => null,
 }));
 
-vi.mock('@ant-design/icons', () => ({
-  LinkOutlined: () => null,
-}));
-
 vi.mock('./requestErrorConfig', () => ({
   errorConfig: {},
 }));

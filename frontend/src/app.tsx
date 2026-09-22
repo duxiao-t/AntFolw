@@ -1,7 +1,7 @@
 import type { RunTimeLayoutConfig } from '@@/plugin-layout/types.d';
 import type { RequestConfig } from '@@/plugin-request/request';
 import { LinkOutlined } from '@ant-design/icons';
-import type { Settings as LayoutSettings } from '@ant-design/pro-components';
+import type { MenuDataItem, Settings as LayoutSettings } from '@ant-design/pro-components';
 import { SettingDrawer } from '@ant-design/pro-components';
 import { history, Link, useModel } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -25,6 +25,7 @@ import {
 import { WorkflowEventsSubscriber } from '@/components/WorkflowEventsSubscriber';
 import { CAPABILITY, hasCapability } from './authz';
 import { navToMenuData, PAGE_BY_KEY, type NavNode } from '@/pages/registry';
+import { menuIcon } from '@/pages/menuIcons';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -181,6 +182,18 @@ function findMenuTitle(navigation: NavNode[], pathname: string): string | undefi
   return undefined;
 }
 
+/**
+ * 菜单项里的 icon 是键字符串（registry 与后端都只存键），ProLayout 会把不认识的字符串
+ * 当文本渲染出来。这里统一换成真图标；未知键置空，绝不漏出英文。
+ */
+function withMenuIcons(items: MenuDataItem[]): MenuDataItem[] {
+  return items.map((item) => ({
+    ...item,
+    icon: menuIcon(item.icon as string | undefined) ?? undefined,
+    children: item.children ? withMenuIcons(item.children) : undefined,
+  }));
+}
+
 /** 第一项永远是可点的工作台，这样子页都有返回入口（ProLayout 默认不给）。 */
 function breadcrumbItems(pathname: string, navigation: NavNode[]) {
   const home = { title: <Link to="/workplace">工作台</Link> };
@@ -209,7 +222,7 @@ export const layout: RunTimeLayoutConfig = ({
   );
   return {
     // 菜单来自服务端编排（t_menu + 能力过滤），未注册 pageKey 会被跳过。
-    menuDataRender: () => navToMenuData(initialState?.navigation ?? []),
+    menuDataRender: () => withMenuIcons(navToMenuData(initialState?.navigation ?? [])),
     // 面包屑自己拼：ProLayout 默认因 minLength=2 且 /approval 无父节点而整条不显示，
     // 隐藏页也永远不在菜单里。这里保证每页至少有一条可点的工作台。
     breadcrumbProps: { minLength: 1 },

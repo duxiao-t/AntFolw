@@ -122,6 +122,7 @@ export function navToMenuData(nodes: NavNode[]): MenuDataItem[] {
       items.push({
         key: `dir-${index}-${node.name ?? ''}`,
         name: node.name ?? '',
+        icon: node.icon ?? undefined,
         children,
       });
       return;
@@ -133,12 +134,13 @@ export function navToMenuData(nodes: NavNode[]): MenuDataItem[] {
       }
       return;
     }
-    // 不输出 icon：图标是字符串键，而全局没有映射表，ProLayout 会把键名当文本渲染出来
-    // （菜单里出现 home / team / barChart 这类英文）。菜单只要中文。
+    // 这里输出的是**图标键**（字符串），不是图标本身——本文件必须保持纯数据。
+    // app.tsx 的 menuDataRender 会用 menuIcons 把它换成真正的图标。
     items.push({
       key: page.key,
       path: page.path,
       name: node.name ?? page.key,
+      icon: node.icon ?? page.icon,
     });
   });
   return items;
