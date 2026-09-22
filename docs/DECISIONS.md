@@ -41,3 +41,14 @@
 - **背景：** 同一授权状态若因入口不同返回不同状态码，前端无法用状态码区分"资源不存在"与"越范围"，审计里 404/403 的语义也会被稀释。
 - **决策：** 统一为「范围内可读资源的管理越权 = 403；任何不可读 = 404」。不可读一律抛 `HiddenResourceException`（映射 404 并写 `security.resource.hidden` 审计），已可读但超出数据范围抛 `AccessDeniedException`（403）。
 - **影响：** `AuthorizationService.requireManageTask` 委托 `requireManageInstance`，任务入口与实例入口天然一致（不存在"同情形两种状态码"）；前者内部的 `canReadInstance` 前置判断与后者重复但无害。新增管理与读取入口必须沿用同一规则。
+
+## D-20260922-bi-ledger-readonly-views
+
+- **状态：** accepted
+- **背景：** 第三方 BI 要读表单数据形成台账，但表单值存在 `t_form_data.data`（JSONB，键是字段 nanoid、无类型），且同一列的含义随 schema 演化。BI 直接读基表写不出可读 SQL，也算不出业务口径。
+- **决策：** BI 直连数据库，但**只授只读视图**（V45 的 4 个字典视图 + `v_form_ledger` 长表），不授任何基表；授权脚本 `infra/sql/bi-readonly-role.sql` 刻意不进迁移（建角色需要 elevated 权限，密码不进 git）。台账含审批人与审批结果（join `t_process_instance`），软删表单**保留行**并暴露 `form_deleted` 供 BI 自行筛选，不静默丢弃。
+- **影响：**
+  - **这是有意接受的鉴权旁路：** BI 直连库读取**绕过**应用的三层鉴权（端点能力 / 表单使用授权 / 数据范围）。任何"把视图授权换成基表授权"的改动都要重新评审。
+  - **`t_form_definition_version` 只增不删（不变量）。** 台账的历史列名依赖它解析；一旦有人加"清理旧版本"的任务，历史报表的列名会静默改变。
+  - **BI 关联一律用 `form_def_id`**：`t_form_definition.code` 有部分唯一索引（`deleted = 0`），软删后编码可复用，`form_code` 只能用于展示。
+  - 视图是纯计算视图，每次查询都重算。量级上来后升级路径是物化视图 + 定时 `REFRESH`，或改走应用侧台账接口。
