@@ -1,9 +1,17 @@
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
+import { useQuery } from '@tanstack/react-query';
 import { Link, request, useLocation } from '@umijs/max';
 import { Drawer, Typography } from 'antd';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { cellText, detailText, fieldColumns, type FormDataFieldValue } from './fieldValues';
+import {
+  cellTextFor,
+  detailTextFor,
+  fieldColumns,
+  fieldMetas,
+  type FieldMeta,
+  type FormDataFieldValue,
+} from './fieldValues';
 
 type FormDataRecord = {
   id: number;
@@ -36,6 +44,24 @@ export default function AdminFormDataPage() {
   const [fields, setFields] = useState<Array<{ id: string; label: string }>>([]);
   const searchParams = new URLSearchParams(location.search);
   const initialFormDefId = searchParams.get('formDefId') ?? undefined;
+  const [formDefId, setFormDefId] = useState<string | undefined>(initialFormDefId);
+
+  // 字段类型与选项只能从表单定义里拿（数据接口不给）。取不到就退化：只有 form:data:read
+  // 的账号取定义会 404，那不该让整页报错——只是下拉显示原始值、检查项显示条目数。
+  const definition = useQuery<{ schema?: string }>({
+    queryKey: ['form-definition-for-ledger', formDefId],
+    queryFn: () => request(`/api/forms/definitions/${formDefId}`),
+    enabled: Boolean(formDefId),
+    retry: false,
+  });
+  const metas = useMemo<Map<string, FieldMeta>>(() => {
+    if (!definition.data?.schema) return new Map();
+    try {
+      return fieldMetas(JSON.parse(definition.data.schema));
+    } catch {
+      return new Map();
+    }
+  }, [definition.data?.schema]);
 
   const columns = useMemo<ProColumns<FormDataRecord>[]>(() => {
     const meta: ProColumns<FormDataRecord>[] = [
@@ -76,7 +102,7 @@ export default function AdminFormDataPage() {
       width: 180,
       render: (_, record) => {
         const hit = record.fieldValues?.find((item) => item.fieldId === field.id);
-        const text = cellText(hit?.value);
+        const text = cellTextFor(hit?.value, metas.get(field.id));
         return text || '—';
       },
     }));
@@ -92,7 +118,7 @@ export default function AdminFormDataPage() {
       ...meta,
       ...fieldCols,
     ];
-  }, [fields, initialFormDefId]);
+  }, [fields, initialFormDefId, metas]);
 
   const loadRecords = useCallback(async (params: Record<string, any>) => {
     const result = await request<PageResult<FormDataRecord>>('/api/forms/data/admin', {
@@ -106,6 +132,8 @@ export default function AdminFormDataPage() {
     });
     const records = result.records ?? [];
     setFields(fieldColumns(records.map((record) => record.fieldValues ?? [])));
+    // 筛选里改了表单 ID 时，字段字典也要跟着换。
+    setFormDefId(params.formDefId ? String(params.formDefId) : undefined);
     return { data: records, total: result.total ?? 0, success: true };
   }, []);
 
@@ -145,7 +173,7 @@ export default function AdminFormDataPage() {
               </dt>
               <dd style={{ margin: '2px 0 0' }}>
                 <Typography.Text style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                  {detailText(field.value)}
+                  {detailTextFor(field.value, metas.get(field.fieldId))}
                 </Typography.Text>
               </dd>
             </div>
