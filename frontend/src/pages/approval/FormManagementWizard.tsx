@@ -105,9 +105,8 @@ const useWizardStyles = createStyles(({ token }) => ({
     '& .ant-card-body': { padding: 0 },
   },
   propertiesForm: {
+    // 不设宽度上限：窗口宽时内容会缩在中间、两侧留大片空白。跟随窗口铺满。
     width: '100%',
-    maxWidth: 1120,
-    margin: '0 auto',
   },
   propertiesSection: {
     padding: '26px 30px',
