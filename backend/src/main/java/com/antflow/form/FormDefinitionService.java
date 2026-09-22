@@ -14,6 +14,7 @@ import com.antflow.common.BusinessNumberService;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -108,11 +109,19 @@ public class FormDefinitionService {
             if ("DEPRECATED".equals(fd.getStatus())) {
                 throw new BizException("NOT_DRAFT", "Only DRAFT form_definitions can be edited");
             }
+            String nextSchema = writeJson(schema);
+            String nextSettings = writeJson(settings);
+            // 只有 schema/settings 真的变了才降级为草稿。已发布表单改个名称、或只是点了一下保存，
+            // 不该让它掉出手机端目录——发布快照只含 schema/settings，名称与描述不入快照。
+            boolean contentChanged = !sameJson(fd.getSchema(), nextSchema)
+                || !sameJson(fd.getSettings(), nextSettings);
             fd.setName(name);
             fd.setDescription(description);
-            fd.setSchema(writeJson(schema));
-            fd.setSettings(writeJson(settings));
-            fd.setStatus("DRAFT");
+            fd.setSchema(nextSchema);
+            fd.setSettings(nextSettings);
+            if (contentChanged) {
+                fd.setStatus("DRAFT");
+            }
             mapper.updateById(fd);
         }
         return fd;
@@ -532,6 +541,21 @@ public class FormDefinitionService {
             return;
         }
         validateNodeValue(node, values, visibleIds);
+    }
+
+    /**
+     * 语义比较两段 JSON。schema/settings 存在 jsonb 列里，读回来会带上 Postgres 自己的排版
+     * （如 {@code "id": "a"} 的空格），所以不能直接比字符串——那会让「原样保存」永远被判为有变化。
+     */
+    private boolean sameJson(String left, String right) {
+        if (Objects.equals(left, right)) {
+            return true;
+        }
+        try {
+            return Objects.equals(json.readTree(left), json.readTree(right));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return false;   // 旧值坏了就当作已变化，仍走降级
+        }
     }
 
     private String writeJson(Object o) {

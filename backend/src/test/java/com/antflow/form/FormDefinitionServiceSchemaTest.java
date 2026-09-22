@@ -33,6 +33,42 @@ class FormDefinitionServiceSchemaTest {
         service = new FormDefinitionService(mapper, json, Mockito.mock(FormGrantService.class));
     }
 
+    @Test void saveDraftKeepsPublishedFormWhenContentIsUnchanged() throws Exception {
+        // 已发布表单只是改名称、或原样保存，不该被降级为草稿（那会让它掉出手机端目录）。
+        when(mapper.selectById(1L)).thenReturn(published());
+
+        var saved = service.saveDraft(1L, "leave", "新名称", "说明",
+            json.readTree(SCHEMA), json.readTree("{}"), 7L);
+
+        assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
+    }
+
+    @Test void saveDraftDemotesToDraftWhenSchemaChanges() throws Exception {
+        when(mapper.selectById(1L)).thenReturn(published());
+
+        var saved = service.saveDraft(1L, "leave", "新名称", "说明",
+            json.readTree("[{\"id\":\"b\",\"type\":\"text\"}]"), json.readTree("{}"), 7L);
+
+        assertThat(saved.getStatus()).isEqualTo("DRAFT");
+        assertThat(saved.getSchema()).isEqualTo("[{\"id\":\"b\",\"type\":\"text\"}]");
+    }
+
+    private static final String SCHEMA = "[{\"id\":\"a\",\"type\":\"text\"}]";
+
+    /**
+     * 已发布表单。schema 故意写成 **Postgres jsonb 读回来的排版**（冒号/逗号后带空格），
+     * 因为真实库里就是这种形式——拿它跟 writeJson 的紧凑输出直接比字符串会永远判定为有变化。
+     */
+    private FormDefinition published() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setCode("leave");
+        fd.setStatus("PUBLISHED");
+        fd.setSchema("[{\"id\": \"a\", \"type\": \"text\"}]");
+        fd.setSettings("{}");
+        return fd;
+    }
+
     @Test void publishAcceptsNonEmptySchema() {
         var fd = new FormDefinition();
         fd.setId(1L);
