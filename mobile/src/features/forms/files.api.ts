@@ -23,8 +23,24 @@ export type MobilePickerDept = {
   name: string;
 };
 
-export async function searchMobileUsers(endpoint: string, keyword: string): Promise<MobilePickerUser[]> {
-  return apiRequest<MobilePickerUser[]>(withKeyword(endpoint, keyword));
+/**
+ * 设计器给「用户选择」字段配的候选范围。参数名与桌面 /api/users 完全一致，
+ * 这样两端对同一份字段配置的理解不会分叉。
+ */
+export type MobileUserScope = {
+  deptId?: number;
+  includeDescendants?: boolean;
+  position?: string;
+  leaderOnly?: boolean;
+  userIds?: number[];
+};
+
+export async function searchMobileUsers(
+  endpoint: string,
+  keyword: string,
+  scope: MobileUserScope = {},
+): Promise<MobilePickerUser[]> {
+  return apiRequest<MobilePickerUser[]>(withQuery(endpoint, { keyword: keyword.trim(), ...scope }));
 }
 
 export async function fetchMobileUser(endpoint: string, id: number): Promise<MobilePickerUser> {
@@ -36,7 +52,7 @@ export async function fetchMobileDepartment(endpoint: string, id: number): Promi
 }
 
 export async function searchMobileDepartments(endpoint: string, keyword: string): Promise<MobilePickerDept[]> {
-  return apiRequest<MobilePickerDept[]>(withKeyword(endpoint, keyword));
+  return apiRequest<MobilePickerDept[]>(withQuery(endpoint, { keyword: keyword.trim() }));
 }
 
 export async function uploadMobileFile(
@@ -73,13 +89,21 @@ export async function fetchMobileFileBlob(contentUrl: string): Promise<Blob> {
   return fetchMobileFileBlobWithAuth(contentUrl);
 }
 
-function withKeyword(endpoint: string, keyword: string) {
-  const trimmed = keyword.trim();
-  if (!trimmed) {
-    return endpoint;
-  }
-  const separator = endpoint.includes('?') ? '&' : '?';
-  return `${endpoint}${separator}keyword=${encodeURIComponent(trimmed)}`;
+/** 拼查询串；空值一律丢掉，免得出现 ?keyword=&deptId= 这种噪声。 */
+function withQuery(endpoint: string, params: Record<string, unknown>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value == null || value === '') return;
+    if (Array.isArray(value)) {
+      if (value.length === 0) return;
+      search.set(key, value.join(','));
+      return;
+    }
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  if (!query) return endpoint;
+  return `${endpoint}${endpoint.includes('?') ? '&' : '?'}${query}`;
 }
 
 function uploadMobileFileWithProgress(

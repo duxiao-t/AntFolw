@@ -21,7 +21,8 @@ public class PickerController {
     @GetMapping("/users")
     @PreAuthorize("@authz.consoleEntry()")
     public List<MobilePickerUserDto> users(@RequestParam(required = false) String keyword) {
-        return service.searchUsers(keyword);
+        // 桌面选择器不做范围收窄，只有关键字。
+        return service.searchUsers(UserService.UserQuery.of(keyword, null, null, null, null, null));
     }
 
     @GetMapping("/users/selected")

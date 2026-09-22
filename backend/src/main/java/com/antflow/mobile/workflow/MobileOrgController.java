@@ -1,6 +1,7 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.org.UserService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -18,9 +19,15 @@ public class MobileOrgController {
 
     @GetMapping("/users")
     @AuthenticatedOnly
-    public List<MobilePickerUserDto> users(@RequestParam(required = false) String keyword) {
+    public List<MobilePickerUserDto> users(@RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long deptId,
+            @RequestParam(required = false) Boolean includeDescendants,
+            @RequestParam(required = false) Boolean leaderOnly,
+            @RequestParam(required = false) String position,
+            @RequestParam(required = false) List<Long> userIds) {
         principal();
-        return service.searchUsers(keyword);
+        return service.searchUsers(UserService.UserQuery.of(
+            keyword, deptId, includeDescendants, leaderOnly, position, userIds));
     }
 
     @GetMapping("/users/{id}")

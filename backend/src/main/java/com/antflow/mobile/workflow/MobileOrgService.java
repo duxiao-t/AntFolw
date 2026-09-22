@@ -7,10 +7,12 @@ import com.antflow.org.RoleMapper;
 import com.antflow.org.PickerRoleDto;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
+import com.antflow.org.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,10 +26,16 @@ public class MobileOrgService {
     private final DepartmentMapper departmentMapper;
     private final RoleMapper roleMapper;
 
-    public List<MobilePickerUserDto> searchUsers(String keyword) {
+    /**
+     * 选择器候选。除关键字外还接受设计器配的范围（部门含下级 / 职务 / 显式名单）。
+     *
+     * <p>注意这里**不叠加查看者自己的数据范围**：填表人往往是员工，数据范围是「本人」，
+     * 一叠加候选就只剩自己，待办里挑审批人会直接坏掉。收窄只按设计器的配置来。
+     */
+    public List<MobilePickerUserDto> searchUsers(UserService.UserQuery request) {
         QueryWrapper<User> query = new QueryWrapper<>();
         query.select("id", "username", "display_name", "employee_no", "dept_id");
-        String trimmedKeyword = normalizeKeyword(keyword);
+        String trimmedKeyword = normalizeKeyword(request.keyword());
         if (!trimmedKeyword.isEmpty()) {
             List<Long> matchingDepartmentIds = departmentMapper.selectList(
                 new QueryWrapper<Department>().select("id").like("name", trimmedKeyword))
@@ -42,6 +50,20 @@ public class MobileOrgService {
                     wrapper.or().in("dept_id", matchingDepartmentIds);
                 }
             });
+        }
+        if (request.userIds() != null && !request.userIds().isEmpty()) {
+            query.in("id", request.userIds());
+        }
+        Collection<Long> departments = request.resolveDepartments(departmentMapper);
+        if (departments != null) {
+            if (departments.isEmpty()) {
+                return List.of();
+            }
+            query.in("dept_id", departments);
+        }
+        String positionFilter = request.positionFilter(UserService.LEADER_TITLE);
+        if (positionFilter != null) {
+            query.like("position", positionFilter);
         }
         query.orderByAsc("display_name").last("LIMIT " + SEARCH_LIMIT);
         return pickerUsers(userMapper.selectList(query));

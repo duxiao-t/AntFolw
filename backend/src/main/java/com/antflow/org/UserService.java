@@ -252,13 +252,16 @@ public class UserService {
      * 「部门领导」的范围定义：职务里带这个称谓。称谓改了只需改这一处。
      * ponytail: 按职务字符串判定，不是 t_department.leader_id 关系；若 HR 改用别的称谓，改这里一个常量。
      */
-    private static final String LEADER_TITLE = "部长";
+    public static final String LEADER_TITLE = "部长";
 
     /**
      * 用户候选的收窄条件。各条件相互独立、都可为空；选择器一次只用一个维度，
      * 但它们能自由组合（例如「研发部的部长」= departmentId + position）。
      * 用 record 而不是一排位置参数：{@code includeDescendants} 与 {@code leaderOnly}
      * 都是 boolean，排在一起极易传错。
+     *
+     * <p>下面两个方法是「怎么用这些条件」的唯一实现——桌面 /api/users 与移动端选择器
+     * 都调它们，免得两处各写一份慢慢漂移。
      */
     public record UserQuery(String keyword, Long departmentId, boolean includeDescendants,
                             boolean leaderOnly, String position, List<Long> userIds) {
@@ -266,6 +269,22 @@ public class UserService {
                                    Boolean leaderOnly, String position, List<Long> userIds) {
             return new UserQuery(keyword, departmentId, Boolean.TRUE.equals(includeDescendants),
                 Boolean.TRUE.equals(leaderOnly), position, userIds);
+        }
+
+        /** 职务过滤的最终值：自由文本优先，否则取「部门领导」的预设称谓；都没有则不过滤。 */
+        public String positionFilter(String leaderTitle) {
+            if (position != null && !position.isBlank()) {
+                return position.trim();
+            }
+            return leaderOnly ? leaderTitle : null;
+        }
+
+        /** 部门收窄最终展开成的 id 集合；返回 null 表示不按部门收窄。 */
+        public Collection<Long> resolveDepartments(DepartmentMapper mapper) {
+            if (departmentId == null) {
+                return null;
+            }
+            return includeDescendants ? mapper.subtreeIds(departmentId) : List.of(departmentId);
         }
     }
 
@@ -282,19 +301,15 @@ public class UserService {
         if (request.userIds() != null && !request.userIds().isEmpty()) {
             query.in("id", request.userIds());
         }
-        if (request.departmentId() != null) {
-            Collection<Long> departments = request.includeDescendants()
-                ? departmentMapper.subtreeIds(request.departmentId())
-                : List.of(request.departmentId());
+        Collection<Long> departments = request.resolveDepartments(departmentMapper);
+        if (departments != null) {
             if (departments.isEmpty()) {
                 return List.of();
             }
             query.in("dept_id", departments);
         }
         // 「部门领导」只是职务过滤的一个预设值，两者共用一条路径。
-        String positionFilter = request.position() != null && !request.position().isBlank()
-            ? request.position().trim()
-            : request.leaderOnly() ? LEADER_TITLE : null;
+        String positionFilter = request.positionFilter(LEADER_TITLE);
         if (positionFilter != null) {
             // LIKE 自动排除职务为空的用户——没有职务的人本来就不是领导。
             query.like("position", positionFilter);

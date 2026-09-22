@@ -2,8 +2,41 @@ import { RightOutline, UserOutline } from 'antd-mobile-icons';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
-import { fetchMobileUser, searchMobileUsers, type MobilePickerUser } from '../files.api';
+import {
+  fetchMobileUser,
+  searchMobileUsers,
+  type MobilePickerUser,
+  type MobileUserScope,
+} from '../files.api';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
+
+/**
+ * 设计器给这个字段配的候选范围 → 查询参数。映射与桌面 `form-fields/UserPickerField.tsx`
+ * 里那段一一对应——两端参数名相同，改一边就要改另一边。
+ *
+ * 只收原始值（不收 node 对象）是为了能直接进 useEffect 的依赖数组：
+ * 每次都新建的对象会让下拉反复重新请求。
+ */
+function userScope(
+  scopeType: unknown,
+  scopeDeptId: unknown,
+  scopePosition: unknown,
+  scopeUserIds: string,
+): MobileUserScope {
+  if (scopeType === 'department' && scopeDeptId) {
+    return { deptId: Number(scopeDeptId), includeDescendants: true };
+  }
+  if (scopeType === 'position' && String(scopePosition ?? '').trim()) {
+    return { position: String(scopePosition).trim() };
+  }
+  if (scopeType === 'leader') {
+    return { leaderOnly: true };
+  }
+  if (scopeType === 'user' && scopeUserIds) {
+    return { userIds: scopeUserIds.split(',').map(Number) };
+  }
+  return {};
+}
 
 type PickerState = {
   open: boolean;
@@ -53,11 +86,18 @@ export function UserPickerField(props: MobileFieldProps) {
     return () => { active = false; };
   }, [endpoint, state.selectedIds]);
 
+  const scopeType = props.node.props?.scopeType;
+  const scopeDeptId = props.node.props?.scopeDeptId;
+  const scopePosition = props.node.props?.scopePosition;
+  const scopeUserIds = Array.isArray(props.node.props?.scopeUserIds)
+    ? (props.node.props.scopeUserIds as number[]).join(',')
+    : '';
   useEffect(() => {
     if (!state.open) return;
     let active = true;
     setState((current) => ({ ...current, loading: true }));
-    searchMobileUsers(endpoint, state.keyword)
+    searchMobileUsers(endpoint, state.keyword,
+      userScope(scopeType, scopeDeptId, scopePosition, scopeUserIds))
       .then((results) => {
         if (active) setState((current) => ({ ...current, loading: false, results }));
       })
@@ -65,7 +105,7 @@ export function UserPickerField(props: MobileFieldProps) {
         if (active) setState((current) => ({ ...current, loading: false, results: [] }));
       });
     return () => { active = false; };
-  }, [endpoint, state.keyword, state.open]);
+  }, [endpoint, state.keyword, state.open, scopeType, scopeDeptId, scopePosition, scopeUserIds]);
 
   const selectedUsers = state.selectedIds.map((id) => state.users[id] ?? fallbackUser(id));
   const readonly = props.mode === 'readonly';

@@ -5,6 +5,7 @@ import com.antflow.org.DepartmentMapper;
 import com.antflow.org.RoleMapper;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
+import com.antflow.org.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,8 @@ class MobileOrgServiceTest {
         Mockito.when(users.selectList(any())).thenReturn(List.of(user));
         Mockito.when(departments.selectBatchIds(any())).thenReturn(List.of(department));
 
-        MobilePickerUserDto row = new MobileOrgService(users, departments, roles).searchUsers("张").get(0);
+        MobilePickerUserDto row = new MobileOrgService(users, departments, roles)
+            .searchUsers(keywordQuery("张")).get(0);
 
         assertThat(row).isEqualTo(new MobilePickerUserDto(7L, "zhangsan", "张三", "研发部", "000007"));
     }
@@ -90,11 +92,35 @@ class MobileOrgServiceTest {
         Mockito.when(users.selectList(any(QueryWrapper.class))).thenReturn(List.of(user));
         Mockito.when(departments.selectBatchIds(any())).thenReturn(List.of(department));
 
-        new MobileOrgService(users, departments, roles).searchUsers("研发");
+        new MobileOrgService(users, departments, roles).searchUsers(keywordQuery("研发"));
 
         ArgumentCaptor<QueryWrapper> query = ArgumentCaptor.forClass(QueryWrapper.class);
         Mockito.verify(users).selectList(query.capture());
         assertThat(query.getValue().getSqlSegment()).contains("dept_id");
+    }
+
+    /** 设计器配的范围要落到移动端选择器的查询上——否则配了范围手机上照样看到全公司。 */
+    @Test
+    void appliesDesignerScopeToMobilePicker() {
+        UserMapper users = Mockito.mock(UserMapper.class);
+        DepartmentMapper departments = Mockito.mock(DepartmentMapper.class);
+        RoleMapper roles = Mockito.mock(RoleMapper.class);
+        Mockito.when(users.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        Mockito.when(departments.subtreeIds(20L)).thenReturn(List.of(20L, 21L));
+
+        new MobileOrgService(users, departments, roles).searchUsers(
+            UserService.UserQuery.of(null, 20L, true, false, "部长", null));
+
+        ArgumentCaptor<QueryWrapper> query = ArgumentCaptor.forClass(QueryWrapper.class);
+        Mockito.verify(users).selectList(query.capture());
+        String segment = query.getValue().getSqlSegment();
+        assertThat(segment).contains("dept_id").contains("position");
+        assertThat(query.getValue().getParamNameValuePairs().values().stream()
+            .anyMatch(value -> String.valueOf(value).contains("部长"))).isTrue();
+    }
+
+    private static UserService.UserQuery keywordQuery(String keyword) {
+        return UserService.UserQuery.of(keyword, null, null, null, null, null);
     }
 
     private static User user(long id, long deptId, String displayName, String username,
