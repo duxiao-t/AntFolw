@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -624,6 +625,26 @@ public class UserService {
         user.setPasswordHash(encoder.encode(rawPassword));
         userMapper.updateById(user);
         authSessionService.revokeAll(userId);
+    }
+
+    /**
+     * 自助修改密码：校验原密码 → 复用同一条长度策略 → 下线除当前会话之外的其它设备。
+     * 管理员重置他人密码走 {@link #resetPassword}，那条路会踢掉全部会话。
+     */
+    @Transactional
+    public void changeOwnPassword(long userId, UUID currentSessionId,
+                                  String currentPassword, String nextPassword) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        if (currentPassword == null || !encoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new BizException("PASSWORD_INCORRECT", "原密码不正确");
+        }
+        validatePassword(nextPassword);
+        user.setPasswordHash(encoder.encode(nextPassword));
+        userMapper.updateById(user);
+        authSessionService.revokeAllExcept(userId, currentSessionId);
     }
 
     private void validatePassword(String rawPassword) {

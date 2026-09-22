@@ -1,6 +1,7 @@
 package com.antflow.auth;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
@@ -171,6 +172,23 @@ public class AuthSessionService {
                 session.setRevokedAt(revokedAt);
                 sessionMapper.updateById(session);
             });
+    }
+
+    /**
+     * 下线该用户除 keep 之外的所有会话（改密码后调用：密码变了，别处不该继续登录着）。
+     * 一条 UPDATE 而不是逐个 revoke——中途失败时不会只踢掉一半。keep 为 null 等同 revokeAll。
+     */
+    @Transactional
+    public void revokeAllExcept(long userId, UUID keep) {
+        if (keep == null) {
+            revokeAll(userId);
+            return;
+        }
+        sessionMapper.update(null, new UpdateWrapper<AuthSession>()
+            .eq("user_id", userId)
+            .ne("id", keep)
+            .isNull("revoked_at")
+            .set("revoked_at", now()));
     }
 
     private AuthService.Authenticated bindAccessToken(AuthService.Authenticated authenticated, UUID sessionId) {

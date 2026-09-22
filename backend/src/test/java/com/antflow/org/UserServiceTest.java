@@ -18,11 +18,13 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.contains;
@@ -536,6 +538,54 @@ class UserServiceTest {
         assertTrue(captor.getValue().getParamNameValuePairs().values().stream()
                 .anyMatch(value -> String.valueOf(value).contains("经理")),
             "实际参数: " + captor.getValue().getParamNameValuePairs());
+    }
+
+    /** 自助改密码：校验原密码，成功后只下线「其它」会话（当前会话要能继续用）。 */
+    @Test
+    void changingOwnPasswordVerifiesCurrentPasswordAndKeepsThisSession() {
+        UUID keep = UUID.randomUUID();
+        User user = new User();
+        user.setId(9L);
+        user.setPasswordHash("hash-old");
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        PasswordEncoder encoder = Mockito.mock(PasswordEncoder.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(encoder.matches("old-pass", "hash-old")).thenReturn(true);
+        when(encoder.encode("new-pass-123")).thenReturn("hash-new");
+
+        service(userMapper, encoder, sessions).changeOwnPassword(9L, keep, "old-pass", "new-pass-123");
+
+        assertEquals("hash-new", user.getPasswordHash());
+        verify(sessions).revokeAllExcept(9L, keep);
+    }
+
+    @Test
+    void changingOwnPasswordRejectsWrongCurrentPasswordAndKeepsSessions() {
+        UUID keep = UUID.randomUUID();
+        User user = new User();
+        user.setId(9L);
+        user.setPasswordHash("hash-old");
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        PasswordEncoder encoder = Mockito.mock(PasswordEncoder.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(encoder.matches("wrong", "hash-old")).thenReturn(false);
+
+        assertThrows(BizException.class,
+            () -> service(userMapper, encoder, sessions).changeOwnPassword(9L, keep, "wrong", "new-pass-123"));
+
+        assertEquals("hash-old", user.getPasswordHash());
+        verify(sessions, never()).revokeAllExcept(anyLong(), any());
+    }
+
+    private static UserService service(UserMapper userMapper, PasswordEncoder encoder,
+                                       AuthSessionService sessions) {
+        return new UserService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), encoder, Mockito.mock(DepartmentMapper.class),
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class),
+            Mockito.mock(FormalNumberService.class), Mockito.mock(AuthorizationService.class),
+            sessions, Mockito.mock(AuditService.class));
     }
 
     private static UserService newService(UserMapper userMapper, UserRoleMapper userRoleMapper,
