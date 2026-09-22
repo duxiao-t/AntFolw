@@ -234,11 +234,17 @@ function collectOptionErrors(nodes: SchemaNode[]) {
   const optionTypes = new Set(['select', 'multi_select']);
   const errors: string[] = [];
   nodes.forEach((node) => {
-    if (
-      optionTypes.has(node.type) &&
-      !isBoundOptionSource(node.props) && (!Array.isArray(node.props?.options) || node.props.options.length === 0)
-    ) {
-      errors.push(getNodeLabel(node));
+    if (optionTypes.has(node.type)) {
+      if (isBoundOptionSource(node.props)) {
+        // 已绑定外部数据源但值列/显示列没选全（多列数据源需手动选择）。
+        // 发布时后端会拒绝，这里提前告诉管理员，避免只看到一个「选项列映射不存在」。
+        const source = node.props?.optionSource as { valueColumn?: string; labelColumn?: string } | undefined;
+        if (!source?.valueColumn?.trim() || !source?.labelColumn?.trim()) {
+          errors.push(getNodeLabel(node));
+        }
+      } else if (!Array.isArray(node.props?.options) || node.props.options.length === 0) {
+        errors.push(getNodeLabel(node));
+      }
     }
     if (node.children) {
       errors.push(...collectOptionErrors(node.children));

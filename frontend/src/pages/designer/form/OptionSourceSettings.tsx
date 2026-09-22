@@ -8,6 +8,9 @@ import type { SchemaNode } from '../../../registry/types';
 type Source = { id: number; code: string; name: string; versionId: number;
   versionNo: number; columns: string[]; rowCount: number };
 
+/** 这些下拉的候选项是列名/版本名，比默认宽度长得多；给足约 10 个汉字的宽度，避免只露两三个字。 */
+const SELECT_WIDTH = 190;
+
 function siblings(nodes: SchemaNode[], id: string): SchemaNode[] {
   const flat = nodes.flatMap((node) => node.type === 'span_layout' ? [node, ...node.children ?? []] : [node]);
   if (flat.some((node) => node.id === id)) return flat;
@@ -53,7 +56,8 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
   return <Space direction="vertical" style={{ width: '100%' }}>
     {isSelect && <>
       <Typography.Text strong>选项来源</Typography.Text>
-      <Select value={sourceMode} options={[{ label: '手动设置', value: 'static' }, { label: '已导入的数据', value: 'source' }]}
+      <Select style={{ width: SELECT_WIDTH }} value={sourceMode}
+        options={[{ label: '手动设置', value: 'static' }, { label: '已导入的数据', value: 'source' }]}
         onChange={(value) => {
           if (value === 'source') {
             setDraftMode('source');
@@ -65,24 +69,29 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
         }} />
       {sourceMode === 'source' && <>
         <Typography.Text type="secondary">选择已发布版本。更新数据后，重新发布表单才能切换版本。</Typography.Text>
-        <Select placeholder="选择数据源与版本" value={selected?.versionId}
+        <Select style={{ width: SELECT_WIDTH }} placeholder="选择数据源与版本" value={selected?.versionId}
           options={sources.map((s) => ({ value: s.versionId, label: `${s.name} · v${s.versionNo} (${s.rowCount} 行)` }))}
           onChange={(versionId) => {
             const source = sources.find((s) => s.versionId === versionId);
             if (!source) return;
             setDraftMode(null);
+            // 一一对应：数据源只有一列时，值列与显示列只能是它，直接填好省掉两次手选。
+            // 多列时留空，交由管理员自己挑——预填「第一列」几乎肯定是错的，反而误导。
+            const onlyColumn = source.columns.length === 1 ? source.columns[0] : undefined;
             update({ optionSource: { sourceId: source.id, versionId: source.versionId,
-              valueColumn: source.columns[0], labelColumn: source.columns[0] }, defaultValue: undefined });
+              valueColumn: onlyColumn, labelColumn: onlyColumn }, defaultValue: undefined });
           }} />
         {selected && <>
           <Typography.Text>保存值所在列</Typography.Text>
-          <Select value={binding.valueColumn} options={columns.map((c) => ({ label: c, value: c }))}
+          <Select style={{ width: SELECT_WIDTH }} placeholder="选择保存值的列"
+            value={binding.valueColumn} options={columns.map((c) => ({ label: c, value: c }))}
             onChange={(valueColumn) => update({ optionSource: { ...binding, valueColumn } })} />
           <Typography.Text>显示名称所在列</Typography.Text>
-          <Select value={binding.labelColumn} options={columns.map((c) => ({ label: c, value: c }))}
+          <Select style={{ width: SELECT_WIDTH }} placeholder="选择显示名的列"
+            value={binding.labelColumn} options={columns.map((c) => ({ label: c, value: c }))}
             onChange={(labelColumn) => update({ optionSource: { ...binding, labelColumn } })} />
           <Typography.Text>根据上游下拉筛选</Typography.Text>
-          <Select allowClear placeholder="无联动" value={binding.dependency?.fieldId}
+          <Select style={{ width: SELECT_WIDTH }} allowClear placeholder="无联动" value={binding.dependency?.fieldId}
             options={parents.filter((parent) => parent.props?.optionSource?.sourceId === selected.id
               && parent.props?.optionSource?.versionId === selected.versionId)
               .map((parent) => ({ label: parent.label ?? parent.id, value: parent.id }))}
@@ -92,7 +101,7 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
                 ? { fieldId, matchColumn: parent.props?.optionSource?.valueColumn } : undefined } });
             }} />
           <Typography.Text>逐步缩小候选</Typography.Text>
-          <Select value={binding.cascade?.kind ?? 'none'} options={[
+          <Select style={{ width: SELECT_WIDTH }} value={binding.cascade?.kind ?? 'none'} options={[
             { value: 'none', label: '直接搜索完整选项' },
             { value: 'split', label: '按编码前缀分步' },
             { value: 'columns', label: '按分类列分步' },
@@ -101,7 +110,8 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
               : { kind, levelColumns: [columns[0]] } } })} />
           {binding.cascade?.kind === 'split' && <>
             <Typography.Text>用于拆分的编码列</Typography.Text>
-            <Select value={binding.cascade.sourceColumn} options={columns.map((c) => ({ label: c, value: c }))}
+            <Select style={{ width: SELECT_WIDTH }} value={binding.cascade.sourceColumn}
+              options={columns.map((c) => ({ label: c, value: c }))}
               onChange={(sourceColumn) => update({ optionSource: { ...binding, cascade: { ...binding.cascade, sourceColumn } } })} />
             <Typography.Text>每级取几位（逗号分隔，J→K→L 输入 1,1,1）</Typography.Text>
             <Input value={(binding.cascade.split?.lengths ?? []).join(',')} onChange={(event) => {
@@ -111,7 +121,7 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
           </>}
           {binding.cascade?.kind === 'columns' && <>
             <Typography.Text>按顺序选择分类列</Typography.Text>
-            <Select mode="multiple" value={binding.cascade.levelColumns ?? []}
+            <Select style={{ width: SELECT_WIDTH }} mode="multiple" value={binding.cascade.levelColumns ?? []}
               options={columns.map((c) => ({ label: c, value: c }))}
               onChange={(levelColumns) => update({ optionSource: { ...binding, cascade: { kind: 'columns', levelColumns } } })} />
           </>}
@@ -120,12 +130,19 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
     </>}
     {!isSelect && <>
       <Typography.Text strong>下拉选择后自动填写</Typography.Text>
-      <Select allowClear placeholder="不联动" value={link?.fieldId}
+      <Select style={{ width: SELECT_WIDTH }} allowClear placeholder="不联动" value={link?.fieldId}
         options={parents.map((parent) => ({ value: parent.id, label: parent.label ?? parent.id }))}
-        onChange={(fieldId) => update({ dataLinkage: fieldId ? { fieldId } : undefined })} />
+        onChange={(fieldId) => {
+          const parent = parents.find((item) => item.id === fieldId);
+          if (!parent) { update({ dataLinkage: undefined }); return; }
+          // 一一对应：上游数据源只有一列时，带出的列只能是它，直接填好；多列则留空由管理员选。
+          const parentColumns = sources.find(
+            (s) => s.versionId === parent.props?.optionSource?.versionId)?.columns ?? [];
+          update({ dataLinkage: { fieldId, valueColumn: parentColumns.length === 1 ? parentColumns[0] : undefined } });
+        }} />
       {currentParent && <>
         <Typography.Text>填写外表中的哪一列</Typography.Text>
-        <Select value={link?.valueColumn}
+        <Select style={{ width: SELECT_WIDTH }} placeholder="选择要带出的列" value={link?.valueColumn}
           options={sources.find((s) => s.versionId === currentParent.props?.optionSource?.versionId)?.columns.map((c) => ({ label: c, value: c })) ?? []}
           onChange={(valueColumn) => update({ dataLinkage: { fieldId: currentParent.id, valueColumn } })} />
         <Typography.Text type="secondary">只有一条结果时自动填写；后续可以手动修改。</Typography.Text>
