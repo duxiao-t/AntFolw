@@ -24,7 +24,7 @@ import {
 } from '@/components';
 import { WorkflowEventsSubscriber } from '@/components/WorkflowEventsSubscriber';
 import { CAPABILITY, hasCapability } from './authz';
-import { navToMenuData, type NavNode } from '@/pages/registry';
+import { navToMenuData, PAGE_BY_KEY, type NavNode } from '@/pages/registry';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -148,6 +148,56 @@ export async function getInitialState(): Promise<{
   };
 }
 
+/**
+ * 隐藏页（设计器、向导等）不在后端菜单里，ProLayout 无从推导，只能显式补标题与父级。
+ * 父级路径可点，是为了让子页有明确的返回入口。
+ */
+const HIDDEN_BREADCRUMBS: Array<{ test: RegExp; parent?: [string, string]; title: string }> = [
+  { test: /^\/approval\/forms\/new(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '表单向导' },
+  { test: /^\/approval\/forms\/[^/]+\/wizard(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '表单向导' },
+  { test: /^\/approval\/option-sources(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '选项数据源' },
+  { test: /^\/(approval|admin)\/form-data(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '提交数据' },
+  { test: /^\/approval\/templates(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '模板库' },
+  { test: /^\/designer\/form\/[^/]+(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '表单设计器' },
+  { test: /^\/designer\/process\/[^/]+(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '流程设计器' },
+  { test: /^\/approval\/designer(\/|$)/, parent: ['/approval/forms', '表单管理'], title: '流程设计器' },
+  { test: /^\/proc\/[^/]+(\/|$)/, parent: ['/approval/records', '审批记录'], title: '申请详情' },
+  { test: /^\/runtime\/form\//, title: '填写表单' },
+  { test: /^\/runtime\/list(\/|$)/, title: '已提交表单' },
+  { test: /^\/tasks\/(inbox|done)(\/|$)/, title: '我的任务' },
+  { test: /^\/account\/(settings|center)(\/|$)/, title: '个人设置' },
+];
+
+/** 菜单页的中文名只有一个真源：后端菜单。按路径回查，避免在前端再抄一份。 */
+function findMenuTitle(navigation: NavNode[], pathname: string): string | undefined {
+  for (const node of navigation) {
+    const page = node.pageKey ? PAGE_BY_KEY[node.pageKey] : undefined;
+    if (page && (pathname === page.path || pathname.startsWith(`${page.path}/`))) {
+      return node.name ?? undefined;
+    }
+    const nested = findMenuTitle(node.children ?? [], pathname);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/** 第一项永远是可点的工作台，这样子页都有返回入口（ProLayout 默认不给）。 */
+function breadcrumbItems(pathname: string, navigation: NavNode[]) {
+  const home = { title: <Link to="/workplace">工作台</Link> };
+  const hidden = HIDDEN_BREADCRUMBS.find((entry) => entry.test.test(pathname));
+  if (hidden) {
+    return [
+      home,
+      ...(hidden.parent
+        ? [{ title: <Link to={hidden.parent[0]}>{hidden.parent[1]}</Link> }]
+        : []),
+      { title: hidden.title },
+    ];
+  }
+  const title = findMenuTitle(navigation, pathname);
+  return title && pathname !== '/workplace' ? [home, { title }] : [home];
+}
+
 // ProLayout 支持的api https://procomponents.ant.design/components/layout
 export const layout: RunTimeLayoutConfig = ({
   initialState,
@@ -160,6 +210,11 @@ export const layout: RunTimeLayoutConfig = ({
   return {
     // 菜单来自服务端编排（t_menu + 能力过滤），未注册 pageKey 会被跳过。
     menuDataRender: () => navToMenuData(initialState?.navigation ?? []),
+    // 面包屑自己拼：ProLayout 默认因 minLength=2 且 /approval 无父节点而整条不显示，
+    // 隐藏页也永远不在菜单里。这里保证每页至少有一条可点的工作台。
+    breadcrumbProps: { minLength: 1 },
+    breadcrumbRender: () =>
+      breadcrumbItems(window.location.pathname, initialState?.navigation ?? []),
     menuItemRender: (item, dom) => {
       if (item.path) {
         return (
