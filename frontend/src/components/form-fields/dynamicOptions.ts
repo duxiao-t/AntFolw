@@ -1,5 +1,5 @@
 import { request } from '@umijs/max';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SchemaNode } from '../../registry/types';
 
 export type RuntimeOption = { value: string; label: string };
@@ -33,6 +33,49 @@ export function isDynamicOption(node: SchemaNode) {
   return isBoundOptionSource(node.props);
 }
 
+/**
+ * 上游字段变更后拉一次候选：**恰好一条就回填**（“一一对应”），否则清空、交回用户自己选。
+ *
+ * 文本联动（dataLinkage）与依赖型下拉（optionSource.dependency）都遵循这一条规则，
+ * 所以抽在一处，避免两份分头漂移。
+ * 已有草稿与历史回显的原值不触发——只有用户真的改了上游才重算。
+ */
+function useUniqueMatchRefill({ active, nodeId, parentId, parentValue, values, context,
+  refillKey, apply }: {
+  active: boolean;
+  nodeId: string;
+  parentId?: string;
+  parentValue: unknown;
+  values: Record<string, any>;
+  context?: OptionContext;
+  /** 额外触发重算的键（如目标列、数据源版本）。 */
+  refillKey?: unknown;
+  apply: (match: RuntimeOption | undefined) => void;
+}) {
+  const previous = useRef(parentValue);
+  const applyRef = useRef(apply);
+  applyRef.current = apply;
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+  useEffect(() => {
+    if (!active || !context || !(context.formCode || context.instanceId || context.dataId)) return;
+    if (previous.current === parentValue) return;
+    previous.current = parentValue;
+    let cancelled = false;
+    applyRef.current(undefined);
+    if (parentValue == null || parentValue === '') return;
+    request<Page>('/api/runtime/form-options/query', {
+      method: 'POST',
+      data: { ...context, fieldId: nodeId, values: valuesRef.current, page: 1, size: 2, path: [] },
+    }).then((result) => {
+      if (cancelled) return;
+      applyRef.current(result.total === 1 ? result.items[0] : undefined);
+    }).catch(() => { if (!cancelled) applyRef.current(undefined); });
+    return () => { cancelled = true; };
+  }, [active, context?.dataId, context?.formCode, context?.formVersion, context?.instanceId,
+    nodeId, parentId, parentValue, refillKey]);
+}
+
 export function useLinkedValue(
   node: SchemaNode,
   values: Record<string, any> = {},
@@ -41,39 +84,32 @@ export function useLinkedValue(
 ) {
   const linkage = node.props?.dataLinkage as Record<string, any> | undefined;
   const parentId = linkage?.fieldId as string | undefined;
-  const parentValue = parentId ? values[parentId] : undefined;
-  const previous = useRef(parentValue);
-  const callback = useRef(onChange);
-  callback.current = onChange;
-  useEffect(() => {
-    if (!linkage || !context || !(context.formCode || context.instanceId || context.dataId)) return;
-    // Hydrated drafts and history keep their saved values; only a user changing A triggers a refill.
-    if (previous.current === parentValue) return;
-    let cancelled = false;
-    previous.current = parentValue;
-    callback.current?.(undefined);
-    if (parentValue == null || parentValue === '') return;
-    request<Page>('/api/runtime/form-options/query', {
-      method: 'POST',
-      data: { ...context, fieldId: node.id, values, page: 1, size: 2, path: [] },
-    }).then((result) => {
-      if (cancelled) return;
-      if (result.total === 1) {
-        const raw = result.items[0].value;
-        const next = node.type === 'number' ? Number(raw) : raw;
-        callback.current?.(node.type === 'number' && (!Number.isFinite(next) || raw.trim() === '') ? undefined : next);
-      } else {
-        callback.current?.(undefined);
+  useUniqueMatchRefill({
+    active: Boolean(linkage),
+    nodeId: node.id,
+    parentId,
+    parentValue: parentId ? values[parentId] : undefined,
+    values,
+    context,
+    refillKey: `${linkage?.valueColumn ?? ''}|${node.type}`,
+    apply: (match) => {
+      if (!match) { onChange?.(undefined); return; }
+      const raw = match.value;
+      if (node.type === 'number') {
+        const next = Number(raw);
+        onChange?.(!Number.isFinite(next) || String(raw).trim() === '' ? undefined : next);
+        return;
       }
-    }).catch(() => { if (!cancelled) callback.current?.(undefined); });
-    return () => { cancelled = true; };
-  }, [context?.dataId, context?.formCode, context?.formVersion, context?.instanceId, linkage?.fieldId, linkage?.valueColumn, node.id, node.type, parentValue]);
+      onChange?.(raw);
+    },
+  });
 }
 
 export function useDynamicOptions(
   node: SchemaNode,
   values: Record<string, any> = {},
   context?: OptionContext,
+  onChange?: (value: any) => void,
 ) {
   const [path, setPath] = useState<string[]>([]);
   const [result, setResult] = useState<Page | null>(null);
@@ -81,6 +117,9 @@ export function useDynamicOptions(
   const [keyword, setKeyword] = useState('');
   const [labels, setLabels] = useState<RuntimeOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // 候选按页累积：下拉滚到底继续取下一页，列表里只出现一次。
+  const [items, setItems] = useState<RuntimeOption[]>([]);
   const [error, setError] = useState<string>();
   const source = node.props?.optionSource as Record<string, any> | undefined;
   const dynamic = Boolean(source && context && (context.formCode || context.instanceId || context.dataId));
@@ -97,6 +136,19 @@ export function useDynamicOptions(
     setKeyword('');
   }, [node.id, parentValue, source?.versionId]);
 
+  useUniqueMatchRefill({
+    // 依赖型**单选**下拉：上游变更后过滤结果只剩一个候选就自动选中；
+    // 多个候选保持现状由用户自己挑。多选不自动选中——用户可能一个都不要。
+    active: Boolean(source?.dependency?.fieldId) && node.type === 'select' && dynamic,
+    nodeId: node.id,
+    parentId,
+    parentValue,
+    values,
+    context,
+    refillKey: source?.versionId,
+    apply: (match) => onChange?.(match ? match.value : undefined),
+  });
+
   useEffect(() => {
     if (!dynamic || selectedValues.length === 0) { setLabels([]); return; }
     let cancelled = false;
@@ -109,11 +161,12 @@ export function useDynamicOptions(
   useEffect(() => {
     if (!dynamic) {
       setResult(null);
+      setItems([]);
       return;
     }
     let cancelled = false;
-    setLoading(true);
     setError(undefined);
+    if (pageNumber === 1) setLoading(true); else setLoadingMore(true);
     const body = {
       ...context,
       fieldId: node.id,
@@ -124,19 +177,27 @@ export function useDynamicOptions(
       path,
     };
     request<Page>('/api/runtime/form-options/query', { method: 'POST', data: body })
-      .then((response) => { if (!cancelled) setResult(response); })
+      .then((response) => {
+        if (cancelled) return;
+        setResult(response);
+        setItems((current) => (pageNumber === 1 ? response.items : [...current, ...response.items]));
+      })
       .catch((reason) => { if (!cancelled) setError(reason?.message ?? '选项加载失败'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .finally(() => { if (!cancelled) { setLoading(false); setLoadingMore(false); } });
     return () => { cancelled = true; };
   }, [context?.dataId, context?.formCode, context?.formVersion, context?.instanceId, dynamic, node.id, path, parentId, parentValue, pageNumber, keyword, filterKey]);
 
-  const options = useMemo(() => result?.items ?? [], [result]);
+  const total = result?.total ?? 0;
+  const stage = result?.stage ?? 'OPTIONS';
+  const hasMore = stage === 'OPTIONS' && items.length > 0 && items.length < total;
   const advance = (value: string) => {
     if (result?.stage === 'LEVEL') { setPath((current) => [...current, value]); setPageNumber(1); setKeyword(''); }
     return result?.stage === 'OPTIONS';
   };
   const reset = () => { setPath([]); setPageNumber(1); setKeyword(''); };
-  return { dynamic, options, labels, loading, error, stage: result?.stage ?? 'OPTIONS', path,
-    total: result?.total ?? 0, page: pageNumber, keyword, search: (next: string) => { setPageNumber(1); setKeyword(next); },
-    next: () => setPageNumber((n) => n + 1), back: () => { setPath((current) => current.slice(0, -1)); setPageNumber(1); }, advance, reset };
+  return { dynamic, options: items, labels, loading, loadingMore, hasMore, error, stage, path,
+    total, keyword, search: (next: string) => { setPageNumber(1); setKeyword(next); },
+    // 下拉滚到底继续取下一页；加载中或已到底时不重复触发。
+    loadMore: () => { if (!loading && !loadingMore && hasMore) setPageNumber((n) => n + 1); },
+    back: () => { setPath((current) => current.slice(0, -1)); setPageNumber(1); }, advance, reset };
 }

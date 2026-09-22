@@ -165,10 +165,13 @@ export const SelectField: FieldType = {
 };
 
 function DynamicSelect({ node, mode, value, onChange, values, optionContext }: any) {
-  const dynamic = useDynamicOptions(node, values, optionContext);
+  const dynamic = useDynamicOptions(node, values, optionContext, onChange);
   const current = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
   const isLevel = dynamic.stage === 'LEVEL';
   const display = isLevel && dynamic.path.length ? `${dynamic.path.join(' / ')} / ` : '';
+  // 与静态下拉一致：只认字段自己的设置。
+  const searchable = node.props?.showSearch === true;
+  const clearable = node.props?.allowClear !== false;
   return (
     <div data-field-id={node.id}>
       <div style={{ display: 'block', marginBottom: 4 }}>{node.label}{node.props?.required ? ' *' : ''}</div>
@@ -180,19 +183,31 @@ function DynamicSelect({ node, mode, value, onChange, values, optionContext }: a
           options={[...dynamic.labels, ...dynamic.options].filter((item, index, all) => all.findIndex((candidate) => candidate.value === item.value) === index)
             .map((item) => ({ value: item.value, label: `${display}${item.label}` }))}
           placeholder={dynamic.error ?? (isLevel ? `请选择第 ${dynamic.path.length + 1} 级` : node.props?.placeholder)}
-          showSearch
+          showSearch={searchable}
           filterOption={false}
-          onSearch={dynamic.search}
+          onSearch={searchable ? dynamic.search : undefined}
           onChange={(next: string) => {
             if (dynamic.advance(next)) onChange?.(next);
           }}
           onClear={() => { dynamic.reset(); onChange?.(undefined); }}
-          allowClear
+          allowClear={clearable}
+          // 滚到底继续取下一页，替代原来的「更多选项」按钮。
+          onPopupScroll={(event: any) => {
+            const list = event.currentTarget as HTMLElement;
+            if (list.scrollHeight - list.scrollTop - list.clientHeight < 48) dynamic.loadMore();
+          }}
+          popupRender={(menu: any) => (
+            <>
+              {menu}
+              {dynamic.loadingMore
+                ? <div style={{ padding: '8px 12px', color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>加载中…</div>
+                : null}
+            </>
+          )}
           style={{ width: '100%' }}
         />
       )}
       {dynamic.path.length > 0 ? <button type="button" onClick={dynamic.back}>上一步</button> : null}
-      {dynamic.total > dynamic.page * 20 ? <button type="button" onClick={dynamic.next}>更多选项</button> : null}
     </div>
   );
 }
