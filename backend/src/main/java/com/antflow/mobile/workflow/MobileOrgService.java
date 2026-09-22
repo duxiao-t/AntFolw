@@ -85,6 +85,17 @@ public class MobileOrgService {
             .toList();
     }
 
+    /**
+     * 选择器用的部门清单：全部部门、不打 20 条上限。{@link #searchDepartments} 有 LIMIT，
+     * 拿它做下拉会静默漏掉排在后面的部门。供 /api/pickers/departments 使用。
+     */
+    public List<MobilePickerDepartmentDto> allDepartments() {
+        return departmentMapper.selectList(new QueryWrapper<Department>()
+                .select("id", "name").orderByAsc("name")).stream()
+            .map(department -> new MobilePickerDepartmentDto(department.getId(), department.getName()))
+            .toList();
+    }
+
     /** 角色选择器：只暴露 id/code/name，供流程配置里的"审批角色"选择使用。 */
     public List<PickerRoleDto> searchRoles(String keyword) {
         QueryWrapper<Role> query = new QueryWrapper<>();

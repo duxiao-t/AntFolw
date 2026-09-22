@@ -47,7 +47,8 @@ class UserServiceTest {
         when(userMapper.selectBatchIds(any())).thenReturn(List.of(manager));
         when(authorizationService.inCurrentDataScope(any(), eq(1L), eq(10L))).thenReturn(true);
 
-        List<User> users = service.listAuthorized(null, null, false);
+        List<User> users = service.listAuthorized(
+            UserService.UserQuery.of(null, null, null, null, null, null));
 
         assertEquals("张经理", users.get(0).getManagerDisplayName());
         verify(userMapper).selectBatchIds(List.of(2L));
@@ -493,7 +494,7 @@ class UserServiceTest {
         verify(userRoleMapper, never()).delete(any(QueryWrapper.class));
     }
 
-    /** 「部门领导」范围：只加一个职务过滤，其余（能力 + 逐行数据范围）沿用原路径。 */
+    /** 「部门领导」范围：职务过滤的一个预设值，其余（能力 + 逐行数据范围）沿用原路径。 */
     @Test
     void leaderScopeFiltersCandidatesByPositionTitle() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
@@ -503,7 +504,7 @@ class UserServiceTest {
             Mockito.mock(JdbcTemplate.class));
         when(userMapper.selectList(any())).thenReturn(List.of());
 
-        service.listAuthorized(null, null, true);
+        service.listAuthorized(UserService.UserQuery.of(null, null, null, true, null, null));
 
         ArgumentCaptor<QueryWrapper<User>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(userMapper).selectList(captor.capture());
@@ -512,6 +513,28 @@ class UserServiceTest {
         assertTrue(segment.contains("position"), "部门领导范围应按职务过滤，实际条件: " + segment);
         assertTrue(captor.getValue().getParamNameValuePairs().values().stream()
                 .anyMatch(value -> String.valueOf(value).contains("部长")),
+            "实际参数: " + captor.getValue().getParamNameValuePairs());
+    }
+
+    /** 自由文本「指定职位」同样走职务过滤；显式名单则按 id 收窄。 */
+    @Test
+    void positionAndExplicitUserListNarrowCandidates() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            Mockito.mock(JdbcTemplate.class));
+        when(userMapper.selectList(any())).thenReturn(List.of());
+
+        service.listAuthorized(UserService.UserQuery.of(null, null, null, null, "经理", List.of(7L, 8L)));
+
+        ArgumentCaptor<QueryWrapper<User>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(userMapper).selectList(captor.capture());
+        String segment = captor.getValue().getSqlSegment();
+        assertTrue(segment.contains("position"), "指定职位应按职务过滤: " + segment);
+        assertTrue(segment.contains("id"), "指定人员应按 id 收窄: " + segment);
+        assertTrue(captor.getValue().getParamNameValuePairs().values().stream()
+                .anyMatch(value -> String.valueOf(value).contains("经理")),
             "实际参数: " + captor.getValue().getParamNameValuePairs());
     }
 

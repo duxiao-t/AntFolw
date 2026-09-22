@@ -1,6 +1,7 @@
 package com.antflow.org;
 
 import com.antflow.mobile.workflow.MobileOrgService;
+import com.antflow.mobile.workflow.MobilePickerDepartmentDto;
 import com.antflow.mobile.workflow.MobilePickerUserDto;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,16 @@ public class PickerController {
     @PreAuthorize("@authz.consoleEntry()")
     public MobilePickerUserDto user(@PathVariable long id) {
         return service.user(id);
+    }
+
+    /**
+     * 选择器用的部门清单。与 /api/departments 的区别是门禁：那个要 ORG_DEPARTMENT_READ，
+     * 而配置选择器的人（如表单设计师）不一定持有，所以这里只要求已进管理端。
+     */
+    @GetMapping("/departments")
+    @PreAuthorize("@authz.consoleEntry()")
+    public List<MobilePickerDepartmentDto> departments() {
+        return service.allDepartments();
     }
 
     @GetMapping("/roles")

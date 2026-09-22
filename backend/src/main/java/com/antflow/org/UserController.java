@@ -27,8 +27,12 @@ public class UserController {
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_READ + "')")
     public List<User> list(@RequestParam(required = false) String keyword,
                            @RequestParam(required = false) Long deptId,
-                           @RequestParam(required = false) Boolean leaderOnly) {
-        return userService.listAuthorized(keyword, deptId, Boolean.TRUE.equals(leaderOnly));
+                           @RequestParam(required = false) Boolean includeDescendants,
+                           @RequestParam(required = false) Boolean leaderOnly,
+                           @RequestParam(required = false) String position,
+                           @RequestParam(required = false) List<Long> userIds) {
+        return userService.listAuthorized(UserService.UserQuery.of(
+            keyword, deptId, includeDescendants, leaderOnly, position, userIds));
     }
 
     @GetMapping("/page")

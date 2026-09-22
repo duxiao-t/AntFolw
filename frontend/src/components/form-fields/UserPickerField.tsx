@@ -11,16 +11,26 @@ export const UserPickerField: FieldType = {
   defaultProps: { required: false, multiple: false, scopeType: 'all' },
   Component: ({ node, mode, value, onChange }) => {
     const [kw, setKw] = useState('');
+    // 一次只用一个维度：指定部门（含下级）/ 指定职位 / 部门领导 / 指定人员 / 全部。
+    // 后端把这些条件当作相互独立的收窄，所以将来要组合也不必改这里。
     const scopeType = node.props?.scopeType;
-    const deptId = scopeType === 'department' ? node.props?.scopeDeptId : undefined;
-    // 「部门领导」由后端按职务（含「部长」）过滤，前端只传一个开关。
-    const leaderOnly = scopeType === 'leader';
+    const scopeParams: Record<string, unknown> = {};
+    if (scopeType === 'department' && node.props?.scopeDeptId) {
+      scopeParams.deptId = node.props.scopeDeptId;
+      scopeParams.includeDescendants = true;
+    } else if (scopeType === 'position' && node.props?.scopePosition?.trim()) {
+      scopeParams.position = node.props.scopePosition.trim();
+    } else if (scopeType === 'leader') {
+      // 职务口径（含「部长」）留在服务端，前端只说明是哪个预设。
+      scopeParams.leaderOnly = true;
+    } else if (scopeType === 'user' && node.props?.scopeUserIds?.length) {
+      scopeParams.userIds = node.props.scopeUserIds;
+    }
+    const scopeKey = JSON.stringify(scopeParams);
     const { data, isFetching } = useQuery({
-      queryKey: ['users', 'field', kw, deptId, leaderOnly],
+      queryKey: ['users', 'field', kw, scopeKey],
       queryFn: () =>
-        request<any[]>('/api/users', {
-          params: { keyword: kw, deptId, leaderOnly: leaderOnly || undefined },
-        }),
+        request<any[]>('/api/users', { params: { keyword: kw, ...scopeParams } }),
     });
     const multi = !!node.props?.multiple;
     return (
