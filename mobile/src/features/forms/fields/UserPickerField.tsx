@@ -257,8 +257,10 @@ function fallbackUser(id: number): MobilePickerUser {
 
 function identityMeta(user: MobilePickerUser | null | undefined, id: number | null) {
   const department = user?.department || '未设置部门';
-  const employeeNo = user?.employeeNo || user?.username || (id == null ? '未设置' : String(id));
-  return `${department} · 工号 ${employeeNo}`;
+  // 有工号才写「工号」。此前缺工号时拿账号冒充，既误导又很长（账号往往是一长串），
+  // 现在退回用户 ID，语义正确也不会撑破这一行。
+  const label = user?.employeeNo ? `工号 ${user.employeeNo}` : id == null ? null : `#${id}`;
+  return label ? `${department} · ${label}` : department;
 }
 
 function identityText(user: MobilePickerUser | null | undefined, id: number | null) {
