@@ -3885,6 +3885,18 @@ body {
   font-size: 12px;
   font-weight: 700;
 }
+/* 分步筛选的「上一步」放在列表上方，不占头部三列网格的左槽（否则标题会被挤偏）。 */
+.af-full-picker__back-step {
+  align-self: flex-start;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--af-radius-control);
+  background: color-mix(in srgb, var(--af-color-primary) 10%, transparent);
+  color: var(--af-color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
 .af-full-picker__head h3 {
   margin: 0;
   overflow: hidden;

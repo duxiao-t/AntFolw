@@ -1,4 +1,3 @@
-import { CheckOutline, DownOutline } from 'antd-mobile-icons';
 import { Input } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
@@ -16,6 +15,7 @@ import {
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 import { DynamicSelectField } from './DynamicSelectField';
 import { isBoundOptionSource } from './dynamicOptions';
+import { PickerOptionList, PickerSearchInput, PickerTrigger } from './SelectPicker';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
 
@@ -54,6 +54,13 @@ function StaticSelectField(props: MobileFieldProps) {
       ? options.filter((option) => option.label.toLocaleLowerCase().includes(query))
       : options;
   }, [keyword, options]);
+  const pickerOptions = visibleOptions.map((option) => ({
+    value: option.isOther ? OTHER_OPTION_VALUE : option.value,
+    label: option.label,
+    color: option.color,
+    disabled: option.disabled,
+    selected: option.isOther ? otherSelected : !otherSelected && selected === option.value,
+  }));
 
   useEffect(() => {
     setSelected(value);
@@ -99,17 +106,14 @@ function StaticSelectField(props: MobileFieldProps) {
           />
         ) : (
         <>
-          <button
-            type="button"
-            className={`control form-picker${selectedLabel ? '' : ' af-field-picker--placeholder'}`}
+          <PickerTrigger
+            value={selectedLabel}
+            placeholder={placeholder}
             onClick={() => {
               setKeyword('');
               setVisible(true);
             }}
-          >
-            <span className="picker-value">{selectedLabel || placeholder}</span>
-            <DownOutline aria-hidden="true" />
-          </button>
+          />
           <MobileSelectionPopup
             visible={visible}
             title={`选择${label}`}
@@ -123,60 +127,22 @@ function StaticSelectField(props: MobileFieldProps) {
             onClose={closePicker}
           >
             {searchable ? (
-              <input
-                type="search"
-                className="af-full-picker__search"
-                aria-label={`搜索${label}`}
-                placeholder="搜索选项"
-                value={keyword}
-                onChange={(event) => setKeyword(event.currentTarget.value)}
-              />
+              <PickerSearchInput label={`搜索${label}`} placeholder="搜索选项"
+                value={keyword} onChange={setKeyword} />
             ) : null}
-            <div role="listbox" aria-label={label} className="af-full-picker__list">
-              {visibleOptions.map((option) => {
-                const active = option.isOther ? otherSelected : !otherSelected && selected === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="option"
-                    aria-label={option.label}
-                    aria-selected={active}
-                    className="af-full-picker__option af-full-picker__option--select"
-                    disabled={option.disabled}
-                    onClick={() => {
-                      if (option.isOther) {
-                        setOtherSelected(true);
-                        setSelected(null);
-                        props.onValueChange(props.node.id, undefined);
-                      } else {
-                        setOtherSelected(false);
-                        setSelected(option.value);
-                        props.onValueChange(props.node.id, option.value);
-                      }
-                      closePicker();
-                    }}
-                  >
-                    <span
-                      className="af-full-picker__avatar af-full-picker__avatar--choice"
-                      aria-hidden="true"
-                      style={useColor && option.color ? { background: option.color } : undefined}
-                    >
-                      {option.label.trim().slice(0, 1)}
-                    </span>
-                    <span className="af-full-picker__option-text">
-                      <strong>{option.label}</strong>
-                    </span>
-                    <span className="af-full-picker__option-status" aria-hidden="true">
-                      {active ? <CheckOutline /> : null}
-                    </span>
-                  </button>
-                );
-              })}
-              {visibleOptions.length === 0 ? (
-                <p className="af-full-picker__empty" role="status">没有匹配的选项</p>
-              ) : null}
-            </div>
+            <PickerOptionList label={label} useColor={useColor} options={pickerOptions}
+              onSelect={(option) => {
+                if (option.value === OTHER_OPTION_VALUE) {
+                  setOtherSelected(true);
+                  setSelected(null);
+                  props.onValueChange(props.node.id, undefined);
+                } else {
+                  setOtherSelected(false);
+                  setSelected(option.value);
+                  props.onValueChange(props.node.id, option.value);
+                }
+                closePicker();
+              }} />
           </MobileSelectionPopup>
         </>
         )

@@ -15,6 +15,9 @@ export type OptionPage = { stage: 'LEVEL' | 'OPTIONS'; level: number; totalLevel
 export type OptionRequest = { fieldId: string; values?: MobileFormValues; path?: string[];
   keyword?: string; page?: number; size?: number; selectedValues?: string[] };
 
+/** 每页候选数；列表滚到底再取下一页。 */
+const PAGE_SIZE = 20;
+
 /**
  * 只有带正整数 sourceId 的 optionSource 才算"已绑定"。
  * 设计器在"选择数据源版本"之前会写入空对象 {}，那不是绑定；按绑定额处理会去查选项并拿到
@@ -54,18 +57,21 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
   const parentValue = dependency?.fieldId ? props.values[dependency.fieldId] : undefined;
   const [path, setPath] = useState<string[]>([]);
   const [keyword, setKeyword] = useState('');
-  const [page, setPage] = useState(1);
   const [result, setResult] = useState<OptionPage>();
+  // 候选按页累积：滚到底继续取下一页，列表里只出现一次。
+  const [items, setItems] = useState<OptionItem[]>([]);
+  const [page, setPage] = useState(1);
   const [labels, setLabels] = useState<OptionItem[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const selected = Array.isArray(props.value) ? props.value : props.value == null || props.value === '' ? [] : [props.value];
   const selectedKey = JSON.stringify(selected.map(String));
   const filterKey = JSON.stringify(Object.fromEntries(Object.entries(props.values).filter(([id]) => id !== props.node.id)));
   const contextKey = JSON.stringify(props.optionContext ?? {});
   const context = props.optionContext;
 
-  useEffect(() => { setPath([]); setPage(1); setKeyword(''); }, [parentValue, props.node.id, source?.versionId]);
+  useEffect(() => { setPath([]); setKeyword(''); setPage(1); }, [parentValue, props.node.id, source?.versionId]);
   useEffect(() => {
     if (!context || selected.length === 0) { setLabels([]); return; }
     let active = true;
@@ -76,13 +82,40 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
   useEffect(() => {
     if (!visible || !context || dependency?.fieldId && (parentValue == null || parentValue === '')) return;
     let active = true;
-    setLoading(true); setError('');
+    setError('');
+    if (page === 1) setLoading(true); else setLoadingMore(true);
     void queryOptions(context, { fieldId: props.node.id, values: JSON.parse(filterKey), path,
-      keyword, page, size: 20 }).then((response) => { if (active) setResult(response); })
+      keyword, page, size: PAGE_SIZE })
+      .then((response) => {
+        if (!active) return;
+        setResult(response);
+        setItems((current) => (page === 1 ? response.items : [...current, ...response.items]));
+      })
       .catch((reason) => { if (active) setError(reason?.message ?? '选项加载失败'); })
-      .finally(() => { if (active) setLoading(false); });
+      .finally(() => { if (active) { setLoading(false); setLoadingMore(false); } });
     return () => { active = false; };
   }, [visible, contextKey, props.node.id, parentValue, dependency?.fieldId, filterKey, path, keyword, page]);
+  // 一一对应：上游变更后过滤结果只剩一个候选就自动选中，多个候选保持现状由用户自己挑。
+  // 多选不自动选中（用户可能一个都不要）；已有草稿与历史回显不触发。
+  const autoFillPrevious = useRef(parentValue);
+  const autoFillCallback = useRef(props.onValueChange);
+  autoFillCallback.current = props.onValueChange;
+  useEffect(() => {
+    if (!dependency?.fieldId || props.node.type !== 'select' || !context) return;
+    if (autoFillPrevious.current === parentValue) return;
+    autoFillPrevious.current = parentValue;
+    autoFillCallback.current(props.node.id, undefined);
+    if (parentValue == null || parentValue === '') return;
+    let active = true;
+    void queryOptions(context, { fieldId: props.node.id, values: props.values, size: 2, path: [] })
+      .then((response) => {
+        if (!active) return;
+        const item = response.total === 1 ? response.items[0] : undefined;
+        autoFillCallback.current(props.node.id, item ? item.value : undefined);
+      }).catch(() => {});
+    return () => { active = false; };
+  }, [contextKey, dependency?.fieldId, parentValue, props.node.id, props.node.type, source?.versionId]);
+
   const choose = (value: string) => {
     if (result?.stage === 'LEVEL') {
       setPath((before) => [...before, value]); setKeyword(''); setPage(1);
@@ -90,11 +123,12 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
     }
     return true;
   };
-  return { result, labels, path, page, keyword, error, loading, choose,
-    setKeyword: (v: string) => { setKeyword(v); setPage(1); },
-    back: () => { setPath((before) => before.slice(0, -1)); setPage(1); setKeyword(''); },
-    next: () => setPage((before) => before + 1),
-    previous: () => setPage((before) => Math.max(1, before - 1)),
+  const hasMore = result?.stage === 'OPTIONS' && items.length > 0 && items.length < (result?.total ?? 0);
+  return { result, items, labels, path, keyword, error, loading, loadingMore, hasMore, choose,
+    setKeyword: (value: string) => { setKeyword(value); setPage(1); },
+    back: () => { setPath((before) => before.slice(0, -1)); setKeyword(''); setPage(1); },
+    // 滚到底继续取下一页；加载中或已到底时不重复触发。
+    loadMore: () => { if (!loading && !loadingMore && hasMore) setPage((before) => before + 1); },
   };
 }
 

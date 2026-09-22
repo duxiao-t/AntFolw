@@ -1,4 +1,3 @@
-import { DownOutline } from 'antd-mobile-icons';
 import { Input } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
@@ -15,6 +14,7 @@ import {
 import { MobileSelectionPopup } from './MobileSelectionPopup';
 import { DynamicSelectField } from './DynamicSelectField';
 import { isBoundOptionSource } from './dynamicOptions';
+import { PickerOptionList, PickerSearchInput, PickerTrigger } from './SelectPicker';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
 
@@ -111,9 +111,7 @@ function StaticMultiSelectField(props: MobileFieldProps) {
           />
         ) : (
         <>
-          <button
-            type="button"
-            className={`control form-picker control--multi${selectedLabels.length > 0 ? '' : ' af-field-picker--placeholder'}`}
+          <PickerTrigger labels={selectedLabels} placeholder={placeholder}
             onClick={() => {
               setKeyword('');
               setDraftSelected([
@@ -121,17 +119,7 @@ function StaticMultiSelectField(props: MobileFieldProps) {
                 ...(otherSelected ? [OTHER_OPTION_VALUE] : []),
               ]);
               setVisible(true);
-            }}
-          >
-            {selectedLabels.length > 0 ? (
-              <span className="selected-tags">
-                {selectedLabels.map((item) => <span key={item}>{item}</span>)}
-              </span>
-            ) : (
-              <span className="picker-value">{placeholder}</span>
-            )}
-            <DownOutline aria-hidden="true" />
-          </button>
+            }} />
           <MobileSelectionPopup
             visible={visible}
             title={`选择${label}`}
@@ -159,53 +147,21 @@ function StaticMultiSelectField(props: MobileFieldProps) {
             )}
           >
             {searchable ? (
-              <input
-                type="search"
-                className="af-full-picker__search"
-                aria-label={`搜索${label}`}
-                placeholder="搜索选项"
-                value={keyword}
-                onChange={(event) => setKeyword(event.currentTarget.value)}
-              />
+              <PickerSearchInput label={`搜索${label}`} placeholder="搜索选项"
+                value={keyword} onChange={setKeyword} />
             ) : null}
-            <fieldset className="af-full-picker__list af-full-picker__fieldset">
-              <legend className="visually-hidden">{label}</legend>
-              {visibleOptions.map((option) => {
-                const checked = draftSelected.includes(
-                  option.isOther ? OTHER_OPTION_VALUE : option.value,
-                );
-                return (
-                  <label
-                    key={option.value}
-                    data-checked={checked ? 'true' : 'false'}
-                    data-disabled={option.disabled ? 'true' : 'false'}
-                    className="af-full-picker__option af-full-picker__option--select af-full-picker__option--check"
-                  >
-                    <span
-                      className="af-full-picker__avatar af-full-picker__avatar--choice"
-                      aria-hidden="true"
-                      style={useColor && option.color ? { background: option.color } : undefined}
-                    >
-                      {option.label.trim().slice(0, 1)}
-                    </span>
-                    <span className="af-full-picker__option-text">
-                      <strong>{option.label}</strong>
-                    </span>
-                    <input
-                      type="checkbox"
-                      aria-label={option.label}
-                      checked={checked}
-                      disabled={option.disabled}
-                      className="af-full-picker__native-check"
-                      onChange={() => toggleDraft(option.isOther ? OTHER_OPTION_VALUE : option.value)}
-                    />
-                  </label>
-                );
+            <PickerOptionList label={label} multiple useColor={useColor}
+              options={visibleOptions.map((option) => {
+                const value = option.isOther ? OTHER_OPTION_VALUE : option.value;
+                return {
+                  value,
+                  label: option.label,
+                  color: option.color,
+                  disabled: option.disabled,
+                  selected: draftSelected.includes(value),
+                };
               })}
-              {visibleOptions.length === 0 ? (
-                <p className="af-full-picker__empty" role="status">没有匹配的选项</p>
-              ) : null}
-            </fieldset>
+              onSelect={(option) => toggleDraft(option.value)} />
           </MobileSelectionPopup>
         </>
         )
