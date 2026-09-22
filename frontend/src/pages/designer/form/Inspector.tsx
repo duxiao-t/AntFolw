@@ -710,6 +710,7 @@ function renderComponentSettings(
               options={[
                 { label: '全部用户', value: 'all' },
                 { label: '指定部门', value: 'department' },
+                { label: '部门领导', value: 'leader' },
               ]}
               onChange={(scopeType) =>
                 updateProps({
@@ -732,6 +733,7 @@ function renderComponentSettings(
           )}
           <Typography.Text type="secondary">
             当前用户接口支持按部门 ID 限定范围；可视化部门选择器后续接入。
+            「部门领导」即职务带「部长」的人员。
           </Typography.Text>
         </Space>
       );

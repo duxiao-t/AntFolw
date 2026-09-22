@@ -247,7 +247,13 @@ public class UserService {
             .toList();
     }
 
-    public List<User> listAuthorized(String keyword, Long departmentId) {
+    /**
+     * 「部门领导」的范围定义：职务里带这个称谓。称谓改了只需改这一处。
+     * ponytail: 按职务字符串判定，不是 t_department.leader_id 关系；若 HR 改用别的称谓，改这里一个常量。
+     */
+    private static final String LEADER_TITLE = "部长";
+
+    public List<User> listAuthorized(String keyword, Long departmentId, boolean leaderOnly) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_READ);
         QueryWrapper<User> query = new QueryWrapper<>();
         if (keyword != null && !keyword.isBlank()) {
@@ -257,6 +263,10 @@ public class UserService {
         }
         if (departmentId != null) {
             query.eq("dept_id", departmentId);
+        }
+        if (leaderOnly) {
+            // LIKE 自动排除职务为空的用户——没有职务的人本来就不是领导。
+            query.like("position", LEADER_TITLE);
         }
         List<User> users = userMapper.selectList(query).stream()
             .filter(user -> authorizationService.inCurrentDataScope(

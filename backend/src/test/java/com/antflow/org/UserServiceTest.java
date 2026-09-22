@@ -14,11 +14,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import org.mockito.ArgumentCaptor;
+
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -44,7 +47,7 @@ class UserServiceTest {
         when(userMapper.selectBatchIds(any())).thenReturn(List.of(manager));
         when(authorizationService.inCurrentDataScope(any(), eq(1L), eq(10L))).thenReturn(true);
 
-        List<User> users = service.listAuthorized(null, null);
+        List<User> users = service.listAuthorized(null, null, false);
 
         assertEquals("张经理", users.get(0).getManagerDisplayName());
         verify(userMapper).selectBatchIds(List.of(2L));
@@ -488,6 +491,28 @@ class UserServiceTest {
         verify(jdbcTemplate).query(contains("FOR UPDATE"),
             Mockito.<ResultSetExtractor<Long>>any());
         verify(userRoleMapper, never()).delete(any(QueryWrapper.class));
+    }
+
+    /** 「部门领导」范围：只加一个职务过滤，其余（能力 + 逐行数据范围）沿用原路径。 */
+    @Test
+    void leaderScopeFiltersCandidatesByPositionTitle() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            Mockito.mock(JdbcTemplate.class));
+        when(userMapper.selectList(any())).thenReturn(List.of());
+
+        service.listAuthorized(null, null, true);
+
+        ArgumentCaptor<QueryWrapper<User>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(userMapper).selectList(captor.capture());
+        // 参数是懒物化的：先取 SQL 片段，paramNameValuePairs 才会被填上。
+        String segment = captor.getValue().getSqlSegment();
+        assertTrue(segment.contains("position"), "部门领导范围应按职务过滤，实际条件: " + segment);
+        assertTrue(captor.getValue().getParamNameValuePairs().values().stream()
+                .anyMatch(value -> String.valueOf(value).contains("部长")),
+            "实际参数: " + captor.getValue().getParamNameValuePairs());
     }
 
     private static UserService newService(UserMapper userMapper, UserRoleMapper userRoleMapper,

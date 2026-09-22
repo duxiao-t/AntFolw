@@ -26,8 +26,9 @@ public class UserController {
     @GetMapping
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_READ + "')")
     public List<User> list(@RequestParam(required = false) String keyword,
-                           @RequestParam(required = false) Long deptId) {
-        return userService.listAuthorized(keyword, deptId);
+                           @RequestParam(required = false) Long deptId,
+                           @RequestParam(required = false) Boolean leaderOnly) {
+        return userService.listAuthorized(keyword, deptId, Boolean.TRUE.equals(leaderOnly));
     }
 
     @GetMapping("/page")

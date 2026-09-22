@@ -11,13 +11,15 @@ export const UserPickerField: FieldType = {
   defaultProps: { required: false, multiple: false, scopeType: 'all' },
   Component: ({ node, mode, value, onChange }) => {
     const [kw, setKw] = useState('');
-    const deptId =
-      node.props?.scopeType === 'department' ? node.props?.scopeDeptId : undefined;
+    const scopeType = node.props?.scopeType;
+    const deptId = scopeType === 'department' ? node.props?.scopeDeptId : undefined;
+    // 「部门领导」由后端按职务（含「部长」）过滤，前端只传一个开关。
+    const leaderOnly = scopeType === 'leader';
     const { data, isFetching } = useQuery({
-      queryKey: ['users', 'field', kw, deptId],
+      queryKey: ['users', 'field', kw, deptId, leaderOnly],
       queryFn: () =>
         request<any[]>('/api/users', {
-          params: { keyword: kw, deptId },
+          params: { keyword: kw, deptId, leaderOnly: leaderOnly || undefined },
         }),
     });
     const multi = !!node.props?.multiple;
