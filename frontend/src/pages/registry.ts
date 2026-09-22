@@ -121,7 +121,6 @@ export function navToMenuData(nodes: NavNode[]): MenuDataItem[] {
       items.push({
         key: `dir-${index}-${node.name ?? ''}`,
         name: node.name ?? '',
-        icon: node.icon ?? undefined,
         children,
       });
       return;
@@ -133,11 +132,12 @@ export function navToMenuData(nodes: NavNode[]): MenuDataItem[] {
       }
       return;
     }
+    // 不输出 icon：图标是字符串键，而全局没有映射表，ProLayout 会把键名当文本渲染出来
+    // （菜单里出现 home / team / barChart 这类英文）。菜单只要中文。
     items.push({
       key: page.key,
       path: page.path,
       name: node.name ?? page.key,
-      icon: node.icon ?? page.icon,
     });
   });
   return items;
