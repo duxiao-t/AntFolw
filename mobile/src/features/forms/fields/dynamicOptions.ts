@@ -98,10 +98,18 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
   // 一一对应：上游变更后过滤结果只剩一个候选就自动选中，多个候选保持现状由用户自己挑。
   // 多选不自动选中（用户可能一个都不要）；已有草稿与历史回显不触发。
   const autoFillPrevious = useRef(parentValue);
+  // 同桌面端：挂载时上游多为空、草稿值随后才回填，把"空 → 有值"当用户改动会清掉已保存的值。
+  const autoFillLoaded = useRef(parentValue != null && parentValue !== '');
   const autoFillCallback = useRef(props.onValueChange);
   autoFillCallback.current = props.onValueChange;
   useEffect(() => {
     if (!dependency?.fieldId || props.node.type !== 'select' || !context) return;
+    if (!autoFillLoaded.current) {
+      if (parentValue == null || parentValue === '') return;
+      autoFillLoaded.current = true;
+      autoFillPrevious.current = parentValue;
+      return;
+    }
     if (autoFillPrevious.current === parentValue) return;
     autoFillPrevious.current = parentValue;
     autoFillCallback.current(props.node.id, undefined);
@@ -136,11 +144,20 @@ export function useLinkedValue(props: MobileFieldProps) {
   const link = props.node.props?.dataLinkage as { fieldId?: string; valueColumn?: string } | undefined;
   const parentValue = link?.fieldId ? props.values[link.fieldId] : undefined;
   const previous = useRef(parentValue);
+  // 同 useDynamicOptions：第一次看到有效上游值只当装载，否则加载草稿会清掉已保存的联动值。
+  const loaded = useRef(parentValue != null && parentValue !== '');
   const callback = useRef(props.onValueChange);
   callback.current = props.onValueChange;
   const contextKey = JSON.stringify(props.optionContext ?? {});
   useEffect(() => {
-    if (!link?.fieldId || props.mode !== 'fill' || !props.optionContext || previous.current === parentValue) return;
+    if (!link?.fieldId || props.mode !== 'fill' || !props.optionContext) return;
+    if (!loaded.current) {
+      if (parentValue == null || parentValue === '') return;
+      loaded.current = true;
+      previous.current = parentValue;
+      return;
+    }
+    if (previous.current === parentValue) return;
     previous.current = parentValue;
     callback.current(props.node.id, undefined);
     if (parentValue == null || parentValue === '') return;

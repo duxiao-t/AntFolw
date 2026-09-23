@@ -389,6 +389,9 @@ export function FormDesignerSurface({
     (async () => {
       try {
         const fd = await request<FormDefinition>(`/api/forms/definitions/${id}`);
+        // 请求期间路由可能已经切到另一张表单：这份响应已过期，落地会把 A 的属性/schema
+        // 写到 B 身上（或盖掉 B 还没保存的编辑）。
+        if (fetchedFormId.current !== String(id)) return;
         setDefinition(fd);
         if (useFormDesignerStore.getState().loadedFormId !== String(id)) {
           loadSchema(parseJsonValue(fd.schema, []), String(id));

@@ -235,6 +235,21 @@ describe('联动一一对应时自动选中，否则手动', () => {
     expect(onValueChange).not.toHaveBeenCalled();
   });
 
+  it('草稿值后到（先空后回填）也不会清掉已保存的联动值', async () => {
+    // 打开草稿/返工单时外层先以空 values 渲染、随后才回填。以前这一步会被当成"用户改了上游"，
+    // 把已保存的下游值清掉——静默丢数据。
+    optionRows = [{ value: 'SZ', label: '深圳' }];
+    const onValueChange = vi.fn();
+    const { rerender } = render(<DynamicSelectField {...fieldProps(boundCity, {}, onValueChange)} />);
+    onValueChange.mockClear();
+
+    rerender(<DynamicSelectField
+      {...fieldProps(boundCity, { province: 'GD', city: 'GZ' }, onValueChange)} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it('多选不自动选中——用户可能一个都不要', async () => {
     optionRows = [{ value: 'SZ', label: '深圳' }];
     const onValueChange = vi.fn();

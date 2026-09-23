@@ -205,11 +205,17 @@ public class OptionRuntimeService {
         // forBinding 时额外拒绝"已停用（下架）"的版本：否则维护人直接提交带该 versionId 的 schema
         // 再发布，就绕过了"停用后不出现在候选里"的约束。
         // 运行时读路径（forBinding=false）**必须保持不校验**，否则钉着停用版的历史表单会 422。
+        // forBinding 时还顺手把数据源行按共享模式（FOR SHARE）锁住：取消发布（unpublish）走的是
+        // `SELECT ... FOR UPDATE`，两边不上同一把锁就会漏出"扫描时还没有引用、随后被这次发布写进
+        // 快照"的窗口——结果是刚发布的表单钉着一个已退回待发布的版本，下拉直接 422。
+        // 读路径不加锁（也不能加），否则热路径全被串行化。
         JsonNode columns = jdbc.query("""
             SELECT v.columns_json::text FROM t_option_data_source_version v
             JOIN t_option_data_source s ON s.id = v.source_id
             WHERE s.id = ? AND v.id = ? AND v.status = 'PUBLISHED'
-            """ + (forBinding ? " AND s.status = 'ACTIVE' AND v.disabled_at IS NULL" : ""),
+            """ + (forBinding
+                ? " AND s.status = 'ACTIVE' AND v.disabled_at IS NULL FOR SHARE OF s"
+                : ""),
             rs -> rs.next() ? parse(rs.getString(1)) : null, source.path("sourceId").asLong(), source.path("versionId").asLong());
         if (columns == null) bad("数据源版本不存在、未发布或不可绑定");
         Set<String> allowed = new LinkedHashSet<>(); columns.forEach(c -> allowed.add(c.asText()));

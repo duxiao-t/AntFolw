@@ -7,7 +7,7 @@ import {
   Space, Steps, Table, Tooltip, Typography,
 } from 'antd';
 import type { MenuProps } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AssigneePicker } from '../../components/AssigneePicker';
 import { OptionSourceImportModal } from './OptionSourceImportModal';
 import { OptionSourceRowsDrawer } from './OptionSourceRowsDrawer';
@@ -158,11 +158,17 @@ export default function OptionSources() {
   const [importOpen, setImportOpen] = useState(false);
   const [rowsVersion, setRowsVersion] = useState<Version | null>(null);
 
+  // 详情加载绑定"当前选中项"：先点 A 再点 B 时，A 的慢响应后到会把界面退回去，
+  // 之后的按钮/保存就都作用在 A 上。用请求序号丢弃过期响应。
+  const detailSeq = useRef(0);
   const refresh = async (id?: number) => {
+    const mine = ++detailSeq.current;
     const sources = await request<Summary[]>('/api/option-sources');
+    if (mine !== detailSeq.current) return;
     setList(sources);
     if (!id) return;
     const current = await request<Detail>(`/api/option-sources/${id}`);
+    if (mine !== detailSeq.current) return;
     setDetail(current);
     setUsers(current.userIds);
     setRoles(current.roleIds);

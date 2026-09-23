@@ -321,6 +321,9 @@ export default function FormManagementWizard() {
   const syncedGrantKey = useRef<string | null>(null);
   const syncedDefinitionId = useRef<number | null>(null);
   const syncedMaintainerFormId = useRef<number | null>(null);
+  // 保存授权用的乐观锁版本。干净状态下跟随服务端；有未保存编辑就冻结——否则窗口焦点触发的
+  // 刷新会把 version 换成新值，而我们发上去的还是旧字段值，等于**静默覆盖**别人的改动。
+  const grantVersionRef = useRef<number | null>(null);
   const workflowEnabled =
     watchedWorkflowEnabled ?? getWorkflowEnabled(definition?.settings);
   const steps = getSteps(!!workflowEnabled);
@@ -528,6 +531,25 @@ export default function FormManagementWizard() {
   // 换出新的 data 对象——用对象当依赖会让回填重跑，把「全公司可见」这类改动冲回服务端旧值，
   // 看起来就是"打开了又自己变回未启用"。
   const grantInitKey = `${formId ?? 'new'}:${allCompanyRoleId ?? ''}`;
+
+  useEffect(() => {
+    if (formGrant && !grantDirty) grantVersionRef.current = formGrant.version;
+  }, [formGrant, grantDirty]);
+
+  // 组件被复用到另一个 formId（例如 N → 后退 → new）时必须清干净：Form 里还留着上一张表单的
+  // 人员/角色/部门，三个 synced ref 也非空 → grantDirty 恒为真 → 新表单的授权不会回填，
+  // 保存时反而把上一张表单的授权写过去。
+  const previousFormId = useRef<string | number | null>(formId);
+  useEffect(() => {
+    if (previousFormId.current === formId) return;
+    previousFormId.current = formId;
+    syncedGrantKey.current = null;
+    syncedDefinitionId.current = null;
+    syncedMaintainerFormId.current = null;
+    grantVersionRef.current = null;
+    form.resetFields();
+  }, [formId, form]);
+
   useEffect(() => {
     if (definition && syncedDefinitionId.current !== definition.id) {
       syncedDefinitionId.current = definition.id;
@@ -699,7 +721,9 @@ export default function FormManagementWizard() {
       return request<FormGrant>(`/api/forms/${formId}/grants`, {
         method: 'PUT',
         data: {
-          version: formGrant.version,
+          // 用快照版本：有未保存编辑时它就是"我读到的那一版"，服务端凭它判冲突，
+          // 而不是拿刚被焦点刷新过的新版本去覆盖别人的改动。
+          version: grantVersionRef.current ?? formGrant.version,
           userIds: Array.isArray(values.userIds) ? values.userIds : formGrant.userIds,
           roleIds,
           departmentIds: Array.isArray(values.departmentIds)
@@ -803,7 +827,10 @@ export default function FormManagementWizard() {
           settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
         },
       });
-      if (saved?.status === 'PUBLISHED') return;   // 内容没变，已经是在发布状态
+      // 内容没变时后端会原样返回 PUBLISHED。但**流程**可能还有未发布的草稿改动，这时不能
+      // 直接返回——否则"只改了流程"的发布会永远停在草稿，界面却提示发布成功。
+      if (saved?.status === 'PUBLISHED'
+          && !(workflowEnabled && processDefinition?.status !== 'PUBLISHED')) return;
       if (workflowEnabled) {
         if (!processDefinition?.id) throw new Error('请先保存流程设计');
         const process = parseJsonValue<any>(processDefinition.process, null);

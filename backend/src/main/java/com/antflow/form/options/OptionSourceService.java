@@ -106,7 +106,10 @@ public class OptionSourceService {
         List<FormRef> forms = referencedForms(sourceId);
         int boundForms = source.inUseFormCount();
         long publishedVersions = versions.stream().filter(v -> "PUBLISHED".equals(v.status())).count();
-        boolean deletable = source.publishedVersionId() == null && boundForms == 0 && forms.isEmpty();
+        // 判据必须与 delete() 一致，否则界面说不可删却能直接调 DELETE（反之亦然）。
+        // 用"有没有任何已发布版本"而不是"当前可用版本"：全下架的源 publishedVersionId 为 null，
+        // 但它发布过，delete() 仍然会拒。
+        boolean deletable = publishedVersions == 0 && boundForms == 0 && forms.isEmpty();
         return new SourceDetail(source, versions, userIds, roleIds, forms, versionUsage(sourceId),
             deletable, deletable ? null : deleteBlockedReason(publishedVersions, boundForms, forms.size()));
     }
@@ -552,6 +555,11 @@ public class OptionSourceService {
             throw new BizException("OPTION_SOURCE_PUBLISHED", "已发布过的数据源不能删除，可以停用");
         }
         if (isReferenced(sourceId)) {
+            throw new BizException("OPTION_SOURCE_REFERENCED", "数据源仍被表单引用，不能删除");
+        }
+        // 源侧那份引用清单也算：管理员特意把它引用到某张表单，删掉等于把他的配置一起抹了。
+        // 之前只有 detail() 看这份清单，delete() 不看，于是界面说不可删、接口却删得掉。
+        if (!referencedForms(sourceId).isEmpty()) {
             throw new BizException("OPTION_SOURCE_REFERENCED", "数据源仍被表单引用，不能删除");
         }
         int deletedVersions = jdbc.update("DELETE FROM t_option_data_source_version WHERE source_id = ?", sourceId);

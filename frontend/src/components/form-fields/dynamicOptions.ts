@@ -53,22 +53,37 @@ function useUniqueMatchRefill({ active, nodeId, parentId, parentValue, values, c
   apply: (match: RuntimeOption | undefined) => void;
 }) {
   const previous = useRef(parentValue);
+  // 挂载时上游通常还是空的（草稿/历史值随后才由外层 effect 回填）。若把"空 → 有值"当成
+  // "用户改了上游"，下面会 apply(undefined) 把**已保存的联动值静默清掉**。
+  // 所以第一次看到有效上游值只当装载。代价：全新表单里第一次选上游不会触发自动回填
+  // （目标字段本来就是空的，用户手动选即可），之后再改上游照常回填。
+  const loaded = useRef(parentValue != null && parentValue !== '');
   const applyRef = useRef(apply);
   applyRef.current = apply;
   const valuesRef = useRef(values);
   valuesRef.current = values;
   useEffect(() => {
     if (!active || !context || !(context.formCode || context.instanceId || context.dataId)) return;
+    if (!loaded.current) {
+      if (parentValue == null || parentValue === '') return;
+      loaded.current = true;
+      previous.current = parentValue;
+      return;
+    }
     if (previous.current === parentValue) return;
     previous.current = parentValue;
     let cancelled = false;
     applyRef.current(undefined);
     if (parentValue == null || parentValue === '') return;
+    const requestParent = parentValue;
     request<Page>('/api/runtime/form-options/query', {
       method: 'POST',
       data: { ...context, fieldId: nodeId, values: valuesRef.current, page: 1, size: 2, path: [] },
     }).then((result) => {
-      if (cancelled) return;
+      if (cancelled || previous.current !== requestParent) return;
+      // 请求期间用户已经自己选了下游字段：别用自动回填盖掉他的选择。
+      const current = valuesRef.current?.[nodeId];
+      if (current != null && current !== '' && !(Array.isArray(current) && !current.length)) return;
       applyRef.current(result.total === 1 ? result.items[0] : undefined);
     }).catch(() => { if (!cancelled) applyRef.current(undefined); });
     return () => { cancelled = true; };
