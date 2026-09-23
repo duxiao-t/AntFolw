@@ -51,7 +51,8 @@ public class OptionSourceService {
                    published.id AS published_version_id,
                    published.version_no AS published_version_no,
                    published.row_count,
-                   draft.id AS draft_version_id
+                   draft.id AS draft_version_id,
+                   refs.form_count AS form_count
             FROM t_option_data_source source
             LEFT JOIN LATERAL (
               SELECT * FROM t_option_data_source_version version_row
@@ -60,12 +61,18 @@ public class OptionSourceService {
             ) published ON true
             LEFT JOIN t_option_data_source_version draft
               ON draft.source_id = source.id AND draft.status = 'DRAFT'
+            -- 清单里要一眼看出这个源有没有人在用。
+            LEFT JOIN LATERAL (
+              SELECT COUNT(*) AS form_count FROM t_form_option_source ref
+              WHERE ref.source_id = source.id
+            ) refs ON true
             ORDER BY source.updated_at DESC, source.id DESC
             """, (rs, row) -> new SourceSummary(rs.getLong("id"), rs.getString("code"),
             rs.getString("name"), rs.getString("status"), rs.getInt("version"),
             rs.getObject("updated_at", OffsetDateTime.class),
             nullableLong(rs, "published_version_id"), nullableInt(rs, "published_version_no"),
-            nullableInt(rs, "row_count"), nullableLong(rs, "draft_version_id")));
+            nullableInt(rs, "row_count"), nullableLong(rs, "draft_version_id"),
+            rs.getInt("form_count")));
     }
 
     public SourceDetail detail(long sourceId) {
@@ -80,8 +87,21 @@ public class OptionSourceService {
             SELECT subject_id FROM t_option_data_source_grant
             WHERE source_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
             """, Long.class, sourceId);
-        return new SourceDetail(source, versions, userIds, roleIds,
-            source.publishedVersionId() == null && !isReferenced(sourceId));
+        List<FormRef> forms = referencedForms(sourceId);
+        return new SourceDetail(source, versions, userIds, roleIds, forms,
+            source.publishedVersionId() == null && !isReferenced(sourceId) && forms.isEmpty());
+    }
+
+    /** 引用了这个数据源的表单。反向读 V46 的引用表。 */
+    private List<FormRef> referencedForms(long sourceId) {
+        return jdbc.query("""
+            SELECT form.id, form.code, form.name
+            FROM t_form_option_source ref
+            JOIN t_form_definition form ON form.id = ref.form_def_id
+            WHERE ref.source_id = ? AND form.deleted = 0
+            ORDER BY form.name, form.id
+            """, (rs, row) -> new FormRef(rs.getLong("id"), rs.getString("code"),
+            rs.getString("name")), sourceId);
     }
 
     @Transactional
@@ -133,6 +153,46 @@ public class OptionSourceService {
             Map.of("changedFields", List.of("userIds", "roleIds")),
             Map.of("userCount", request.userIds().size(), "roleCount", request.roleIds().size()));
         return detail(sourceId);
+    }
+
+    /**
+     * 这个数据源可以被哪些表单引用。设计器里的字段下拉只列引用过的源，所以这一步决定了
+     * 哪些表单能挑到它。只改「可被选中」的清单，不授予任何数据读取——发布与运行时仍按
+     * OptionRuntimeService 的授权判断。
+     */
+    @Transactional
+    public SourceDetail replaceForms(long sourceId, FormRefWrite request) {
+        authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
+        if (request == null || request.version() == null) {
+            throw new BizException("OPTION_SOURCE_VERSION_REQUIRED", "数据源版本不能为空");
+        }
+        requireForms(request.formIds());
+        int updated = jdbc.update("""
+            UPDATE t_option_data_source SET version = version + 1, updated_at = now()
+            WHERE id = ? AND version = ?
+            """, sourceId, request.version());
+        if (updated != 1) throw new BizException("OPTION_SOURCE_VERSION_CONFLICT", "数据源已被其他人修改");
+        jdbc.update("DELETE FROM t_form_option_source WHERE source_id = ?", sourceId);
+        long actor = authorization.currentUserId();
+        request.formIds().forEach(id -> jdbc.update("""
+            INSERT INTO t_form_option_source(form_def_id, source_id, created_by)
+            VALUES (?, ?, ?)
+            """, id, sourceId, actor));
+        audit.success("form.option_source.forms.update", "OPTION_SOURCE", sourceId,
+            AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("formIds")),
+            Map.of("formCount", request.formIds().size()));
+        return detail(sourceId);
+    }
+
+    private void requireForms(Set<Long> formIds) {
+        formIds.forEach(id -> {
+            Long found = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM t_form_definition WHERE id = ? AND deleted = 0
+                """, Long.class, id);
+            if (found == null || found == 0) {
+                throw new BizException("OPTION_SOURCE_FORM_INVALID", "表单不存在：" + id);
+            }
+        });
     }
 
     @Transactional
@@ -288,6 +348,8 @@ public class OptionSourceService {
         authorization.requireFormMaintenance(formId, PermissionCodes.FORM_DEFINITION_MANAGE);
         PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
         List<Object> args = new ArrayList<>();
+        args.add(formId);
+        args.add(formId);
         String predicate = "";
         if (!principal.isAdmin()) {
             predicate = """
@@ -319,6 +381,16 @@ public class OptionSourceService {
               WHERE candidate.source_id = source.id AND candidate.status = 'PUBLISHED'
             ) latest ON true
             WHERE source.status = 'ACTIVE'
+              AND (
+                EXISTS (SELECT 1 FROM t_form_option_source form_ref
+                        WHERE form_ref.source_id = source.id AND form_ref.form_def_id = ?)
+                -- 已绑定但引用被撤掉的源也要留着：否则该字段的版本下拉会空掉、
+                -- 保存值/显示名称的下拉会没选项。
+                OR EXISTS (SELECT 1 FROM t_form_definition form_def
+                           WHERE form_def.id = ? AND jsonb_path_exists(
+                             form_def.schema, '$.**.props.optionSource.sourceId ? (@ == $sourceId)',
+                             jsonb_build_object('sourceId', to_jsonb(source.id))))
+              )
             """ + predicate + " ORDER BY source.name, version_row.version_no DESC",
             (rs, row) -> new BindableSource(rs.getLong("id"), rs.getString("code"),
                 rs.getString("name"), rs.getLong("version_id"), rs.getInt("version_no"),
@@ -560,9 +632,17 @@ public class OptionSourceService {
     }
     public record SourceSummary(long id, String code, String name, String status, int version,
                                 OffsetDateTime updatedAt, Long publishedVersionId,
-                                Integer publishedVersionNo, Integer rowCount, Long draftVersionId) { }
+                                Integer publishedVersionNo, Integer rowCount, Long draftVersionId,
+                                int formCount) { }
     public record SourceDetail(SourceSummary source, List<VersionView> versions,
-                               List<Long> userIds, List<Long> roleIds, boolean deletable) { }
+                               List<Long> userIds, List<Long> roleIds, List<FormRef> forms,
+                               boolean deletable) { }
+    public record FormRef(long id, String code, String name) { }
+    public record FormRefWrite(Integer version, Set<Long> formIds) {
+        public FormRefWrite {
+            formIds = formIds == null ? Set.of() : Set.copyOf(formIds);
+        }
+    }
     public record VersionView(long id, long sourceId, int versionNo, String status,
                               List<String> columns, int rowCount, String originalName,
                               String sha256, OffsetDateTime createdAt, OffsetDateTime publishedAt) { }

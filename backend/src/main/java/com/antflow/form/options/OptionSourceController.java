@@ -57,6 +57,13 @@ public class OptionSourceController {
         return service.replaceGrants(id, request);
     }
 
+    @PutMapping("/api/option-sources/{id}/forms")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public OptionSourceService.SourceDetail forms(@PathVariable long id,
+                                                  @RequestBody OptionSourceService.FormRefWrite request) {
+        return service.replaceForms(id, request);
+    }
+
     @PostMapping(path = "/api/option-sources/{id}/versions/import",
         consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")

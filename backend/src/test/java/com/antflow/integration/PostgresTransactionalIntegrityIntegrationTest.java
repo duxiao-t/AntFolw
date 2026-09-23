@@ -13,6 +13,7 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormProcessPublishService;
+import com.antflow.form.options.OptionSourceService;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormDataMapper;
@@ -174,6 +175,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private MobileAppService mobileAppService;
     @Autowired private MenuService menuService;
     @Autowired private WecomService wecomService;
+    @Autowired private OptionSourceService optionSourceService;
 
     @Test
     void directSubmissionConsumesOnlyItsSourceDraft() {
@@ -574,6 +576,74 @@ class PostgresTransactionalIntegrityIntegrationTest {
         } finally {
             jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
+    }
+
+    @Test
+    void v46BackfillsFormOptionSourceReferences() {
+        String schema = "form_option_source_migration_"
+            + UUID.randomUUID().toString().replace("-", "");
+        try {
+            // 先停在 V45：那时候还没有引用表，表单只能把绑定写在 schema 里。
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("45").load().migrate();
+            long sourceId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_option_data_source(code, name) VALUES ('ledger', 'Ledger') RETURNING id",
+                Long.class);
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, version, schema, settings, status, deleted) "
+                + "VALUES ('ref_form', 'Ref form', 1, jsonb_build_array(jsonb_build_object("
+                + "'id', 'dept', 'type', 'select', 'label', 'Dept', 'props', jsonb_build_object("
+                + "'optionSource', jsonb_build_object('sourceId', ?::bigint)))), "
+                + "'{}'::jsonb, 'DRAFT', 0) RETURNING id", Long.class, sourceId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForList("SELECT source_id FROM " + schema
+                + ".t_form_option_source WHERE form_def_id = ?", Long.class, formId))
+                .containsExactly(sourceId);
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void bindableListsOnlySourcesTheFormReferences() {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT",
+            "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":{}}]");
+        long referenced = insertOptionSource("ref_" + UUID.randomUUID().toString().replace("-", ""));
+        long unreferenced = insertOptionSource("unref_" + UUID.randomUUID().toString().replace("-", ""));
+        long bound = insertOptionSource("bound_" + UUID.randomUUID().toString().replace("-", ""));
+        jdbcTemplate.update("INSERT INTO t_form_option_source(form_def_id, source_id) VALUES (?, ?)",
+            formId, referenced);
+        jdbcTemplate.update("INSERT INTO t_form_option_source(form_def_id, source_id) VALUES (?, ?)",
+            formId, bound);
+        // 绑定写在 schema 里、但引用行被撤掉：仍要出现在候选里，否则该字段的版本下拉会空掉。
+        jdbcTemplate.update("DELETE FROM t_form_option_source WHERE form_def_id = ? AND source_id = ?",
+            formId, bound);
+        jdbcTemplate.update("UPDATE t_form_definition SET schema = jsonb_build_array("
+            + "jsonb_build_object('id', 'dept', 'type', 'select', 'label', 'Dept', 'props', "
+            + "jsonb_build_object('optionSource', jsonb_build_object('sourceId', ?::bigint)))) "
+            + "WHERE id = ?", bound, formId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThat(optionSourceService.bindable(formId))
+                .extracting(OptionSourceService.BindableSource::id)
+                .containsExactlyInAnyOrder(referenced, bound);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    private long insertOptionSource(String code) {
+        long sourceId = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source(code, name) "
+            + "VALUES (?, 'Integration source') RETURNING id", Long.class, code);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_version(source_id, version_no, "
+            + "status, columns_json, row_count, sha256) "
+            + "VALUES (?, 1, 'PUBLISHED', '[\"col\"]'::jsonb, 2, 'deadbeef')", sourceId);
+        return sourceId;
     }
 
     @Test
