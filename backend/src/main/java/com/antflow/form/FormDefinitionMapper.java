@@ -16,8 +16,10 @@ public interface FormDefinitionMapper extends BaseMapper<FormDefinition> {
         FROM t_form_definition form
         WHERE form.deleted = 0
         <if test="keyword != null and keyword != ''">
-          AND (form.name ILIKE CONCAT('%', #{keyword}, '%')
-            OR form.code ILIKE CONCAT('%', #{keyword}, '%'))
+          <!-- 必须显式 ::text：连接串带 stringtype=unspecified，参数以 unknown 送到 PG，
+               而 concat(variadic "any") 无法从 unknown 推断类型，会直接 500。 -->
+          AND (form.name ILIKE CONCAT('%', #{keyword}::text, '%')
+            OR form.code ILIKE CONCAT('%', #{keyword}::text, '%'))
         </if>
         <if test="status != null and status != ''">
           AND form.status = #{status}

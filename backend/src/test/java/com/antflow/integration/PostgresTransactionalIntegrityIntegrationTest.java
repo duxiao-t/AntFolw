@@ -637,6 +637,24 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
+    @Test
+    void formListKeywordSearchWorksAgainstRealPostgres() {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            // 连接串带 stringtype=unspecified：参数以 unknown 送到 PG，CONCAT 少了 ::text 会 500。
+            assertThat(formDefinitionService.list(1, 50, code.substring(0, 8), null, adminId, true)
+                .getRecords()).extracting(FormDefinitionMapper.Summary::id).contains(formId);
+            assertThat(formDefinitionService.list(1, 50, "Integration form", null, adminId, true)
+                .getRecords()).extracting(FormDefinitionMapper.Summary::id).contains(formId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
     private long insertOptionSource(String code) {
         long sourceId = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source(code, name) "
             + "VALUES (?, 'Integration source') RETURNING id", Long.class, code);
