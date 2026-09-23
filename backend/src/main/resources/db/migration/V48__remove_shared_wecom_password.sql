@@ -1,18 +1,17 @@
 WITH remediated_users AS (
     UPDATE t_user user_row
     SET password_hash = CASE
+        -- 种子账号打成哨兵，交给 BootstrapCredentialInitializer 用配置的口令重置。
+        -- 不能给它随机密码：初始化器只认哨兵行，随机密码没人知道 → 管理员直接登不进去。
+        -- （进到这里的 admin/bob 一定是命中了下面 WHERE 里的共享口令，所以不必再判一次。）
         WHEN user_row.username IN ('admin', 'bob')
-             AND user_row.password_hash = crypt('ant.design', user_row.password_hash)
         THEN '!ANTFLOW_BOOTSTRAP_REQUIRED!'
         ELSE crypt(encode(gen_random_bytes(32), 'hex'), gen_salt('bf', 10))
     END
+    -- 按**口令哈希**清理，不要绑"当前还有企微映射"：V36 当初给当时所有映射用户设过 qwer1234，
+    -- 之后映射被删掉或改指向别人的账号会逃过整改，共享口令继续可用。
     WHERE user_row.password_hash = crypt('ant.design', user_row.password_hash)
-       OR (user_row.password_hash = crypt('qwer1234', user_row.password_hash)
-           AND EXISTS (
-               SELECT 1
-               FROM t_wecom_user_mapping mapping
-               WHERE mapping.user_id = user_row.id
-           ))
+       OR user_row.password_hash = crypt('qwer1234', user_row.password_hash)
     RETURNING user_row.id
 )
 UPDATE t_auth_session session

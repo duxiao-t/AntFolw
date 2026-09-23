@@ -80,7 +80,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     "antflow.outbox.poll-interval-ms=3600000",
     "antflow.wecom.schedule-poll-interval-ms=3600000",
     "antflow.mobile.files.storage=test",
-    "antflow.jwt.secret=test-secret-0123456789-test-secret-0123456789"
+    "antflow.jwt.secret=test-secret-0123456789-test-secret-0123456789",
+    // 引导口令放在测试自己这里（pom 的全局属性会盖掉外部传值，故已从 pom 移除）。
+    // 用非公开口令：初始化器会拒绝已知共享口令，而 V48 会把种子账号打成哨兵，
+    // 测试的 Spring 上下文必须能把它解开。
+    "antflow.auth.bootstrap-admin-password=test-bootstrap-password",
+    "antflow.auth.bootstrap-bob-password=test-bootstrap-password"
 })
 @Import(PostgresTransactionalIntegrityIntegrationTest.TestFileStorageConfig.class)
 class PostgresTransactionalIntegrityIntegrationTest {

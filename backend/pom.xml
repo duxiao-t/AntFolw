@@ -74,8 +74,9 @@
                     <systemPropertyVariables>
                         <spring.datasource.password>antflow-test</spring.datasource.password>
                         <antflow.jwt.secret>antflow-test-jwt-secret-0123456789abcdef</antflow.jwt.secret>
-                        <antflow.auth.bootstrap-admin-password>ant.design</antflow.auth.bootstrap-admin-password>
-                        <antflow.auth.bootstrap-bob-password>ant.design</antflow.auth.bootstrap-bob-password>
+                        <!-- 引导口令刻意不在这里设：surefire 的系统属性会盖掉调用方用环境变量传进来的值，
+                             连外部测试库（ANTFLOW_TEST_POSTGRES_URL）的种子账号都会被改成这个公开口令。
+                             需要它的测试自己在 @SpringBootTest(properties=...) 里给。 -->
                         <antflow.audit.archive-access-key>antflow-test</antflow.audit.archive-access-key>
                         <antflow.audit.archive-secret-key>antflow-test-secret</antflow.audit.archive-secret-key>
                         <antflow.audit.archive-encryption-secret>antflow-test-audit-encryption-secret</antflow.audit.archive-encryption-secret>

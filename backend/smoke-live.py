@@ -4,6 +4,9 @@ import json, urllib.request, urllib.parse, uuid, sys, os
 
 BASE = "http://127.0.0.1:8091"
 RESULTS = []
+# 种子账号口令从环境读：V48 之后 admin/bob 用的是配置里的引导口令，公开的 ant.design 登不进去。
+ADMIN_PASSWORD = os.getenv("SMOKE_ADMIN_PASSWORD", "ant.design")
+BOB_PASSWORD = os.getenv("SMOKE_BOB_PASSWORD", ADMIN_PASSWORD)
 
 def http(method, path, headers=None, body=None, files=None, timeout=10):
     headers = dict(headers or {})
@@ -49,8 +52,8 @@ for p in ["/api/public/branding", "/api/branding/public", "/api/branding"]:
 
 # 2. admin-only brand mutation
 print("== 2. Admin-only brand mutation ==")
-adminTok, sa, ba = login("admin", "ant.design")
-bobTok, sb, bb = login("bob", "ant.design")
+adminTok, sa, ba = login("admin", ADMIN_PASSWORD)
+bobTok, sb, bb = login("bob", BOB_PASSWORD)
 record("02 login admin", sa, "<redacted>", 200)
 record("02 login bob",   sb, "<redacted>", 200)
 adminHdr = {"Authorization": "Bearer " + adminTok} if adminTok else {}
@@ -95,9 +98,12 @@ record("06 idem-deduped-same-key", "PASS" if deduped else "FAIL", f"i1={inst1} i
 print("== Creating third user for unrelated 403 ==")
 # try to login third user; if missing, create via /api/users (admin)
 thirdUsername = "smoke_third_" + uuid.uuid4().hex[:6]
-try_user = http("POST", "/api/auth/login", body={"username": thirdUsername, "password":"ant.design"})
+# 不再用公开口令建账号：每次跑都新建，跑完删掉，别把它留在库里。
+thirdPassword = "Smoke-" + uuid.uuid4().hex
+newUid = None
+try_user = http("POST", "/api/auth/login", body={"username": thirdUsername, "password":thirdPassword})
 if try_user[0] != 200:
-    s, h, b = http("POST", "/api/users", headers=adminHdr, body={"employeeNo":thirdUsername, "username":thirdUsername, "displayName":"Smoke Third","email":thirdUsername+"@antflow.local","password":"ant.design","status":"ACTIVE"})
+    s, h, b = http("POST", "/api/users", headers=adminHdr, body={"employeeNo":thirdUsername, "username":thirdUsername, "displayName":"Smoke Third","email":thirdUsername+"@antflow.local","password":thirdPassword,"status":"ACTIVE"})
     record("03 create third user", s, b, 200)
     if s == 200:
         newUid = json.loads(b)["id"]
@@ -107,7 +113,7 @@ if try_user[0] != 200:
         userRole = next((r["id"] for r in roles if r.get("code") in ("employee", "user")), None)
         if userRole:
             http("PUT", f"/api/users/{newUid}/roles", headers=adminHdr, body=[userRole])
-thirdTok, s3, b3 = login(thirdUsername, "ant.design")
+thirdTok, s3, b3 = login(thirdUsername, thirdPassword)
 record("03 login third", s3, "<redacted>", 200)
 thirdHdr = {"Authorization":"Bearer "+thirdTok} if thirdTok else {}
 
@@ -123,6 +129,9 @@ if inst1:
     taskIds = [t["id"] for t in (tlist.get("items") or []) if t.get("instanceId")==inst1]
     if taskIds:
         s, h, b = http("GET", f"/api/mobile/tasks/{taskIds[0]}", headers=thirdHdr); record("03 unrelated task detail", s, b, 403)
+    else:
+        # 找不到待办时这条越权断言根本没执行过；以前缺 else，汇总照样打印 FAIL: 0。
+        record("03 unrelated task detail", "FAIL", "no pending task for bob", 403)
 else:
     record("03 unrelated instance", "FAIL", "no instance", "PASS")
 
@@ -131,7 +140,7 @@ print("== 4. Refresh replay rejection ==")
 for p in ["/api/auth/refresh","/api/auth/refresh-token","/api/auth/token/refresh","/api/auth/rotate"]:
     s, h, b = http("POST", p, body={"refreshToken":"anything"}); record(f"04 refresh probe {p}", s, b, "401/403/404/405")
 # Re-login: returns a NEW accessToken (stateless); confirm it differs
-sa2, _, ba2 = http("POST", "/api/auth/login", body={"username":"admin","password":"ant.design"})
+sa2, _, ba2 = http("POST", "/api/auth/login", body={"username":"admin","password":ADMIN_PASSWORD})
 record("04 re-login admin", sa2, "<redacted>", 200)
 if sa2 == 200:
     newTok = json.loads(ba2)["accessToken"]
@@ -163,6 +172,10 @@ if goodId:
     s, h, b = http("GET", f"/api/mobile/files/{goodId}", headers=adminHdr); record("05 owner metadata ok", s, b, 200)
     s, h, b = http("GET", f"/api/mobile/files/{goodId}", headers=thirdHdr); record("05 unrelated metadata forbidden", s, b, 403)
     s, h, b = http("GET", f"/api/mobile/files/{goodId}/content", headers=adminHdr); record("05 owner content ok", s, b, 200)
+
+# 清理：带口令的临时账号不要留在库里。
+if newUid:
+    http("DELETE", f"/api/users/{newUid}", headers=adminHdr)
 
 print("=== SUMMARY ===")
 fail = 0

@@ -40,7 +40,10 @@ services:
       SPRING_DATASOURCE_USERNAME: antflow
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD: ${ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD:?set ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD}
+      # 隔离测试环境给默认值：写成必填的话，已有的 .env.test 会让整份 compose 解析失败，
+      # 连 `compose down`/refresh/destroy 都跑不了 → 旧测试环境没法清理也没法升级。
+      # （compose.yaml 那份保持必填：真实部署必须在启动时就挡住。）
+      ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD: ${ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD:-antflow-test-bootstrap}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}

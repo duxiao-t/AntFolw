@@ -438,8 +438,14 @@ export default function ContactsPage() {
       }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
       const { successCount, failedCount } = imported;
       if (successCount) qc.invalidateQueries({ queryKey: ['users-page'] });
-      if (failedCount) msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
-      else msg.success(`已导入 ${successCount} 名成员；请由管理员为新账号重置密码`);
+      // 只要建成了账号就得提醒重置密码：后端给的是随机且不返回的密码，这些人自己登不上。
+      // 部分成功时以前只报失败数，把这条盖掉了。
+      const resetHint = successCount ? '；请由管理员为新账号重置密码' : '';
+      if (failedCount) {
+        msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条${resetHint}`);
+      } else {
+        msg.success(`已导入 ${successCount} 名成员${resetHint}`);
+      }
     } catch (_error) {
       msg.error('批量导入失败');
     }

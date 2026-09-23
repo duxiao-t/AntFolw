@@ -46,10 +46,12 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
         byte[] body = req.getInputStream().readAllBytes();
         long userId = principal.get().userId();
-        String scopedKey = IdempotencyService.hash((key + "\0" + principal.get().authzVersion())
-            .getBytes(StandardCharsets.UTF_8));
+        // 幂等键只能由「用户 + 路由 + 客户端给的 key」决定，不能掺 authzVersion：
+        // 角色/菜单一变版本就变，24h 内重试同一个提交会被当成新请求，副作用重放（重复提交/重复审批）。
+        // 也不能改键的形态——已落库的旧记录还在 TTL 内，换了形态就命中不到。
+        // （要做到"权限变化后不重放旧响应"，应在重放前单独校验当前授权，而不是改键空间。）
         IdempotencyService.Claim claim = service.claim(userId, req.getMethod(), req.getRequestURI(),
-            scopedKey, body);
+            key, body);
         if (claim.replay() != null) {
             write(res, claim.replay(), true, null);
             return;
