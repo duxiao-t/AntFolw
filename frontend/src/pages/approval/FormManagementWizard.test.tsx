@@ -1,15 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FormManagementWizard from './FormManagementWizard';
+import { useFormDesignerStore } from '../designer/form/useFormDesignerStore';
 
-const { request, push } = vi.hoisted(() => ({ request: vi.fn(), push: vi.fn() }));
+const { request, push, location } = vi.hoisted(() => ({
+  request: vi.fn(), push: vi.fn(), location: { search: '?step=basic' },
+}));
 vi.mock('@umijs/max', () => ({
   request,
   history: { push },
   useParams: () => ({ id: '10' }),
-  useLocation: () => ({ search: '?step=basic' }),
+  useLocation: () => location,
   useModel: () => ({ initialState: { currentUser: {
     id: 1, roles: ['admin'], username: 'admin',
   } } }),
@@ -29,6 +32,56 @@ vi.mock('./FormGrantUserPicker', () => ({
 }));
 
 describe('FormManagementWizard permission settings', () => {
+  beforeEach(() => {
+    // store 是模块级单例，测试之间要清干净。
+    location.search = '?step=basic';
+    useFormDesignerStore.setState({
+      schema: [], loadedFormId: null, selectedId: null, history: { past: [], future: [] },
+    });
+  });
+
+  it('保存草稿带上设计器里还没保存的编辑，而不是服务端那份', async () => {
+    const definition = {
+      id: 10, code: 'leave', name: '请假申请', version: 1, status: 'PUBLISHED',
+      schema: [{ id: 'a', type: 'text', label: 'A' }], settings: {},
+    };
+    let posted: any = null;
+    request.mockImplementation(async (url: string, options?: { method?: string; data?: any }) => {
+      if (url === '/api/forms/definitions') {
+        posted = options?.data;
+        return { ...definition, status: 'DRAFT', schema: options?.data?.schema };
+      }
+      if (url === '/api/forms/definitions/10') return definition;
+      if (url === '/api/forms/10/grants/candidates') return { roles: [], departments: [] };
+      if (url === '/api/forms/10/grants') {
+        return { version: 7, userIds: [], roleIds: [], departmentIds: [],
+          users: [], roles: [], departments: [] };
+      }
+      if (url === '/api/forms/10/maintainers') return { version: 7, userIds: [], users: [] };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    location.search = '?step=publish';
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <FormManagementWizard />
+      </QueryClientProvider>,
+    );
+
+    // 进页面就会把服务端那份灌进 store（不打开设计器也有内容）。
+    await waitFor(() => expect(useFormDesignerStore.getState().loadedFormId).toBe('10'));
+    // 模拟在设计器里改了字段标题，但**没点设计器的保存**。
+    useFormDesignerStore.setState({
+      schema: [{ id: 'a', type: 'text', label: 'A改了' }],
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '保存草稿' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    // 以前这里发的是 definition.schema（旧内容），于是后端看什么都没变：
+    // 不降级为草稿、版本号也不动，而编辑被悄悄丢掉。
+    expect(posted.schema).toEqual([{ id: 'a', type: 'text', label: 'A改了' }]);
+  });
+
   it('saves usage and maintenance as separate lists with consecutive CAS versions', async () => {
     let permissionVersion = 7;
     const definition = {

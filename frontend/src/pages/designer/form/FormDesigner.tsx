@@ -267,6 +267,7 @@ export function FormDesignerSurface({
   const { token } = theme.useToken();
   const {
     schema,
+    loadedFormId,
     loadSchema,
     resetSchema,
     addNode,
@@ -375,16 +376,19 @@ export function FormDesignerSurface({
   // Load existing definition when id is provided (not 'new').
   useEffect(() => {
     if (!id || id === 'new') return;
+    // 已经载过这张表单就别再回填：切到别的步骤再切回来会重新挂载，无条件 loadSchema 会把
+    // 还没保存的编辑冲掉（store 里的内容才是真相，服务端那份是"上次保存的状态"）。
+    if (loadedFormId === String(id)) return;
     (async () => {
       try {
         const fd = await request<FormDefinition>(`/api/forms/definitions/${id}`);
         setDefinition(fd);
-        loadSchema(parseJsonValue(fd.schema, []));
+        loadSchema(parseJsonValue(fd.schema, []), String(id));
       } catch (_error) {
         message.error('加载表单失败');
       }
     })();
-  }, [id, loadSchema, message]);
+  }, [id, loadedFormId, loadSchema, message]);
 
   const save = useMutation({
     mutationFn: () =>

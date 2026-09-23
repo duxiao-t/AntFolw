@@ -31,6 +31,7 @@ import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
 import { isBoundOptionSource } from '../../components/form-fields/dynamicOptions';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
+import { useFormDesignerStore } from '../designer/form/useFormDesignerStore';
 import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
 import type { TreeNode } from '../designer/process/types';
 import {
@@ -401,10 +402,25 @@ export default function FormManagementWizard() {
   const initialMaintainerUsers: GrantUser[] =
     formMaintainers?.users ?? initialGrantUsers;
 
+  // 表单内容的唯一真相是设计器的 store（用户正在编辑的那份）。definition.schema 是"上次保存的
+  // 状态"——拿它当真相会让「改完内容保存/发布」把编辑悄悄丢掉，而且后端看什么都没变，
+  // 于是不降级为草稿、版本号也不动。
+  const designerSchema = useFormDesignerStore((s) => s.schema);
+  const designerFormId = useFormDesignerStore((s) => s.loadedFormId);
+  const loadDesignerSchema = useFormDesignerStore((s) => s.loadSchema);
+  const storeHoldsThisForm = designerFormId !== null && designerFormId === String(formId ?? 'new');
   const schema = useMemo(
-    () => parseJsonValue<SchemaNode[]>(definition?.schema, []),
-    [definition?.schema],
+    () => (storeHoldsThisForm
+      ? designerSchema
+      : parseJsonValue<SchemaNode[]>(definition?.schema, [])),
+    [definition?.schema, designerSchema, storeHoldsThisForm],
   );
+  // 不打开设计器也要有 store：进到这一页就把服务端那份灌进去，之后的保存都从 store 取。
+  useEffect(() => {
+    if (!definition) return;
+    if (designerFormId === String(definition.id)) return;
+    loadDesignerSchema(parseJsonValue<SchemaNode[]>(definition.schema, []), String(definition.id));
+  }, [definition, designerFormId, loadDesignerSchema]);
   const previewSchema = useMemo(() => enrichSchemaLabels(schema), [schema]);
   const processTree = useMemo(
     () => parseJsonValue<any>(processDefinition?.process, null),
@@ -585,7 +601,7 @@ export default function FormManagementWizard() {
           id: formId,
           code: values.code,
           name: values.name,
-          schema: parseJsonValue(definition?.schema, []),
+          schema,
           settings,
         },
       });
@@ -774,6 +790,20 @@ export default function FormManagementWizard() {
   const publishAll = useMutation({
     mutationFn: async () => {
       if (!formId) throw new Error('请先保存表单属性');
+      // 先落库再发布：不然画布上没保存的改动会连同发布一起被丢掉，而且"已发布的表单再点发布"
+      // 在后端是空操作——用户会以为发布成功了，其实什么都没发生。
+      const saved = await request<FormDefinition>('/api/forms/definitions', {
+        method: 'POST',
+        data: {
+          id: formId,
+          code: definition?.code,
+          name: definition?.name,
+          description: definition?.description ?? '',
+          schema,
+          settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
+        },
+      });
+      if (saved?.status === 'PUBLISHED') return;   // 内容没变，已经是在发布状态
       if (workflowEnabled) {
         if (!processDefinition?.id) throw new Error('请先保存流程设计');
         const process = parseJsonValue<any>(processDefinition.process, null);
