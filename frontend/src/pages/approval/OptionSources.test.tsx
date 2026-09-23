@@ -97,6 +97,8 @@ describe('选项数据源', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /ces/ }));
     expect(await screen.findByText('引用与权限')).toBeInTheDocument();
+    // 停用状态不能只有一个灰点，列表那一项也要写出来。
+    expect(screen.getByRole('button', { name: /已停用 · v2/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('更多操作'));
 

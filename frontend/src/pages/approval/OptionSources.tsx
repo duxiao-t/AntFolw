@@ -320,6 +320,8 @@ export default function OptionSources() {
                   {source.name}
                 </span>
                 <span className={styles.meta}>
+                  {/* 状态只用灰点表示太弱了（也过不了无障碍），停用就写出来。 */}
+                  {source.status !== 'ACTIVE' ? '已停用 · ' : ''}
                   {metaLine(source)}
                   <br />
                   {source.formCount > 0 ? `被 ${source.formCount} 张表单引用` : '未被引用'}
