@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import FormManagementWizard from './FormManagementWizard';
@@ -75,5 +75,56 @@ describe('FormManagementWizard permission settings', () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/10/maintainers', {
       method: 'PUT', data: { userIds: [5, 6], version: 8 },
     }));
+  });
+
+  it('后台重新拉取使用范围时，不会把没保存的改动冲掉', async () => {
+    let grantFetches = 0;
+    request.mockImplementation(async (url: string) => {
+      if (url === '/api/forms/definitions/10') {
+        return { id: 10, code: 'leave', name: '请假申请', version: 1, status: 'DRAFT',
+          schema: [], settings: {} };
+      }
+      if (url === '/api/forms/10/grants/candidates') {
+        // 有 employee 角色，「全公司可见」这个开关才可用。
+        return { roles: [{ id: 2, code: 'employee', name: '员工' }], departments: [] };
+      }
+      if (url === '/api/forms/10/grants') {
+        grantFetches += 1;
+        // 第二次拉取版本号变了——保存维护人员和保存使用范围共用同一个版本计数器，
+        // 所以「保存维护人员」或任何一次保存都会让这份数据变成新对象。
+        return { version: grantFetches === 1 ? 7 : 8, userIds: [3], roleIds: [], departmentIds: [],
+          users: [], roles: [], departments: [] };
+      }
+      if (url === '/api/forms/10/maintainers') {
+        return { version: 7, userIds: [5], users: [] };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <FormManagementWizard />
+      </QueryClientProvider>,
+    );
+
+    const toggle = screen.getByRole('switch', { name: '全公司可见' });
+    // 先等候选角色到位（开关在拿到 employee 角色之前是禁用的），否则点了不会生效。
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).not.toBeChecked();
+    // 打开但**不保存**——这一段本来就要按「保存使用范围」才落库，所以必须提示未保存。
+    fireEvent.click(toggle);
+    // 提示是 useWatch 驱动的，下一帧才出现，不能同步断言。
+    await waitFor(() => expect(screen.getByText('有未保存的修改')).toBeInTheDocument());
+
+    // 模拟切走再切回来：react-query 默认 refetchOnWindowFocus，会换出一个新的 data 对象
+    // （内容一样、引用不同），旧的实现会让初始化 effect 重跑、把没保存的改动冲掉。
+    await client.invalidateQueries({ queryKey: ['form-management-grant'] });
+    await waitFor(() => expect(grantFetches).toBe(2));
+    // 等这次 refetch 的数据真的渲染进组件再断言，否则会在"重置发生之前"侥幸通过。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(toggle).toBeChecked();
+    expect(screen.getByText('有未保存的修改')).toBeInTheDocument();
   });
 });

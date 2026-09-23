@@ -24,7 +24,7 @@ import {
   theme,
   TreeSelect,
 } from 'antd';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { createStyles } from 'antd-style';
 import { CAPABILITY, hasCapability } from '../../authz';
 import { formRegistry } from '../../registry/formRegistry';
@@ -178,6 +178,14 @@ const useWizardStyles = createStyles(({ token }) => ({
     '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
   },
   fullWidth: { gridColumn: '1 / -1' },
+  saveRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
+    '@media (max-width: 680px)': { flexWrap: 'wrap', gap: 6 },
+  },
+  unsavedHint: { color: token.colorWarning, fontSize: 12 },
   actions: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -305,6 +313,13 @@ export default function FormManagementWizard() {
 
   const watchedWorkflowEnabled = Form.useWatch('workflowEnabled', form);
   const watchedAllCompany = Form.useWatch('allCompany', form);
+  const watchedUserIds = Form.useWatch('userIds', form);
+  const watchedRoleIds = Form.useWatch('roleIds', form);
+  const watchedDepartmentIds = Form.useWatch('departmentIds', form);
+  // 回填做一次就够，键是「哪张表单 + 候选角色是否已知」。
+  const syncedGrantKey = useRef<string | null>(null);
+  const syncedDefinitionId = useRef<number | null>(null);
+  const syncedMaintainerFormId = useRef<number | null>(null);
   const workflowEnabled =
     watchedWorkflowEnabled ?? getWorkflowEnabled(definition?.settings);
   const steps = getSteps(!!workflowEnabled);
@@ -355,6 +370,18 @@ export default function FormManagementWizard() {
         formGrant?.roleIds.length ? `${formGrant.roleIds.length} 个角色` : '',
         formGrant?.userIds.length ? `${formGrant.userIds.length} 名人员` : '',
       ].filter(Boolean).join('、') || '仅创建人';
+  // 「全公司可见」是个开关，看着像点一下就生效，但这一整段要按「保存使用范围」才落库。
+  // 没有提示的话，切走页面就会被当成"打开了又自己变回去"。所以把未保存状态写出来。
+  const sameIds = (left?: number[], right?: number[]) =>
+    JSON.stringify([...(left ?? [])].sort((a, b) => a - b))
+      === JSON.stringify([...(right ?? [])].sort((a, b) => a - b));
+  const grantDirty = !!formGrant && (
+    !sameIds(watchedUserIds, formGrant.userIds)
+    || !sameIds(watchedRoleIds, formGrant.roleIds.filter((id) => id !== allCompanyRoleId))
+    || !sameIds(watchedDepartmentIds, formGrant.departmentIds)
+    || (!!allCompanyRoleId
+      && watchedAllCompany !== formGrant.roleIds.includes(allCompanyRoleId))
+  );
   const initialGrantUsers: GrantUser[] =
     formGrant?.users ??
     (currentUser?.id
@@ -478,8 +505,16 @@ export default function FormManagementWizard() {
   const publishErrors = publishChecks.filter((item) => item.status === 'error');
   const canPublish = publishErrors.length === 0;
 
+  // ⚠ 这一段只在「换表单」或「这一张表单还没回填过」时跑，绝不能因为数据刷新就重跑：
+  // 使用范围的四个字段（人员/角色/部门/全公司可见）要按「保存使用范围」才落库，中间是用户的
+  // 未保存编辑。而保存维护人员与保存使用范围共用同一个版本计数器（下面 save 流程断言两者
+  // version 必须相等），所以任何一次保存、以及 react-query 默认的 refetchOnWindowFocus 都会
+  // 换出新的 data 对象——用对象当依赖会让回填重跑，把「全公司可见」这类改动冲回服务端旧值，
+  // 看起来就是"打开了又自己变回未启用"。
+  const grantInitKey = `${formId ?? 'new'}:${allCompanyRoleId ?? ''}`;
   useEffect(() => {
-    if (definition) {
+    if (definition && syncedDefinitionId.current !== definition.id) {
+      syncedDefinitionId.current = definition.id;
       form.setFieldsValue({
         code: definition.code,
         name: definition.name,
@@ -487,15 +522,21 @@ export default function FormManagementWizard() {
         businessNumber: parseJsonValue<Record<string, any>>(definition.settings, {}).businessNumber,
       });
     }
-    if (canManageGrants && formGrant) {
-      form.setFieldsValue({
-        userIds: formGrant.userIds,
-        roleIds: isAdmin ? formGrant.roleIds.filter((id) => id !== allCompanyRoleId) : [],
-        allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
-        departmentIds: formGrant.departmentIds,
-      });
+    if (canManageGrants && formGrant && syncedGrantKey.current !== grantInitKey) {
+      // 用户已经改过就不覆盖：宁可让保存时报版本冲突，也不要悄悄丢掉他填的东西。
+      if (syncedGrantKey.current === null || !grantDirty) {
+        syncedGrantKey.current = grantInitKey;
+        form.setFieldsValue({
+          userIds: formGrant.userIds,
+          roleIds: isAdmin ? formGrant.roleIds.filter((id) => id !== allCompanyRoleId) : [],
+          allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
+          departmentIds: formGrant.departmentIds,
+        });
+      }
     }
-    if (canManageGrants && formMaintainers) {
+    // 维护人员同理：只回填一次，否则刷新一下就把没保存的人员选择冲回去。
+    if (canManageGrants && formMaintainers && syncedMaintainerFormId.current !== formId) {
+      syncedMaintainerFormId.current = formId;
       form.setFieldValue('maintainerIds', formMaintainers.userIds);
     } else if (
       canManageGrants &&
@@ -519,6 +560,8 @@ export default function FormManagementWizard() {
     form,
     formGrant,
     formMaintainers,
+    grantDirty,
+    grantInitKey,
     isAdmin,
     isNew,
   ]);
@@ -925,14 +968,18 @@ export default function FormManagementWizard() {
                   placeholder="选择部门后自动包含其下级部门" />
               </Form.Item>
             </div>
-            <Button
-              style={{ marginTop: 18 }}
-              disabled={!formId}
-              loading={saveUsageScope.isPending}
-              onClick={() => saveUsageScope.mutate()}
-            >
-              保存使用范围
-            </Button>
+            <div className={styles.saveRow}>
+              <Button
+                disabled={!formId}
+                loading={saveUsageScope.isPending}
+                onClick={() => saveUsageScope.mutate()}
+              >
+                保存使用范围
+              </Button>
+              {formId && grantDirty && (
+                <span className={styles.unsavedHint}>有未保存的修改</span>
+              )}
+            </div>
           </section>
         )}
         <section className={`${styles.propertiesSection} ${styles.dividedSection}`}>
