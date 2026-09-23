@@ -81,9 +81,26 @@ public class OptionSourceController {
         return service.publish(id, versionId);
     }
 
+    @PostMapping("/api/option-sources/{id}/versions/{versionId}/unpublish")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public OptionSourceService.VersionView unpublish(@PathVariable long id, @PathVariable long versionId) {
+        return service.unpublish(id, versionId);
+    }
+
+    @DeleteMapping("/api/option-sources/{id}/versions/{versionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public void discardVersion(@PathVariable long id, @PathVariable long versionId) {
+        service.discardVersion(id, versionId);
+    }
+
     @PostMapping("/api/option-sources/{id}/disable")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
     public OptionSourceService.SourceSummary disable(@PathVariable long id) { return service.disable(id); }
+
+    @PostMapping("/api/option-sources/{id}/enable")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public OptionSourceService.SourceSummary enable(@PathVariable long id) { return service.enable(id); }
 
     @GetMapping("/api/option-sources/{id}/versions/{versionId}/rows")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")

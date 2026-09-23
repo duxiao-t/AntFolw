@@ -39,7 +39,7 @@ class OptionSourceDeletionTest {
     void deletesOnlyAnUnreferencedNeverPublishedSource() throws Exception {
         activeSource();
         when(jdbc.queryForObject(contains("status = 'PUBLISHED'"), eq(Long.class), eq(7L))).thenReturn(0L);
-        when(jdbc.queryForObject(contains("jsonb_path_exists"), eq(Boolean.class), eq(7L))).thenReturn(false);
+        when(jdbc.queryForObject(contains("jsonb_path_exists"), eq(Integer.class), eq(7L))).thenReturn(0);
         when(jdbc.update(contains("DELETE FROM t_option_data_source_version"), eq(7L))).thenReturn(1);
 
         service.delete(7L);
@@ -59,7 +59,7 @@ class OptionSourceDeletionTest {
         verify(jdbc, never()).update(contains("DELETE FROM t_option_data_source_version"), eq(7L));
 
         when(jdbc.queryForObject(contains("status = 'PUBLISHED'"), eq(Long.class), eq(7L))).thenReturn(0L);
-        when(jdbc.queryForObject(contains("jsonb_path_exists"), eq(Boolean.class), eq(7L))).thenReturn(true);
+        when(jdbc.queryForObject(contains("jsonb_path_exists"), eq(Integer.class), eq(7L))).thenReturn(2);
         assertThatThrownBy(() -> service.delete(7L)).isInstanceOf(BizException.class)
             .hasMessageContaining("被表单引用");
         verify(jdbc, never()).update(contains("DELETE FROM t_option_data_source WHERE id"), eq(7L));

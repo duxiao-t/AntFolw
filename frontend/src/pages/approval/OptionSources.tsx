@@ -3,9 +3,10 @@ import { PageContainer } from '@ant-design/pro-components';
 import { history, request } from '@umijs/max';
 import { createStyles } from 'antd-style';
 import {
-  App, Button, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Select,
+  App, Button, Card, Dropdown, Empty, Form, Input, Modal, Select,
   Space, Steps, Table, Typography,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { AssigneePicker } from '../../components/AssigneePicker';
 import { OptionSourceImportModal } from './OptionSourceImportModal';
@@ -23,7 +24,7 @@ type Version = {
 type FormRef = { id: number; code: string; name: string };
 type Detail = {
   source: Summary; versions: Version[]; userIds: number[]; roleIds: number[];
-  forms: FormRef[]; deletable: boolean;
+  forms: FormRef[]; deletable: boolean; deleteBlockedReason?: string | null;
 };
 
 const useStyles = createStyles(({ token }) => ({
@@ -126,12 +127,22 @@ const useStyles = createStyles(({ token }) => ({
     '@media (max-width: 680px)': { flexDirection: 'column', alignItems: 'stretch' },
   },
   hint: { color: 'var(--af-color-muted)', fontSize: 12 },
+  // 「删除」置灰时下面那行解释。禁用项不响应 hover，光标也别变手。
+  menuNote: {
+    display: 'block',
+    maxWidth: 240,
+    color: 'var(--af-color-muted)',
+    fontSize: 12,
+    lineHeight: 1.5,
+    whiteSpace: 'normal',
+    cursor: 'default',
+  },
   createForm: { display: 'flex', gap: 10, flexWrap: 'wrap' },
 }));
 
 export default function OptionSources() {
   const { styles, cx } = useStyles();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [list, setList] = useState<Summary[]>([]);
   const [detail, setDetail] = useState<Detail>();
   const [users, setUsers] = useState<number[]>([]);
@@ -201,32 +212,74 @@ export default function OptionSources() {
   }), [list, keyword]);
 
   const latestVersionNo = detail?.source.publishedVersionNo;
-  const latestVersion = detail?.versions.find((version) => version.versionNo === latestVersionNo);
-  const moreItems = detail ? [
-    ...(detail.source.status === 'ACTIVE' ? [{
-      key: 'disable',
-      label: (
-        <Popconfirm title="停用后，已发布表单仍可使用当前版本。确认停用？"
-          onConfirm={() => void run(async () => {
-            await request(`/api/option-sources/${detail.source.id}/disable`, { method: 'POST' });
-          }, '已停用')}>
-          <span>停用</span>
-        </Popconfirm>
-      ),
-    }] : []),
-    ...(detail.deletable ? [{
-      key: 'delete',
-      danger: true,
-      label: (
-        <Popconfirm title="确定删除此未引用、未发布的数据源及其草稿？"
-          onConfirm={() => void run(async () => {
-            await request(`/api/option-sources/${detail.source.id}`, { method: 'DELETE' });
-          }, '数据源已删除', true)}>
-          <span>删除</span>
-        </Popconfirm>
-      ),
-    }] : []),
+
+  // 只有不可逆的操作才弹确认。停用/启用/发布/取消发布都能回头，点一下就给反馈更直接。
+  const moreItems: MenuProps['items'] = detail ? [
+    {
+      key: 'toggle-status',
+      label: detail.source.status === 'ACTIVE' ? '停用' : '启用',
+    },
+    { type: 'divider' },
+    { key: 'delete', danger: true, disabled: !detail.deletable, label: '删除' },
+    ...(detail.deletable || !detail.deleteBlockedReason ? [] : [{
+      key: 'delete-blocked-reason',
+      disabled: true,
+      label: <span className={styles.menuNote}>{detail.deleteBlockedReason}</span>,
+    }]),
   ] : [];
+
+  const onMore = ({ key }: { key: string }) => {
+    if (!detail) return;
+    const id = detail.source.id;
+    if (key === 'toggle-status') {
+      const disabling = detail.source.status === 'ACTIVE';
+      void run(async () => {
+        await request(`/api/option-sources/${id}/${disabling ? 'disable' : 'enable'}`,
+          { method: 'POST' });
+      }, disabling ? '已停用' : '已启用');
+      return;
+    }
+    if (key === 'delete') {
+      modal.confirm({
+        title: '确定删除这个数据源？',
+        content: '它没有已发布版本、也没有表单在用。删除后无法恢复。',
+        okText: '删除', okButtonProps: { danger: true }, cancelText: '取消',
+        onOk: () => run(async () => {
+          await request(`/api/option-sources/${id}`, { method: 'DELETE' });
+        }, '数据源已删除', true),
+      });
+    }
+  };
+
+  const publishVersion = (version: Version) => {
+    if (!detail) return;
+    void run(async () => {
+      await request(
+        `/api/option-sources/${detail.source.id}/versions/${version.id}/publish`, { method: 'POST' });
+    }, `v${version.versionNo} 已发布`);
+  };
+
+  const unpublishVersion = (version: Version) => {
+    if (!detail) return;
+    // 被表单版本快照引用的版本，后端会拒绝并说清有几张表单——直接把那句话弹出来。
+    void run(async () => {
+      await request(
+        `/api/option-sources/${detail.source.id}/versions/${version.id}/unpublish`, { method: 'POST' });
+    }, `v${version.versionNo} 已退回待发布`);
+  };
+
+  const discardVersion = (version: Version) => {
+    if (!detail) return;
+    const id = detail.source.id;
+    modal.confirm({
+      title: `丢弃 v${version.versionNo}？`,
+      content: `这一版还没发布过，丢弃会连着它导入的 ${version.rowCount} 行数据一起删掉，无法恢复。`,
+      okText: '丢弃', okButtonProps: { danger: true }, cancelText: '取消',
+      onOk: () => run(async () => {
+        await request(`/api/option-sources/${id}/versions/${version.id}`, { method: 'DELETE' });
+      }, `v${version.versionNo} 已丢弃`),
+    });
+  };
 
   const metaLine = (source: Summary) => [
     source.publishedVersionNo ? `v${source.publishedVersionNo} · 最新` : '未发布',
@@ -311,11 +364,9 @@ export default function OptionSources() {
                     ? `被 ${detail.source.formCount} 张表单引用` : '未被表单引用'}
                 </span>
               </div>
-              {moreItems.length > 0 && (
-                <Dropdown menu={{ items: moreItems }} trigger={['click']}>
-                  <Button type="text" aria-label="更多操作" icon={<MoreOutlined />} />
-                </Dropdown>
-              )}
+              <Dropdown menu={{ items: moreItems, onClick: onMore }} trigger={['click']}>
+                <Button type="text" aria-label="更多操作" icon={<MoreOutlined />} />
+              </Dropdown>
             </div>
             <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
               已发布的版本不会再变。表单固定它绑定的版本；要用上新数据，需重新发布那张表单。
@@ -353,16 +404,19 @@ export default function OptionSources() {
                 { title: '文件', dataIndex: 'originalName', ellipsis: true,
                   render: (value: string) => value || '—' },
                 {
-                  title: '操作', width: 120,
+                  title: '操作', width: 180,
                   render: (_: unknown, version: Version) => (version.status === 'DRAFT'
-                    ? <Popconfirm title="确认发布此版本？发布后不会再变。"
-                        onConfirm={() => void run(async () => {
-                          await request(`/api/option-sources/${detail.source.id}/versions/${version.id}/publish`,
-                            { method: 'POST' });
-                        }, '版本已发布')}>
-                        <Button size="small" type="link">发布数据</Button>
-                      </Popconfirm>
-                    : <Button size="small" type="link" onClick={() => setRowsVersion(version)}>查看数据</Button>),
+                    ? <Space size={4}>
+                        <Button size="small" type="link" onClick={() => publishVersion(version)}>发布</Button>
+                        <Button size="small" type="link" danger
+                          onClick={() => discardVersion(version)}>丢弃</Button>
+                      </Space>
+                    : <Space size={4}>
+                        <Button size="small" type="link"
+                          onClick={() => setRowsVersion(version)}>查看数据</Button>
+                        <Button size="small" type="link"
+                          onClick={() => unpublishVersion(version)}>取消发布</Button>
+                      </Space>),
                 },
               ]} />
             {!detail.versions.length && <span className={styles.rowNote}>

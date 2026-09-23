@@ -28,6 +28,7 @@ const detail = {
     { id: 301, versionNo: 1, status: 'PUBLISHED', columns: ['招聘单位'], rowCount: 13, originalName: '旧表.xlsx' },
   ],
   userIds: [], roleIds: [], forms: [{ id: 1, code: 'F1', name: '表单一' }], deletable: false,
+  deleteBlockedReason: '已发布过 2 个版本，只能停用',
 };
 
 function renderPage() {
@@ -72,9 +73,37 @@ describe('选项数据源', () => {
     expect(await screen.findByText('引用与权限')).toBeInTheDocument();
     // v2 是已发布的最新版：只标一次，v1 不该也带上。
     expect(screen.getAllByText('最新')).toHaveLength(1);
+    // 已发布的两个版本：查看数据 + 取消发布；待发布那个：发布 + 丢弃。
     expect(screen.getAllByText('查看数据')).toHaveLength(2);
-    expect(screen.getByText('发布数据')).toBeInTheDocument();
+    expect(screen.getAllByText('取消发布')).toHaveLength(2);
+    expect(screen.getByText('发布')).toBeInTheDocument();
+    expect(screen.getByText('丢弃')).toBeInTheDocument();
     // 引用关系回填到多选框，标签是「名称 · 编码」。
     await waitFor(() => expect(screen.getByText('表单一 · F1')).toBeInTheDocument());
+  });
+
+  it('停用的源给「启用」，不可删时删除置灰并说清原因', async () => {
+    request.mockImplementation((url: string) => {
+      if (url === '/api/option-sources') {
+        return Promise.resolve([{ ...source, status: 'DISABLED' }]);
+      }
+      if (url === '/api/option-sources/7') {
+        return Promise.resolve({ ...detail, source: { ...source, status: 'DISABLED' } });
+      }
+      return Promise.resolve([]);
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /ces/ }));
+    expect(await screen.findByText('引用与权限')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('更多操作'));
+
+    expect(await screen.findByText('启用')).toBeInTheDocument();
+    // 删不掉时不再整个藏起来，而是置灰 + 一行原因。
+    expect(screen.getByText('已发布过 2 个版本，只能停用')).toBeInTheDocument();
+    const deleteItem = screen.getByText('删除').closest('.ant-dropdown-menu-item');
+    expect(deleteItem).toHaveClass('ant-dropdown-menu-item-disabled');
   });
 });

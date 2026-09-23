@@ -88,8 +88,26 @@ public class OptionSourceService {
             WHERE source_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
             """, Long.class, sourceId);
         List<FormRef> forms = referencedForms(sourceId);
-        return new SourceDetail(source, versions, userIds, roleIds, forms,
-            source.publishedVersionId() == null && !isReferenced(sourceId) && forms.isEmpty());
+        int boundForms = bindingFormCount(sourceId);
+        long publishedVersions = versions.stream().filter(v -> "PUBLISHED".equals(v.status())).count();
+        boolean deletable = source.publishedVersionId() == null && boundForms == 0 && forms.isEmpty();
+        return new SourceDetail(source, versions, userIds, roleIds, forms, deletable,
+            deletable ? null : deleteBlockedReason(publishedVersions, boundForms, forms.size()));
+    }
+
+    /**
+     * 删不掉的原因，按 {@link #delete} 里闸门的先后顺序给。界面要能把这句话显示出来——
+     * 今天不可删就整个不显示「删除」，用户会以为没这个功能。
+     */
+    private static String deleteBlockedReason(long publishedVersions, int boundForms, int referencedForms) {
+        if (publishedVersions > 0) {
+            return "已发布过 " + publishedVersions + " 个版本，只能停用";
+        }
+        if (boundForms > 0) {
+            // 用「绑定」而不是「引用」：这是 schema 里真的绑着，和下面那份可撤销的引用清单不是一回事。
+            return "已被 " + boundForms + " 张表单的字段绑定，不能删除";
+        }
+        return "已被 " + referencedForms + " 张表单引用，不能删除";
     }
 
     /** 引用了这个数据源的表单。反向读 V46 的引用表。 */
@@ -323,6 +341,110 @@ public class OptionSourceService {
         return requireSource(sourceId);
     }
 
+    /**
+     * 停用的反面。停用只是「暂停新绑定」——已发布表单的填报与读取一直不受影响
+     * （填报值校验走 {@code requireVersion(source, false)}，不要求 ACTIVE），所以启用只是
+     * 让引用过它的表单重新在设计器候选里看到它，不需要动任何表单。
+     */
+    @Transactional
+    public SourceSummary enable(long sourceId) {
+        authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
+        int updated = jdbc.update("""
+            UPDATE t_option_data_source
+            SET status = 'ACTIVE', version = version + 1, updated_at = now()
+            WHERE id = ? AND status = 'DISABLED'
+            """, sourceId);
+        if (updated == 0) requireSource(sourceId);
+        audit.success("form.option_source.enable", "OPTION_SOURCE", sourceId,
+            AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("status")), Map.of());
+        return requireSource(sourceId);
+    }
+
+    /**
+     * 取消发布：已发布版本退回「待发布」。数据都还在，之后可以重新导入覆盖它、或者丢弃它。
+     * 这样「发布错了」才有退路，不用靠放宽删除来解决。
+     *
+     * <p>唯一的硬门槛是**没有任何表单版本快照引用这个版本**——一退，那些表单打开下拉会立刻
+     * 报 422、字段提交不了。表单版本快照只增不删，所以被引用过的版本永远退不回来。
+     */
+    @Transactional
+    public VersionView unpublish(long sourceId, long versionId) {
+        authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
+        // 用 lockSourceRow 而不是 lockSource：收回是「不再用」的动作，停用的源也该能收回它的版本。
+        lockSourceRow(sourceId);
+        VersionView target = version(versionId);
+        if (target.sourceId() != sourceId) {
+            throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
+        }
+        int referencingForms = versionReferencingForms(versionId);
+        if (referencingForms > 0) {
+            throw new BizException("OPTION_SOURCE_VERSION_IN_USE",
+                "有 " + referencingForms + " 张表单的已发布版本在用 v" + target.versionNo() + "，不能取消发布");
+        }
+        Long drafts = jdbc.queryForObject("""
+            SELECT COUNT(*) FROM t_option_data_source_version
+            WHERE source_id = ? AND status = 'DRAFT' AND id <> ?
+            """, Long.class, sourceId, versionId);
+        if (drafts != null && drafts > 0) {
+            throw new BizException("OPTION_SOURCE_DRAFT_EXISTS", "已有待发布版本，请先发布或丢弃它");
+        }
+        int updated = jdbc.update("""
+            UPDATE t_option_data_source_version
+            SET status = 'DRAFT', published_by = NULL, published_at = NULL
+            WHERE id = ? AND source_id = ? AND status = 'PUBLISHED'
+            """, versionId, sourceId);
+        if (updated != 1) throw new BizException("OPTION_SOURCE_VERSION_NOT_PUBLISHED", "该版本不是已发布状态");
+        jdbc.update("UPDATE t_option_data_source SET version = version + 1, updated_at = now() WHERE id = ?",
+            sourceId);
+        audit.success("form.option_source.unpublish", "OPTION_SOURCE", sourceId,
+            AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("publishedVersion")),
+            Map.of("versionId", versionId, "versionNo", target.versionNo()));
+        return version(versionId);
+    }
+
+    /**
+     * 丢弃待发布版本（连同行数据）。绝对安全：读写都要求版本是 PUBLISHED
+     * （{@code requireVersion}），所以没有任何表单能绑定草稿；行数据靠 FK 级联删除。
+     * 这是「导入错了、还没发布也想重来」的出口。
+     */
+    @Transactional
+    public void discardVersion(long sourceId, long versionId) {
+        authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
+        lockSourceRow(sourceId);
+        VersionView target = version(versionId);
+        if (target.sourceId() != sourceId) {
+            throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
+        }
+        if (!"DRAFT".equals(target.status())) {
+            throw new BizException("OPTION_SOURCE_VERSION_PUBLISHED",
+                "已发布的版本不能丢弃，请先取消发布");
+        }
+        jdbc.update("DELETE FROM t_option_data_source_version WHERE id = ? AND source_id = ?",
+            versionId, sourceId);
+        jdbc.update("UPDATE t_option_data_source SET version = version + 1, updated_at = now() WHERE id = ?",
+            sourceId);
+        audit.success("form.option_source.version.discard", "OPTION_SOURCE", sourceId,
+            AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("draftVersion")),
+            Map.of("versionId", versionId, "versionNo", target.versionNo(), "rowCount", target.rowCount()));
+    }
+
+    /** 有几张表单（草稿或已发布快照）绑定了这个具体版本。 */
+    private int versionReferencingForms(long versionId) {
+        Integer count = jdbc.queryForObject("""
+            SELECT COUNT(DISTINCT form_def_id) FROM (
+              SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
+              UNION ALL
+              SELECT form_definition_id, schema FROM t_form_definition_version
+            ) form_schema
+            WHERE jsonb_path_exists(
+              form_schema.schema,
+              '$.**.props.optionSource ? (@.versionId == $versionId)',
+              jsonb_build_object('versionId', to_jsonb(?::bigint))
+            )
+            """, Integer.class, versionId);
+        return count == null ? 0 : count;
+    }
+
     @Transactional
     public void delete(long sourceId) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
@@ -418,22 +540,29 @@ public class OptionSourceService {
     }
 
     private boolean isReferenced(long sourceId) {
-        Boolean referenced = jdbc.queryForObject("""
-            SELECT EXISTS (
-              SELECT 1
-              FROM (
-                SELECT schema FROM t_form_definition WHERE deleted = 0
-                UNION ALL
-                SELECT schema FROM t_form_definition_version
-              ) form_schema
-              WHERE jsonb_path_exists(
-                form_schema.schema,
-                '$.**.props.optionSource.sourceId ? (@ == $sourceId)',
-                jsonb_build_object('sourceId', to_jsonb(?::bigint))
-              )
+        return bindingFormCount(sourceId) > 0;
+    }
+
+    /**
+     * 有几张表单在 schema 里真的绑着这个数据源（草稿 + 所有已发布版本快照，含已软删表单的快照）。
+     *
+     * <p>注意这和 {@code t_form_option_source}（V46 那份可在源侧撤销的引用清单）是两件事：
+     * 撤引用**不会**解绑字段。删除判定只认这个数。
+     */
+    private int bindingFormCount(long sourceId) {
+        Integer count = jdbc.queryForObject("""
+            SELECT COUNT(DISTINCT form_def_id) FROM (
+              SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
+              UNION ALL
+              SELECT form_definition_id, schema FROM t_form_definition_version
+            ) form_schema
+            WHERE jsonb_path_exists(
+              form_schema.schema,
+              '$.**.props.optionSource.sourceId ? (@ == $sourceId)',
+              jsonb_build_object('sourceId', to_jsonb(?::bigint))
             )
-            """, Boolean.class, sourceId);
-        return Boolean.TRUE.equals(referenced);
+            """, Integer.class, sourceId);
+        return count == null ? 0 : count;
     }
 
     private VersionView version(long versionId) {
@@ -636,7 +765,7 @@ public class OptionSourceService {
                                 int formCount) { }
     public record SourceDetail(SourceSummary source, List<VersionView> versions,
                                List<Long> userIds, List<Long> roleIds, List<FormRef> forms,
-                               boolean deletable) { }
+                               boolean deletable, String deleteBlockedReason) { }
     public record FormRef(long id, String code, String name) { }
     public record FormRefWrite(Integer version, Set<Long> formIds) {
         public FormRefWrite {

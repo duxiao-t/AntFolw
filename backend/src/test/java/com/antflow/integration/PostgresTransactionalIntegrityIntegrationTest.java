@@ -655,6 +655,86 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
+    @Test
+    void mobileListSearchWorksAgainstRealPostgres() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long dataId = insertSubmittedData(formId, adminId);
+        String businessNo = jdbcTemplate.queryForObject(
+            "SELECT business_no FROM t_form_data WHERE id = ?", String.class, dataId);
+
+        // 这三个查询都带 keyword；参数没转成 text 时 PG 直接 "could not determine data type"。
+        assertThatCode(() -> mobileWorkflowMapper.selectTaskPage(adminId, "todo", "x", null, 20, 0))
+            .doesNotThrowAnyException();
+        assertThatCode(() -> mobileWorkflowMapper.selectInstancePage(adminId, "x", null, 20, 0))
+            .doesNotThrowAnyException();
+        // 光"不抛异常"也可能是因为什么都没查到，所以这条要求真的命中。
+        assertThat(mobileWorkflowMapper.selectInitiatedPage(adminId, businessNo, null, 50, 0))
+            .extracting(MobileWorkflowMapper.InitiatedRow::id)
+            .contains(dataId);
+    }
+
+    @Test
+    void unpublishIsRefusedWhileAFormBindsTheVersion() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("unpub_" + UUID.randomUUID().toString().replace("-", ""));
+        long versionId = optionSourceVersionId(sourceId);
+        long formId = insertForm("DRAFT", optionSchema(sourceId, versionId));
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThatThrownBy(() -> optionSourceService.unpublish(sourceId, versionId))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("不能取消发布");
+
+            // 解绑之后就能退回待发布——这就是「发布错了」的退路。
+            jdbcTemplate.update("UPDATE t_form_definition SET schema = '[]'::jsonb WHERE id = ?", formId);
+            assertThat(optionSourceService.unpublish(sourceId, versionId).status()).isEqualTo("DRAFT");
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void discardDropsOnlyDraftVersions() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("discard_" + UUID.randomUUID().toString().replace("-", ""));
+        long publishedId = optionSourceVersionId(sourceId);
+        long draftId = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'DRAFT', '[\"col\"]'::jsonb, 2, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_row(version_id, row_no, data) "
+            + "VALUES (?, 1, '{\"col\":\"a\"}'::jsonb), (?, 2, '{\"col\":\"b\"}'::jsonb)",
+            draftId, draftId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThatThrownBy(() -> optionSourceService.discardVersion(sourceId, publishedId))
+                .isInstanceOf(BizException.class).hasMessageContaining("先取消发布");
+
+            optionSourceService.discardVersion(sourceId, draftId);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_option_data_source_row WHERE version_id = ?", Long.class, draftId))
+                .isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_option_data_source_version WHERE source_id = ? AND status = 'DRAFT'",
+                Long.class, sourceId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    private long optionSourceVersionId(long sourceId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT id FROM t_option_data_source_version WHERE source_id = ?", Long.class, sourceId);
+    }
+
+    private static String optionSchema(long sourceId, long versionId) {
+        return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
+            + "{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId + "}}}]";
+    }
+
     private long insertOptionSource(String code) {
         long sourceId = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source(code, name) "
             + "VALUES (?, 'Integration source') RETURNING id", Long.class, code);

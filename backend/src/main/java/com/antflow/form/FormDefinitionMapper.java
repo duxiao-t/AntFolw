@@ -16,10 +16,11 @@ public interface FormDefinitionMapper extends BaseMapper<FormDefinition> {
         FROM t_form_definition form
         WHERE form.deleted = 0
         <if test="keyword != null and keyword != ''">
-          <!-- 必须显式 ::text：连接串带 stringtype=unspecified，参数以 unknown 送到 PG，
-               而 concat(variadic "any") 无法从 unknown 推断类型，会直接 500。 -->
-          AND (form.name ILIKE CONCAT('%', #{keyword}::text, '%')
-            OR form.code ILIKE CONCAT('%', #{keyword}::text, '%'))
+          <!-- 必须显式转成 text：连接串带 stringtype=unspecified，参数以 unknown 送到 PG，
+               而 concat(variadic "any") 无法从 unknown 推断类型，会直接 500。
+               手机端 MobileWorkflowMapper 同样的问题也一并补上了。 -->
+          AND (form.name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR form.code ILIKE CONCAT('%', CAST(#{keyword} AS text), '%'))
         </if>
         <if test="status != null and status != ''">
           AND form.status = #{status}
