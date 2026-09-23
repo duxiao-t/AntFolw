@@ -1,43 +1,185 @@
-import { FileExcelOutlined, PlusOutlined } from '@ant-design/icons';
+import { MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
 import { history, request } from '@umijs/max';
-import { App, Button, Card, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { createStyles } from 'antd-style';
+import {
+  App, Button, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Select,
+  Space, Steps, Table, Typography,
+} from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { AssigneePicker } from '../../components/AssigneePicker';
+import { OptionSourceImportModal } from './OptionSourceImportModal';
+import { OptionSourceRowsDrawer } from './OptionSourceRowsDrawer';
 
-type Summary = { id: number; code: string; name: string; status: string; version: number;
-  publishedVersionId?: number; publishedVersionNo?: number; rowCount?: number; draftVersionId?: number };
-type Version = { id: number; versionNo: number; status: string; columns: string[]; rowCount: number; originalName: string };
-type Detail = { source: Summary; versions: Version[]; userIds: number[]; roleIds: number[]; deletable: boolean };
-type Preview = { sheets: string[]; columns: string[]; rowCount: number; rows: Array<Record<string, string>> };
+type Summary = {
+  id: number; code: string; name: string; status: string; version: number;
+  publishedVersionId?: number; publishedVersionNo?: number; rowCount?: number;
+  draftVersionId?: number; formCount: number;
+};
+type Version = {
+  id: number; versionNo: number; status: string; columns: string[];
+  rowCount: number; originalName: string;
+};
+type FormRef = { id: number; code: string; name: string };
+type Detail = {
+  source: Summary; versions: Version[]; userIds: number[]; roleIds: number[];
+  forms: FormRef[]; deletable: boolean;
+};
+
+const useStyles = createStyles(({ token }) => ({
+  layout: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(260px, 320px) minmax(0, 1fr)',
+    gap: 16,
+    alignItems: 'start',
+    '@media (max-width: 900px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  },
+  listHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '0 0 12px',
+  },
+  listTitle: { display: 'flex', alignItems: 'baseline', gap: 6 },
+  count: {
+    color: 'var(--af-color-muted)',
+    fontSize: 12,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  list: { display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 },
+  item: {
+    display: 'block',
+    width: '100%',
+    padding: '9px 10px',
+    border: 0,
+    borderLeft: '3px solid transparent',
+    borderRadius: token.borderRadius,
+    background: 'transparent',
+    color: 'inherit',
+    cursor: 'pointer',
+    font: 'inherit',
+    textAlign: 'left',
+    transition: 'background-color .15s',
+    '&:hover': { background: token.colorFillTertiary },
+    '&:focus-visible': { outline: `2px solid ${token.colorPrimary}`, outlineOffset: -2 },
+  },
+  itemActive: {
+    borderLeftColor: token.colorPrimary,
+    background: 'var(--af-color-primary-soft)',
+    '&:hover': { background: 'var(--af-color-primary-soft)' },
+  },
+  itemName: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontWeight: 500,
+    color: 'var(--af-color-text)',
+  },
+  meta: {
+    display: 'block',
+    marginTop: 2,
+    color: 'var(--af-color-muted)',
+    fontSize: 12,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  dot: {
+    flex: '0 0 auto',
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    background: token.colorSuccess,
+  },
+  dotOff: { background: token.colorTextQuaternary },
+  dotDraft: { background: token.colorWarning },
+  head: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingBottom: 12,
+    borderBottom: '1px solid var(--af-color-line)',
+  },
+  headTitle: { display: 'flex', alignItems: 'center', gap: 8 },
+  headName: { margin: 0, fontSize: 16, fontWeight: 600 },
+  bar: {
+    display: 'inline-block',
+    width: 3,
+    height: 14,
+    marginRight: 8,
+    verticalAlign: '-2px',
+    borderRadius: 2,
+    background: token.colorPrimary,
+  },
+  rowNote: {
+    display: 'block',
+    marginTop: 10,
+    color: 'var(--af-color-muted)',
+    fontSize: 12,
+  },
+  field: { display: 'flex', flexDirection: 'column', gap: 6 },
+  fieldRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 10,
+    flexWrap: 'wrap',
+    '@media (max-width: 680px)': { flexDirection: 'column', alignItems: 'stretch' },
+  },
+  hint: { color: 'var(--af-color-muted)', fontSize: 12 },
+  createForm: { display: 'flex', gap: 10, flexWrap: 'wrap' },
+}));
 
 export default function OptionSources() {
+  const { styles, cx } = useStyles();
   const { message } = App.useApp();
   const [list, setList] = useState<Summary[]>([]);
   const [detail, setDetail] = useState<Detail>();
-  const [name, setName] = useState('');
-  const [code, setCode] = useState('');
-  const [text, setText] = useState('');
-  const [file, setFile] = useState<File>();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [sheet, setSheet] = useState('');
-  const [preview, setPreview] = useState<Preview>();
   const [users, setUsers] = useState<number[]>([]);
   const [roles, setRoles] = useState<number[]>([]);
+  const [formIds, setFormIds] = useState<number[]>([]);
+  const [formOptions, setFormOptions] = useState<FormRef[]>([]);
+  const [keyword, setKeyword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [rowsVersion, setRowsVersion] = useState<Version | null>(null);
 
   const refresh = async (id?: number) => {
     const sources = await request<Summary[]>('/api/option-sources');
     setList(sources);
-    if (id) {
-      const current = await request<Detail>(`/api/option-sources/${id}`);
-      setDetail(current);
-      setUsers(current.userIds);
-      setRoles(current.roleIds);
+    if (!id) return;
+    const current = await request<Detail>(`/api/option-sources/${id}`);
+    setDetail(current);
+    setUsers(current.userIds);
+    setRoles(current.roleIds);
+    setFormIds(current.forms.map((form) => form.id));
+  };
+
+  useEffect(() => {
+    void refresh().catch((error) => message.error(error?.message ?? '无法加载数据源'));
+  }, []);
+
+  // 表单多选要能搜索：先给一份默认列表，输入时再按关键字远程查。
+  const searchForms = async (word?: string) => {
+    try {
+      const page = await request<{ records?: FormRef[] }>('/api/forms/definitions', {
+        params: { page: 1, size: 50, keyword: word },
+      });
+      setFormOptions(page.records ?? []);
+    } catch (error: any) {
+      message.error(error?.message ?? '无法加载表单');
     }
   };
-  useEffect(() => { void refresh().catch((error) => message.error(error?.message ?? '无法加载数据源')); }, []);
-  const open = (id: number) => void refresh(id).catch((error) => message.error(error?.message ?? '无法打开数据源'));
+
+  const open = async (source: Summary) => {
+    try {
+      await refresh(source.id);
+      void searchForms();
+    } catch (error: any) {
+      message.error(error?.message ?? '无法打开数据源');
+    }
+  };
+
   const run = async (action: () => Promise<number | undefined>, success: string, clear = false) => {
     setBusy(true);
     try {
@@ -45,131 +187,259 @@ export default function OptionSources() {
       if (clear) setDetail(undefined);
       await refresh(clear ? undefined : id ?? detail?.source.id);
       message.success(success);
+    } catch (error: any) {
+      message.error(error?.message ?? '操作失败');
+    } finally {
+      setBusy(false);
     }
-    catch (error: any) { message.error(error?.message ?? '操作失败'); }
-    finally { setBusy(false); }
-  };
-  const upload = (selectedSheet = sheet) => {
-    const data = new FormData();
-    if (file) data.append('file', file);
-    else if (text.trim()) data.append('text', text);
-    if (selectedSheet) data.append('sheetName', selectedSheet);
-    return data;
-  };
-  const inspect = async (selectedSheet = sheet) => {
-    setBusy(true);
-    try { setPreview(await request<Preview>('/api/option-sources/inspect', { method: 'POST', data: upload(selectedSheet) })); }
-    catch (error: any) { message.error(error?.message ?? '预检失败'); }
-    finally { setBusy(false); }
   };
 
+  const sources = useMemo(() => list.filter((source) => {
+    const word = keyword.trim().toLowerCase();
+    if (!word) return true;
+    return source.name.toLowerCase().includes(word) || source.code.toLowerCase().includes(word);
+  }), [list, keyword]);
+
+  const latestVersionNo = detail?.source.publishedVersionNo;
+  const latestVersion = detail?.versions.find((version) => version.versionNo === latestVersionNo);
+  const moreItems = detail ? [
+    ...(detail.source.status === 'ACTIVE' ? [{
+      key: 'disable',
+      label: (
+        <Popconfirm title="停用后，已发布表单仍可使用当前版本。确认停用？"
+          onConfirm={() => void run(async () => {
+            await request(`/api/option-sources/${detail.source.id}/disable`, { method: 'POST' });
+          }, '已停用')}>
+          <span>停用</span>
+        </Popconfirm>
+      ),
+    }] : []),
+    ...(detail.deletable ? [{
+      key: 'delete',
+      danger: true,
+      label: (
+        <Popconfirm title="确定删除此未引用、未发布的数据源及其草稿？"
+          onConfirm={() => void run(async () => {
+            await request(`/api/option-sources/${detail.source.id}`, { method: 'DELETE' });
+          }, '数据源已删除', true)}>
+          <span>删除</span>
+        </Popconfirm>
+      ),
+    }] : []),
+  ] : [];
+
+  const metaLine = (source: Summary) => [
+    source.publishedVersionNo ? `v${source.publishedVersionNo} · 最新` : '未发布',
+    source.rowCount ? `${source.rowCount} 行` : undefined,
+  ].filter(Boolean).join(' · ');
+
   return (
-    <PageContainer title="选项数据源" subTitle="导入一次，多个表单可引用；表单发布时固定所选版本"
-      onBack={() => history.push('/approval/forms')}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px, 300px) minmax(0, 1fr)', gap: 16 }}>
-        <Card title="已导入的数据" size="small">
-          <Space direction="vertical" style={{ width: '100%' }}>
-            {list.map((source) => (
-              <Button key={source.id} block type={detail?.source.id === source.id ? 'primary' : 'default'}
-                onClick={() => open(source.id)} style={{ textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}>
-                {source.name} {source.publishedVersionNo ? `· v${source.publishedVersionNo}` : '· 未发布'}
-              </Button>
+    <PageContainer
+      title="选项数据源"
+      subTitle="导入一次，多个表单可引用；表单固定它绑定的那个版本"
+      onBack={() => history.push('/approval/forms')}
+      extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+        新建数据源
+      </Button>}
+    >
+      <div className={styles.layout}>
+        <Card size="small" title={false}>
+          <div className={styles.listHead}>
+            <span className={styles.listTitle}>
+              <Typography.Text strong>数据源</Typography.Text>
+              <span className={styles.count}>{list.length} 个</span>
+            </span>
+          </div>
+          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索名称或编码"
+            aria-label="搜索数据源" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+          {list.length === 0 && <Empty style={{ marginTop: 16 }} description="还没有数据源" />}
+          {list.length > 0 && sources.length === 0 && (
+            <Empty style={{ marginTop: 16 }} image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的数据源" />
+          )}
+          <div className={styles.list}>
+            {sources.map((source) => (
+              <button key={source.id} type="button"
+                className={cx(styles.item, detail?.source.id === source.id && styles.itemActive)}
+                aria-current={detail?.source.id === source.id}
+                onClick={() => void open(source)}>
+                <span className={styles.itemName}>
+                  <span className={cx(styles.dot, source.status !== 'ACTIVE' && styles.dotOff)} aria-hidden />
+                  {source.name}
+                </span>
+                <span className={styles.meta}>
+                  {metaLine(source)}
+                  <br />
+                  {source.formCount > 0 ? `被 ${source.formCount} 张表单引用` : '未被引用'}
+                </span>
+              </button>
             ))}
-            {!list.length && <Typography.Text type="secondary">创建数据源后，可导入文本或 Excel 表格。</Typography.Text>}
-          </Space>
+          </div>
         </Card>
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <Card title="创建数据源" size="small">
-            <Space wrap>
-              <Input aria-label="数据源名称" placeholder="名称，例如设备台账" maxLength={128} value={name} onChange={(e) => setName(e.target.value)} />
-              <Input aria-label="数据源编码" placeholder="英文编码，例如 device_codes" maxLength={64} value={code} onChange={(e) => setCode(e.target.value)} />
-              <Button type="primary" icon={<PlusOutlined />} disabled={!name.trim() || !code.trim()} loading={busy}
-                onClick={() => void run(async () => {
-                  const created = await request<Detail>('/api/option-sources', { method: 'POST', data: { name: name.trim(), code: code.trim() } });
-                  setName(''); setCode('');
-                  return created.source.id;
-                }, '数据源已创建')}>
-                创建
-              </Button>
+
+        {!detail && list.length === 0 && (
+          <Card>
+            <Typography.Title level={5} style={{ marginTop: 0 }}>三步开始用</Typography.Title>
+            <Steps direction="vertical" size="small" style={{ marginBottom: 16 }} items={[
+              { title: '新建数据源', description: '给它起个名字，比如「设备台账」。编码是给表单内部用的英文名。' },
+              { title: '导入并发布版本', description: '粘贴文本，或上传 Excel / CSV。检查无误后导入，再发布成版本。' },
+              { title: '在表单里引用', description: '把数据源引用到表单，字段的「选项来源」就能挑到它。' },
+            ]} />
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建数据源
+            </Button>
+          </Card>
+        )}
+
+        {!detail && list.length > 0 && (
+          <Card><Empty description="从左边挑一个数据源" /></Card>
+        )}
+
+        {detail && <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Card>
+            <div className={styles.head}>
+              <div>
+                <div className={styles.headTitle}>
+                  <h2 className={styles.headName}>{detail.source.name}</h2>
+                  <span className={styles.meta} style={{ margin: 0 }}>{detail.source.code}</span>
+                </div>
+                <span className={styles.meta}>
+                  {detail.source.status === 'ACTIVE' ? '可使用' : '已停用'}
+                  {' · '}
+                  {metaLine(detail.source)}
+                  {' · '}
+                  {detail.source.formCount > 0
+                    ? `被 ${detail.source.formCount} 张表单引用` : '未被表单引用'}
+                </span>
+              </div>
+              {moreItems.length > 0 && (
+                <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                  <Button type="text" aria-label="更多操作" icon={<MoreOutlined />} />
+                </Dropdown>
+              )}
+            </div>
+            <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
+              已发布的版本不会再变。表单固定它绑定的版本；要用上新数据，需重新发布那张表单。
+            </Typography.Paragraph>
+          </Card>
+
+          <Card title="版本" size="small"
+            extra={<Button type="primary" ghost icon={<PlusOutlined />}
+              disabled={detail.source.status !== 'ACTIVE'}
+              onClick={() => setImportOpen(true)}>导入新版本</Button>}>
+            <Table size="small" rowKey="id" pagination={false} dataSource={detail.versions}
+              onRow={(version) => (version.versionNo === latestVersionNo
+                ? { style: { background: 'var(--af-color-primary-soft)' } } : {})}
+              columns={[
+                {
+                  title: '版本', dataIndex: 'versionNo', width: 130,
+                  render: (versionNo: number) => (
+                    <span className={styles.itemName}>
+                      {versionNo === latestVersionNo && <span className={styles.bar} aria-hidden />}
+                      {`v${versionNo}`}
+                      {versionNo === latestVersionNo && <Typography.Text type="secondary">最新</Typography.Text>}
+                    </span>
+                  ),
+                },
+                {
+                  title: '状态', dataIndex: 'status', width: 110,
+                  render: (value: string) => (
+                    <span className={styles.itemName}>
+                      <span className={cx(styles.dot, value === 'DRAFT' ? styles.dotDraft : undefined)} aria-hidden />
+                      {value === 'PUBLISHED' ? '已发布' : '待发布'}
+                    </span>
+                  ),
+                },
+                { title: '记录', dataIndex: 'rowCount', width: 90, align: 'right' as const },
+                { title: '文件', dataIndex: 'originalName', ellipsis: true,
+                  render: (value: string) => value || '—' },
+                {
+                  title: '操作', width: 120,
+                  render: (_: unknown, version: Version) => (version.status === 'DRAFT'
+                    ? <Popconfirm title="确认发布此版本？发布后不会再变。"
+                        onConfirm={() => void run(async () => {
+                          await request(`/api/option-sources/${detail.source.id}/versions/${version.id}/publish`,
+                            { method: 'POST' });
+                        }, '版本已发布')}>
+                        <Button size="small" type="link">发布数据</Button>
+                      </Popconfirm>
+                    : <Button size="small" type="link" onClick={() => setRowsVersion(version)}>查看数据</Button>),
+                },
+              ]} />
+            {!detail.versions.length && <span className={styles.rowNote}>
+              还没有任何版本。点「导入新版本」把文本或表格导进来。
+            </span>}
+          </Card>
+
+          <Card title="引用与权限" size="small">
+            <Space direction="vertical" style={{ width: '100%' }} size={16}>
+              <div className={styles.field}>
+                <Typography.Text strong>哪些表单可以用</Typography.Text>
+                <div className={styles.fieldRow}>
+                  <Select mode="multiple" style={{ minWidth: 280, flex: 1 }} showSearch
+                    placeholder="选择表单，可搜索" aria-label="引用到表单"
+                    filterOption={false} value={formIds} onChange={setFormIds}
+                    onSearch={(word) => void searchForms(word)}
+                    options={formOptions.map((form) => ({
+                      value: form.id, label: `${form.name} · ${form.code}`,
+                    }))} />
+                  <Button loading={busy} onClick={() => void run(async () => {
+                    await request(`/api/option-sources/${detail.source.id}/forms`, {
+                      method: 'PUT',
+                      data: { version: detail.source.version, formIds },
+                    });
+                  }, '引用关系已保存')}>保存</Button>
+                </div>
+                <span className={styles.hint}>被引用的表单，才能在字段里挑到这个数据源。</span>
+              </div>
+              <div className={styles.field}>
+                <Typography.Text strong>谁可以引用</Typography.Text>
+                <AssigneePicker mode="user" value={users} onChange={setUsers} />
+                <AssigneePicker mode="role" value={roles} onChange={setRoles} />
+                <div className={styles.fieldRow}>
+                  <Button loading={busy} onClick={() => void run(async () => {
+                    await request(`/api/option-sources/${detail.source.id}/grants`, {
+                      method: 'PUT',
+                      data: { version: detail.source.version, userIds: users, roleIds: roles },
+                    });
+                  }, '引用权限已保存')}>保存</Button>
+                </div>
+                <span className={styles.hint}>管理员始终可以引用；其他人需在这里获得用户或角色授权。</span>
+              </div>
             </Space>
           </Card>
-          {detail && <>
-            <Card title={<Space>{detail.source.name} <Tag>{detail.source.status === 'ACTIVE' ? '可使用' : '已停用'}</Tag>
-              {detail.deletable && <Tag color="blue">未引用 · 未发布</Tag>}</Space>}
-              extra={<Space>
-                {detail.deletable && <Popconfirm title="确定删除此未引用、未发布的数据源及其草稿？"
-                  onConfirm={() => void run(async () => { await request(`/api/option-sources/${detail.source.id}`, { method: 'DELETE' }); }, '数据源已删除', true)}>
-                  <Button danger size="small" loading={busy}>删除</Button>
-                </Popconfirm>}
-                {detail.source.status === 'ACTIVE' && <Popconfirm title="停用后现有已发布表单仍可使用当前版本，确认停用？"
-                  onConfirm={() => void run(async () => { await request(`/api/option-sources/${detail.source.id}/disable`, { method: 'POST' }); }, '已停用')}>
-                  <Button danger size="small">停用</Button>
-                </Popconfirm>}
-              </Space>}>
-              <Typography.Paragraph type="secondary">版本固定：重新导入和发布数据不会改变现有表单的选项；要切换数据，需重新发布表单。</Typography.Paragraph>
-              <Table size="small" rowKey="id" pagination={false} dataSource={detail.versions}
-                columns={[
-                  { title: '版本', dataIndex: 'versionNo', render: (v: number) => `v${v}` },
-                  { title: '状态', dataIndex: 'status', render: (s: string) => s === 'PUBLISHED' ? '已发布' : '待发布' },
-                  { title: '记录', dataIndex: 'rowCount' },
-                  { title: '文件', dataIndex: 'originalName', ellipsis: true },
-                  { title: '操作', render: (_: unknown, v: Version) => v.status === 'DRAFT'
-                    ? <Popconfirm title="确认发布此数据版本？" onConfirm={() => void run(async () => { await request(`/api/option-sources/${detail.source.id}/versions/${v.id}/publish`, { method: 'POST' }); }, '数据版本已发布')}>
-                        <Button size="small" type="primary">发布数据</Button>
-                      </Popconfirm> : null },
-                ]} />
-            </Card>
-            {detail.source.status === 'ACTIVE' && <Card title={<Space><FileExcelOutlined />导入新版本</Space>}>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Typography.Text type="secondary">粘贴文本每行一个选项；表格可粘贴 Excel 单元格或上传 CSV、TXT、XLS、XLSX。表格首行为列名。</Typography.Text>
-                <Input.TextArea value={text} rows={4} placeholder="一行一个选项，或直接粘贴多列 Excel 表格" disabled={!!file}
-                  onChange={(e) => { setText(e.target.value); setPreview(undefined); }} />
-                <Button icon={<FileExcelOutlined />} style={{ alignSelf: 'flex-start' }} onClick={() => fileInput.current?.click()}>
-                  选择文件导入
-                </Button>
-                <input ref={fileInput} type="file" aria-label="选择导入文件" accept=".txt,.csv,.xls,.xlsx"
-                  style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} onChange={(e) => {
-                    setFile(e.target.files?.[0]); e.target.value = '';
-                    setText(''); setSheet(''); setPreview(undefined);
-                  }} />
-                {file && <Space><Typography.Text>已选择：{file.name}</Typography.Text>
-                  <Button size="small" onClick={() => { setFile(undefined); setPreview(undefined); }}>清除文件</Button></Space>}
-                {preview?.sheets && preview.sheets.length > 1 && <Select aria-label="选择工作表" style={{ width: 240 }}
-                  placeholder="选择工作表" value={sheet || undefined} options={preview.sheets.map((v) => ({ value: v, label: v }))}
-                  onChange={(v) => { setSheet(v); void inspect(v); }} />}
-                <Space>
-                  <Button disabled={!file && !text.trim()} loading={busy} onClick={() => void inspect()}>检查导入内容</Button>
-                  <Button type="primary" disabled={!preview?.columns.length || busy}
-                    onClick={() => void run(async () => {
-                      await request(`/api/option-sources/${detail.source.id}/versions/import`, { method: 'POST', data: upload() });
-                      setPreview(undefined); setFile(undefined); setText(''); setSheet('');
-                    }, '已导入草稿，请发布数据版本')}>
-                    导入为草稿
-                  </Button>
-                </Space>
-                {preview && !!preview.columns.length && <>
-                  <Typography.Text>共 {preview.rowCount} 行 · {preview.columns.length} 列，下面显示前 {preview.rows.length} 行</Typography.Text>
-                  <Table size="small" scroll={{ x: 'max-content' }} pagination={false}
-                    dataSource={preview.rows.map((row, index) => ({ ...row, key: index }))}
-                    columns={preview.columns.map((column) => ({ title: column, dataIndex: column, ellipsis: true }))} />
-                </>}
-              </Space>
-            </Card>}
-            <Card title="允许哪些表单维护者引用">
-              <Typography.Paragraph type="secondary">管理员始终可引用；其他维护者需先获得用户或角色授权。</Typography.Paragraph>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Typography.Text>用户（输入姓名、账号或部门搜索）</Typography.Text>
-                <AssigneePicker mode="user" value={users} onChange={setUsers} />
-                <Typography.Text>角色（输入名称或编码搜索）</Typography.Text>
-                <AssigneePicker mode="role" value={roles} onChange={setRoles} />
-                <Button loading={busy} onClick={() => void run(async () => { await request(`/api/option-sources/${detail.source.id}/grants`, {
-                  method: 'PUT', data: { version: detail.source.version, userIds: users, roleIds: roles },
-                }); }, '引用权限已保存')}>保存引用权限</Button>
-              </Space>
-            </Card>
-          </>}
-        </Space>
+        </Space>}
       </div>
+
+      <Modal title="新建数据源" open={createOpen} onCancel={() => setCreateOpen(false)}
+        footer={null} destroyOnHidden>
+        <Form layout="vertical" onFinish={(values: { name: string; code: string }) =>
+          void run(async () => {
+            const created = await request<Detail>('/api/option-sources', {
+              method: 'POST',
+              data: { name: values.name.trim(), code: values.code.trim() },
+            });
+            setCreateOpen(false);
+            return created.source.id;
+          }, '数据源已创建')}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input placeholder="例如 设备台账" maxLength={128} />
+          </Form.Item>
+          <Form.Item name="code" label="编码" rules={[
+            { required: true, message: '请输入编码' },
+            { pattern: /^[a-z][a-z0-9_]{1,63}$/, message: '小写字母开头，只能用小写字母、数字和下划线' },
+          ]} extra="英文编码，创建后不可修改。">
+            <Input placeholder="例如 device_codes" maxLength={64} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={busy} block>创建</Button>
+        </Form>
+      </Modal>
+
+      {detail && <OptionSourceImportModal sourceId={detail.source.id} open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => void refresh(detail.source.id)} />}
+
+      <OptionSourceRowsDrawer sourceId={detail?.source.id ?? 0} version={rowsVersion}
+        onClose={() => setRowsVersion(null)} />
     </PageContainer>
   );
 }

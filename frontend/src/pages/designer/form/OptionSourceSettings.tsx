@@ -1,12 +1,12 @@
-import { request } from '@umijs/max';
+import { Link, request } from '@umijs/max';
 import { useQuery } from '@tanstack/react-query';
-import { Input, Select, Space, Typography } from 'antd';
+import { Checkbox, Input, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { isBoundOptionSource } from '../../../components/form-fields/dynamicOptions';
 import type { SchemaNode } from '../../../registry/types';
+import { type BindableSource, versionOptionGroups } from './optionSourceVersions';
 
-type Source = { id: number; code: string; name: string; versionId: number;
-  versionNo: number; columns: string[]; rowCount: number };
+type Source = BindableSource;
 
 /** 这些下拉的候选项是列名/版本名，比默认宽度长得多；给足约 10 个汉字的宽度，避免只露两三个字。 */
 const SELECT_WIDTH = 190;
@@ -40,8 +40,10 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
   // 「已选外部数据源、还没选版本」是编辑途中的临时状态：只留在组件内，不写进 schema，
   // 否则会留下 optionSource: {} 这种脏数据让表单发布失败。
   const [draftMode, setDraftMode] = useState<'source' | null>(null);
+  // 「显示历史版本」也留在组件内：这是看的偏好，不是表单数据。
+  const [showHistory, setShowHistory] = useState(false);
   const sourceMode = draftMode ?? (bound ? 'source' : 'static');
-  useEffect(() => { setDraftMode(null); }, [node.id]);
+  useEffect(() => { setDraftMode(null); setShowHistory(false); }, [node.id]);
   const link = node.props?.dataLinkage as Record<string, any> | undefined;
   const selected = sources.find((s) => s.id === binding?.sourceId && s.versionId === binding?.versionId);
   const columns = selected?.columns ?? [];
@@ -67,10 +69,13 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
           setDraftMode(null);
           update({ optionSource: undefined, defaultValue: undefined });
         }} />
-      {sourceMode === 'source' && <>
+      {sourceMode === 'source' && sources.length === 0 && <Typography.Text type="secondary">
+        本表单还没有引用任何选项数据源。先去 <Link to="/approval/option-sources">选项数据源</Link> 把它引用到这张表单。
+      </Typography.Text>}
+      {sourceMode === 'source' && sources.length > 0 && <>
         <Typography.Text type="secondary">选择已发布版本。更新数据后，重新发布表单才能切换版本。</Typography.Text>
-        <Select style={{ width: SELECT_WIDTH }} placeholder="选择数据源与版本" value={selected?.versionId}
-          options={sources.map((s) => ({ value: s.versionId, label: `${s.name} · v${s.versionNo} (${s.rowCount} 行)` }))}
+        <Select style={{ width: SELECT_WIDTH }} placeholder="数据源与版本" value={selected?.versionId}
+          options={versionOptionGroups(sources, { boundVersionId: binding?.versionId, showHistory })}
           onChange={(versionId) => {
             const source = sources.find((s) => s.versionId === versionId);
             if (!source) return;
@@ -81,7 +86,10 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
             update({ optionSource: { sourceId: source.id, versionId: source.versionId,
               valueColumn: onlyColumn, labelColumn: onlyColumn }, defaultValue: undefined });
           }} />
-        {selected && <>
+        <Checkbox checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)}>
+          显示历史版本
+        </Checkbox>
+        {selected && binding && <>
           <Typography.Text>保存值所在列</Typography.Text>
           <Select style={{ width: SELECT_WIDTH }} placeholder="选择保存值的列"
             value={binding.valueColumn} options={columns.map((c) => ({ label: c, value: c }))}

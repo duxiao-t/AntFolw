@@ -152,10 +152,23 @@ function DynamicMultiSelect({ node, mode, value, onChange, values, optionContext
           onClear={() => { dynamic.reset(); onChange?.([]); }}
           allowClear
           style={{ width: '100%' }}
+          // 滚到底继续取下一页，与 SelectField 一致。原来那个「更多选项」按钮依赖已经删掉的
+          // dynamic.page/next，算出来是 NaN 比较，早就渲染不出来了。
+          onPopupScroll={(event: any) => {
+            const list = event.currentTarget as HTMLElement;
+            if (list.scrollHeight - list.scrollTop - list.clientHeight < 48) dynamic.loadMore();
+          }}
+          popupRender={(menu: any) => (
+            <>
+              {menu}
+              {dynamic.loadingMore
+                ? <div style={{ padding: '8px 12px', color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>加载中…</div>
+                : null}
+            </>
+          )}
         />
       )}
       {dynamic.path.length > 0 ? <button type="button" onClick={dynamic.back}>上一步</button> : null}
-      {dynamic.total > dynamic.page * 20 ? <button type="button" onClick={dynamic.next}>更多选项</button> : null}
     </div>
   );
 }
