@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OptionSources from './OptionSources';
@@ -17,15 +17,18 @@ vi.mock('@ant-design/pro-components', () => ({
 
 const source = {
   id: 7, code: 'ces', name: 'ces', status: 'ACTIVE', version: 3,
-  publishedVersionId: 302, publishedVersionNo: 2, rowCount: 13, inUseFormCount: 2,
+  publishedVersionId: 302, publishedVersionNo: 2, rowCount: 13,
+  anyPublishedVersion: true, inUseFormCount: 2,
 };
 
 const detail = {
   source,
+  // 三种状态各一个：待发布 v3、已发布 v2、已停用 v1。
   versions: [
     { id: 303, versionNo: 3, status: 'DRAFT', columns: ['招聘单位'], rowCount: 5, originalName: '新表.xlsx' },
     { id: 302, versionNo: 2, status: 'PUBLISHED', columns: ['招聘单位'], rowCount: 13, originalName: '旧表.xlsx' },
-    { id: 301, versionNo: 1, status: 'PUBLISHED', columns: ['招聘单位'], rowCount: 13, originalName: '旧表.xlsx' },
+    { id: 301, versionNo: 1, status: 'PUBLISHED', columns: ['招聘单位'], rowCount: 13, originalName: '旧表.xlsx',
+      disabledAt: '2026-09-23T00:00:00Z' },
   ],
   userIds: [], roleIds: [], forms: [{ id: 1, code: 'F1', name: '表单一' }],
   // v2 被两张表单用着，v1 和待发布的 v3 没人用。
@@ -78,11 +81,17 @@ describe('选项数据源', () => {
     expect(await screen.findByText('引用与权限')).toBeInTheDocument();
     // v2 是已发布的最新版：只标一次，v1 不该也带上。
     expect(screen.getAllByText('最新')).toHaveLength(1);
-    // 已发布的两个版本：查看数据 + 取消发布；待发布那个：发布 + 丢弃。
+    // 已发布/已停用各一个：查看数据 + 取消发布；待发布那个：发布 + 丢弃。
     expect(screen.getAllByText('查看数据')).toHaveLength(2);
     expect(screen.getAllByText('取消发布')).toHaveLength(2);
     expect(screen.getByText('发布')).toBeInTheDocument();
     expect(screen.getByText('丢弃')).toBeInTheDocument();
+    // 三种状态都能看出来，操作列跟着状态走：已停用的给「启用」，未停用的给「停用」。
+    expect(screen.getByText('待发布')).toBeInTheDocument();
+    expect(screen.getByText('已发布')).toBeInTheDocument();
+    expect(screen.getByText('已停用')).toBeInTheDocument();
+    expect(screen.getByText('停用')).toBeInTheDocument();
+    expect(screen.getByText('启用')).toBeInTheDocument();
     // 引用关系回填到多选框，标签是「名称 · 编码」。
     await waitFor(() => expect(screen.getByText('表单一 · F1')).toBeInTheDocument());
     // 每个版本分开显示在用的表单：v2 两张、v1 和待发布的 v3 都没人用。
@@ -112,7 +121,9 @@ describe('选项数据源', () => {
 
     fireEvent.click(screen.getByLabelText('更多操作'));
 
-    expect(await screen.findByText('启用')).toBeInTheDocument();
+    // 版本表里也有「启用」（已停用的版本），所以这里要限定在 ⋯ 菜单里找。
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByText('启用')).toBeInTheDocument();
     // 删不掉时不再整个藏起来，而是置灰 + 一行原因。
     expect(screen.getByText('已发布过 2 个版本，只能停用')).toBeInTheDocument();
     const deleteItem = screen.getByText('删除').closest('.ant-dropdown-menu-item');

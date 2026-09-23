@@ -638,6 +638,42 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void retiredVersionLeavesThePickerButKeepsServingBoundForms() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("retire_" + UUID.randomUUID().toString().replace("-", ""));
+        long v1 = optionSourceVersionId(sourceId);
+        // 表单钉着 v1（这就是「在用」的来源）。
+        long formId = insertForm("DRAFT", optionSchema(sourceId, v1));
+        // 再发一版，然后把它停用。
+        long v2 = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'PUBLISHED', '[\"col\"]'::jsonb, 3, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            optionSourceService.disableVersion(sourceId, v2);
+
+            // 停用后的版本不再进候选；表单钉着的 v1 照常在（否则版本下拉会显示空白）。
+            assertThat(optionSourceService.bindable(formId))
+                .extracting(OptionSourceService.BindableSource::versionId)
+                .containsExactly(v1);
+            // 读路径完全不受影响：v1 仍是 PUBLISHED，钉着它的表单照常能读候选。
+            assertThat(optionSourceService.previewRows(sourceId, v1, 10)).isNotNull();
+            // 「最新」回落到仍然可用的 v1。
+            assertThat(optionSourceService.detail(sourceId).source().publishedVersionId())
+                .isEqualTo(v1);
+
+            optionSourceService.enableVersion(sourceId, v2);
+            assertThat(optionSourceService.bindable(formId))
+                .extracting(OptionSourceService.BindableSource::versionId)
+                .containsExactlyInAnyOrder(v1, v2);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
     void formListKeywordSearchWorksAgainstRealPostgres() {
         long adminId = userId("admin");
         long formId = insertForm("DRAFT", VALID_SCHEMA);

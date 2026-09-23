@@ -94,6 +94,20 @@ public class OptionSourceController {
         service.discardVersion(id, versionId);
     }
 
+    @PostMapping("/api/option-sources/{id}/versions/{versionId}/disable")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public OptionSourceService.VersionView disableVersion(@PathVariable long id,
+                                                          @PathVariable long versionId) {
+        return service.disableVersion(id, versionId);
+    }
+
+    @PostMapping("/api/option-sources/{id}/versions/{versionId}/enable")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public OptionSourceService.VersionView enableVersion(@PathVariable long id,
+                                                         @PathVariable long versionId) {
+        return service.enableVersion(id, versionId);
+    }
+
     @PostMapping("/api/option-sources/{id}/disable")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
     public OptionSourceService.SourceSummary disable(@PathVariable long id) { return service.disable(id); }

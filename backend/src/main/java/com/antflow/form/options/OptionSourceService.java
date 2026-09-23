@@ -6,6 +6,7 @@ import com.antflow.authz.PermissionCodes;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -52,11 +53,17 @@ public class OptionSourceService {
                    published.version_no AS published_version_no,
                    published.row_count,
                    draft.id AS draft_version_id,
+                   -- 区分「从没发布过」和「发布过但都下架了」，前者显示未发布、后者显示无可用版本。
+                   EXISTS (SELECT 1 FROM t_option_data_source_version any_published
+                           WHERE any_published.source_id = source.id
+                             AND any_published.status = 'PUBLISHED') AS any_published,
                    used.in_use_count
             FROM t_option_data_source source
+            -- 「最新」= 最高的**可用**（已发布且未停用）版本。全部下架时回落成 null。
             LEFT JOIN LATERAL (
               SELECT * FROM t_option_data_source_version version_row
               WHERE version_row.source_id = source.id AND version_row.status = 'PUBLISHED'
+                AND version_row.disabled_at IS NULL
               ORDER BY version_row.version_no DESC LIMIT 1
             ) published ON true
             LEFT JOIN t_option_data_source_version draft
@@ -81,7 +88,7 @@ public class OptionSourceService {
             rs.getObject("updated_at", OffsetDateTime.class),
             nullableLong(rs, "published_version_id"), nullableInt(rs, "published_version_no"),
             nullableInt(rs, "row_count"), nullableLong(rs, "draft_version_id"),
-            rs.getInt("in_use_count")));
+            rs.getBoolean("any_published"), rs.getInt("in_use_count")));
     }
 
     public SourceDetail detail(long sourceId) {
@@ -420,7 +427,8 @@ public class OptionSourceService {
         int referencingForms = versionReferencingForms(versionId);
         if (referencingForms > 0) {
             throw new BizException("OPTION_SOURCE_VERSION_IN_USE",
-                "有 " + referencingForms + " 张表单的已发布版本在用 v" + target.versionNo() + "，不能取消发布");
+                "有 " + referencingForms + " 张表单的已发布版本在用 v" + target.versionNo()
+                    + "，不能取消发布；要停止新表单使用它，请改为停用该版本");
         }
         Long drafts = jdbc.queryForObject("""
             SELECT COUNT(*) FROM t_option_data_source_version
@@ -439,6 +447,52 @@ public class OptionSourceService {
             sourceId);
         audit.success("form.option_source.unpublish", "OPTION_SOURCE", sourceId,
             AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("publishedVersion")),
+            Map.of("versionId", versionId, "versionNo", target.versionNo()));
+        return version(versionId);
+    }
+
+    /**
+     * 版本停用（下架）：从「新绑定」的候选里移除，但**状态保持 PUBLISHED**。
+     *
+     * <p>这就是「停用」和「取消发布」的分界：取消发布会把版本退回待发布，钉着它的表单读候选
+     * 立刻 422；停用只收窄候选，读路径完全不受影响——所以**没有任何门槛，随时可做**。
+     * 想先把有问题的版本止血、又不能让在用的表单坏掉，用这个。
+     */
+    @Transactional
+    public VersionView disableVersion(long sourceId, long versionId) {
+        return setVersionDisabled(sourceId, versionId, true);
+    }
+
+    /** 版本启用的反面。 */
+    @Transactional
+    public VersionView enableVersion(long sourceId, long versionId) {
+        return setVersionDisabled(sourceId, versionId, false);
+    }
+
+    private VersionView setVersionDisabled(long sourceId, long versionId, boolean disabled) {
+        authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
+        // 收回动作：和取消发布同一个方向，不要求源处于 ACTIVE。
+        lockSourceRow(sourceId);
+        VersionView target = version(versionId);
+        if (target.sourceId() != sourceId) {
+            throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
+        }
+        if (!"PUBLISHED".equals(target.status())) {
+            throw new BizException("OPTION_SOURCE_VERSION_NOT_PUBLISHED",
+                "只有已发布的版本能停用或启用");
+        }
+        int updated = jdbc.update(disabled
+            ? "UPDATE t_option_data_source_version SET disabled_at = now() WHERE id = ? AND disabled_at IS NULL"
+            : "UPDATE t_option_data_source_version SET disabled_at = NULL WHERE id = ? AND disabled_at IS NOT NULL",
+            versionId);
+        if (updated == 1) {
+            jdbc.update(
+                "UPDATE t_option_data_source SET version = version + 1, updated_at = now() WHERE id = ?",
+                sourceId);
+        }
+        audit.success(disabled ? "form.option_source.version.disable"
+                : "form.option_source.version.enable", "OPTION_SOURCE", sourceId,
+            AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("versionDisabled")),
             Map.of("versionId", versionId, "versionNo", target.versionNo()));
         return version(versionId);
     }
@@ -510,6 +564,12 @@ public class OptionSourceService {
     public List<BindableSource> bindable(long formId) {
         authorization.requireFormMaintenance(formId, PermissionCodes.FORM_DEFINITION_MANAGE);
         PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
+        // 这张表单现在钉着的版本：被停用的版本不进候选，**除非**正被它钉着，
+        // 否则版本下拉会显示空白，管理员会以为绑定丢了。
+        List<Long> boundVersions = boundVersionIds(formId);
+        String boundFilter = boundVersions.isEmpty() ? ""
+            : " OR version_row.id IN (" + boundVersions.stream().map(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(", ")) + ")";
         List<Object> args = new ArrayList<>();
         args.add(formId);
         args.add(formId);
@@ -539,9 +599,13 @@ public class OptionSourceService {
             FROM t_option_data_source source
             JOIN t_option_data_source_version version_row
               ON version_row.source_id = source.id AND version_row.status = 'PUBLISHED'
+              -- 已停用的版本不进候选，除非这张表单正钉着它（boundFilter 里是那些 id）。
+              AND (version_row.disabled_at IS NULL""" + boundFilter + """
+              )
             JOIN LATERAL (
               SELECT MAX(version_no) AS version_no FROM t_option_data_source_version candidate
               WHERE candidate.source_id = source.id AND candidate.status = 'PUBLISHED'
+                AND candidate.disabled_at IS NULL
             ) latest ON true
             WHERE source.status = 'ACTIVE'
               AND (
@@ -606,10 +670,45 @@ public class OptionSourceService {
         return count == null ? 0 : count;
     }
 
+    /**
+     * 这张表单的草稿 schema 里钉着的所有 optionSource.versionId。
+     *
+     * <p>用途只有一个：让被停用的版本在「这张表单正用着它」时仍然留在候选里。设计器编辑的是
+     * 草稿，所以只扫草稿就够。
+     */
+    private List<Long> boundVersionIds(long formId) {
+        String schema = jdbc.query("SELECT schema::text FROM t_form_definition WHERE id = ?",
+            rs -> rs.next() ? rs.getString(1) : null, formId);
+        if (schema == null) return List.of();
+        try {
+            List<Long> ids = new ArrayList<>();
+            collectVersionIds(json.readTree(schema), ids);
+            return ids;
+        } catch (Exception error) {
+            return List.of();
+        }
+    }
+
+    /** 只认 props.optionSource 里的 versionId——schema 里别处也可能有同名字段。 */
+    private static void collectVersionIds(JsonNode node, List<Long> target) {
+        if (node == null) return;
+        if (node.isArray()) {
+            node.forEach(child -> collectVersionIds(child, target));
+            return;
+        }
+        if (!node.isObject()) return;
+        JsonNode optionSource = node.path("optionSource");
+        if (optionSource.isObject()) {
+            JsonNode versionId = optionSource.path("versionId");
+            if (versionId.isIntegralNumber() && versionId.asLong() > 0) target.add(versionId.asLong());
+        }
+        node.fields().forEachRemaining(entry -> collectVersionIds(entry.getValue(), target));
+    }
+
     private VersionView version(long versionId) {
         VersionView version = jdbc.query("""
             SELECT id, source_id, version_no, status, columns_json::text, row_count,
-                   original_name, sha256, created_at, published_at
+                   original_name, sha256, created_at, published_at, disabled_at
             FROM t_option_data_source_version WHERE id = ?
             """, rs -> rs.next() ? versionView(rs) : null, versionId);
         if (version == null) throw new BizException("OPTION_SOURCE_VERSION_NOT_FOUND", "数据版本不存在");
@@ -619,7 +718,7 @@ public class OptionSourceService {
     private List<VersionView> versions(long sourceId, boolean publishedOnly) {
         return jdbc.query("""
             SELECT id, source_id, version_no, status, columns_json::text, row_count,
-                   original_name, sha256, created_at, published_at
+                   original_name, sha256, created_at, published_at, disabled_at
             FROM t_option_data_source_version
             WHERE source_id = ? AND (? = false OR status = 'PUBLISHED')
             ORDER BY version_no DESC
@@ -631,7 +730,8 @@ public class OptionSourceService {
             rs.getString("status"), readColumns(rs.getString("columns_json")),
             rs.getInt("row_count"), rs.getString("original_name"), rs.getString("sha256"),
             rs.getObject("created_at", OffsetDateTime.class),
-            rs.getObject("published_at", OffsetDateTime.class));
+            rs.getObject("published_at", OffsetDateTime.class),
+            rs.getObject("disabled_at", OffsetDateTime.class));
     }
 
     private List<String> readColumns(String value) {
@@ -803,7 +903,7 @@ public class OptionSourceService {
     public record SourceSummary(long id, String code, String name, String status, int version,
                                 OffsetDateTime updatedAt, Long publishedVersionId,
                                 Integer publishedVersionNo, Integer rowCount, Long draftVersionId,
-                                int inUseFormCount) { }
+                                boolean anyPublishedVersion, int inUseFormCount) { }
     public record SourceDetail(SourceSummary source, List<VersionView> versions,
                                List<Long> userIds, List<Long> roleIds, List<FormRef> forms,
                                List<VersionUsage> versionUsage, boolean deletable,
@@ -818,7 +918,8 @@ public class OptionSourceService {
     }
     public record VersionView(long id, long sourceId, int versionNo, String status,
                               List<String> columns, int rowCount, String originalName,
-                              String sha256, OffsetDateTime createdAt, OffsetDateTime publishedAt) { }
+                              String sha256, OffsetDateTime createdAt, OffsetDateTime publishedAt,
+                              OffsetDateTime disabledAt) { }
     public record BindableSource(long id, String code, String name, long versionId,
                                  int versionNo, List<String> columns, int rowCount,
                                  int latestVersionNo) { }

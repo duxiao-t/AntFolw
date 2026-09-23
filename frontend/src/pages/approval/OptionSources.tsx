@@ -15,11 +15,11 @@ import { OptionSourceRowsDrawer } from './OptionSourceRowsDrawer';
 type Summary = {
   id: number; code: string; name: string; status: string; version: number;
   publishedVersionId?: number; publishedVersionNo?: number; rowCount?: number;
-  draftVersionId?: number; inUseFormCount: number;
+  draftVersionId?: number; anyPublishedVersion: boolean; inUseFormCount: number;
 };
 type Version = {
   id: number; versionNo: number; status: string; columns: string[];
-  rowCount: number; originalName: string;
+  rowCount: number; originalName: string; disabledAt?: string | null;
 };
 type FormRef = { id: number; code: string; name: string };
 type VersionUsage = { versionId: number; forms: FormRef[] };
@@ -288,6 +288,17 @@ export default function OptionSources() {
     }, `v${version.versionNo} 已退回待发布`);
   };
 
+  // 停用版本 = 下架：不再被新绑定挑到，读路径完全不受影响，所以不需要确认框。
+  const toggleVersionDisabled = (version: Version) => {
+    if (!detail) return;
+    const disabling = !version.disabledAt;
+    void run(async () => {
+      await request(
+        `/api/option-sources/${detail.source.id}/versions/${version.id}/${disabling ? 'disable' : 'enable'}`,
+        { method: 'POST' });
+    }, disabling ? `v${version.versionNo} 已停用` : `v${version.versionNo} 已启用`);
+  };
+
   const discardVersion = (version: Version) => {
     if (!detail) return;
     const id = detail.source.id;
@@ -301,8 +312,10 @@ export default function OptionSources() {
     });
   };
 
+  // 「最新」指的是最高的**可用**版本（已发布且未停用），和后端一致：被停用的版本不参与。
   const metaLine = (source: Summary) => [
-    source.publishedVersionNo ? `v${source.publishedVersionNo} · 最新` : '未发布',
+    source.publishedVersionNo ? `v${source.publishedVersionNo} · 最新`
+      : source.anyPublishedVersion ? '无可用版本' : '未发布',
     source.rowCount ? `${source.rowCount} 行` : undefined,
   ].filter(Boolean).join(' · ');
 
@@ -417,10 +430,12 @@ export default function OptionSources() {
                 },
                 {
                   title: '状态', dataIndex: 'status', width: 110,
-                  render: (value: string) => (
+                  render: (value: string, version: Version) => (
                     <span className={styles.itemName}>
-                      <span className={cx(styles.dot, value === 'DRAFT' ? styles.dotDraft : undefined)} aria-hidden />
-                      {value === 'PUBLISHED' ? '已发布' : '待发布'}
+                      <span className={cx(styles.dot,
+                        value === 'DRAFT' ? styles.dotDraft : undefined,
+                        version.disabledAt ? styles.dotOff : undefined)} aria-hidden />
+                      {value === 'DRAFT' ? '待发布' : version.disabledAt ? '已停用' : '已发布'}
                     </span>
                   ),
                 },
@@ -432,7 +447,7 @@ export default function OptionSources() {
                   render: (_: unknown, version: Version) => usedByForms(version.id),
                 },
                 {
-                  title: '操作', width: 180,
+                  title: '操作', width: 220,
                   render: (_: unknown, version: Version) => (version.status === 'DRAFT'
                     ? <Space size={4}>
                         <Button size="small" type="link" onClick={() => publishVersion(version)}>发布</Button>
@@ -442,6 +457,10 @@ export default function OptionSources() {
                     : <Space size={4}>
                         <Button size="small" type="link"
                           onClick={() => setRowsVersion(version)}>查看数据</Button>
+                        <Button size="small" type="link"
+                          onClick={() => toggleVersionDisabled(version)}>
+                          {version.disabledAt ? '启用' : '停用'}
+                        </Button>
                         <Button size="small" type="link"
                           onClick={() => unpublishVersion(version)}>取消发布</Button>
                       </Space>),
