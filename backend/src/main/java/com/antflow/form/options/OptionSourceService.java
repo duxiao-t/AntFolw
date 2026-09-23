@@ -52,7 +52,7 @@ public class OptionSourceService {
                    published.version_no AS published_version_no,
                    published.row_count,
                    draft.id AS draft_version_id,
-                   refs.form_count AS form_count
+                   used.in_use_count
             FROM t_option_data_source source
             LEFT JOIN LATERAL (
               SELECT * FROM t_option_data_source_version version_row
@@ -61,18 +61,27 @@ public class OptionSourceService {
             ) published ON true
             LEFT JOIN t_option_data_source_version draft
               ON draft.source_id = source.id AND draft.status = 'DRAFT'
-            -- 清单里要一眼看出这个源有没有人在用。
+            -- 「在用」= schema 里真的绑着这个源的字段所属表单数，和可在源侧撤销的引用清单
+            -- （t_form_option_source）不是一回事。这里每个源扫一遍所有表单 schema；源/表单数量
+            -- 上千时再考虑改成物化计数。
             LEFT JOIN LATERAL (
-              SELECT COUNT(*) AS form_count FROM t_form_option_source ref
-              WHERE ref.source_id = source.id
-            ) refs ON true
+              SELECT COUNT(DISTINCT bound.form_def_id) AS in_use_count
+              FROM (
+                SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
+                UNION ALL
+                SELECT form_definition_id AS form_def_id, schema FROM t_form_definition_version
+              ) bound
+              WHERE jsonb_path_exists(
+                bound.schema, '$.**.props.optionSource.sourceId ? (@ == $sourceId)',
+                jsonb_build_object('sourceId', to_jsonb(source.id)))
+            ) used ON true
             ORDER BY source.updated_at DESC, source.id DESC
             """, (rs, row) -> new SourceSummary(rs.getLong("id"), rs.getString("code"),
             rs.getString("name"), rs.getString("status"), rs.getInt("version"),
             rs.getObject("updated_at", OffsetDateTime.class),
             nullableLong(rs, "published_version_id"), nullableInt(rs, "published_version_no"),
             nullableInt(rs, "row_count"), nullableLong(rs, "draft_version_id"),
-            rs.getInt("form_count")));
+            rs.getInt("in_use_count")));
     }
 
     public SourceDetail detail(long sourceId) {
@@ -88,11 +97,43 @@ public class OptionSourceService {
             WHERE source_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
             """, Long.class, sourceId);
         List<FormRef> forms = referencedForms(sourceId);
-        int boundForms = bindingFormCount(sourceId);
+        int boundForms = source.inUseFormCount();
         long publishedVersions = versions.stream().filter(v -> "PUBLISHED".equals(v.status())).count();
         boolean deletable = source.publishedVersionId() == null && boundForms == 0 && forms.isEmpty();
-        return new SourceDetail(source, versions, userIds, roleIds, forms, deletable,
-            deletable ? null : deleteBlockedReason(publishedVersions, boundForms, forms.size()));
+        return new SourceDetail(source, versions, userIds, roleIds, forms, versionUsage(sourceId),
+            deletable, deletable ? null : deleteBlockedReason(publishedVersions, boundForms, forms.size()));
+    }
+
+    /**
+     * 每个版本分别被哪些表单的字段绑着。表单在**发布那一刻**把 versionId 钉进快照，之后不重新
+     * 发布那张表单就一直用旧版——所以同一个源的各个版本，在用表单可以是完全不同的两批。
+     */
+    private List<VersionUsage> versionUsage(long sourceId) {
+        Map<Long, List<FormRef>> byVersion = new LinkedHashMap<>();
+        jdbc.query("""
+            WITH binding AS (
+              SELECT DISTINCT form.id AS form_id, form.code AS form_code, form.name AS form_name,
+                     (opt->>'versionId')::bigint AS version_id
+              FROM (
+                SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
+                UNION ALL
+                SELECT form_definition_id, schema FROM t_form_definition_version
+              ) s
+              JOIN t_form_definition form ON form.id = s.form_def_id
+              CROSS JOIN LATERAL jsonb_path_query(s.schema, '$.**.props.optionSource') opt
+              WHERE opt->>'sourceId' ~ '^[0-9]+$' AND opt->>'versionId' ~ '^[0-9]+$'
+                AND (opt->>'sourceId')::bigint = ?
+            )
+            SELECT version_id, form_id, form_code, form_name FROM binding
+            ORDER BY form_name, form_id
+            """, rs -> {
+            long versionId = rs.getLong("version_id");
+            byVersion.computeIfAbsent(versionId, key -> new ArrayList<>())
+                .add(new FormRef(rs.getLong("form_id"), rs.getString("form_code"),
+                    rs.getString("form_name")));
+        }, sourceId);
+        return byVersion.entrySet().stream()
+            .map(entry -> new VersionUsage(entry.getKey(), entry.getValue())).toList();
     }
 
     /**
@@ -762,11 +803,14 @@ public class OptionSourceService {
     public record SourceSummary(long id, String code, String name, String status, int version,
                                 OffsetDateTime updatedAt, Long publishedVersionId,
                                 Integer publishedVersionNo, Integer rowCount, Long draftVersionId,
-                                int formCount) { }
+                                int inUseFormCount) { }
     public record SourceDetail(SourceSummary source, List<VersionView> versions,
                                List<Long> userIds, List<Long> roleIds, List<FormRef> forms,
-                               boolean deletable, String deleteBlockedReason) { }
+                               List<VersionUsage> versionUsage, boolean deletable,
+                               String deleteBlockedReason) { }
     public record FormRef(long id, String code, String name) { }
+    /** 一个版本被哪些表单的字段绑着。没出现在列表里的版本就是没人在用。 */
+    public record VersionUsage(long versionId, List<FormRef> forms) { }
     public record FormRefWrite(Integer version, Set<Long> formIds) {
         public FormRefWrite {
             formIds = formIds == null ? Set.of() : Set.copyOf(formIds);

@@ -17,7 +17,7 @@ vi.mock('@ant-design/pro-components', () => ({
 
 const source = {
   id: 7, code: 'ces', name: 'ces', status: 'ACTIVE', version: 3,
-  publishedVersionId: 302, publishedVersionNo: 2, rowCount: 13, formCount: 1,
+  publishedVersionId: 302, publishedVersionNo: 2, rowCount: 13, inUseFormCount: 2,
 };
 
 const detail = {
@@ -27,7 +27,12 @@ const detail = {
     { id: 302, versionNo: 2, status: 'PUBLISHED', columns: ['招聘单位'], rowCount: 13, originalName: '旧表.xlsx' },
     { id: 301, versionNo: 1, status: 'PUBLISHED', columns: ['招聘单位'], rowCount: 13, originalName: '旧表.xlsx' },
   ],
-  userIds: [], roleIds: [], forms: [{ id: 1, code: 'F1', name: '表单一' }], deletable: false,
+  userIds: [], roleIds: [], forms: [{ id: 1, code: 'F1', name: '表单一' }],
+  // v2 被两张表单用着，v1 和待发布的 v3 没人用。
+  versionUsage: [
+    { versionId: 302, forms: [{ id: 1, code: 'F1', name: '表单一' }, { id: 2, code: 'F2', name: '表单二' }] },
+  ],
+  deletable: false,
   deleteBlockedReason: '已发布过 2 个版本，只能停用',
 };
 
@@ -80,6 +85,11 @@ describe('选项数据源', () => {
     expect(screen.getByText('丢弃')).toBeInTheDocument();
     // 引用关系回填到多选框，标签是「名称 · 编码」。
     await waitFor(() => expect(screen.getByText('表单一 · F1')).toBeInTheDocument());
+    // 每个版本分开显示在用的表单：v2 两张、v1 和待发布的 v3 都没人用。
+    expect(screen.getByText('表单一、表单二')).toBeInTheDocument();
+    expect(screen.getAllByText('未使用')).toHaveLength(2);
+    // 「在用」和「可以引用」是两个数，不能混着说。
+    expect(screen.getByRole('button', { name: /2 张表单在用/ })).toBeInTheDocument();
   });
 
   it('停用的源给「启用」，不可删时删除置灰并说清原因', async () => {

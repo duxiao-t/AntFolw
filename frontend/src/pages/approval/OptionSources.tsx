@@ -4,7 +4,7 @@ import { history, request } from '@umijs/max';
 import { createStyles } from 'antd-style';
 import {
   App, Button, Card, Dropdown, Empty, Form, Input, Modal, Select,
-  Space, Steps, Table, Typography,
+  Space, Steps, Table, Tooltip, Typography,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
@@ -15,16 +15,18 @@ import { OptionSourceRowsDrawer } from './OptionSourceRowsDrawer';
 type Summary = {
   id: number; code: string; name: string; status: string; version: number;
   publishedVersionId?: number; publishedVersionNo?: number; rowCount?: number;
-  draftVersionId?: number; formCount: number;
+  draftVersionId?: number; inUseFormCount: number;
 };
 type Version = {
   id: number; versionNo: number; status: string; columns: string[];
   rowCount: number; originalName: string;
 };
 type FormRef = { id: number; code: string; name: string };
+type VersionUsage = { versionId: number; forms: FormRef[] };
 type Detail = {
   source: Summary; versions: Version[]; userIds: number[]; roleIds: number[];
-  forms: FormRef[]; deletable: boolean; deleteBlockedReason?: string | null;
+  forms: FormRef[]; versionUsage: VersionUsage[]; deletable: boolean;
+  deleteBlockedReason?: string | null;
 };
 
 const useStyles = createStyles(({ token }) => ({
@@ -127,6 +129,7 @@ const useStyles = createStyles(({ token }) => ({
     '@media (max-width: 680px)': { flexDirection: 'column', alignItems: 'stretch' },
   },
   hint: { color: 'var(--af-color-muted)', fontSize: 12 },
+  warn: { color: 'var(--af-color-warning)', fontSize: 12, lineHeight: 1.5 },
   // 「删除」置灰时下面那行解释。禁用项不响应 hover，光标也别变手。
   menuNote: {
     display: 'block',
@@ -212,6 +215,23 @@ export default function OptionSources() {
   }), [list, keyword]);
 
   const latestVersionNo = detail?.source.publishedVersionNo;
+
+  // 每张表单在发布那一刻把 versionId 钉死，所以同一个源的各个版本，在用表单可以是两批人。
+  const usageByVersion = useMemo(() => {
+    const map = new Map<number, FormRef[]>();
+    for (const usage of detail?.versionUsage ?? []) map.set(usage.versionId, usage.forms);
+    return map;
+  }, [detail?.versionUsage]);
+
+  const usedByForms = (versionId: number) => {
+    const forms = usageByVersion.get(versionId) ?? [];
+    if (!forms.length) return <Typography.Text type="secondary">未使用</Typography.Text>;
+    return (
+      <Tooltip title={forms.map((form) => `${form.name} · ${form.code}`).join('\n')}>
+        <span>{forms.map((form) => form.name).join('、')}</span>
+      </Tooltip>
+    );
+  };
 
   // 只有不可逆的操作才弹确认。停用/启用/发布/取消发布都能回头，点一下就给反馈更直接。
   const moreItems: MenuProps['items'] = detail ? [
@@ -324,7 +344,9 @@ export default function OptionSources() {
                   {source.status !== 'ACTIVE' ? '已停用 · ' : ''}
                   {metaLine(source)}
                   <br />
-                  {source.formCount > 0 ? `被 ${source.formCount} 张表单引用` : '未被引用'}
+                  {/* 「在用」= 谁的字段真的绑着它。这和「引用与权限」里那份"谁可以挑到它"的
+                      清单是两回事，措辞必须分开，否则两个数字会打架。 */}
+                  {source.inUseFormCount > 0 ? `${source.inUseFormCount} 张表单在用` : '未被使用'}
                 </span>
               </button>
             ))}
@@ -362,8 +384,8 @@ export default function OptionSources() {
                   {' · '}
                   {metaLine(detail.source)}
                   {' · '}
-                  {detail.source.formCount > 0
-                    ? `被 ${detail.source.formCount} 张表单引用` : '未被表单引用'}
+                  {detail.source.inUseFormCount > 0
+                    ? `${detail.source.inUseFormCount} 张表单在用` : '未被使用'}
                 </span>
               </div>
               <Dropdown menu={{ items: moreItems, onClick: onMore }} trigger={['click']}>
@@ -403,8 +425,12 @@ export default function OptionSources() {
                   ),
                 },
                 { title: '记录', dataIndex: 'rowCount', width: 90, align: 'right' as const },
-                { title: '文件', dataIndex: 'originalName', ellipsis: true,
+                { title: '文件', dataIndex: 'originalName', width: 160, ellipsis: true,
                   render: (value: string) => value || '—' },
+                {
+                  title: '在用的表单', width: 220, ellipsis: true,
+                  render: (_: unknown, version: Version) => usedByForms(version.id),
+                },
                 {
                   title: '操作', width: 180,
                   render: (_: unknown, version: Version) => (version.status === 'DRAFT'
@@ -446,6 +472,14 @@ export default function OptionSources() {
                   }, '引用关系已保存')}>保存</Button>
                 </div>
                 <span className={styles.hint}>被引用的表单，才能在字段里挑到这个数据源。</span>
+                {/* 清空这份清单的效果很容易被低估：页面上什么都不变，但其实没人能再新建绑定了，
+                    而已经在用的表单不受影响——所以两者都要说出来。 */}
+                {formIds.length === 0 && detail.source.inUseFormCount > 0 && (
+                  <span className={styles.warn}>
+                    还没有引用任何表单，但有 {detail.source.inUseFormCount} 张表单的字段仍在用它。
+                    它们不受影响；只是别的表单无法再新建绑定。
+                  </span>
+                )}
               </div>
               <div className={styles.field}>
                 <Typography.Text strong>谁可以引用</Typography.Text>
