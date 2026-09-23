@@ -3,6 +3,9 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:Tao@1234}
 
 antflow:
+  auth:
+    bootstrap-admin-password: ${ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD:ant.design}
+    bootstrap-bob-password: ${ANTFLOW_BOOTSTRAP_BOB_PASSWORD:ant.design}
   jwt:
     secret: ${JWT_SECRET:devsecret0123456789devsecret0123456789devsecret}
   audit:

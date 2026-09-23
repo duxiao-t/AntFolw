@@ -14,7 +14,9 @@ export const UserPickerField: FieldType = {
     // 一次只用一个维度：指定部门（含下级）/ 指定职位 / 部门领导 / 指定人员 / 全部。
     // 后端把这些条件当作相互独立的收窄，所以将来要组合也不必改这里。
     const scopeType = node.props?.scopeType;
-    const scopeParams: Record<string, unknown> = {};
+    // 始终带上范围类型：空名单会被序列化丢掉，只有 scopeType 能让服务端分清"没配范围"和
+    // "配了指定人员但名单是空的"（后者应当零候选，不能退化成全员）。
+    const scopeParams: Record<string, unknown> = { scopeType };
     if (scopeType === 'department' && node.props?.scopeDeptId) {
       scopeParams.deptId = node.props.scopeDeptId;
       scopeParams.includeDescendants = true;

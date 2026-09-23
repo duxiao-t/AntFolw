@@ -29,8 +29,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class UserService {
-    public static final String DEFAULT_IMPORTED_PASSWORD = "ant.design";
-
     private final UserMapper userMapper;
     private final UserRoleMapper userRoleMapper;
     private final RoleMapper roleMapper;
@@ -42,13 +40,6 @@ public class UserService {
     private final AuthorizationService authorizationService;
     private final AuthSessionService authSessionService;
     private final AuditService auditService;
-
-    @Transactional(rollbackFor = Exception.class)
-    public Long create(User u, List<Long> roleIds) {
-        String rawPassword = u.getPasswordHash() == null
-            ? DEFAULT_IMPORTED_PASSWORD : u.getPasswordHash();
-        return create(u, roleIds, rawPassword);
-    }
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds, String rawPassword) {
@@ -299,7 +290,12 @@ public class UserService {
                 .or().like("employee_no", keyword));
         }
         // 显式名单：候选只限这些人。仍会被下面的数据范围再过滤一次。
-        if (request.userIds() != null && !request.userIds().isEmpty()) {
+        // 注意「给了名单但是空的」= 明确要求"零候选"，不能当成"没给过滤"——否则设计器把
+        // "指定人员"清空后，本该没人可选的字段会退化成全员可选。
+        if (request.userIds() != null) {
+            if (request.userIds().isEmpty()) {
+                return List.of();
+            }
             query.in("id", request.userIds());
         }
         Collection<Long> departments = request.resolveDepartments(departmentMapper);

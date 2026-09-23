@@ -202,8 +202,11 @@ export function parseMembersCsv(content: string, deptId: number): MemberCsvParse
 }
 
 function escapeCsvCell(value: string): string {
-  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
+  // 前导空白/控制字符 + `=+-@` 会被 Excel 当公式执行。\s 已覆盖真正会被当触发器的 \t \r，
+  // 原来还写了 \u0000-\u001f 的区段，Biome 的 noControlCharactersInRegex 不接受，去掉不影响防护。
+  const safe = /^\s*[=+\-@]/.test(value) ? `'${value}` : value;
+  if (/[",\r\n]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
+  return safe;
 }
 
 export function formatGender(value?: string): string {

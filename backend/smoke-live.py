@@ -51,8 +51,8 @@ for p in ["/api/public/branding", "/api/branding/public", "/api/branding"]:
 print("== 2. Admin-only brand mutation ==")
 adminTok, sa, ba = login("admin", "ant.design")
 bobTok, sb, bb = login("bob", "ant.design")
-record("02 login admin", sa, ba, 200)
-record("02 login bob",   sb, bb, 200)
+record("02 login admin", sa, "<redacted>", 200)
+record("02 login bob",   sb, "<redacted>", 200)
 adminHdr = {"Authorization": "Bearer " + adminTok} if adminTok else {}
 bobHdr   = {"Authorization": "Bearer " + bobTok}   if bobTok   else {}
 for m, p in [("PUT","/api/branding"),("PATCH","/api/branding"),("PUT","/api/admin/branding")]:
@@ -69,7 +69,7 @@ for p in ["/api/mobile/forms/LEAVE_REQ","/api/mobile/instances","/api/mobile/tas
         s, h, b = http("GET", p)
     else:
         s, h, b = http("GET", p)
-    record(f"03 unauth GET {p}", s, b, 401/403)
+    record(f"03 unauth GET {p}", s, b, "401/403")
 
 # admin reads existing form, process
 s, h, b = http("GET", "/api/mobile/forms/LEAVE_REQ", headers=adminHdr); record("03 admin GET form", s, b, 200)
@@ -86,8 +86,8 @@ s2, _, b2 = http("POST", "/api/mobile/instances", headers=hdr, body=start)
 record("06 start #2 (idem replay)", s2, b2, 200)
 inst1 = json.loads(b1).get("instanceId") if s1 == 200 else None
 inst2 = json.loads(b2).get("instanceId") if s2 == 200 else None
-deduped = (inst1 == inst2)
-record("06 idem-deduped-same-key", "PASS" if deduped else "FAIL", f"i1={inst1} i2={inst2}", "expect equal")
+deduped = s1 == 200 and s2 == 200 and inst1 is not None and inst1 == inst2
+record("06 idem-deduped-same-key", "PASS" if deduped else "FAIL", f"i1={inst1} i2={inst2}", "PASS")
 
 # 3. Unrelated instance 403 - need a SECOND user to be unrelated
 # We have bob (approver) and a third user "alice" or "test001" who is not involved.
@@ -97,18 +97,18 @@ print("== Creating third user for unrelated 403 ==")
 thirdUsername = "smoke_third_" + uuid.uuid4().hex[:6]
 try_user = http("POST", "/api/auth/login", body={"username": thirdUsername, "password":"ant.design"})
 if try_user[0] != 200:
-    s, h, b = http("POST", "/api/users", headers=adminHdr, body={"username":thirdUsername, "displayName":"Smoke Third","email":thirdUsername+"@antflow.local","status":"ACTIVE"})
+    s, h, b = http("POST", "/api/users", headers=adminHdr, body={"employeeNo":thirdUsername, "username":thirdUsername, "displayName":"Smoke Third","email":thirdUsername+"@antflow.local","password":"ant.design","status":"ACTIVE"})
     record("03 create third user", s, b, 200)
     if s == 200:
         newUid = json.loads(b)["id"]
         # assign user role
         # find role ids
         s, h, b = http("GET", "/api/roles", headers=adminHdr); roles = json.loads(b) if s==200 else []
-        userRole = next((r["id"] for r in roles if r.get("code")=="user"), None)
+        userRole = next((r["id"] for r in roles if r.get("code") in ("employee", "user")), None)
         if userRole:
             http("PUT", f"/api/users/{newUid}/roles", headers=adminHdr, body=[userRole])
 thirdTok, s3, b3 = login(thirdUsername, "ant.design")
-record("03 login third", s3, b3, 200)
+record("03 login third", s3, "<redacted>", 200)
 thirdHdr = {"Authorization":"Bearer "+thirdTok} if thirdTok else {}
 
 # now check unrelated: third reads instance started by admin
@@ -124,7 +124,7 @@ if inst1:
     if taskIds:
         s, h, b = http("GET", f"/api/mobile/tasks/{taskIds[0]}", headers=thirdHdr); record("03 unrelated task detail", s, b, 403)
 else:
-    record("03 unrelated instance", "SKIP", "no instance", "n/a")
+    record("03 unrelated instance", "FAIL", "no instance", "PASS")
 
 # 4. refresh replay rejection (no refresh endpoint)
 print("== 4. Refresh replay rejection ==")
@@ -132,10 +132,10 @@ for p in ["/api/auth/refresh","/api/auth/refresh-token","/api/auth/token/refresh
     s, h, b = http("POST", p, body={"refreshToken":"anything"}); record(f"04 refresh probe {p}", s, b, "401/403/404/405")
 # Re-login: returns a NEW accessToken (stateless); confirm it differs
 sa2, _, ba2 = http("POST", "/api/auth/login", body={"username":"admin","password":"ant.design"})
-record("04 re-login admin", sa2, ba2, 200)
+record("04 re-login admin", sa2, "<redacted>", 200)
 if sa2 == 200:
     newTok = json.loads(ba2)["accessToken"]
-    record("04 new-token-differs", "PASS" if newTok != adminTok else "FAIL", f"old/neq", "expect new token")
+    record("04 new-token-differs", "PASS" if newTok != adminTok else "FAIL", "old/neq", "PASS")
 # Token reuse: old token still valid (stateless)
 s, h, b = http("GET", "/api/auth/me", headers=adminHdr); record("04 old-token-still-valid", s, b, 200)
 
@@ -157,7 +157,7 @@ s, h, b = http("POST","/api/mobile/files", headers=adminHdr, files={"file":("evi
 s, h, b = http("POST","/api/mobile/files", headers=adminHdr, files={"file":("empty.png", b"", "image/png")}); record("05 empty file", s, b, 422)
 # oversized
 big = b"X" * (11*1024*1024)
-s, h, b = http("POST","/api/mobile/files", headers=adminHdr, files={"file":("big.png", big, "image/png")}); record("05 oversized >10MB", s, b, 422/413)
+s, h, b = http("POST","/api/mobile/files", headers=adminHdr, files={"file":("big.png", big, "image/png")}); record("05 oversized >10MB", s, b, "422/413")
 # owner can read metadata; unrelated cannot
 if goodId:
     s, h, b = http("GET", f"/api/mobile/files/{goodId}", headers=adminHdr); record("05 owner metadata ok", s, b, 200)
@@ -165,9 +165,13 @@ if goodId:
     s, h, b = http("GET", f"/api/mobile/files/{goodId}/content", headers=adminHdr); record("05 owner content ok", s, b, 200)
 
 print("=== SUMMARY ===")
-ok = fail = na = 0
+fail = 0
 for r in RESULTS:
+    passed = str(r[1]) in str(r[2]).split("/")
+    fail += 0 if passed else 1
     line = f"{r[0]:<55} status={str(r[1]):<5} expect={str(r[2]):<20} body={r[3]}"
     print(line)
-print(f"TOTAL: {len(RESULTS)} cases")
+print(f"TOTAL: {len(RESULTS)} cases, FAIL: {fail}")
+if fail:
+    raise SystemExit(1)
 

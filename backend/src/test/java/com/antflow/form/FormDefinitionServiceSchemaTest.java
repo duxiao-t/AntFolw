@@ -53,6 +53,31 @@ class FormDefinitionServiceSchemaTest {
         assertThat(saved.getSchema()).isEqualTo("[{\"id\":\"b\",\"type\":\"text\"}]");
     }
 
+    @Test void saveDraftKeepsSettingsWhenPayloadOmitsThem() throws Exception {
+        // 客户端漏传 settings 时不能把已有的清成 {}（审批流开关、业务单号配置就藏在这里面）。
+        var existing = published();
+        existing.setSettings("{\"workflowEnabled\": true}");
+        when(mapper.selectById(1L)).thenReturn(existing);
+
+        var saved = service.saveDraft(1L, "leave", "新名称", "说明",
+            json.readTree(SCHEMA), null, 7L);
+
+        assertThat(saved.getSettings()).isEqualTo("{\"workflowEnabled\": true}");
+        // 内容没变，也不该被降级为草稿。
+        assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
+    }
+
+    @Test void saveDraftKeepsNameWhenPayloadOmitsIt() throws Exception {
+        var existing = published();
+        existing.setName("真实名字");
+        when(mapper.selectById(1L)).thenReturn(existing);
+
+        var saved = service.saveDraft(1L, "leave", null, null, json.readTree(SCHEMA), null, 7L);
+
+        assertThat(saved.getName()).isEqualTo("真实名字");
+        assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
+    }
+
     private static final String SCHEMA = "[{\"id\":\"a\",\"type\":\"text\"}]";
 
     /**
@@ -80,6 +105,15 @@ class FormDefinitionServiceSchemaTest {
         var pub = service.publish(1L);
         assertThat(pub.getStatus()).isEqualTo("PUBLISHED");
         assertThat(pub.getVersion()).isEqualTo(2);
+    }
+
+    @Test void updateCannotBypassTheDedicatedDisableEndpoint() {
+        var fd = published();
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThatThrownBy(() -> service.update(1L, null, null, "DEPRECATED", null, null))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("publish/disable endpoints");
     }
 
     @Test void publishRejectsSectionType() {

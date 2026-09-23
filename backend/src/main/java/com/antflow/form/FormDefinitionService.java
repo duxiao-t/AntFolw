@@ -109,14 +109,18 @@ public class FormDefinitionService {
             if ("DEPRECATED".equals(fd.getStatus())) {
                 throw new BizException("NOT_DRAFT", "Only DRAFT form_definitions can be edited");
             }
-            String nextSchema = writeJson(schema);
-            String nextSettings = writeJson(settings);
+            // 为 null 的字段表示「这次请求没带它」，**保持原值**，不要覆盖。
+            // 这里曾经是无条件写入：客户端一旦漏传（或拿到的是兜底值），name 会被写成"未命名表单"、
+            // settings 会被清成 {}（writeJson(null) 存的是 JSON null，列是 NOT NULL 所以静默通过），
+            // 表单的审批流开关、业务单号配置就这样无声消失。
+            String nextSchema = schema == null ? fd.getSchema() : writeJson(schema);
+            String nextSettings = settings == null ? fd.getSettings() : writeJson(settings);
             // 只有 schema/settings 真的变了才降级为草稿。已发布表单改个名称、或只是点了一下保存，
             // 不该让它掉出手机端目录——发布快照只含 schema/settings，名称与描述不入快照。
             boolean contentChanged = !sameJson(fd.getSchema(), nextSchema)
                 || !sameJson(fd.getSettings(), nextSettings);
-            fd.setName(name);
-            fd.setDescription(description);
+            if (name != null) fd.setName(name);
+            if (description != null) fd.setDescription(description);
             fd.setSchema(nextSchema);
             fd.setSettings(nextSettings);
             if (contentChanged) {
@@ -138,10 +142,10 @@ public class FormDefinitionService {
         if (description != null) fd.setDescription(description);
         if (status != null) {
             validateStatus(status);
-            if ("PUBLISHED".equals(status) && !"PUBLISHED".equals(fd.getStatus())) {
-                throw new BizException("USE_PUBLISH", "Use publish endpoint to publish a form");
+            if (!status.equals(fd.getStatus())) {
+                throw new BizException("USE_STATUS_ENDPOINT",
+                    "Use publish/disable endpoints to change form status");
             }
-            fd.setStatus(status);
         }
         if (schema != null || settings != null) {
             if (!"DRAFT".equals(fd.getStatus())) {

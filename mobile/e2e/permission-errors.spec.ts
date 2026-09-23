@@ -3,6 +3,18 @@ import { installDeterministicRuntime, signIn } from './helpers/auth';
 import { createMockWorld, installApiMocks, USERS } from './helpers/fixtures';
 
 test.describe('permission and idempotency', () => {
+  test('invalid token cannot borrow the last login', async ({ page }) => {
+    const world = createMockWorld();
+    await installApiMocks(page, world);
+    await signIn(page, USERS.bob.username, 'ant.design', '/workbench');
+
+    const statuses = await page.evaluate(async () => Promise.all([
+      fetch('/api/mobile/bootstrap'),
+      fetch('/api/mobile/bootstrap', { headers: { Authorization: 'Bearer invalid' } }),
+    ]).then((responses) => responses.map((response) => response.status)));
+    expect(statuses).toEqual([401, 401]);
+  });
+
   test('unrelated user receives forbidden instance page', async ({ page }) => {
     const world = createMockWorld({ forbiddenInstanceId: 9099 });
     await installDeterministicRuntime(page);

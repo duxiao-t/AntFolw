@@ -7,10 +7,12 @@ import com.antflow.common.FormalNumberService;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
+import com.antflow.engine.BizException;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.antflow.mobile.workflow.MobileFileLinkService;
 import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.process.DefinitionVersionRepository;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,6 +86,36 @@ class FormDataServiceTest {
         assertThat(json.readTree(saved.getData()).path("reason").asText()).isEqualTo("报销");
         assertThat(json.readTree(saved.getData()).has("row")).isFalse();
         Mockito.verify(authorizationService).requireFormUse(10L);
+    }
+
+    @Test
+    void directSubmitIsRefusedWhenTheFormHasAPublishedProcess() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+        var versions = Mockito.mock(DefinitionVersionRepository.class);
+        Mockito.when(versions.hasPublishedProcess(10L)).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "versions", versions);
+
+        // 有已发布流程的表单只能走引擎发起（/api/instances/start）；直提会造出没有
+        // t_process_instance 的记录，等于绕过审批。
+        assertThatThrownBy(() -> service.submit("expense", "SUBMITTED",
+            Map.of("applicant", "张三"), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("审批流程");
+        Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
+    }
+
+    @Test
+    void draftIsStillAllowedWhenTheFormHasAPublishedProcess() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+        var versions = Mockito.mock(DefinitionVersionRepository.class);
+        Mockito.when(versions.hasPublishedProcess(10L)).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "versions", versions);
+
+        // 存草稿不进审批，不该被拦。
+        Long id = service.submit("expense", "DRAFT",
+            Map.of("applicant", "张三", "reason", "报销"), 7L);
+
+        assertThat(id).isEqualTo(100L);
     }
 
     @Test

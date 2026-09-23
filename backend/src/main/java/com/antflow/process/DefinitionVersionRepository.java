@@ -73,6 +73,23 @@ public class DefinitionVersionRepository {
             """, rs -> rs.next() ? form(rs) : null, code);
     }
 
+    /**
+     * 这张表单是否已经挂着**已发布**的流程定义。
+     *
+     * <p>用来兜底「有流程的表单必须走引擎发起」：直接提交（`/api/forms/data`、`/api/mobile/submissions`）
+     * 会造出没有 `t_process_instance` 的提交记录，等于绕过审批。注意 {@link #runtimeProcessForForm}
+     * 不筛状态，草稿流程也会命中，所以这里单独加 `status = 'PUBLISHED'`。
+     */
+    public boolean hasPublishedProcess(long formDefinitionId) {
+        Boolean exists = jdbc.queryForObject("""
+            SELECT EXISTS (
+              SELECT 1 FROM t_process_definition
+              WHERE form_def_id = ? AND status = 'PUBLISHED'
+            )
+            """, Boolean.class, formDefinitionId);
+        return Boolean.TRUE.equals(exists);
+    }
+
     public ProcessDefinition runtimeProcessForForm(long formDefinitionId) {
         return jdbc.query("""
             SELECT process.id, process.form_def_id, version.version_no,

@@ -28,6 +28,8 @@ export type MobilePickerDept = {
  * 这样两端对同一份字段配置的理解不会分叉。
  */
 export type MobileUserScope = {
+  /** 范围类型。空名单时也要带上它，服务端才知道该返回零候选而不是"不过滤"。 */
+  scopeType?: string;
   deptId?: number;
   includeDescendants?: boolean;
   position?: string;
@@ -233,6 +235,12 @@ async function waitForProcessedFile(file: MobileFileDto, onProgress?: UploadProg
 }
 
 async function fetchMobileFileBlobWithAuth(contentUrl: string, retry = false): Promise<Blob> {
+  const url = new URL(contentUrl, window.location.origin);
+  if (url.origin !== window.location.origin
+    || !/^\/api\/mobile\/files\/[^/]+\/content$/.test(url.pathname)
+    || contentUrl.includes('\\')) {
+    throw new Error('无效的附件地址');
+  }
   const controller = getAuthController();
   const headers = new Headers({ Accept: '*/*' });
   const auth = controller.authorizationHeader();

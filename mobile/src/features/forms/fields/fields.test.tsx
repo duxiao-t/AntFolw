@@ -96,11 +96,8 @@ describe('leaf mobile fields', () => {
 
   it('renders historical checklist descriptions, images, and videos in readonly mode', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['media']), { status: 200 })));
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: vi.fn(() => 'blob:inspection-media'),
-      revokeObjectURL: vi.fn(),
-    });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:inspection-media');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const node: MobileSchemaNode = {
       id: 'inspection',
       type: 'checklist',
@@ -119,8 +116,8 @@ describe('leaf mobile fields', () => {
           result: 'bad',
           remark: '外壳有划痕',
           photos: [
-            { id: 'p1', name: '现场.jpg', contentType: 'image/jpeg', contentUrl: '/files/p1', size: 10 },
-            { id: 'v1', name: '现场.mp4', contentType: 'video/mp4', contentUrl: '/files/v1', size: 20 },
+            { id: 'p1', name: '现场.jpg', contentType: 'image/jpeg', contentUrl: '/api/mobile/files/p1/content', size: 10 },
+            { id: 'v1', name: '现场.mp4', contentType: 'video/mp4', contentUrl: '/api/mobile/files/v1/content', size: 20 },
           ],
         }])}
         mode="readonly"

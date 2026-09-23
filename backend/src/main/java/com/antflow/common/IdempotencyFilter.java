@@ -8,7 +8,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.annotation.Order;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -33,8 +32,8 @@ public class IdempotencyFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest req) {
         String path = req.getRequestURI();
         return !METHODS.contains(req.getMethod().toUpperCase())
-            || !(path.startsWith("/api/mobile/") || path.startsWith("/api/auth/login")
-                || path.startsWith("/api/forms/") || path.startsWith("/api/processes/"));
+            || !(path.startsWith("/api/mobile/") || path.startsWith("/api/forms/")
+                || path.startsWith("/api/processes/"));
     }
 
     @Override
@@ -42,10 +41,15 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String key = readKey(req);
         if (key == null) { chain.doFilter(req, res); return; }
+        var principal = PrincipalHolder.current();
+        if (principal.isEmpty()) { chain.doFilter(req, res); return; }
 
         byte[] body = req.getInputStream().readAllBytes();
-        long userId = currentUserId();
-        IdempotencyService.Claim claim = service.claim(userId, req.getMethod(), req.getRequestURI(), key, body);
+        long userId = principal.get().userId();
+        String scopedKey = IdempotencyService.hash((key + "\0" + principal.get().authzVersion())
+            .getBytes(StandardCharsets.UTF_8));
+        IdempotencyService.Claim claim = service.claim(userId, req.getMethod(), req.getRequestURI(),
+            scopedKey, body);
         if (claim.replay() != null) {
             write(res, claim.replay(), true, null);
             return;
@@ -91,13 +95,6 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             if (value != null && !value.isBlank()) return value.trim();
         }
         return null;
-    }
-
-    private static long currentUserId() {
-        var principal = PrincipalHolder.current();
-        if (principal.isPresent()) return principal.get().userId();
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.isAuthenticated() ? 0L : 0L;
     }
 
     private static final class CachedBodyRequest extends HttpServletRequestWrapper {

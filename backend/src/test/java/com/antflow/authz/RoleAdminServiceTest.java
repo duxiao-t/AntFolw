@@ -96,4 +96,15 @@ class RoleAdminServiceTest {
             grant(PermissionCodes.SYSTEM_BACKUP_MANAGE, "ALL")))
             .doesNotThrowAnyException();
     }
+
+    @Test
+    void sensitiveIntegrationCapabilitiesStayAdminOnly() {
+        org.assertj.core.api.Assertions.assertThat(
+            PermissionCatalog.isAdminOnly(PermissionCodes.INTEGRATION_WECOM_MANAGE)).isTrue();
+        org.assertj.core.api.Assertions.assertThat(
+            PermissionCatalog.isAdminOnly(PermissionCodes.INTEGRATION_STORAGE_MANAGE)).isTrue();
+        org.assertj.core.api.Assertions.assertThat(
+            PermissionCatalog.isAdminOnly(PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE))
+            .isTrue();
+    }
 }

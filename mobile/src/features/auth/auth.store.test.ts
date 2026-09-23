@@ -33,6 +33,7 @@ describe('safeReturnUrl', () => {
     ['/tasks?status=pending', true],
     ['', false],
     ['//evil.com', false],
+    ['/\\evil.example', false],
     ['http://evil.com', false],
     ['javascript:alert(1)', false],
     ['workbench', false],

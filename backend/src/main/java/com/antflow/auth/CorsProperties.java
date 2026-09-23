@@ -12,10 +12,7 @@ public class CorsProperties {
     private static final List<String> DEFAULT_ALLOWED_ORIGIN_PATTERNS = List.of(
         "http://localhost:*",
         "http://127.0.0.1:*",
-        "http://[::1]:*",
-        "http://192.168.*:*",
-        "http://10.*:*",
-        "http://172.*:*"
+        "http://[::1]:*"
     );
     private List<String> allowedOriginPatterns = DEFAULT_ALLOWED_ORIGIN_PATTERNS;
 

@@ -89,6 +89,8 @@ describe('SecurityPage', () => {
     expect(screen.getByText('当前设备')).toBeInTheDocument();
     expect(screen.getByText('iPhone Safari')).toBeInTheDocument();
     expect(screen.queryByText('绑定企业微信')).not.toBeInTheDocument();
+    expect(screen.queryByText('已开启')).not.toBeInTheDocument();
+    expect(screen.queryByText('较高')).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/auth/sessions', expect.any(Object));
   });
 

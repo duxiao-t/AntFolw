@@ -30,6 +30,20 @@ class ProcessDefinitionServiceValidationTest {
     private final ProcessDefinitionService service =
         new ProcessDefinitionService(null, null, new ObjectMapper());
 
+    @Test void updateRejectsAProcessOwnedByAnotherForm() {
+        ProcessDefinitionMapper mapper = Mockito.mock(ProcessDefinitionMapper.class);
+        ProcessDefinition existing = new ProcessDefinition();
+        existing.setId(7L);
+        existing.setFormDefId(20L);
+        when(mapper.selectById(7L)).thenReturn(existing);
+        ProcessDefinitionService saving = new ProcessDefinitionService(
+            mapper, Mockito.mock(FormDefinitionService.class), new ObjectMapper());
+
+        assertThatThrownBy(() -> saving.saveOrUpdateDraft(7L, 10L, Map.of(), 1L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("does not belong");
+    }
+
     @Test void validate_rejects_sequential_approval_mode_for_new_definitions() {
         String tree = """
             {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",

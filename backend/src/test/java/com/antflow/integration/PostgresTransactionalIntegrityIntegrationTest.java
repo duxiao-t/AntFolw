@@ -608,6 +608,79 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void v48RotatesOnlySharedWecomPasswordsAndRevokesTheirSessions() {
+        String schema = "wecom_password_migration_"
+            + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("47").load().migrate();
+            long companyId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_company ORDER BY id LIMIT 1", Long.class);
+            long rotatedId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_user(employee_no, username, password_hash, display_name, status) "
+                + "VALUES ('wx-rotate', 'wx-rotate', crypt('qwer1234', gen_salt('bf', 10)), "
+                + "'Rotate', 'ACTIVE') RETURNING id", Long.class);
+            long preservedId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_user(employee_no, username, password_hash, display_name, status) "
+                + "VALUES ('wx-keep', 'wx-keep', crypt('kept-secret', gen_salt('bf', 10)), "
+                + "'Keep', 'ACTIVE') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_wecom_user_mapping(company_id, wecom_user_id, user_id) VALUES (?, ?, ?)",
+                companyId, "wx-rotate", rotatedId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_wecom_user_mapping(company_id, wecom_user_id, user_id) VALUES (?, ?, ?)",
+                companyId, "wx-keep", preservedId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_auth_session(user_id, refresh_token_hash, csrf_token_hash, device_name, expires_at) "
+                + "VALUES (?, 'rotate-refresh', 'rotate-csrf', 'test', now() + interval '1 day')",
+                rotatedId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForObject("SELECT password_hash = crypt('qwer1234', "
+                + "password_hash) FROM " + schema + ".t_user WHERE id = ?", Boolean.class,
+                rotatedId)).isFalse();
+            assertThat(jdbcTemplate.queryForObject("SELECT password_hash = crypt('kept-secret', "
+                + "password_hash) FROM " + schema + ".t_user WHERE id = ?", Boolean.class,
+                preservedId)).isTrue();
+            assertThat(jdbcTemplate.queryForObject("SELECT password_hash FROM " + schema
+                + ".t_user WHERE username = 'admin'", String.class))
+                .isEqualTo("!ANTFLOW_BOOTSTRAP_REQUIRED!");
+            assertThat(jdbcTemplate.queryForObject("SELECT revoked_at IS NOT NULL FROM " + schema
+                + ".t_auth_session WHERE user_id = ?", Boolean.class, rotatedId)).isTrue();
+
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status) VALUES "
+                + "('bi_redact', 'BI redact', '[{\"id\":\"secret\",\"type\":\"text\"},"
+                + "{\"id\":\"count\",\"type\":\"number\"}]'::jsonb, '{}'::jsonb, "
+                + "'PUBLISHED') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "SELECT id, 1, schema, 'test' FROM " + schema
+                + ".t_form_definition WHERE id = ?", formId);
+            long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, '{\"secret\":\"private\",\"count\":42,"
+                + "\"unknown\":\"hidden\"}'::jsonb, 'SUBMITTED') RETURNING id",
+                Long.class, formId);
+            assertThat(jdbcTemplate.queryForObject("SELECT value_text FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'secret'",
+                String.class, dataId)).isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT value_json::text FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'unknown'",
+                String.class, dataId)).isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT value_text FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'count'",
+                String.class, dataId)).isEqualTo("42");
+            assertThat(jdbcTemplate.queryForObject("SELECT employee_no FROM " + schema
+                + ".v_user_catalog WHERE id = ?", String.class, rotatedId)).isNull();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
     void bindableListsOnlySourcesTheFormReferences() {
         long adminId = userId("admin");
         long formId = insertForm("DRAFT",
@@ -668,6 +741,35 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(optionSourceService.bindable(formId))
                 .extracting(OptionSourceService.BindableSource::versionId)
                 .containsExactlyInAnyOrder(v1, v2);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void publishingABindingToARetiredVersionIsRefused() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("retirepub_" + UUID.randomUUID().toString().replace("-", ""));
+        // insertOptionSource 建的是 v1（可用），这里再加一个已发布但会被停用的 v2。
+        long usable = optionSourceVersionId(sourceId);
+        long retired = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'PUBLISHED', '[\"col\"]'::jsonb, 1, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            optionSourceService.disableVersion(sourceId, retired);
+
+            // 停用只把版本从候选列表里移除是不够的：直接提交带该 versionId 的 schema 再发布就绕过去了。
+            long badForm = insertForm("DRAFT", boundOptionSchema(sourceId, retired));
+            assertThatThrownBy(() -> formDefinitionService.publish(badForm))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("不可绑定");
+
+            // 未停用的版本照常可绑定——别把这道闸做成"一律拒绝"。
+            long okForm = insertForm("DRAFT", boundOptionSchema(sourceId, usable));
+            assertThat(formDefinitionService.publish(okForm).getStatus()).isEqualTo("PUBLISHED");
         } finally {
             PrincipalHolder.clear();
         }
@@ -769,6 +871,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
     private static String optionSchema(long sourceId, long versionId) {
         return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
             + "{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId + "}}}]";
+    }
+
+    /** 带完整列映射的绑定，能过 requireVersion 的列检查——用来测"能不能发布"这类到了后面的路径。 */
+    private static String boundOptionSchema(long sourceId, long versionId) {
+        return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":{\"optionSource\":"
+            + "{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId
+            + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}]";
     }
 
     private long insertOptionSource(String code) {

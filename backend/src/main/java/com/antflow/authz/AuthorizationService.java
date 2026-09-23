@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 public class AuthorizationService {
     private final JdbcTemplate jdbcTemplate;
     private final Map<Long, CachedSnapshot> cache = new ConcurrentHashMap<>();
+    private final Object cacheLock = new Object();
 
     public Optional<PrincipalHolder.Principal> principalForRequest(long userId, UUID sessionId) {
         UserState state = userState(userId);
@@ -29,14 +30,7 @@ public class AuthorizationService {
             cache.remove(userId);
             return Optional.empty();
         }
-        CachedSnapshot cached = cache.get(userId);
-        AuthzSnapshot snapshot;
-        if (cached != null && cached.version() == state.authzVersion()) {
-            snapshot = cached.snapshot();
-        } else {
-            snapshot = loadSnapshot(state);
-            cache.put(userId, new CachedSnapshot(state.authzVersion(), snapshot));
-        }
+        AuthzSnapshot snapshot = cachedSnapshot(state);
         return Optional.of(new PrincipalHolder.Principal(
             userId,
             state.username(),
@@ -54,22 +48,33 @@ public class AuthorizationService {
         if (state == null || !"ACTIVE".equals(state.status())) {
             throw new AccessDeniedException("user is disabled");
         }
-        CachedSnapshot cached = cache.get(userId);
-        if (cached != null && cached.version() == state.authzVersion()) {
-            return cached.snapshot();
-        }
-        AuthzSnapshot snapshot = loadSnapshot(state);
-        cache.put(userId, new CachedSnapshot(state.authzVersion(), snapshot));
-        return snapshot;
+        return cachedSnapshot(state);
     }
 
     public void evict(long userId) {
-        cache.remove(userId);
+        synchronized (cacheLock) {
+            cache.remove(userId);
+        }
     }
 
     /** 全局授权变更（菜单编排、能力目录）后一次性失效所有快照。 */
     public void evictAll() {
-        cache.clear();
+        synchronized (cacheLock) {
+            cache.clear();
+        }
+    }
+
+    private AuthzSnapshot cachedSnapshot(UserState state) {
+        // ponytail: one global lock; split per user only if permission-cache load contention appears.
+        synchronized (cacheLock) {
+            CachedSnapshot cached = cache.get(state.userId());
+            if (cached != null && cached.version() == state.authzVersion()) {
+                return cached.snapshot();
+            }
+            AuthzSnapshot loaded = loadSnapshot(state);
+            cache.put(state.userId(), new CachedSnapshot(state.authzVersion(), loaded));
+            return loaded;
+        }
     }
 
     public void requirePermission(String permission) {

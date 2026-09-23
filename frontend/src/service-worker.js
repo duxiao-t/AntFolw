@@ -26,9 +26,6 @@ workbox.routing.registerNavigationRoute('/index.html');
  * https://developers.google.com/web/tools/workbox/reference-docs/latest/workbox.strategies
  */
 
-/** Handle API requests */
-workbox.routing.registerRoute(/\/api\//, workbox.strategies.networkFirst());
-
 /** Handle third party requests */
 workbox.routing.registerRoute(
   /^https:\/\/gw\.alipayobjects\.com\//,

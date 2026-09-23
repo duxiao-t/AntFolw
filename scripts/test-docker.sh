@@ -40,6 +40,7 @@ ensure_test_env() {
     "MINIO_ROOT_USER=antflow-test" \
     "MINIO_ROOT_PASSWORD=$(random_secret 24)" \
     "JWT_SECRET=$(random_secret 32)" \
+    "ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD=$(random_secret 24)" \
     "AUDIT_ARCHIVE_ENCRYPTION_SECRET=$(random_secret 32)" \
     "ANTFLOW_INTEGRATION_ENCRYPTION_KEY=$(random_secret 32)" \
     "BACKUP_ENCRYPTION_SECRET=$(random_secret 32)" > "$tmp"

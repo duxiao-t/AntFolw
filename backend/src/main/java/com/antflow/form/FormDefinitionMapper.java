@@ -15,6 +15,12 @@ public interface FormDefinitionMapper extends BaseMapper<FormDefinition> {
                form.created_by, form.authz_version, form.created_at, form.updated_at
         FROM t_form_definition form
         WHERE form.deleted = 0
+        <if test="!admin">
+          AND EXISTS (
+            SELECT 1 FROM t_form_maintainer maintainer
+            WHERE maintainer.form_def_id = form.id AND maintainer.user_id = #{userId}
+          )
+        </if>
         <if test="keyword != null and keyword != ''">
           <!-- 必须显式转成 text：连接串带 stringtype=unspecified，参数以 unknown 送到 PG，
                而 concat(variadic "any") 无法从 unknown 推断类型，会直接 500。

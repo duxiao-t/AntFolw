@@ -127,7 +127,11 @@ public class MobileWorkflowController {
         FormDataService.SubmitResult result = formDataService.submit(request.formCode(),
             request.status(), request.data(), userId,
             request.files() == null ? List.of() : request.files(), request.draftId());
-        return Map.of("dataId", result.dataId(), "businessNo", result.businessNo());
+        // 草稿没有业务单号（businessNo 为 null），Map.of 不接受 null 会抛 NPE → 500。照桌面端用可变 Map。
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("dataId", result.dataId());
+        response.put("businessNo", result.businessNo());
+        return response;
     }
 
     public record DirectSubmitRequest(String formCode, String status, Object data,

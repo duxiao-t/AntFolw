@@ -33,7 +33,12 @@ function userScope(
     return { leaderOnly: true };
   }
   if (scopeType === 'user' && scopeUserIds) {
-    return { userIds: scopeUserIds.split(',').map(Number) };
+    return { scopeType: 'user', userIds: scopeUserIds.split(',').map(Number) };
+  }
+  // 指定人员但名单是空的：必须让服务端知道「这是零候选」，不能什么都不发——那会被当成
+  // "没配范围"，候选退化成全员。
+  if (scopeType === 'user') {
+    return { scopeType: 'user' };
   }
   return {};
 }

@@ -91,6 +91,8 @@ class AuthSessionServiceTest {
         AuthSession session = session(refreshToken, csrfToken, 7L);
         when(sessionMapper.selectOne(any(QueryWrapper.class))).thenReturn(session);
         when(authService.resume(7L)).thenReturn(Optional.of(authenticated()));
+        when(sessionMapper.rotate(eq(session), eq(AuthSessionService.hash(refreshToken))))
+            .thenReturn(1);
         when(jwtService.issue(eq(7L), eq("admin"), eq(List.of("admin")), eq(session.getId())))
             .thenReturn("rotated-access-token");
 
@@ -102,7 +104,7 @@ class AuthSessionServiceTest {
         assertThat(result.sessionId()).isEqualTo(session.getId());
         assertThat(session.getRefreshTokenHash()).isNotEqualTo(AuthSessionService.hash(refreshToken));
         assertThat(session.getCsrfTokenHash()).isNotEqualTo(AuthSessionService.hash(csrfToken));
-        verify(sessionMapper).updateById(session);
+        verify(sessionMapper).rotate(eq(session), eq(AuthSessionService.hash(refreshToken)));
 
         when(sessionMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(session));
         String rotatedRawToken = cookieValue(response, AuthSessionService.REFRESH_COOKIE);
@@ -110,6 +112,22 @@ class AuthSessionServiceTest {
             assertThat(device.id()).isEqualTo(session.getId().toString());
             assertThat(device.isCurrent()).isTrue();
         });
+    }
+
+    @Test
+    void concurrentRefreshLosesTheCompareAndSwap() {
+        String refreshToken = "refresh-token";
+        String csrfToken = "csrf-token";
+        AuthSession session = session(refreshToken, csrfToken, 7L);
+        when(sessionMapper.selectOne(any(QueryWrapper.class))).thenReturn(session);
+        when(authService.resume(7L)).thenReturn(Optional.of(authenticated()));
+        when(sessionMapper.rotate(eq(session), eq(AuthSessionService.hash(refreshToken))))
+            .thenReturn(0);
+
+        assertThatThrownBy(() -> service.refresh(refreshToken, csrfToken, csrfToken,
+            request("Mozilla/5.0"), new MockHttpServletResponse()))
+            .isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class)
+            .hasMessageContaining("already refreshed");
     }
 
     @Test

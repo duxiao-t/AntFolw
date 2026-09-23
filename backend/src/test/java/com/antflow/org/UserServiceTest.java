@@ -178,7 +178,8 @@ class UserServiceTest {
         user.setDisplayName("Duplicate User");
         when(userMapper.selectCount(any())).thenReturn(1L);
 
-        BizException error = assertThrows(BizException.class, () -> service.create(user, List.of()));
+        BizException error = assertThrows(BizException.class,
+            () -> service.create(user, List.of(), "test-password"));
 
         assertEquals("USERNAME_EXISTS", error.getCode());
         assertEquals("账号已存在", error.getMessage());
@@ -203,7 +204,8 @@ class UserServiceTest {
         when(userMapper.selectCount(any())).thenReturn(0L);
         when(departmentMapper.selectById(999L)).thenReturn(null);
 
-        BizException error = assertThrows(BizException.class, () -> service.create(user, List.of()));
+        BizException error = assertThrows(BizException.class,
+            () -> service.create(user, List.of(), "test-password"));
 
         assertEquals("DEPARTMENT_NOT_FOUND", error.getCode());
         assertEquals("所属部门不存在", error.getMessage());

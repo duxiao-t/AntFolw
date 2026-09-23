@@ -78,9 +78,9 @@ public final class PermissionCatalog {
         entry(PermissionCodes.WORKFLOW_AUTOMATION_RETRY, "重试流程自动化", Risk.HIGH,
             DataScope.ALL),
 
-        entry(PermissionCodes.INTEGRATION_WECOM_MANAGE, "管理企业微信对接", Risk.HIGH),
-        entry(PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE, "管理身份提供方", Risk.HIGH),
-        entry(PermissionCodes.INTEGRATION_STORAGE_MANAGE, "管理对象存储", Risk.HIGH),
+        entry(PermissionCodes.INTEGRATION_WECOM_MANAGE, "管理企业微信对接", Risk.HIGH, true),
+        entry(PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE, "管理身份提供方", Risk.HIGH, true),
+        entry(PermissionCodes.INTEGRATION_STORAGE_MANAGE, "管理对象存储", Risk.HIGH, true),
 
         entry(PermissionCodes.AUDIT_EVENT_READ, "查看操作日志", Risk.HIGH),
         entry(PermissionCodes.AUDIT_EVENT_EXPORT, "导出操作日志", Risk.HIGH),

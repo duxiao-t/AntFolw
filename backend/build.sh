@@ -7,4 +7,4 @@ docker run --rm \
   -v /www/antflow/backend:/app -w /app \
   -v /www/antflow/.m2:/root/.m2 \
   maven:3.9-eclipse-temurin-17 \
-  mvn -B -DskipTests "$@"
+  mvn -B "$@"

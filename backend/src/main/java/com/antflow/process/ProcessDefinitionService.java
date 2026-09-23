@@ -82,6 +82,10 @@ public class ProcessDefinitionService {
             if (pd == null) {
                 throw new BizException("PROCESS_NOT_FOUND", "Process not found: " + id);
             }
+            if (!formDefId.equals(pd.getFormDefId())) {
+                throw new BizException("PROCESS_FORM_MISMATCH",
+                    "Process does not belong to form: " + formDefId);
+            }
             pd.setProcess(writeJson(process));
             pd.setStatus("DRAFT");
             mapper.updateById(pd);

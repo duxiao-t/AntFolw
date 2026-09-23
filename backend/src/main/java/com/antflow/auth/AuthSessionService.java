@@ -92,12 +92,15 @@ public class AuthSessionService {
         String nextRefreshToken = randomToken();
         String nextCsrfToken = randomToken();
         OffsetDateTime now = now();
+        String previousRefreshTokenHash = session.getRefreshTokenHash();
         session.setRefreshTokenHash(hash(nextRefreshToken));
         session.setCsrfTokenHash(hash(nextCsrfToken));
         session.setLastActiveAt(now);
         session.setDeviceName(deviceName(request.getHeader(HttpHeaders.USER_AGENT)));
         session.setPlatform(platform(request.getHeader(HttpHeaders.USER_AGENT)));
-        sessionMapper.updateById(session);
+        if (sessionMapper.rotate(session, previousRefreshTokenHash) != 1) {
+            throw new BadCredentialsException("session was already refreshed");
+        }
 
         long remainingSeconds = Math.max(1, Duration.between(now, session.getExpiresAt()).getSeconds());
         writeCookies(response, request.isSecure(), nextRefreshToken, nextCsrfToken, remainingSeconds);

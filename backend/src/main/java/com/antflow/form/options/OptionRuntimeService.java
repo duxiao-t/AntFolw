@@ -202,11 +202,14 @@ public class OptionRuntimeService {
     private void requireVersion(JsonNode source, boolean forBinding) {
         if (!source.path("sourceId").isIntegralNumber() || source.path("sourceId").asLong() <= 0
             || !source.path("versionId").isIntegralNumber() || source.path("versionId").asLong() <= 0) bad("数据源和版本不能为空");
+        // forBinding 时额外拒绝"已停用（下架）"的版本：否则维护人直接提交带该 versionId 的 schema
+        // 再发布，就绕过了"停用后不出现在候选里"的约束。
+        // 运行时读路径（forBinding=false）**必须保持不校验**，否则钉着停用版的历史表单会 422。
         JsonNode columns = jdbc.query("""
             SELECT v.columns_json::text FROM t_option_data_source_version v
             JOIN t_option_data_source s ON s.id = v.source_id
             WHERE s.id = ? AND v.id = ? AND v.status = 'PUBLISHED'
-            """ + (forBinding ? " AND s.status = 'ACTIVE'" : ""),
+            """ + (forBinding ? " AND s.status = 'ACTIVE' AND v.disabled_at IS NULL" : ""),
             rs -> rs.next() ? parse(rs.getString(1)) : null, source.path("sourceId").asLong(), source.path("versionId").asLong());
         if (columns == null) bad("数据源版本不存在、未发布或不可绑定");
         Set<String> allowed = new LinkedHashSet<>(); columns.forEach(c -> allowed.add(c.asText()));

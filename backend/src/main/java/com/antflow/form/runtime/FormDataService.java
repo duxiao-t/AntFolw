@@ -5,6 +5,7 @@ import com.antflow.common.BusinessNumberService;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
+import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
@@ -40,6 +41,9 @@ public class FormDataService {
     private final FormDefinitionMapper formDefinitionMapper;
     private final MobileFileLinkService fileLinkService;
     private final MobileDraftService draftService;
+    /** 可选注入：老的单测直接 new 本类，不给它传这个依赖。 */
+    @Autowired(required = false)
+    private DefinitionVersionRepository versions;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -67,8 +71,16 @@ public class FormDataService {
             throw new AccessDeniedException("submission user does not match current principal");
         }
         authorizationService.requireFormUse(fd.getId());
-        formDefinitionService.validateSubmission(fd.getSchema(), data);
         String normalizedStatus = status == null ? "SUBMITTED" : status;
+        // 挂了已发布流程的表单只能走引擎发起。否则直接提交会造出 status=SUBMITTED、却没有
+        // t_process_instance/审批任务的记录——桌面 /api/forms/data 与移动 /api/mobile/submissions
+        // 都调这里，客户端只是"按 settings.workflowEnabled 自己选路"，服务端不兜底就能被绕过。
+        if (!"DRAFT".equals(normalizedStatus) && versions != null
+                && versions.hasPublishedProcess(fd.getId())) {
+            throw new BizException("FORM_HAS_PROCESS",
+                "该表单已启用审批流程，请从发起入口提交");
+        }
+        formDefinitionService.validateSubmission(fd.getSchema(), data);
         Object storedData = "DRAFT".equals(normalizedStatus)
             ? data
             : formDefinitionService.filterVisibleSubmission(fd.getSchema(), data);

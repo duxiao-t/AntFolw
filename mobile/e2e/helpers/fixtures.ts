@@ -534,7 +534,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method().toUpperCase();
-    const authUser = userFromToken(request.headers().authorization ?? null) ?? world.sessionUser;
+    const authUser = userFromToken(request.headers().authorization ?? null);
 
     try {
       if (path === '/api/public/branding' && method === 'GET') {
@@ -574,6 +574,10 @@ export async function installApiMocks(page: Page, world: MockWorld) {
         return empty(route, 204);
       }
 
+      if (!authUser) {
+        return error(route, 401, 'UNAUTHORIZED', '未登录');
+      }
+
       if (path === '/api/auth/sessions' && method === 'GET') {
         if (!authUser) {
           return error(route, 401, 'UNAUTHORIZED', '未登录');
@@ -608,7 +612,7 @@ export async function installApiMocks(page: Page, world: MockWorld) {
       }
 
       if (path === '/api/mobile/apps/favorites' && method === 'GET') {
-        return json(route, bootstrapFor(authUser ?? USERS.bob, world).favoriteApps);
+        return json(route, bootstrapFor(authUser, world).favoriteApps);
       }
 
       if (path === '/api/mobile/preferences/apps' && method === 'PUT') {

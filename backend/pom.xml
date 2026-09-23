@@ -74,6 +74,8 @@
                     <systemPropertyVariables>
                         <spring.datasource.password>antflow-test</spring.datasource.password>
                         <antflow.jwt.secret>antflow-test-jwt-secret-0123456789abcdef</antflow.jwt.secret>
+                        <antflow.auth.bootstrap-admin-password>ant.design</antflow.auth.bootstrap-admin-password>
+                        <antflow.auth.bootstrap-bob-password>ant.design</antflow.auth.bootstrap-bob-password>
                         <antflow.audit.archive-access-key>antflow-test</antflow.audit.archive-access-key>
                         <antflow.audit.archive-secret-key>antflow-test-secret</antflow.audit.archive-secret-key>
                         <antflow.audit.archive-encryption-secret>antflow-test-audit-encryption-secret</antflow.audit.archive-encryption-secret>

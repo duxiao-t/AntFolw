@@ -434,12 +434,12 @@ export default function ContactsPage() {
       if (!result.rows.length) { msg.warning('CSV 中没有可导入的成员'); return; }
 
       const imported = await request<{
-        successCount: number; failedCount: number; defaultPassword: string;
+        successCount: number; failedCount: number; passwordResetRequired: boolean;
       }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
       const { successCount, failedCount } = imported;
       if (successCount) qc.invalidateQueries({ queryKey: ['users-page'] });
       if (failedCount) msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
-      else msg.success(`已导入 ${successCount} 名成员，初始密码为 ${imported.defaultPassword}`);
+      else msg.success(`已导入 ${successCount} 名成员；请由管理员为新账号重置密码`);
     } catch (_error) {
       msg.error('批量导入失败');
     }

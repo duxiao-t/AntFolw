@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.antflow.authz.PermissionCodes;
 
@@ -30,7 +31,11 @@ public class UserController {
                            @RequestParam(required = false) Boolean includeDescendants,
                            @RequestParam(required = false) Boolean leaderOnly,
                            @RequestParam(required = false) String position,
-                           @RequestParam(required = false) List<Long> userIds) {
+                           @RequestParam(required = false) List<Long> userIds,
+                           @RequestParam(required = false) String scopeType) {
+        // 指名范围但名单为空 = 零候选。空数组会被序列化丢掉，所以靠 scopeType 区分
+        // "没配范围"和"配了指定人员但一个人都没选"——判据必须在服务端，不能交给客户端。
+        if ("user".equals(scopeType) && (userIds == null || userIds.isEmpty())) return List.of();
         return userService.listAuthorized(UserService.UserQuery.of(
             keyword, deptId, includeDescendants, leaderOnly, position, userIds));
     }
@@ -135,7 +140,7 @@ public class UserController {
             try {
                 User user = toUser(rows.get(index));
                 Long id = auditService.execute(
-                    () -> userService.create(user, List.of(), UserService.DEFAULT_IMPORTED_PASSWORD),
+                    () -> userService.create(user, List.of(), UUID.randomUUID().toString()),
                     createdId -> auditService.success("org.user.import", "USER", createdId,
                         AuditService.RiskLevel.HIGH,
                         Map.of("changedFields", List.of("profile", "password")),
@@ -145,8 +150,7 @@ public class UserController {
                 failures.add(new ImportFailure(rowNumber, exception.getMessage()));
             }
         }
-        return new ImportResult(successCount, failures.size(),
-            UserService.DEFAULT_IMPORTED_PASSWORD, failures);
+        return new ImportResult(successCount, failures.size(), successCount > 0, failures);
     }
 
     @DeleteMapping("/{id}")
@@ -189,7 +193,7 @@ public class UserController {
 
     public record ImportRequest(List<Map<String, Object>> users) { }
     public record ImportFailure(int row, String message) { }
-    public record ImportResult(int successCount, int failedCount, String defaultPassword,
+    public record ImportResult(int successCount, int failedCount, boolean passwordResetRequired,
                                List<ImportFailure> failures) { }
     public record ManagerCandidate(Long id, String displayName, String employeeNo, Long deptId) { }
     public record LoginAccessRequest(@NotNull Boolean enabled) { }

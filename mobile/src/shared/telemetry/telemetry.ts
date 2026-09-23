@@ -18,7 +18,7 @@ function currentRoute(): string {
   if (typeof window === 'undefined') {
     return '/';
   }
-  return `${window.location.pathname}${window.location.search}`;
+  return window.location.pathname;
 }
 
 export function isTelemetryEnabled(): boolean {
@@ -41,7 +41,7 @@ export function getTelemetryEndpoint(): string | undefined {
 export function sanitizeTelemetryEvent(event: TelemetryEvent): TelemetryEvent {
   const safe: TelemetryEvent = {
     name: String(event.name ?? ''),
-    route: String(event.route ?? currentRoute()),
+    route: String(event.route ?? currentRoute()).replace(/[?#].*$/, ''),
   };
   if (typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)) {
     safe.durationMs = event.durationMs;

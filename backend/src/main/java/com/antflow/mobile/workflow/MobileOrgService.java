@@ -21,6 +21,8 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class MobileOrgService {
     private static final int SEARCH_LIMIT = 20;
+    /** 「已选」批量取人时的上限，防止拿这个接口当目录翻页工具。 */
+    private static final int SELECTED_LIMIT = 200;
 
     private final UserMapper userMapper;
     private final DepartmentMapper departmentMapper;
@@ -51,7 +53,11 @@ public class MobileOrgService {
                 }
             });
         }
-        if (request.userIds() != null && !request.userIds().isEmpty()) {
+        // 空名单 = 明确要求零候选，不能当成"没给过滤"（见 UserService.UserQuery 的说明）。
+        if (request.userIds() != null) {
+            if (request.userIds().isEmpty()) {
+                return List.of();
+            }
             query.in("id", request.userIds());
         }
         Collection<Long> departments = request.resolveDepartments(departmentMapper);
@@ -71,8 +77,11 @@ public class MobileOrgService {
 
     public List<MobilePickerUserDto> selectedUsers(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return List.of();
+        // 这个接口按调用方给的 id 列表取人，没有上限就等同于"传 N 个 id 拿 N 条"，可以被拿来翻目录。
+        // 选择器实际用不到几百个选中项，超出的截断即可。
         return pickerUsers(userMapper.selectList(new QueryWrapper<User>()
-            .select("id", "username", "display_name", "employee_no", "dept_id").in("id", ids)));
+            .select("id", "username", "display_name", "employee_no", "dept_id")
+            .in("id", ids.stream().limit(SELECTED_LIMIT).toList())));
     }
 
     private List<MobilePickerUserDto> pickerUsers(List<User> users) {

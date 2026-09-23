@@ -40,13 +40,15 @@ antflow:
     ttl-seconds: 86400
     clock-skew-seconds: 30
   cors:
-    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,http://[::1]:*,http://192.168.*:*,http://10.*:*,http://172.*:*}
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,http://[::1]:*}
   login:
     per-minute: 5
     per-hour: 30
   auth:
     session-ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:2592000}
     cookie-prefix: ${ANTFLOW_AUTH_COOKIE_PREFIX:antflow}
+    bootstrap-admin-password: ${ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD:}
+    bootstrap-bob-password: ${ANTFLOW_BOOTSTRAP_BOB_PASSWORD:}
     public-base-url: ${ANTFLOW_PUBLIC_BASE_URL:http://localhost:5173}
     oidc-allowed-hosts: ${ANTFLOW_OIDC_ALLOWED_HOSTS:}
     oidc-https-only: ${ANTFLOW_OIDC_HTTPS_ONLY:true}

@@ -24,8 +24,11 @@ public class MobileOrgController {
             @RequestParam(required = false) Boolean includeDescendants,
             @RequestParam(required = false) Boolean leaderOnly,
             @RequestParam(required = false) String position,
-            @RequestParam(required = false) List<Long> userIds) {
+            @RequestParam(required = false) List<Long> userIds,
+            @RequestParam(required = false) String scopeType) {
         principal();
+        // 同 UserController：指名范围但名单为空 = 零候选（空数组会被序列化丢掉）。
+        if ("user".equals(scopeType) && (userIds == null || userIds.isEmpty())) return List.of();
         return service.searchUsers(UserService.UserQuery.of(
             keyword, deptId, includeDescendants, leaderOnly, position, userIds));
     }

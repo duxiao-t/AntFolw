@@ -123,6 +123,23 @@ describe('Contacts CSV helpers', () => {
     expect(csv).toBe('姓名,工号,账号,手机,邮箱,职务,性别\r\n"张三,主管",000001,zhangsan,13800000000,"z""s@example.com",研发,男');
   });
 
+  it('neutralizes spreadsheet formulas in exported member fields', () => {
+    const csv = buildMembersCsv([{
+      displayName: '=HYPERLINK("https://evil.example")',
+      employeeNo: '000001',
+      username: '+cmd',
+      phone: '',
+      email: ' safe@example.com',
+      position: '\t@SUM(1,1)',
+      gender: 'M',
+      deptId: 2,
+    }]);
+
+    expect(csv).toContain('"\'=HYPERLINK(""https://evil.example"")"');
+    expect(csv).toContain("'+cmd");
+    expect(csv).toContain('"\'\t@SUM(1,1)"');
+  });
+
   it('imports Chinese-header CSV rows into the selected department', () => {
     const result = parseMembersCsv('姓名,工号,账号,手机,邮箱,职务,性别\n李四,000002,lisi,13900000000,lisi@example.com,产品,女', 7);
 

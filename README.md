@@ -42,6 +42,7 @@ POSTGRES_PASSWORD=replace-with-postgres-password
 MINIO_ROOT_USER=antflow-local
 MINIO_ROOT_PASSWORD=replace-with-minio-password
 JWT_SECRET=replace-with-at-least-32-random-characters
+ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD=replace-with-initial-admin-password
 AUDIT_ARCHIVE_ENCRYPTION_SECRET=replace-with-audit-encryption-secret
 ANTFLOW_INTEGRATION_ENCRYPTION_KEY=replace-with-integration-encryption-key
 ANTFLOW_PUBLIC_BASE_URL=https://approval.example.com
@@ -75,7 +76,7 @@ docker compose --env-file .env.docker.local ps
 - 桌面管理端：<http://127.0.0.1:7070/>
 - 移动端：<http://127.0.0.1:7070/mobile/login>
 - 后端健康检查：<http://127.0.0.1:7070/actuator/health>
-- 初始开发账号：`admin / ant.design`、`bob / ant.design`
+- 首次 Docker 启动：管理员为 `admin / ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD`；该变量只初始化待设置凭据，不会覆盖后续改密。
 
 首次启动会自动执行 Flyway 迁移。PostgreSQL 和 MinIO 分别使用 `antflow-local_postgres_data`、`antflow-local_minio_data` 持久卷。
 
@@ -146,6 +147,8 @@ $env:MINIO_ACCESS_KEY='minioadmin'
 $env:MINIO_SECRET_KEY='your-minio-password'
 mvn -B spring-boot:run
 ```
+
+`local` profile 会为待初始化的 `admin`、`bob` 开发账号设置 `ant.design`；非 `local` 环境不会启用该默认值。
 
 后端默认监听 `8080`，健康检查为 <http://localhost:8080/actuator/health>。
 
