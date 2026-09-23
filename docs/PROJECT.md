@@ -48,3 +48,4 @@ AntFlow 是面向企业的表单与审批平台，提供桌面管理端、移动
 - D-20260918-form-usage-maintenance-separation：表单使用范围与模板维护职责分离。
 - D-20260921-shared-option-sources：共享选项使用不可变版本并复用运行时授权上下文。
 - D-20260922-bi-ledger-readonly-views：BI 台账走只读视图，直连库有意绕过三层鉴权。
+- D-20260923-option-source-reversible-state：选项数据源靠状态可逆治"错了删不掉"。
