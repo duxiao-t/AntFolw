@@ -181,6 +181,131 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private MenuService menuService;
     @Autowired private WecomService wecomService;
     @Autowired private OptionSourceService optionSourceService;
+    @Autowired private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
+
+    /**
+     * 隐藏字段的选项可见性必须按"调用者自己所处的节点"判，而不是只看发起人。
+     * 三条路径（instanceId / dataId / selectedValues 回查）共用同一套判据，这里走前两条。
+     */
+    @Test
+    void optionFieldVisibilityFollowsTheViewersOwnNode() {
+        long starter = userId("admin");
+        long first = insertUser("vis-first");
+        long second = insertUser("vis-second");
+        long reader = insertUser("vis-reader");
+        long approverRole = insertRole("vis-approver");
+        jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code) "
+            + "VALUES (?, 'workflow:task:read')", approverRole);
+        assignRole(first, approverRole);
+        assignRole(second, approverRole);
+        long readerRole = insertRole("vis-instance-reader");
+        jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+            + "VALUES (?, 'workflow:instance:read', 'ALL'), (?, 'form:data:read', 'ALL')",
+            readerRole, readerRole);
+        assignRole(reader, readerRole);
+
+        long sourceId = insertOptionSource("vis_source");
+        long versionId = optionSourceVersionId(sourceId);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_row(version_id, row_no, data) "
+            + "VALUES (?, 1, '{\"col\":\"甲\"}'::jsonb)", versionId);
+        java.util.function.Function<String, String> boundSelect = id ->
+            "{\"id\":\"" + id + "\",\"type\":\"select\",\"label\":\"F\",\"props\":{\"optionSource\":"
+                + "{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}";
+        String schema = "[" + boundSelect.apply("plain") + "," + boundSelect.apply("hiddenA")
+            + "," + boundSelect.apply("hiddenB") + "]";
+        // a1 把 hiddenA 设为隐藏、a2 把 hiddenB 设为隐藏。
+        String flow = """
+            {"id":"root","type":"ROOT","children":{
+              "id":"a1","type":"APPROVAL","props":{"assignedType":"ASSIGN_USER",
+                "assignedUser":[%d],"mode":"OR","formPerms":[{"fieldId":"hiddenA","mode":"HIDDEN"}]},
+              "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"ASSIGN_USER",
+                "assignedUser":[%d],"mode":"OR","formPerms":[{"fieldId":"hiddenB","mode":"HIDDEN"}]},
+                "children":null}}}
+            """.formatted(first, second);
+        long formId = insertForm("DRAFT", schema, starter);
+        long processId = insertProcess(formId, "DRAFT", flow);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long createdInstance = 0L;
+        try {
+            PrincipalHolder.set(new PrincipalHolder.Principal(starter, "admin", List.of("admin")));
+            publishService.publish(formId, processId);
+            Map<String, Object> started = processEngine.start(
+                new StartCmd(code, Map.of(), Map.of()), starter);
+            final long instanceId = ((Number) started.get("instanceId")).longValue();
+            createdInstance = instanceId;
+            long dataId = jdbcTemplate.queryForObject(
+                "SELECT form_data_id FROM t_process_instance WHERE id = ?", Long.class, instanceId);
+            long firstTask = ((List<?>) started.get("firstTaskIds")).stream()
+                .map(Number.class::cast).mapToLong(Number::longValue).findFirst().orElseThrow();
+
+            // 发起人：沿用 ROOT 的 formPerms（ROOT 没配 → 不受影响）
+            assertThat(queryOptionsByInstance(instanceId, "hiddenA")).isNotEmpty();
+
+            // a1 处理人：自己节点没隐藏 hiddenB → 必须查得到（不能被"任一节点隐藏"误伤）
+            setPrincipal(first);
+            assertThat(queryOptionsByInstance(instanceId, "hiddenB")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByInstance(instanceId, "hiddenA"))
+                .isInstanceOf(HiddenResourceException.class);
+
+            // 用 SQL 推进到 a2 而不是 processEngine.approve：t_task_history 是 append-only
+            // （触发器保护），一旦走了真审批就没法清理这次测试留下的实例。
+            jdbcTemplate.update("UPDATE t_task SET status = 'APPROVED', approved_by = ?, "
+                + "approved_at = now() WHERE id = ?", first, firstTask);
+            jdbcTemplate.update("INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, "
+                + "approval_mode, task_type, version) "
+                + "VALUES (?, 'a2', ?, 'PENDING', 'OR_SIGN', 'APPROVAL', 0)", instanceId, second);
+
+            // a2 处理人：反过来
+            setPrincipal(second);
+            assertThat(queryOptionsByInstance(instanceId, "hiddenA")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByInstance(instanceId, "hiddenB"))
+                .isInstanceOf(HiddenResourceException.class);
+
+            // 不是处理人（只有实例读 + 数据读权限）：任一节点隐藏就拒；没隐藏的照常
+            setPrincipal(reader);
+            assertThat(queryOptionsByInstance(instanceId, "plain")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByInstance(instanceId, "hiddenA"))
+                .isInstanceOf(HiddenResourceException.class);
+            // 拿 dataId 绕不开：同一条记录反查实例后按同一套判
+            assertThat(queryOptionsByDataId(dataId, "plain")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByDataId(dataId, "hiddenB"))
+                .isInstanceOf(HiddenResourceException.class);
+        } finally {
+            PrincipalHolder.clear();
+            cleanupOptionVisibilityFixture(sourceId, approverRole, readerRole);
+        }
+    }
+
+    private List<com.antflow.form.options.OptionRuntimeService.OptionValue> queryOptionsByInstance(
+            long instanceId, String fieldId) {
+        return optionRuntimeService.query(new com.antflow.form.options.OptionRuntimeService.OptionQuery(
+            null, null, instanceId, null, fieldId, null, 1, 20, Map.of(), List.of(), null)).items();
+    }
+
+    private List<com.antflow.form.options.OptionRuntimeService.OptionValue> queryOptionsByDataId(
+            long dataId, String fieldId) {
+        return optionRuntimeService.query(new com.antflow.form.options.OptionRuntimeService.OptionQuery(
+            null, null, null, dataId, fieldId, null, 1, 20, Map.of(), List.of(), null)).items();
+    }
+
+    /**
+     * 由引擎启动的实例清不掉：`t_task_history` 是 append-only（触发器保护），而它引用 proc_inst_id，
+     * 于是 instance → form_data → form_definition 这条链都得留着——与
+     * {@code workflowHistoryIsAppendOnlyAtDatabaseBoundary} 一样，测完不回收。
+     * 只回收本次独有的数据源与角色，避免影响"按列表断言"的用例。
+     */
+    private void cleanupOptionVisibilityFixture(long sourceId, long approverRole, long readerRole) {
+        // 源→版本的 FK 不级联，得按 行 → 版本 → 源 的顺序删。
+        jdbcTemplate.update("DELETE FROM t_option_data_source_row WHERE version_id IN "
+            + "(SELECT id FROM t_option_data_source_version WHERE source_id = ?)", sourceId);
+        jdbcTemplate.update("DELETE FROM t_option_data_source_version WHERE source_id = ?", sourceId);
+        jdbcTemplate.update("DELETE FROM t_form_option_source WHERE source_id = ?", sourceId);
+        jdbcTemplate.update("DELETE FROM t_option_data_source WHERE id = ?", sourceId);
+        jdbcTemplate.update("DELETE FROM t_user_role WHERE role_id IN (?, ?)", approverRole, readerRole);
+        jdbcTemplate.update("DELETE FROM t_role WHERE id IN (?, ?)", approverRole, readerRole);
+    }
 
     @Test
     void directSubmissionConsumesOnlyItsSourceDraft() {

@@ -5,6 +5,7 @@ import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
+import com.antflow.engine.tree.ProcessTreeNav;
 import com.antflow.process.DefinitionVersionRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -286,7 +287,8 @@ public class OptionRuntimeService {
                 WHERE i.id = ?
                 """, rs -> rs.next() ? new InstanceSchema(parse(rs.getString(1)), parse(rs.getString(2)), rs.getLong(3)) : null, request.instanceId());
             if (context == null) throw new HiddenResourceException("instance not found");
-            if (context.owner() == user) requireVisible(context.process(), request.fieldId());
+            requireViewerVisible(context.process(), request.fieldId(), request.instanceId(),
+                user, context.owner());
             return context.schema();
         }
         authorization.requireReadableFormData(request.dataId());
@@ -297,13 +299,80 @@ public class OptionRuntimeService {
             WHERE d.id = ?
             """, rs -> rs.next() ? parse(rs.getString(1)) : null, request.dataId());
         if (schema == null) throw new HiddenResourceException("form data not found");
+        // 这条填报记录如果属于某个实例，就必须按实例那套可见性判——否则可以拿 dataId
+        // 绕开 instanceId 路径的 HIDDEN 检查（两条路径返回的是同一批选项）。没有实例
+        // （无流程表单的直接提交）时不存在任何节点权限配置，放行。
+        AuthorizedData owner = jdbc.query("""
+            SELECT i.id, i.process_snapshot::text AS process, i.started_by
+            FROM t_process_instance i
+            WHERE i.form_data_id = ?
+            ORDER BY i.id DESC LIMIT 1
+            """, rs -> rs.next() ? new AuthorizedData(rs.getLong("id"),
+                parse(rs.getString("process")), rs.getLong("started_by")) : null, request.dataId());
+        if (owner != null) {
+            requireViewerVisible(owner.process(), request.fieldId(), owner.instanceId(),
+                user, owner.owner());
+        }
         return schema;
     }
 
-    private void requireVisible(JsonNode process, String fieldId) {
-        for (JsonNode permission : process.path("props").path("formPerms")) {
+    /**
+     * 按"调用者在这次流程里所处的节点"判隐藏字段。节点级 formPerms 长在审批节点上，
+     * 所以非发起人必须先把"我是哪个节点"算出来，不能拿发起人视角（ROOT 的 props.formPerms）糊弄；
+     * 而发起人自己填的字段本来就不受审批节点的可见性约束，仍按 ROOT 的 formPerms 判。
+     */
+    private void requireViewerVisible(JsonNode process, String fieldId, long instanceId,
+                                      long user, long owner) {
+        if (fieldId == null) return;
+        if (user == owner) {
+            requireVisible(process, fieldId);
+            return;
+        }
+        String nodeId = viewerNodeId(instanceId, user);
+        if (nodeId != null) {
+            // 精确：只看我所在节点对该字段的三态配置。
+            requireVisible(ProcessTreeNav.findById(process, nodeId), fieldId);
+            return;
+        }
+        // 不是这次流程的处理人（例如只有实例读权限的管理员/监控）。不能一律拒绝——实例详情页
+        // 解析"已选值"的显示名也走这个接口，全拒会让管理员的详情页没有选项；但也不能什么都不查，
+        // 否则非发起人就能拿到隐藏字段的选项。折中：任一节点把它标成 HIDDEN 就拒。
+        requireNotHiddenAnywhere(process, fieldId);
+    }
+
+    /** 调用者在这个实例上的节点：优先当前待办，其次最近一次已审批。都没有返回 null。 */
+    private String viewerNodeId(long instanceId, long user) {
+        String pending = jdbc.query("""
+            SELECT node_id FROM t_task
+            WHERE proc_inst_id = ? AND assignee_id = ? AND status = 'PENDING'
+              AND task_type = 'APPROVAL'
+            ORDER BY id DESC LIMIT 1
+            """, rs -> rs.next() ? rs.getString(1) : null, instanceId, user);
+        if (pending != null) return pending;
+        return jdbc.query("""
+            SELECT node_id FROM t_task
+            WHERE proc_inst_id = ? AND approved_by = ? AND status IN ('APPROVED', 'REJECTED')
+            ORDER BY approved_at DESC NULLS LAST, id DESC LIMIT 1
+            """, rs -> rs.next() ? rs.getString(1) : null, instanceId, user);
+    }
+
+    private void requireVisible(JsonNode node, String fieldId) {
+        if (node == null) return;
+        for (JsonNode permission : node.path("props").path("formPerms")) {
             if (fieldId != null && fieldId.equals(permission.path("fieldId").asText()) && "HIDDEN".equals(permission.path("mode").asText())) throw new HiddenResourceException("field not found");
         }
+    }
+
+    /** 整棵树里任一节点把该字段标成 HIDDEN 就拒（含 branchs 分支）。 */
+    private void requireNotHiddenAnywhere(JsonNode node, String fieldId) {
+        if (node == null || node.isNull() || !node.has("id")) return;
+        requireVisible(node, fieldId);
+        if (ProcessTreeNav.isBranch(node)) {
+            for (JsonNode branch : node.withArray("branchs")) {
+                requireNotHiddenAnywhere(branch, fieldId);
+            }
+        }
+        requireNotHiddenAnywhere(node.get("children"), fieldId);
     }
 
     static int depth(JsonNode cascade) {
@@ -380,6 +449,8 @@ public class OptionRuntimeService {
     private static void invalid(String message) { throw new BizException("FORM_DATA_INVALID", message); }
     private static int size(OptionQuery r) { return r.size() == 0 ? 20 : r.size(); }
     private record InstanceSchema(JsonNode schema, JsonNode process, long owner) { }
+    /** 按 dataId 反查到的实例可见性上下文。 */
+    private record AuthorizedData(long instanceId, JsonNode process, long owner) { }
     public record OptionQuery(String formCode, Integer formVersion, Long instanceId, Long dataId, String fieldId,
         String keyword, int page, int size, Map<String, Object> values, List<String> path, List<String> selectedValues) { }
     public record PreviewQuery(JsonNode schema, OptionQuery query) { }
