@@ -46,6 +46,16 @@ public class AuthorizationService {
     }
 
     public AuthzSnapshot snapshot(long userId) {
+        // 快路径：请求主体自己。认证时 principalForRequest 已经查过 t_user 并确认 ACTIVE，
+        // 版本也带在 principal 上，所以同一请求内再查一次 t_user 是纯浪费——而 snapshot 会被
+        // currentSnapshot / hasPermission(userId,…) / inCurrentDataScope 等入口反复调用
+        // （UserService.listAuthorized 就是每行一次），原先等于每行一条 SELECT。
+        PrincipalHolder.Principal principal = PrincipalHolder.current().orElse(null);
+        if (principal != null && principal.userId() == userId && principal.authzVersion() > 0) {
+            return cachedSnapshot(new UserState(userId, principal.username(),
+                principal.displayName(), "ACTIVE", principal.authzVersion(),
+                principal.departmentId()));
+        }
         UserState state = userState(userId);
         if (state == null || !"ACTIVE".equals(state.status())) {
             throw new AccessDeniedException("user is disabled");
@@ -498,19 +508,31 @@ public class AuthorizationService {
                 "SELECT id FROM t_department ORDER BY id", Long.class));
         }
         Set<Long> result = new LinkedHashSet<>();
+        // 同一个查询在这几个分支里是重复的（多个 ALL 授权、多个"本部门及下级"授权都查同一份），
+        // 而 currentDataScope 是数据权限拦截器的热路径——按需算一次再复用，别让查询次数随授权项增长。
+        List<Long> allDepartments = null;
+        List<Long> departmentSubtree = null;
         for (RoleGrant grant : snapshot.permissionRoles().getOrDefault(permission, List.of())) {
             switch (grant.dataScope()) {
-                case ALL -> result.addAll(jdbcTemplate.queryForList(
-                    "SELECT id FROM t_department ORDER BY id", Long.class));
+                case ALL -> {
+                    if (allDepartments == null) {
+                        allDepartments = jdbcTemplate.queryForList(
+                            "SELECT id FROM t_department ORDER BY id", Long.class);
+                    }
+                    result.addAll(allDepartments);
+                }
                 case DEPARTMENT -> addIfPresent(result, snapshot.departmentId());
                 case DEPARTMENT_AND_DESCENDANTS -> {
                     if (snapshot.departmentId() != null) {
-                        result.addAll(jdbcTemplate.queryForList("""
-                            SELECT child.id FROM t_department child
-                            JOIN t_department parent ON parent.id = ?
-                            WHERE child.path <@ parent.path
-                            ORDER BY child.path
-                            """, Long.class, snapshot.departmentId()));
+                        if (departmentSubtree == null) {
+                            departmentSubtree = jdbcTemplate.queryForList("""
+                                SELECT child.id FROM t_department child
+                                JOIN t_department parent ON parent.id = ?
+                                WHERE child.path <@ parent.path
+                                ORDER BY child.path
+                                """, Long.class, snapshot.departmentId());
+                        }
+                        result.addAll(departmentSubtree);
                     }
                 }
                 case CUSTOM -> result.addAll(grant.customDepartmentIds());

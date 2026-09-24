@@ -281,6 +281,42 @@ class AuthorizationServiceTest {
             .isEqualTo(DataScope.ALL);
     }
 
+    /**
+     * 同一请求内对"当前主体自己"的重复判权不该反复读 t_user：认证阶段已经查过并确认 ACTIVE，
+     * 版本也在 principal 上。UserService.listAuthorized 是每行调一次判权的典型，原先等于每行一条 SELECT。
+     */
+    @Test
+    void repeatedSnapshotForTheCurrentPrincipalDoesNotRequeryTheUserTable() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "u", "U",
+            Set.of("operator"), Set.of("workflow:instance:read"), 1L, 10L, null));
+        when(jdbcTemplate.query(contains("FROM t_user_role ur"),
+            any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
+
+        service.snapshot(7L);
+        service.snapshot(7L);
+        service.snapshot(7L);
+
+        Mockito.verify(jdbcTemplate, Mockito.never()).query(
+            contains("FROM t_user WHERE id = ?"),
+            any(ResultSetExtractor.class), any(Object[].class));
+    }
+
+    /**
+     * 但不能把"主体版本未知"当成有效版本直接命中缓存——那种情况下必须回查 t_user，
+     * 否则停用账号会继续被放行。
+     */
+    @Test
+    void unknownPrincipalVersionStillReadsAndEnforcesTheUserStatus() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "u", List.of("operator")));
+        when(jdbcTemplate.query(contains("FROM t_user WHERE id = ?"),
+            any(ResultSetExtractor.class), any(Object[].class)))
+            .thenReturn(new AuthorizationService.UserState(7L, "u", "U", "DISABLED", 1L, 10L));
+
+        assertThatThrownBy(() -> service.snapshot(7L))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+            .hasMessageContaining("disabled");
+    }
+
     private static AuthorizationService.AuthzSnapshot snapshot(
             AuthorizationService.RoleGrant role, Long departmentId, boolean admin) {
         return new AuthorizationService.AuthzSnapshot(7L, departmentId, admin,
