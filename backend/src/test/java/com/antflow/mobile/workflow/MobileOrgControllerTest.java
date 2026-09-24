@@ -47,12 +47,16 @@ class MobileOrgControllerTest {
     @Test
     void mobileUserPickerReturnsSafeUserDtosWithoutAdminRole() throws Exception {
         when(userMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(user()));
+        when(departmentMapper.selectBatchIds(any())).thenReturn(List.of(department()));
 
         mockMvc.perform(get("/api/mobile/users").param("keyword", "zhang"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].id").value(1001))
-            .andExpect(jsonPath("$[0].username").value("zhangsan"))
             .andExpect(jsonPath("$[0].displayName").value("张三"))
+            .andExpect(jsonPath("$[0].department").value("研发部"))
+            .andExpect(jsonPath("$[0].employeeNo").value("000007"))
+            // 这个列表端点是能被关键字枚举的入口，刻意不下发登录账号。
+            .andExpect(jsonPath("$[0].username").doesNotExist())
             .andExpect(jsonPath("$[0].email").doesNotExist())
             .andExpect(jsonPath("$[0].passwordHash").doesNotExist());
 
@@ -98,6 +102,8 @@ class MobileOrgControllerTest {
         user.setDisplayName("张三");
         user.setEmail("private@example.com");
         user.setPasswordHash("secret");
+        user.setDeptId(2001L);
+        user.setEmployeeNo("000007");
         return user;
     }
 

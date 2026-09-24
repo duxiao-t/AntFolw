@@ -19,7 +19,7 @@ public class MobileOrgController {
 
     @GetMapping("/users")
     @AuthenticatedOnly
-    public List<MobilePickerUserDto> users(@RequestParam(required = false) String keyword,
+    public List<MobileOrgService.RuntimePickerUserDto> users(@RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long deptId,
             @RequestParam(required = false) Boolean includeDescendants,
             @RequestParam(required = false) Boolean leaderOnly,

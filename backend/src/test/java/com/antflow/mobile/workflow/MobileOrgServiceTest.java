@@ -29,10 +29,13 @@ class MobileOrgServiceTest {
         Mockito.when(users.selectList(any())).thenReturn(List.of(user));
         Mockito.when(departments.selectBatchIds(any())).thenReturn(List.of(department));
 
-        MobilePickerUserDto row = new MobileOrgService(users, departments, roles)
+        MobileOrgService.RuntimePickerUserDto row = new MobileOrgService(users, departments, roles)
             .searchUsers(keywordQuery("张")).get(0);
 
-        assertThat(row).isEqualTo(new MobilePickerUserDto(7L, "zhangsan", "张三", "研发部", "000007"));
+        // 列表端点刻意不返回登录账号（可被关键字枚举的入口）：窄 DTO 上根本没有 username 字段，
+        // 所以"没泄漏账号"这件事是**编译期**保证的，不需要断言。
+        assertThat(row).isEqualTo(new MobileOrgService.RuntimePickerUserDto(
+            7L, "张三", "研发部", "000007"));
     }
 
     @Test

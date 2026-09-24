@@ -51,7 +51,8 @@ export const UserPickerField: FieldType = {
           onSearch={setKw}
           onChange={(v) => onChange?.(v)}
           filterOption={false}
-          options={(data ?? []).map((u: any) => ({ value: u.id, label: u.displayName ?? u.username }))}
+          // 列表端点不再下发登录账号（那是唯一能被关键字枚举的入口），所以没有 username 可退。
+          options={(data ?? []).map((u: any) => ({ value: u.id, label: u.displayName ?? `#${u.id}` }))}
           notFoundContent={isFetching ? <Spin size="small" /> : '无匹配用户'}
           placeholder={node.props?.placeholder}
           maxCount={node.props?.maxCount}

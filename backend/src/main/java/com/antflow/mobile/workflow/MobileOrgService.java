@@ -33,8 +33,11 @@ public class MobileOrgService {
      *
      * <p>注意这里**不叠加查看者自己的数据范围**：填表人往往是员工，数据范围是「本人」，
      * 一叠加候选就只剩自己，待办里挑审批人会直接坏掉。收窄只按设计器的配置来。
+     *
+     * <p>返回的是**窄 DTO**（不含登录账号）：这两个列表端点是唯一能被"敲个关键字翻页"枚举的入口，
+     * 而它们只要求登录 / 能进管理端。需要账号与工号的场景（人员详情、已选回显）走按 id 的端点。
      */
-    public List<MobilePickerUserDto> searchUsers(UserService.UserQuery request) {
+    public List<RuntimePickerUserDto> searchUsers(UserService.UserQuery request) {
         QueryWrapper<User> query = new QueryWrapper<>();
         query.select("id", "username", "display_name", "employee_no", "dept_id");
         String trimmedKeyword = normalizeKeyword(request.keyword());
@@ -72,7 +75,11 @@ public class MobileOrgService {
             query.like("position", positionFilter);
         }
         query.orderByAsc("display_name").last("LIMIT " + SEARCH_LIMIT);
-        return pickerUsers(userMapper.selectList(query));
+        List<User> rows = userMapper.selectList(query);
+        Map<Long, String> departmentNames = departmentsOf(rows);
+        return rows.stream()
+            .map(user -> toRuntimePickerUser(user, departmentNames))
+            .toList();
     }
 
     public List<MobilePickerUserDto> selectedUsers(List<Long> ids) {
@@ -85,15 +92,30 @@ public class MobileOrgService {
     }
 
     private List<MobilePickerUserDto> pickerUsers(List<User> users) {
-        Set<Long> departmentIds = users.stream().map(User::getDeptId)
-            .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
-        Map<Long, String> departments = departmentIds.isEmpty() ? Map.of()
-            : departmentMapper.selectBatchIds(departmentIds).stream()
-                .collect(java.util.stream.Collectors.toMap(Department::getId, Department::getName));
+        Map<Long, String> departments = departmentsOf(users);
         return users.stream()
             .map(user -> toPickerUser(user, departments))
             .toList();
     }
+
+    private Map<Long, String> departmentsOf(List<User> users) {
+        Set<Long> departmentIds = users.stream().map(User::getDeptId)
+            .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        return departmentIds.isEmpty() ? Map.of()
+            : departmentMapper.selectBatchIds(departmentIds).stream()
+                .collect(java.util.stream.Collectors.toMap(Department::getId, Department::getName));
+    }
+
+    /** 运行时选择器候选的窄投影：只有够用的身份信息，不带登录账号。 */
+    public static RuntimePickerUserDto toRuntimePickerUser(User user, Map<Long, String> departments) {
+        return new RuntimePickerUserDto(user.getId(), user.getDisplayName(),
+            user.getDeptId() == null ? null : departments.get(user.getDeptId()),
+            user.getEmployeeNo());
+    }
+
+    /** 列表端点用的窄 DTO：id / 姓名 / 部门 / 工号。**刻意不含 username**。 */
+    public record RuntimePickerUserDto(Long id, String displayName, String department,
+                                       String employeeNo) { }
 
     public MobilePickerUserDto user(long userId) {
         User user = userMapper.selectById(userId);
