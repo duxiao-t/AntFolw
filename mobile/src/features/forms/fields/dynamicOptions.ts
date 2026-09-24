@@ -84,6 +84,9 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
     let active = true;
     setError('');
     if (page === 1) setLoading(true); else setLoadingMore(true);
+    // 新一轮查询（换关键字 / 换上级 / 换分步路径）先清空：否则旧候选在请求飞行期间仍可点选，
+    // 用户会点中一个不属于当前筛选的值。翻页（page > 1）是追加，不能清。
+    if (page === 1) setItems([]);
     void queryOptions(context, { fieldId: props.node.id, values: JSON.parse(filterKey), path,
       keyword, page, size: PAGE_SIZE })
       .then((response) => {

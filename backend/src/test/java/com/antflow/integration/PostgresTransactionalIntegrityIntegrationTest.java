@@ -1042,6 +1042,57 @@ class PostgresTransactionalIntegrityIntegrationTest {
             "SELECT id FROM t_option_data_source_version WHERE source_id = ?", Long.class, sourceId);
     }
 
+    /**
+     * 「可引用表单」清单只拦**新增**绑定：撤销引用不该让已经绑着它的表单失去保存能力，
+     * 否则表单 1/14 那种状态（引用被撤销、字段仍绑着）会直接卡死。
+     */
+    @Test
+    void optionReferenceListOnlyGatesNewBindings() {
+        long adminId = userId("admin");
+        long sourceA = insertOptionSource("ref_gate_a");
+        long sourceB = insertOptionSource("ref_gate_b");
+        long versionA = optionSourceVersionId(sourceA);
+        long versionB = optionSourceVersionId(sourceB);
+        // 表单本来就绑着 A，且 A 对该表单**没有**引用行（模拟撤销引用后的状态）。
+        long formId = insertForm("PUBLISHED", boundOptionSchema(sourceA, versionA));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            // 原样再存一次：旧绑定照常放行
+            assertThatCode(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(boundOptionSchema(sourceA, versionA)), null, adminId))
+                .doesNotThrowAnyException();
+
+            // 新增一条绑定到同样没有被引用的 B → 拒绝
+            String both = "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
+                + "{\"optionSource\":{\"sourceId\":" + sourceB + ",\"versionId\":" + versionB
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}]";
+            assertThatThrownBy(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(both), null, adminId))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("可引用表单");
+
+            // 把 B 加回该表单的可引用清单后放行
+            jdbcTemplate.update("INSERT INTO t_form_option_source(form_def_id, source_id, created_by) "
+                + "VALUES (?, ?, ?)", formId, sourceB, adminId);
+            assertThatCode(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(both), null, adminId))
+                .doesNotThrowAnyException();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_option_source WHERE form_def_id = ?", formId);
+        }
+    }
+
+    private Object jsonFor(String schema) {
+        try {
+            return flowJson.readValue(schema, Object.class);
+        } catch (Exception error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
     private static String optionSchema(long sourceId, long versionId) {
         return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
             + "{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId + "}}}]";

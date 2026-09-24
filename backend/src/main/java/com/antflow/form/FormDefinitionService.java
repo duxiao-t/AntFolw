@@ -125,6 +125,12 @@ public class FormDefinitionService {
             // 表单的审批流开关、业务单号配置就这样无声消失。
             String nextSchema = schema == null ? fd.getSchema() : writeJson(schema);
             String nextSettings = settings == null ? fd.getSettings() : writeJson(settings);
+            // 数据源的「可引用表单」清单只拦**新增**绑定：引用被撤销后，已经绑着它的字段照常保存
+            // （见 OptionRuntimeService.requireNewBindingsAreReferenced 的说明）。
+            if (schema != null && optionRuntimeService != null) {
+                optionRuntimeService.requireNewBindingsAreReferenced(
+                    fd.getId(), fd.getSchema(), nextSchema);
+            }
             // 只有 schema/settings 真的变了才降级为草稿。已发布表单改个名称、或只是点了一下保存，
             // 不该让它掉出手机端目录——发布快照只含 schema/settings，名称与描述不入快照。
             boolean contentChanged = !sameJson(fd.getSchema(), nextSchema)
@@ -160,6 +166,10 @@ public class FormDefinitionService {
         if (schema != null || settings != null) {
             if (!"DRAFT".equals(fd.getStatus())) {
                 throw new BizException("NOT_DRAFT", "Only DRAFT form_definitions can change schema/settings");
+            }
+            if (schema != null && optionRuntimeService != null) {
+                optionRuntimeService.requireNewBindingsAreReferenced(
+                    fd.getId(), fd.getSchema(), writeJson(schema));
             }
             if (schema != null) fd.setSchema(writeJson(schema));
             if (settings != null) fd.setSettings(writeJson(settings));

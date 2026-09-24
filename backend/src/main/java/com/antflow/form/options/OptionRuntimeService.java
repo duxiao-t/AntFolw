@@ -112,6 +112,49 @@ public class OptionRuntimeService {
             || selected.stream().anyMatch(v -> !(v instanceof String) || !allowed.contains(v))) invalid("包含不存在或与上游不匹配的选项");
     }
 
+    /**
+     * 新增绑定必须在源侧的「可引用表单」清单（{@code t_form_option_source}）里。
+     *
+     * <p>口径是**差集**，不是"新 schema 里每个绑定都要有引用行"：引用可以被撤销，而撤销的语义是
+     * "只影响新绑定，已经绑着它的表单不受影响"（同 bindable 里第二条 EXISTS、前端 OptionSources
+     * 的提示文案）。拿全量去卡，会让"引用被撤销但字段仍绑定"的表单再也保存/发布不了。
+     *
+     * @param previousSchemaJson 这张表单**改动前**的 schema（新建表单传 null）
+     * @param newSchemaJson      本次要写入的 schema
+     */
+    public void requireNewBindingsAreReferenced(long formId, String previousSchemaJson,
+                                                String newSchemaJson) {
+        Set<Long> before = new LinkedHashSet<>();
+        collectBoundSources(parse(previousSchemaJson), before);
+        Set<Long> after = new LinkedHashSet<>();
+        collectBoundSources(parse(newSchemaJson), after);
+        after.removeAll(before);
+        for (Long sourceId : after) {
+            Boolean referenced = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM t_form_option_source
+                               WHERE form_def_id = ? AND source_id = ?)
+                """, Boolean.class, formId, sourceId);
+            if (!Boolean.TRUE.equals(referenced)) {
+                throw new BizException("OPTION_SOURCE_NOT_REFERENCED",
+                    "这张表单还没被授权引用该数据源，请先在数据源页把它加回"
+                        + "「可引用表单」：sourceId=" + sourceId);
+            }
+        }
+    }
+
+    /** 收集 schema 里所有已绑定的数据源 id（含 span_layout 与 table_list 内部）。 */
+    private void collectBoundSources(JsonNode schema, Set<Long> target) {
+        if (schema == null || !schema.isArray()) return;
+        for (JsonNode node : flatten(schema)) {
+            if ("table_list".equals(node.path("type").asText())) {
+                collectBoundSources(node.path("children"), target);
+            }
+            JsonNode source = node.path("props").path("optionSource");
+            if (isBound(source)) target.add(source.path("sourceId").asLong());
+        }
+    }
+
+
     /** A detail row is a separate value scope; columns share their parent's scope. */
     public void validateSchema(JsonNode schema) {
         if (!schema.isArray()) bad("表单结构无效");

@@ -100,7 +100,8 @@ export function UserPickerField(props: MobileFieldProps) {
   useEffect(() => {
     if (!state.open) return;
     let active = true;
-    setState((current) => ({ ...current, loading: true }));
+    // 飞行期先清空：旧的候选还留在列表里就能点中一个"上一个关键字"的人。
+    setState((current) => ({ ...current, loading: true, results: [] }));
     searchMobileUsers(endpoint, state.keyword,
       userScope(scopeType, scopeDeptId, scopePosition, scopeUserIds))
       .then((results) => {

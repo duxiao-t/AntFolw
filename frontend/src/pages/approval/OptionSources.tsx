@@ -180,14 +180,19 @@ export default function OptionSources() {
   }, []);
 
   // 表单多选要能搜索：先给一份默认列表，输入时再按关键字远程查。
+  // 带请求序号 + 飞行期先清空：否则连着敲字时，后发的先回、旧响应会把候选换回去，
+  // 而列表里那些"上一个关键字"的候选在请求飞行期间仍可点选。
+  const formSearchSeq = useRef(0);
   const searchForms = async (word?: string) => {
+    const seq = ++formSearchSeq.current;
+    setFormOptions([]);
     try {
       const page = await request<{ records?: FormRef[] }>('/api/forms/definitions', {
         params: { page: 1, size: 50, keyword: word },
       });
-      setFormOptions(page.records ?? []);
+      if (seq === formSearchSeq.current) setFormOptions(page.records ?? []);
     } catch (error: any) {
-      message.error(error?.message ?? '无法加载表单');
+      if (seq === formSearchSeq.current) message.error(error?.message ?? '无法加载表单');
     }
   };
 
