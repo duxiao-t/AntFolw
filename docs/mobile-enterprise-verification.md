@@ -1,5 +1,7 @@
 # AntFlow 企业级移动端验收记录
 
+> **已过期。** 本文记的是 `feature/mobile-approval-workflow` 分支当时那轮验收；移动端此后又经过多轮改动，当前状态见 `HANDOFF.md`。
+
 > 分支：`feature/mobile-approval-workflow`  
 > 计划：`docs/superpowers/plans/2026-07-18-antflow-mobile-approval-workflow.md` Task 15  
 > 最近验收：2026-07-31（移动端 UI 整改 + 正式编号 + 原单驳回重提）

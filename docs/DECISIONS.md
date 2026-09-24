@@ -77,3 +77,23 @@
   - **「最新」= 最高的"已发布且未停用"版本**（`list()` 与 `bindable()` 两处 LATERAL 都要跟着改）。全部下架时 `publishedVersionNo` 为 null，用 `anyPublishedVersion` 区分「从没发布过」（未发布）和「发布过但都下架了」（无可用版本）。
   - **已停用的版本仍要出现在"正钉着它"的表单候选里**（`boundVersionIds` 从表单草稿 schema 解析），否则版本下拉会显示空白、管理员以为绑定丢了。这和源的"已绑定兜底"是同一条规则。
   - 「**引用**」（源侧可撤销的清单）与「**在用**」（表单侧钉死的绑定）是两件事：撤引用不解绑，也不影响删除判定。
+
+## D-20260924-v40-legacy-permission-conversion
+
+- **状态：** accepted（**记录现状，不是设计意图**）
+- **背景：** V40 把旧的能力码换算成新能力模型时，有三处"信息在换算里丢了"，且因为 V40 已冻结、只前滚，都不能原地改。补记在这里，避免后来者按现在的模型反推、以为历史上一直是这么紧的。
+- **决策：** 三条都**不改权限数据、不改 V40**，只记录 + 用测试钉住现状（`PostgresTransactionalIntegrityIntegrationTest` 里三条 `v40*` 用例）。
+  1. **`form:authorization:manage` 丢掉旧的 `t_role.data_scope`。** 该能力在 V40:47 声明为 `scopeable=false`，而换算语句（V40:145-152）只在 `scopeable` 为真时才写 `scope_override`，于是旧的部门范围被丢成 NULL。行为上等于"谁管表单授权，谁就能管全部表单的授权"。
+  2. **`create` 与 `design` 收敛成同一个写能力。** 旧码 `form.definition.create` 与 `form.definition.design` 都映射到 `form:definition:manage`（V40:117-119），粒度没了：只被授过"创建"的角色换算后同样能改已有表单的设计。
+  3. **内置角色改名没有冲突保护。** `UPDATE t_role SET code = 'employee' WHERE code = 'user'`（V40:198）是裸更新，`t_role.code` 唯一；如果库里已经有人建了 `employee` 角色，整个 V40 回滚。全新库的种子顺序保证不会撞，但"手动建角色"的路径能触发（测试用一条断言把"会回滚"这件事钉住了）。
+- **影响：** 要真正修这三条只能**前滚一条对账迁移**（补范围、补粒度、加冲突保护），那属于改权限数据，得单独开一轮并配一次权限对账。在那之前，读 `t_role_permission` 时不要把"没有 scope_override"当成"刻意配成默认范围"。
+
+## D-20260924-picker-list-narrow-dto
+
+- **状态：** accepted
+- **背景：** 运行时选择器的两个列表端点（移动 `/api/mobile/users`、桌面 `/api/pickers/users`）是唯一能用关键字翻页枚举的入口，而它们只要求"登录"或"能进管理端"；此前会把 `username`（登录账号）一起下发，等于给任何登录用户提供了账号字典。按 id 取单人的端点不可枚举，不受影响。
+- **决策：** 列表端点改用窄 DTO `RuntimePickerUserDto(id, displayName, department, employeeNo)` —— **不下发登录账号，保留工号**。人员详情（`proc/Detail` 的"某某 · 工号"）与移动端"已选"回显走按 id 的端点，仍是完整 DTO；管理端要全量字段继续走 `/api/users`（已要求 `org:user:read`）。
+- **影响：**
+  - "列表里不再有账号"是**编译期**保证：窄 record 上没有 `username` 字段，加回来必须先改类型。
+  - 工号**有意保留**：前端就靠它做同名消歧，而它自己的注释说明过"缺工号时不拿账号冒充"——账号比工号敏感。这与 BI 那条"人员字典不暴露登录工号"不冲突：那条针对的是绕过三层鉴权的直连库场景。
+  - 桌面 `UserPickerField` 的候选标签不再有 `username` 可退，缺显示名时回落到 `#id`。

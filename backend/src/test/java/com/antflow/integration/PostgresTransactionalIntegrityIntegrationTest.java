@@ -1093,6 +1093,84 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
+    // ===== V40 换算里三条「只记录、不修改」的存量权限事实（见 docs/DECISIONS.md）=====
+    // 这三条都不是 bug 修复，而是把**当前行为**钉住：哪天有人要改，得先让它们红。
+
+    /** ① form:authorization:manage 在 V40 是 scopeable=false，换算时旧 t_role.data_scope 被丢成 NULL。 */
+    @Test
+    void v40DropsTheOldDataScopeOfTheFormAuthorizationCapability() {
+        String schema = "v40_scope_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "39");
+            long roleId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_role(code, name, data_scope) "
+                + "VALUES ('scope_probe', 'probe', 'DEPARTMENT') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code) "
+                + "VALUES (?, 'form.authorization.manage')", roleId);
+
+            migrateTo(schema, null);
+
+            assertThat(jdbcTemplate.queryForObject("SELECT scope_override FROM " + schema
+                + ".t_role_permission WHERE role_id = ? "
+                + "AND permission_code = 'form:authorization:manage'", String.class, roleId))
+                .as("scopeable=false 的能力在换算时拿不到覆盖值，旧部门范围就此丢失")
+                .isNull();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    /** ② 旧的 create 与 design 都收敛到同一个写能力，粒度没了（拿到 create 就等于能 design）。 */
+    @Test
+    void v40MergesFormCreateAndDesignIntoOneWriteCapability() {
+        String schema = "v40_merge_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "39");
+            long roleId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_role(code, name, data_scope) "
+                + "VALUES ('create_probe', 'probe', 'ALL') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code) "
+                + "VALUES (?, 'form.definition.create')", roleId);
+
+            migrateTo(schema, null);
+
+            assertThat(jdbcTemplate.queryForList("SELECT permission_code FROM " + schema
+                + ".t_role_permission WHERE role_id = ?", String.class, roleId))
+                .as("只授过 create 的角色，换算后拿到的是合并后的写能力")
+                .contains("form:definition:manage");
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    /** ③ 内置角色改名（user → employee）没有冲突保护：已有 employee 角色时整个 V40 回滚。 */
+    @Test
+    void v40RenameRollsBackWhenAnEmployeeRoleAlreadyExists() {
+        String schema = "v40_rename_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "39");
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role(code, name, data_scope) VALUES ('employee', '自建员工', 'ALL')");
+
+            assertThatThrownBy(() -> migrateTo(schema, null))
+                .as("t_role.code 唯一，裸 UPDATE 撞上自建 employee 会让整个 V40 回滚")
+                .hasMessageContaining("employee");
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    private void migrateTo(String schema, String target) {
+        var configuration = Flyway.configure().dataSource(dataSource)
+            .defaultSchema(schema).schemas(schema).locations("classpath:db/migration");
+        if (target != null) {
+            configuration = configuration.target(target);
+        }
+        configuration.load().migrate();
+    }
+
     private static String optionSchema(long sourceId, long versionId) {
         return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
             + "{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId + "}}}]";
