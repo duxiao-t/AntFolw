@@ -15,7 +15,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -92,12 +95,23 @@ class MobileAppServiceTest {
     @Test
     void rejectsFavoriteOutsideCurrentUsageScope() {
         when(formDefinitionMapper.selectList(any())).thenReturn(List.of(form(3L), form(4L)));
-        when(authorizationService.canUseForm(3L, 7L)).thenReturn(true);
+        allowForms(3L);
 
         BizException exception = assertThrows(BizException.class,
             () -> service.saveFavorites(7L, List.of(3L, 4L)));
 
         assertEquals("INVALID_FAVORITES", exception.getCode());
+    }
+
+    @Test
+    void bootstrapFavoritesAreEmptyNotForbiddenWithoutTheRuntimeCapability() {
+        // favorites() 也被 @AuthenticatedOnly 的 /api/mobile/bootstrap 调用：没有运行时能力时
+        // 只能是"没有可收藏的应用"，不能抛授权异常，否则整个 bootstrap 都打不开。
+        when(authorizationService.hasPermission(eq(7L), anyString())).thenReturn(false);
+        when(preferenceMapper.selectById(7L)).thenReturn(null);
+
+        assertTrue(service.favorites(7L).isEmpty());
+        assertTrue(service.list(7L, null, null).isEmpty());
     }
 
     private FormDefinition form(long id) {
@@ -110,9 +124,10 @@ class MobileAppServiceTest {
         return form;
     }
 
+    /** 列表按批量授权过滤：只给出这些表单的使用授权。 */
     private void allowForms(Long... ids) {
-        for (Long id : ids) {
-            when(authorizationService.canUseForm(id, 7L)).thenReturn(true);
-        }
+        when(authorizationService.hasPermission(eq(7L), anyString())).thenReturn(true);
+        when(authorizationService.usableFormIds(7L))
+            .thenReturn(java.util.Optional.of(new java.util.HashSet<>(java.util.Arrays.asList(ids))));
     }
 }

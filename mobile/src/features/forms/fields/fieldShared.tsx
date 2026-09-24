@@ -82,6 +82,15 @@ export function isRequired(node: MobileSchemaNode) {
   return node.props?.required === true;
 }
 
+/**
+ * 选项数量上限：只认正整数，其余（0 / 负数 / 小数 / 非数字）都当"没设上限"。
+ * 设计器的 min={1} 只是界面约束，导入的 schema 里什么值都可能有；
+ * 若把 0 当上限，就会出现"内联样式能选、下拉样式一个都选不了"。
+ */
+export function positiveInteger(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
 export function stringValue(value: unknown) {
   if (value == null) {
     return '';

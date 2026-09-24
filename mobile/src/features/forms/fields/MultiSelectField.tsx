@@ -9,6 +9,7 @@ import {
   FieldShell,
   InlineFieldOptions,
   isRequired,
+  positiveInteger,
   selectDisplayStyle,
 } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
@@ -34,9 +35,9 @@ function StaticMultiSelectField(props: MobileFieldProps) {
   const searchable = props.node.props?.showSearch === true;
   const clearable = props.node.props?.allowClear !== false;
   const displayStyle = selectDisplayStyle(props.node);
-  const maxCount = typeof props.node.props?.maxCount === 'number'
-    ? props.node.props.maxCount
-    : undefined;
+  // 归一成"正整数或 undefined"：内联样式那边本来就是这条规则（Number.isInteger && > 0），
+  // 这里若把 0 / 负数 / 小数当上限，就会出现两种展示样式上限不一致。
+  const maxCount = positiveInteger(props.node.props?.maxCount);
   const allOptions = allFieldOptions(props.node);
   const useColor = props.node.props?.enableOptionColor === true;
   const otherOption = options.find((option) => option.isOther);
@@ -123,7 +124,7 @@ function StaticMultiSelectField(props: MobileFieldProps) {
           <MobileSelectionPopup
             visible={visible}
             title={`选择${label}`}
-            subtitle={`已选 ${draftSelected.length} 项`}
+            subtitle={`已选 ${draftSelected.length}${maxCount !== undefined ? ` / ${maxCount}` : ''} 项`}
             presentation="sheet"
             headerAction={clearable && draftSelected.length > 0 ? (
               <button
@@ -157,7 +158,10 @@ function StaticMultiSelectField(props: MobileFieldProps) {
                   value,
                   label: option.label,
                   color: option.color,
-                  disabled: option.disabled,
+                  // 到了上限把未选中的项置灰，否则点击毫无反应会像卡住了。
+                  disabled: option.disabled
+                    || (maxCount !== undefined && draftSelected.length >= maxCount
+                      && !draftSelected.includes(value)),
                   selected: draftSelected.includes(value),
                 };
               })}
@@ -206,11 +210,13 @@ function StaticMultiSelectField(props: MobileFieldProps) {
   }
 
   function toggleDraft(value: string | number) {
-    setDraftSelected((current) =>
-      current.includes(value)
-        ? current.filter((item) => item !== value)
-        : [...current, value],
-    );
+    setDraftSelected((current) => {
+      if (current.includes(value)) return current.filter((item) => item !== value);
+      // 内联样式那边把 maxCount 传给了 InlineFieldOptions，下拉样式这条路完全没判——
+      // 同一份配置换个展示样式上限就失效。收口到这里，两种样式共用。
+      if (maxCount !== undefined && current.length >= maxCount) return current;
+      return [...current, value];
+    });
   }
 }
 

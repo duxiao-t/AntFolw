@@ -55,8 +55,10 @@ class MobileDraftServiceTest {
             draft.setId(100L);
             return 1;
         }).when(formDataMapper).insert(any(FormData.class));
-        Mockito.when(authorizationService.canUseForm(Mockito.anyLong(), Mockito.anyLong()))
-            .thenReturn(true);
+        // 列表改走批量判定：usableFormIds 返回空 = 不过滤（管理员口径），默认放行。
+        Mockito.when(authorizationService.hasPermission(Mockito.anyLong(), Mockito.anyString())).thenReturn(true);
+        Mockito.when(authorizationService.usableFormIds(Mockito.anyLong()))
+            .thenReturn(java.util.Optional.empty());
     }
 
     @Test
@@ -115,7 +117,8 @@ class MobileDraftServiceTest {
     @Test
     void updateRejectsUnpublishedTemplateButGetRemainsReadable() {
         Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "DEPRECATED"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "DEPRECATED")));
 
         assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), 7L))
             .isInstanceOf(BizException.class)
@@ -130,7 +133,8 @@ class MobileDraftServiceTest {
     void listReturnsOnlyOwnedDraftsWithReadOnlyFlag() {
         Mockito.when(formDataMapper.selectMyDrafts(7L))
             .thenReturn(List.of(draft(101L, 7L, "DRAFT"), draft(102L, 7L, "DRAFT")));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
 
         List<MobileDraftDto> drafts = service.list(7L);
 
@@ -143,8 +147,10 @@ class MobileDraftServiceTest {
     @Test
     void revokedUsageGrantKeepsDraftDeletableButMarksItReadOnly() {
         Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
-        Mockito.when(authorizationService.canUseForm(10L, 7L)).thenReturn(false);
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+        Mockito.when(authorizationService.usableFormIds(7L))
+            .thenReturn(java.util.Optional.of(java.util.Set.of()));
 
         MobileDraftDto dto = service.get(101L, 7L);
 

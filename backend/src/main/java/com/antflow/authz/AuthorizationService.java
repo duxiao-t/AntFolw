@@ -22,7 +22,6 @@ import org.springframework.stereotype.Service;
 public class AuthorizationService {
     private final JdbcTemplate jdbcTemplate;
     private final Map<Long, CachedSnapshot> cache = new ConcurrentHashMap<>();
-    private final Object cacheLock = new Object();
 
     public Optional<PrincipalHolder.Principal> principalForRequest(long userId, UUID sessionId) {
         UserState state = userState(userId);
@@ -52,29 +51,24 @@ public class AuthorizationService {
     }
 
     public void evict(long userId) {
-        synchronized (cacheLock) {
-            cache.remove(userId);
-        }
+        cache.remove(userId);
     }
 
     /** 全局授权变更（菜单编排、能力目录）后一次性失效所有快照。 */
     public void evictAll() {
-        synchronized (cacheLock) {
-            cache.clear();
-        }
+        cache.clear();
     }
 
     private AuthzSnapshot cachedSnapshot(UserState state) {
-        // ponytail: one global lock; split per user only if permission-cache load contention appears.
-        synchronized (cacheLock) {
-            CachedSnapshot cached = cache.get(state.userId());
+        // 原来是把 loadSnapshot（内含多次查库）放在一把**全局**锁里，于是任何一次缓存未命中
+        // 都会把全站请求串行在数据库往返上。ConcurrentHashMap.compute 只锁住该用户的桶，
+        // 同一用户不会重复装载，不同用户互不阻塞。
+        return cache.compute(state.userId(), (userId, cached) -> {
             if (cached != null && cached.version() == state.authzVersion()) {
-                return cached.snapshot();
+                return cached;
             }
-            AuthzSnapshot loaded = loadSnapshot(state);
-            cache.put(state.userId(), new CachedSnapshot(state.authzVersion(), loaded));
-            return loaded;
-        }
+            return new CachedSnapshot(state.authzVersion(), loadSnapshot(state));
+        }).snapshot();
     }
 
     public void requirePermission(String permission) {
@@ -110,6 +104,16 @@ public class AuthorizationService {
         PrincipalHolder.Principal principal = PrincipalHolder.current().orElse(null);
         return principal != null
             && (principal.isAdmin() || principal.permissions().contains(permission));
+    }
+
+    /**
+     * 指定用户（而不是当前请求主体）是否持有该能力。
+     * 服务层按 userId 判定时必须用这个——与 canUseForm/hasFormGrant 一样以入参用户为准，
+     * 否则"按 A 用户查数据"和"用当前主体的能力判定"会错配。
+     */
+    public boolean hasPermission(long userId, String permission) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        return snapshot.admin() || snapshot.permissions().contains(permission);
     }
 
     public boolean isAdmin() {
@@ -235,6 +239,35 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
+    /**
+     * 该用户有使用授权的表单 id 集合，用于列表类的批量过滤。
+     * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"一个都没有"。
+     */
+    public Optional<Set<Long>> usableFormIds(long userId) {
+        if (snapshot(userId).admin()) {
+            return Optional.empty();
+        }
+        // 与 hasFormGrant 同一套判定，只是去掉了 form_def_id 这一维。
+        return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
+            SELECT grant_row.form_def_id
+            FROM t_form_resource_grant grant_row
+            WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = ?)
+               OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
+                    SELECT ur.role_id
+                    FROM t_user_role ur
+                    JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
+                    WHERE ur.user_id = ?))
+               OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
+                    SELECT 1
+                    FROM t_user grant_user
+                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
+                    JOIN t_department grant_department
+                      ON grant_department.id = grant_row.subject_id
+                    WHERE grant_user.id = ?
+                      AND user_department.path <@ grant_department.path))
+            """, Long.class, userId, userId, userId)));
+    }
+
     /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
     public void requireFormUse(long formId) {
         PrincipalHolder.Principal principal = principal();
@@ -271,6 +304,25 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
+    /**
+     * 该用户维护的表单 id 集合，用于列表类的批量过滤。
+     * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"什么都不维护"。
+     */
+    public Optional<Set<Long>> maintainableFormIds(long userId) {
+        if (snapshot(userId).admin()) {
+            return Optional.empty();
+        }
+        return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
+            SELECT maintainer.form_def_id
+            FROM t_form_maintainer maintainer
+            JOIN t_form_definition form ON form.id = maintainer.form_def_id
+              AND form.deleted = 0
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+              AND user_row.status = 'ACTIVE'
+            WHERE maintainer.user_id = ?
+            """, Long.class, userId)));
+    }
+
     /** 模板操作入口：非管理员必须同时是维护人并持有对应原子能力。 */
     public void requireFormMaintenance(long formId, String permission) {
         PrincipalHolder.Principal principal = principal();
@@ -292,15 +344,6 @@ public class AuthorizationService {
         if (!hasFormMaintainer(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
         }
-    }
-
-    public boolean canMaintainFormAny(long formId, long userId, String... permissions) {
-        AuthzSnapshot snapshot = snapshot(userId);
-        if (snapshot.admin()) {
-            return true;
-        }
-        return java.util.Arrays.stream(permissions).anyMatch(snapshot.permissions()::contains)
-            && hasFormMaintainer(formId, userId);
     }
 
     /**

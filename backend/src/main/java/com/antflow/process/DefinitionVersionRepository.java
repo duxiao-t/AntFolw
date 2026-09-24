@@ -6,7 +6,12 @@ import com.antflow.form.runtime.FormData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -102,6 +107,31 @@ public class DefinitionVersionRepository {
             ) version ON true
             WHERE process.form_def_id = ?
             """, rs -> rs.next() ? process(rs) : null, formDefinitionId);
+    }
+
+    /** runtimeProcessForForm 的批量版：一次取回多张表单，而不是每张表单一次往返。 */
+    public Map<Long, ProcessDefinition> runtimeProcessesForForms(Collection<Long> formDefinitionIds) {
+        if (formDefinitionIds == null || formDefinitionIds.isEmpty()) return Map.of();
+        List<Long> ids = formDefinitionIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return Map.of();
+        String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+        Map<Long, ProcessDefinition> found = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT process.id, process.form_def_id, version.version_no,
+                   version.process::text, process.created_by, process.created_at
+            FROM t_process_definition process
+            JOIN LATERAL (
+                SELECT * FROM t_process_definition_version candidate
+                WHERE candidate.process_definition_id = process.id
+                ORDER BY candidate.version_no DESC, candidate.id DESC LIMIT 1
+            ) version ON true
+            WHERE process.form_def_id IN (""" + placeholders + ")",
+            rs -> {
+                ProcessDefinition value = process(rs);
+                found.put(value.getFormDefId(), value);
+            },
+            ids.toArray());
+        return found;
     }
 
     public long processVersionId(long processDefinitionId, int versionNo) {

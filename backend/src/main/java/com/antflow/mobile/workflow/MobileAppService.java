@@ -107,10 +107,26 @@ public class MobileAppService {
     }
 
     private List<FormDefinition> usableForms(long userId, QueryWrapper<FormDefinition> query) {
-        // ponytail: catalog is small; move the shared predicate into SQL only if measured growth warrants it.
-        return formDefinitionMapper.selectList(query).stream()
-            .filter(form -> authorizationService.canUseForm(form.getId(), userId))
-            .toList();
+        // canUseForm 原本是"运行时能力 + 使用授权"两条一起判；批量版只剩授权这一维，
+        // 能力这维要补回来。注意**不能抛异常**：favorites() 也被 @AuthenticatedOnly 的
+        // /api/mobile/bootstrap 调用，那里的语义是"没有能力就返回空列表"，不是 403。
+        // 写入路径（saveFavorites）会因为候选数对不上而去报 INVALID_FAVORITES，与改前一致。
+        if (!authorizationService.hasPermission(userId,
+                com.antflow.authz.PermissionCodes.FORM_RUNTIME_READ)) {
+            return List.of();
+        }
+        List<FormDefinition> forms = formDefinitionMapper.selectList(query);
+        if (forms.isEmpty()) {
+            return forms;
+        }
+        // 授权表单 id 一次查出来再过滤：原来 canUseForm 会对每个表单各跑一条
+        // hasFormGrant，应用市场有多少张表单就跑多少条 SQL。
+        java.util.Optional<java.util.Set<Long>> granted = authorizationService.usableFormIds(userId);
+        if (granted.isEmpty()) {
+            return forms;   // admin：不过滤
+        }
+        java.util.Set<Long> allowed = granted.get();
+        return forms.stream().filter(form -> allowed.contains(form.getId())).toList();
     }
 
     private List<Long> readFormIds(String value) {

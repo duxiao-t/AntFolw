@@ -125,6 +125,28 @@ public class ProcessDefinitionService {
             .orderByDesc("version").last("LIMIT 1"));
     }
 
+    /**
+     * latestPublishedForForm 的批量版，口径一致（版本表优先，缺的退回已发布行）。
+     * 列表接口用它替代逐张表单调用，把 N 次往返压成最多 2 次。
+     */
+    public Map<Long, ProcessDefinition> latestPublishedForForms(
+            java.util.Collection<Long> formDefIds) {
+        if (formDefIds == null || formDefIds.isEmpty()) return Map.of();
+        Map<Long, ProcessDefinition> result = new java.util.LinkedHashMap<>(
+            versions == null ? Map.of() : versions.runtimeProcessesForForms(formDefIds));
+        List<Long> missing = formDefIds.stream().filter(java.util.Objects::nonNull)
+            .distinct().filter(id -> !result.containsKey(id)).toList();
+        if (!missing.isEmpty()) {
+            // form_def_id 在 t_process_definition 上唯一，一张表单最多一行。
+            for (ProcessDefinition definition : mapper.selectList(
+                    new QueryWrapper<ProcessDefinition>()
+                        .in("form_def_id", missing).eq("status", "PUBLISHED"))) {
+                result.putIfAbsent(definition.getFormDefId(), definition);
+            }
+        }
+        return result;
+    }
+
     public ProcessDefinition findByForm(Long formDefId) {
         return mapper.selectOne(new QueryWrapper<ProcessDefinition>()
             .eq("form_def_id", formDefId)

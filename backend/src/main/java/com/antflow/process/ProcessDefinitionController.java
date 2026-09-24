@@ -26,12 +26,16 @@ public class ProcessDefinitionController {
     public List<ProcessDefinition> list() {
         authorizationService.requireAnyPermission(PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         var principal = PrincipalHolder.current().orElseThrow();
-        // ponytail: current process count is small; move this predicate into SQL if list latency grows.
+        // 维护人集合一次查出来再过滤：原来每个流程一行 SQL（canMaintainFormAny → hasFormMaintainer），
+        // 列表有多长就查多少次。能力校验已由上面的 requireAnyPermission 完成，这里只剩维护关系。
+        java.util.Optional<java.util.Set<Long>> maintained =
+            authorizationService.maintainableFormIds(principal.userId());
+        if (maintained.isEmpty()) {
+            return service.list();
+        }
+        java.util.Set<Long> formIds = maintained.get();
         return service.list().stream()
-            .filter(definition -> authorizationService.canMaintainFormAny(
-                definition.getFormDefId(), principal.userId(),
-                PermissionCodes.WORKFLOW_DEFINITION_READ,
-                PermissionCodes.FORM_DEFINITION_READ))
+            .filter(definition -> formIds.contains(definition.getFormDefId()))
             .toList();
     }
 

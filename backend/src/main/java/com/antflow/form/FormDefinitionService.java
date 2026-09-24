@@ -76,6 +76,16 @@ public class FormDefinitionService {
     }
     public FormDefinition getById(Long id) { return mapper.selectById(id); }
 
+    /** 批量取表单定义（去重后一次查库），供列表类接口替代逐条 getById。 */
+    public Map<Long, FormDefinition> mapByIds(java.util.Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) return Map.of();
+        List<Long> distinct = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (distinct.isEmpty()) return Map.of();
+        return mapper.selectBatchIds(distinct).stream()
+            .collect(java.util.stream.Collectors.toMap(FormDefinition::getId,
+                java.util.function.Function.identity()));
+    }
+
     private static String normalized(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
