@@ -47,4 +47,14 @@ describe('account-scoped caches', () => {
     useAuthStore.setState({ accessToken: 'refreshed-token', user: { ...user } });
     expect(queryClient.getQueryData(['mobile', 'apps'])).toEqual(['current-account-data']);
   });
+
+  it('drops permission-scoped caches when the same account gets new roles', () => {
+    const user = { id: 7, username: 'test1', displayName: 'Test 1', roles: ['employee'] };
+    useAuthStore.setState({ status: 'unknown', user: null });
+    useAuthStore.setState({ status: 'authenticated', user });
+    queryClient.setQueryData(['mobile', 'apps'], ['employee-apps']);
+
+    useAuthStore.setState({ status: 'authenticated', user: { ...user, roles: ['employee', 'approver'] } });
+    expect(queryClient.getQueryData(['mobile', 'apps'])).toBeUndefined();
+  });
 });

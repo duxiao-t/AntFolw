@@ -32,6 +32,7 @@ import { collectVisibleValues } from "./schema/validators";
 import type { FieldMode, FieldValidationErrors, MobileFormValues } from "./schema/types";
 import { fetchReworkTask, saveReworkTask } from "./rework.api";
 import { isApiError } from "../../shared/api/errors";
+import { createClientId } from "../../shared/clientId";
 
 export function FormFillPage() {
   const { code = "" } = useParams();
@@ -50,6 +51,9 @@ export function FormFillPage() {
   const [status, setStatus] = useState("");
   const recoveryWriterRef = useRef<RecoveryDraftWriter | null>(null);
   const touchSaveAtRef = useRef(0);
+  // 懒生成：没人点「保存草稿」就不必占用一个 UUID（也避免在渲染期消耗随机数）。
+  const saveKeyRef = useRef<string | undefined>(undefined);
+  const draftSaveKey = () => (saveKeyRef.current ??= createClientId("draft-save"));
   const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
   const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
   const [draftVersionMismatch, setDraftVersionMismatch] = useState(false);
@@ -78,20 +82,25 @@ export function FormFillPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      // 保存草稿也要幂等键：双击「保存草稿」或传输层重试，早先会在 /api/mobile/drafts 上
+      // 造出两份同样的草稿（IdempotencyFilter 是显式带 key 才生效的）。键按"一次保存"
+      // 生成，成功后再换新的——否则下一次真正不同的保存会被当成重放。
       if (reworkTaskId != null) {
-        await saveReworkTask(reworkTaskId, values);
+        await saveReworkTask(reworkTaskId, values, draftSaveKey());
         return { draftId: null, rework: true };
       }
       if (draftId != null) {
-        await updateMobileDraft(draftId, code, values);
+        await updateMobileDraft(draftId, code, values, draftSaveKey());
         return { draftId, rework: false };
       }
-      return { draftId: await createMobileDraft(code, values), rework: false };
+      return { draftId: await createMobileDraft(code, values, draftSaveKey()), rework: false };
     },
     retry: (failureCount, errorValue) => failureCount < 1 && errorValue instanceof TypeError
       && (draftId != null || reworkTaskId != null),
     retryDelay: 300,
     onSuccess(result) {
+      // 这次保存已落库，作废旧键（服务端 24h 内仍会命中缓存）；下次保存再生成新的。
+      saveKeyRef.current = undefined;
       if (!result.rework) setSavedDraftId(result.draftId);
       setInitialValues(values);
       setStatus(result.rework ? "原单已保存" : "草稿已保存");

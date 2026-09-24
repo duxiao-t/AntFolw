@@ -652,8 +652,11 @@ public class FormDefinitionService {
         if ("dept_picker".equals(type) && !isEmpty(value)) {
             validateDepartmentPickerValue(node, value);
         }
+        // 判定必须与发布校验一致：`optionSource: {}` 是设计器"选了源还没选版本"的中途状态，
+        // 发布时按未绑定（走内置 options）处理；这里若按 isObject 当成外部绑定去校验，就会出现
+        // **表单能发布、却填不了**（提交时 requireVersion 因缺 sourceId 报 BAD_SCHEMA）。
         if (Set.of("select", "multi_select").contains(type) && !isEmpty(value)
-            && node.path("props").path("optionSource").isObject()
+            && com.antflow.form.options.OptionRuntimeService.isBound(node.path("props").path("optionSource"))
             ) {
             if (optionRuntimeService == null) {
                 throw new BizException("FORM_DATA_INVALID", "共享选项服务不可用");

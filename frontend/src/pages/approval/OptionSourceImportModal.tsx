@@ -27,12 +27,17 @@ export function OptionSourceImportModal({ sourceId, open, onClose, onImported }:
   const [preview, setPreview] = useState<Preview>();
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // 预检的请求序号：连点工作表时后发的可能先回，旧响应会把预览盖成另一个 sheet 的内容，
+  // 而「导入」按的是当前 sheet——预览与实际导入的内容就对不上了。只认最后一次。
+  const inspectSeq = useRef(0);
 
   const reset = () => {
     setText('');
     setFile(undefined);
     setSheet('');
     setPreview(undefined);
+    // 关掉/重置后落地的旧预检响应不该再写回状态。
+    inspectSeq.current += 1;
   };
   // 关掉就清空：下次打开是干净的，不会带着上次的粘贴内容。
   useEffect(() => { if (!open) reset(); }, [open]);
@@ -46,14 +51,18 @@ export function OptionSourceImportModal({ sourceId, open, onClose, onImported }:
   };
 
   const inspect = async (selectedSheet = sheet) => {
+    const seq = ++inspectSeq.current;
     setBusy(true);
     try {
-      setPreview(await request<Preview>('/api/option-sources/inspect',
-        { method: 'POST', data: upload(selectedSheet) }));
+      const result = await request<Preview>('/api/option-sources/inspect',
+        { method: 'POST', data: upload(selectedSheet) });
+      if (seq !== inspectSeq.current) return;
+      setPreview(result);
     } catch (error: any) {
+      if (seq !== inspectSeq.current) return;
       message.error(error?.message ?? '预检失败');
     } finally {
-      setBusy(false);
+      if (seq === inspectSeq.current) setBusy(false);
     }
   };
 

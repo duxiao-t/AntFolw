@@ -196,3 +196,49 @@ describe('Contacts bulk action helpers', () => {
     expect(summary).toEqual({ successCount: 2, failedCount: 1 });
   });
 });
+
+describe('Contacts CSV round trip', () => {
+  it('导出的文件原样导回来，值不变（含类公式值）', () => {
+    const member = {
+      displayName: '=SUM(A1)',
+      employeeNo: '100001',
+      username: 'alice',
+      phone: '13800000000',
+      email: 'alice@example.com',
+      position: '+组长',
+      gender: 'F',
+      deptId: 7,
+    };
+
+    const parsed = parseMembersCsv(buildMembersCsv([member]), 7);
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows).toEqual([{
+      displayName: '=SUM(A1)',
+      employeeNo: '100001',
+      username: 'alice',
+      phone: '13800000000',
+      email: 'alice@example.com',
+      position: '+组长',
+      gender: 'F',
+      deptId: 7,
+    }]);
+  });
+
+  it('含逗号与引号的值也能往返', () => {
+    const member = {
+      displayName: '张三, "阿三"',
+      employeeNo: '',
+      username: 'zhangsan',
+      phone: '',
+      email: '',
+      position: '',
+      gender: 'M',
+      deptId: 1,
+    };
+
+    const parsed = parseMembersCsv(buildMembersCsv([member]), 1);
+
+    expect(parsed.rows[0].displayName).toBe('张三, "阿三"');
+  });
+});

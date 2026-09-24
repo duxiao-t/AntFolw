@@ -204,7 +204,9 @@ export function useDynamicOptions(
 
   const total = result?.total ?? 0;
   const stage = result?.stage ?? 'OPTIONS';
-  const hasMore = stage === 'OPTIONS' && items.length > 0 && items.length < total;
+  // 分步（LEVEL）阶段同样要能翻页：服务端的 total 就是"当前这一级的去重取值个数"，
+  // 早先写了 stage === 'OPTIONS' 才 hasMore，导致某一级超过 20 个选项时永远看不到第 21 个。
+  const hasMore = items.length > 0 && items.length < total;
   const advance = (value: string) => {
     if (result?.stage === 'LEVEL') { setPath((current) => [...current, value]); setPageNumber(1); setKeyword(''); }
     return result?.stage === 'OPTIONS';

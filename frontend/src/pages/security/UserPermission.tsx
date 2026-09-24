@@ -16,6 +16,7 @@ import {
 import type { DataNode } from 'antd/es/tree';
 import { request, useModel } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../authz';
 import './Security.less';
 
 
@@ -66,12 +67,17 @@ export default function UserPermissionPage() {
   const [effective, setEffective] = useState<EffectivePermission | null>(null);
   const [saving, setSaving] = useState(false);
   const currentUser = initialState?.currentUser as any;
-  const isAdmin = (currentUser?.roles ?? []).includes('admin');
+  // 页面门禁与路由一致：security.user-permissions 只需要 security:user_role:read，
+  // 但这里原本写死 isAdmin，导致拿到该能力的委派管理员只能看到一句"仅管理员可以分配用户角色"。
+  const canRead = hasCapability(currentUser, CAPABILITY.securityUserRoleRead);
+  const canAssign = hasCapability(currentUser, CAPABILITY.securityUserRoleManage);
 
   const loadCatalog = useCallback(async () => {
+    // 目录接口各有自己的能力（role:read / permission:read）；只拿到 user_role:read 时
+    // 应该降级成"显示 code"，而不是 Promise.all 整体失败把页面打空。
     const [roleRows, permissionRows] = await Promise.all([
-      request<Role[]>('/api/security/roles'),
-      request<Permission[]>('/api/security/permissions'),
+      request<Role[]>('/api/security/roles').catch(() => [] as Role[]),
+      request<Permission[]>('/api/security/permissions').catch(() => [] as Permission[]),
     ]);
     setRoles(roleRows); setPermissions(permissionRows);
   }, []);
@@ -84,8 +90,8 @@ export default function UserPermissionPage() {
     setSelectedId((current) => result.records.some((user: UserAssignment) => user.id === current)
       ? current : result.records[0]?.id ?? null);
   }, [keyword, page]);
-  useEffect(() => { if (isAdmin) void loadCatalog(); }, [isAdmin, loadCatalog]);
-  useEffect(() => { if (isAdmin) void loadUsers(); }, [isAdmin, loadUsers]);
+  useEffect(() => { if (canRead) void loadCatalog(); }, [canRead, loadCatalog]);
+  useEffect(() => { if (canRead) void loadUsers(); }, [canRead, loadUsers]);
   useEffect(() => {
     const timer = window.setTimeout(() => { setKeyword(search.trim()); setPage(1); }, 300);
     return () => window.clearTimeout(timer);
@@ -114,7 +120,9 @@ export default function UserPermissionPage() {
     }
   };
 
-  if (!isAdmin) return <PageContainer title={false}><Empty description="仅管理员可以分配用户角色" /></PageContainer>;
+  if (!canRead) {
+    return <PageContainer title={false}><Empty description="当前账号没有查看用户角色的权限" /></PageContainer>;
+  }
 
   return (
     <PageContainer title={false} className="security-page">
@@ -143,7 +151,7 @@ export default function UserPermissionPage() {
             <>
               <header className="security-editor__header">
                 <div><Typography.Title level={3}>{selectedUser.displayName}</Typography.Title><Typography.Text type="secondary">{selectedUser.username} · 授权版本 {selectedUser.authzVersion}</Typography.Text></div>
-                <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={save}>保存角色</Button>
+                <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canAssign} onClick={save}>保存角色</Button>
               </header>
               <div className="security-user-summary">
                 <div><span>当前角色</span><Space size={[4, 4]} wrap>{selectedUser.roleIds.map((id) => <Tag key={id}>{roleMap.get(id)?.name ?? `#${id}`}</Tag>)}</Space></div>

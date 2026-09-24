@@ -23,14 +23,19 @@ public class FormDefinitionController {
     private final AuditService auditService;
     private final FormProcessPublishService formProcessPublishService;
 
+    /**
+     * 表单清单。除表单管理员外，选项数据源管理员也要挑表单来绑定数据源，
+     * 早先只认 FORM_DEFINITION_READ，导致数据源页的"绑定表单"下拉直接 403。
+     * 可见范围没有放宽：非 admin 仍只看到自己维护的表单（见 selectSummaryPage）。
+     */
     @GetMapping
-    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DEFINITION_READ + "')")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.FORM_DEFINITION_READ
+        + "', '" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
     public Page<FormDefinitionMapper.Summary> list(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status) {
-        authorizationService.requirePermission(PermissionCodes.FORM_DEFINITION_READ);
         var principal = PrincipalHolder.current().orElseThrow();
         return service.list(page, size, keyword, status,
             principal.userId(), principal.isAdmin());

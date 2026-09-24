@@ -19,9 +19,18 @@ export const queryClient = new QueryClient({
 });
 
 // Clear synchronously before the next account can render any prior account's server data.
+// 角色集变化也要清：同一个人被加/减角色后，refresh() 拿回的 bootstrap 已经是新的，
+// 但 react-query 里按旧权限缓存的响应（工作台应用、待办计数…）不会自己失效。
+function rolesKey(roles: readonly string[] | undefined): string {
+  return [...(roles ?? [])].sort().join(',');
+}
+
 useAuthStore.subscribe((state, previous) => {
   if (state.status === 'unknown') return;
-  if (previous.status === 'unknown' || state.user?.id !== previous.user?.id) {
+  const accountChanged = previous.status === 'unknown'
+    || state.user?.id !== previous.user?.id
+    || rolesKey(state.user?.roles) !== rolesKey(previous.user?.roles);
+  if (accountChanged) {
     queryClient.clear();
     useFavoriteDraftStore.getState().reset([]);
     useSubmitFlowStore.getState().reset();

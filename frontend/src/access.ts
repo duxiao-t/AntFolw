@@ -33,11 +33,14 @@ export default function access(
   PAGES.forEach((page) => {
     result[accessKey(page.key)] = pageAllowed(page, roles, permissions);
   });
+  // 隐藏页同样要走管理端入口。后端这些端点一律是 @authz.console(...) / consoleAny(...)，
+  // 本身就要求 CONSOLE_ACCESS；前端早先只判业务能力，导致没有入口能力的账号能打开
+  // /tasks /proc /designer 这些桌面页，然后每个请求都 403，页面只剩一片报错。
   Object.entries(HIDDEN_CAPABILITIES).forEach(([key, permission]) => {
-    result[key] = can(permission);
+    result[key] = result.canEnterConsole && can(permission);
   });
   Object.entries(HIDDEN_ANY_OF_CAPABILITIES).forEach(([key, codesForEntry]) => {
-    result[key] = codesForEntry.some(can);
+    result[key] = result.canEnterConsole && codesForEntry.some(can);
   });
   return result;
 }

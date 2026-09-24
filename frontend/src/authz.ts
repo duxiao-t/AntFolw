@@ -17,6 +17,9 @@ export const CAPABILITY = {
   orgUserRead: 'org:user:read',
   securityRoleRead: 'security:role:read',
   securityRoleManage: 'security:role:manage',
+  securityPermissionRead: 'security:permission:read',
+  securityUserRoleRead: 'security:user_role:read',
+  securityUserRoleManage: 'security:user_role:manage',
   auditEventExport: 'audit:event:export',
   auditArchiveDownload: 'audit:archive:download',
 } as const;

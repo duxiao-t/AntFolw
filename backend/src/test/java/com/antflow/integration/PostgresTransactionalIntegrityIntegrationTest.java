@@ -686,6 +686,50 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void ledgerResolvesLabelsFromTheRowsOwnVersionAndJoinsMultiSelectLabels() {
+        String schema = "ledger_version_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("48").load().migrate();
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status) VALUES "
+                + "('ledger_v', 'Ledger', '[{\"id\":\"pick\",\"type\":\"multi_select\","
+                + "\"label\":\"新下拉\",\"props\":{\"options\":[{\"value\":\"a\","
+                + "\"label\":\"X\"},{\"value\":\"b\",\"label\":\"Y\"}]}}]'::jsonb, "
+                + "'{}'::jsonb, 'PUBLISHED') RETURNING id", Long.class);
+            // v1 是这一行数据当时的 schema；之后字段改名、选项显示名也改了。
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "VALUES (?, 1, '[{\"id\":\"pick\",\"type\":\"multi_select\","
+                + "\"label\":\"旧下拉\",\"props\":{\"options\":[{\"value\":\"a\","
+                + "\"label\":\"甲\"},{\"value\":\"b\",\"label\":\"乙\"}]}}]'::jsonb, 'v1')",
+                formId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "VALUES (?, 2, '[{\"id\":\"pick\",\"type\":\"multi_select\","
+                + "\"label\":\"新下拉\",\"props\":{\"options\":[{\"value\":\"a\","
+                + "\"label\":\"X\"},{\"value\":\"b\",\"label\":\"Y\"}]}}]'::jsonb, 'v2')",
+                formId);
+            long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, '{\"pick\":[\"a\",\"b\"]}'::jsonb, 'SUBMITTED') RETURNING id",
+                Long.class, formId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForObject("SELECT field_label FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'pick'",
+                String.class, dataId)).isEqualTo("旧下拉");
+            assertThat(jdbcTemplate.queryForObject("SELECT value_label FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'pick'",
+                String.class, dataId)).isEqualTo("甲、乙");
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
     void bindableListsOnlySourcesTheFormReferences() {
         long adminId = userId("admin");
         long formId = insertForm("DRAFT",

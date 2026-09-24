@@ -16,6 +16,7 @@ import {
   List,
   Modal,
   message,
+  Result,
   Select,
   Space,
   Steps,
@@ -305,6 +306,10 @@ export default function FormManagementWizard() {
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
   const canManageGrants = hasCapability(currentUser, CAPABILITY.formAuthorizationManage);
+  // 新建表单需要 form:definition:manage，但 /approval/forms/:id/wizard 这条路由只要求
+  // canDesigner（表单管理员**或**流程管理员）。于是只有 workflow:definition:manage 的人
+  // 能打开 /designer/form/new，一路填完，最后 POST /api/forms/definitions 才 403——"存不了"。
+  const canCreateForm = isAdmin || hasCapability(currentUser, CAPABILITY.formDefinitionManage);
 
   const { data: definition } = useQuery<FormDefinition>({
     queryKey: ['form-management-definition', formId],
@@ -566,7 +571,11 @@ export default function FormManagementWizard() {
         syncedGrantKey.current = grantInitKey;
         form.setFieldsValue({
           userIds: formGrant.userIds,
-          roleIds: isAdmin ? formGrant.roleIds.filter((id) => id !== allCompanyRoleId) : [],
+          // 非管理员也按服务端回填：早先这里给非管理员写死 []，于是 grantDirty 永远为真
+          // （[] 对比服务端的角色清单），页面上恒显「有未保存的修改」，而且一旦点保存会把
+          // 现有角色授权整片抹掉。候选接口与 canManageGrants 同门禁，非管理员同样拿得到
+          // 全公司角色 id，过滤逻辑不需要分角色。
+          roleIds: formGrant.roleIds.filter((id) => id !== allCompanyRoleId),
           allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
           departmentIds: formGrant.departmentIds,
         });
@@ -1175,6 +1184,18 @@ export default function FormManagementWizard() {
       </div>
     );
   };
+
+  if (isNew && !canCreateForm) {
+    return (
+      <PageContainer title={false}>
+        <Result
+          status="403"
+          title="没有新建表单的权限"
+          subTitle="当前账号可以设计已有表单的流程，但不能新建表单。"
+        />
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer title={false}>

@@ -91,6 +91,9 @@ public class OptionRuntimeService {
     public void validateValue(JsonNode field, Object value, Map<?, ?> values) {
         if (empty(value)) return;
         JsonNode source = field.path("props").path("optionSource");
+        // 未真正绑定（`{}`）时按静态选项处理，不该走到外部值校验——调用方也会用 isBound 过滤，
+        // 这里是第二道，避免别的入口把 `{}` 送进来直接报 BAD_SCHEMA。
+        if (!isBound(source)) return;
         requireVersion(source, false);
         boolean multiple = "multi_select".equals(field.path("type").asText());
         if (multiple != (value instanceof List<?>)) invalid("下拉值类型不正确");

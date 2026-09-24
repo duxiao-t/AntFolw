@@ -20,9 +20,17 @@ public class PickerController {
 
     @GetMapping("/users")
     @PreAuthorize("@authz.consoleEntry()")
-    public List<MobilePickerUserDto> users(@RequestParam(required = false) String keyword) {
-        // 桌面选择器不做范围收窄，只有关键字。
-        return service.searchUsers(UserService.UserQuery.of(keyword, null, null, null, null, null));
+    public List<MobilePickerUserDto> users(@RequestParam(required = false) String keyword,
+                           @RequestParam(required = false) Long deptId,
+                           @RequestParam(required = false) Boolean includeDescendants,
+                           @RequestParam(required = false) Boolean leaderOnly,
+                           @RequestParam(required = false) String position,
+                           @RequestParam(required = false) List<Long> userIds,
+                           @RequestParam(required = false) String scopeType) {
+        // 指名范围但名单为空 = 零候选（空数组会被序列化丢掉，靠 scopeType 区分）。
+        if ("user".equals(scopeType) && (userIds == null || userIds.isEmpty())) return List.of();
+        return service.searchUsers(
+            UserService.UserQuery.of(keyword, deptId, includeDescendants, leaderOnly, position, userIds));
     }
 
     @GetMapping("/users/selected")

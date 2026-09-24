@@ -32,7 +32,9 @@ export const UserPickerField: FieldType = {
     const { data, isFetching } = useQuery({
       queryKey: ['users', 'field', kw, scopeKey],
       queryFn: () =>
-        request<any[]>('/api/users', { params: { keyword: kw, ...scopeParams } }),
+        // 走选择器专用端点（只要求"已进管理端"）：/api/users 还要 org:user:read，
+        // 于是没有该能力的普通提交人在运行时填表单时拉不到任何候选。
+        request<any[]>('/api/pickers/users', { params: { keyword: kw, ...scopeParams } }),
     });
     const multi = !!node.props?.multiple;
     return (

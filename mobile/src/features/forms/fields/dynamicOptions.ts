@@ -131,7 +131,9 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
     }
     return true;
   };
-  const hasMore = result?.stage === 'OPTIONS' && items.length > 0 && items.length < (result?.total ?? 0);
+  // 同桌面端：LEVEL 阶段也要能翻页（服务端 total 就是当前这一级的去重取值个数），
+  // 否则某一级超过 PAGE_SIZE 个选项时后面那些永远选不到。
+  const hasMore = items.length > 0 && items.length < (result?.total ?? 0);
   return { result, items, labels, path, keyword, error, loading, loadingMore, hasMore, choose,
     setKeyword: (value: string) => { setKeyword(value); setPage(1); },
     back: () => { setPath((before) => before.slice(0, -1)); setKeyword(''); setPage(1); },

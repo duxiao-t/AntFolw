@@ -70,7 +70,10 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public void setRoles(Long userId, List<Long> roleIds) {
-        authorizationService.requireAdmin();
+        // 与端点能力对齐（原来是 requireAdmin()，导致拿到 security:user_role:manage 的委派管理员
+        // 每个操作都吃 403）。但"能改角色"不能等于"能给自己发管理员"，所以下面单加一道：
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.SECURITY_USER_ROLE_MANAGE);
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -80,6 +83,10 @@ public class UserService {
         validateUserRoles(normalizedRoleIds);
         List<String> currentRoles = rolesOf(userId);
         boolean assigningAdmin = normalizedRoleIds.stream().anyMatch(this::isAdminRole);
+        // 动到 admin 角色（授出去或收回来）仍然必须是超管。
+        if (assigningAdmin || currentRoles.contains("admin")) {
+            authorizationService.requireAdmin();
+        }
         if (currentRoles.contains("admin") || assigningAdmin) {
             lockAdminRole();
             user = userMapper.selectById(userId);
@@ -552,7 +559,12 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public User setWecomLoginAccess(Long userId, boolean enabled) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.ORG_USER_CREDENTIALS_MANAGE);
+        // 改管理员的登录方式等于管理员的账号安全，委派的凭据管理员不能碰。
+        if (rolesOf(userId).contains("admin")) {
+            authorizationService.requireAdmin();
+        }
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -612,7 +624,12 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public void resetPassword(Long userId, String rawPassword) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.ORG_USER_CREDENTIALS_MANAGE);
+        // 重置管理员的密码＝直接接管管理员账号，委派的凭据管理员不能碰。
+        if (rolesOf(userId).contains("admin")) {
+            authorizationService.requireAdmin();
+        }
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");

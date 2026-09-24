@@ -117,6 +117,11 @@ public class MenuService {
             flat.add(new MenuNode(nodeKey, parentKey, node.type(), node.pageKey(), node.name(),
                 node.icon(), requiredPermissions, node.sortOrder(), node.visible(), null));
             if (node.children() != null && !node.children().isEmpty()) {
+                // PAGE 是叶子（一个 pageKey 对应一个路由）。早先这里照收不误，但下发给前端的
+                // prune/navToMenuData 对 PAGE 一律输出空 children，存进去的子节点等于凭空消失。
+                if (!directory) {
+                    throw new BizException("MENU_PAGE_CHILD_NOT_ALLOWED", "页面菜单不能包含子节点");
+                }
                 flatten(node.children(), depth + 1, flat, pageKeys, nodeKey,
                     directoryCounter);
             }

@@ -50,6 +50,14 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
   const parents = scope.filter((candidate) => candidate.type === 'select'
     && candidate.id !== node.id && isBoundOptionSource(candidate.props));
   const currentParent = parents.find((parent) => parent.id === (isSelect ? binding?.dependency?.fieldId : link?.fieldId));
+  // 「每级取几位」的输入框文本（见下面的说明）。只在换字段/换分步方式时从 schema 同步。
+  const [lengthsText, setLengthsText] = useState('');
+  const lengthsSyncKey = `${node.id}|${binding?.cascade?.kind ?? ''}|${binding?.cascade?.sourceColumn ?? ''}`;
+  useEffect(() => {
+    // 只在换字段/换分步方式/换编码列时从 schema 取一次；不要跟着 lengths 走，
+    // 否则用户敲下的 "1," 会被解析结果 "1" 立刻覆盖回去。
+    setLengthsText((binding?.cascade?.split?.lengths ?? []).join(','));
+  }, [lengthsSyncKey]);
 
   if (!formId) return <Typography.Text type="secondary">保存表单后，可以配置数据源。</Typography.Text>;
   if (error) return <Typography.Text type="danger">无法加载授权数据源：{(error as Error).message}</Typography.Text>;
@@ -122,8 +130,13 @@ export function OptionSourceSettings({ formId, node, schema, update }: {
               options={columns.map((c) => ({ label: c, value: c }))}
               onChange={(sourceColumn) => update({ optionSource: { ...binding, cascade: { ...binding.cascade, sourceColumn } } })} />
             <Typography.Text>每级取几位（逗号分隔，J→K→L 输入 1,1,1）</Typography.Text>
-            <Input value={(binding.cascade.split?.lengths ?? []).join(',')} onChange={(event) => {
-              const lengths = event.target.value.split(',').map((v) => Number(v.trim())).filter((v) => Number.isInteger(v) && v > 0);
+            <Input value={lengthsText} onChange={(event) => {
+              // 输入框保留原始文本：早先把 value 绑成"解析后的数组再 join"，敲下逗号的瞬间
+              // 解析结果里没有空项，回写的字符串就把逗号吃掉了，1, 会变回 1，根本输不进多级。
+              setLengthsText(event.target.value);
+              const lengths = event.target.value.split(',')
+                .map((v) => Number(v.trim()))
+                .filter((v) => Number.isInteger(v) && v > 0);
               update({ optionSource: { ...binding, cascade: { ...binding.cascade, split: { kind: 'fixed', lengths } } } });
             }} />
           </>}

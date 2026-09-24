@@ -156,6 +156,12 @@ describe('FormFillPage', () => {
         && String((init as RequestInit).body).includes('回家探亲'),
       )).toBe(true);
     });
+    // 保存草稿必须带幂等键，否则双击会落两份草稿。
+    const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const draftPost = calls.find(([url, init]) =>
+      String(url).includes('/api/mobile/drafts') && (init as RequestInit).method === 'POST');
+    const draftInit = (draftPost?.[1] ?? {}) as RequestInit;
+    expect(new Headers(draftInit.headers).get('Idempotency-Key')).toBeTruthy();
     expect(await screen.findByText((text) => text.includes('草稿已保存'))).toBeInTheDocument();
     await waitFor(() => expect(router.state.location.search).toBe('?draftId=102'));
     expect(queryClient.getQueryState(queryKeys.drafts)?.isInvalidated).toBe(true);

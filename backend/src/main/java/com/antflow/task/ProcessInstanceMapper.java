@@ -89,7 +89,11 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         <choose>
           <when test="scope == 'mine'">
             pi.started_by = #{userId}
-            AND pi.current_node_id IS DISTINCT FROM '__rework__'
+            <!-- 「驳回待改」的单据 current_node_id 就是 '__rework__'，平时列表要把它隐掉（另有入口），
+                 但按 status=REWORK 筛时不能隐，否则那条筛选恒为空——发起人永远看不到自己待修改的单据。 -->
+            <if test="status != 'REWORK'">
+              AND pi.current_node_id IS DISTINCT FROM '__rework__'
+            </if>
           </when>
           <otherwise>
         """ + FULL_VISIBLE + """

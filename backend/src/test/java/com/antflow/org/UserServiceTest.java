@@ -354,13 +354,23 @@ class UserServiceTest {
     }
 
     @Test
-    void nonAdministratorCannotChangeWecomLoginAccess() {
+    void nonAdministratorCannotChangeAnAdministratorsWecomLoginAccess() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        RoleMapper roleMapper = Mockito.mock(RoleMapper.class);
         AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
-        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
-            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
-            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
-            Mockito.mock(JdbcTemplate.class), authorizationService);
+        UserService service = newService(userMapper, userRoleMapper, roleMapper,
+            Mockito.mock(PasswordEncoder.class), Mockito.mock(DepartmentMapper.class),
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class),
+            authorizationService);
+        // 目标用户是管理员：只持 ORG_USER_CREDENTIALS_MANAGE 的委派管理员不能动它——
+        // 改登录方式/重置口令都等于接管管理员账号。
+        UserRole membership = new UserRole();
+        membership.setRoleId(1L);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(membership));
+        Role adminRole = new Role();
+        adminRole.setCode("admin");
+        when(roleMapper.selectById(1L)).thenReturn(adminRole);
         doThrow(new org.springframework.security.access.AccessDeniedException("denied"))
             .when(authorizationService).requireAdmin();
 

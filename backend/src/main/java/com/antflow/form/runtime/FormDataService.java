@@ -106,7 +106,10 @@ public class FormDataService {
         Long formDefId = null;
         if (formCode != null) {
             var fd = formDefinitionService.getByCode(formCode);
-            if (fd != null) formDefId = fd.getId();
+            // 指定了 code 却查不到（改名/下架/写错）时必须返回空：早先 formDefId 落成 null，
+            // 而下传给 SQL 的 null 含义是"不过滤表单"，于是把该用户**所有**表单的提交都吐了出来。
+            if (fd == null) return List.of();
+            formDefId = fd.getId();
         }
         return mapper.selectMySubmissions(userId, formDefId);
     }

@@ -13,6 +13,8 @@ import pageCapabilities from '../../config/page-capabilities.json';
 export type PageDef = {
   /** 与后端 t_menu.page_key 对应的稳定标识 */
   key: string;
+  /** 菜单默认显示名（管理员没改名时用它，避免把内部 pageKey 当菜单名展示） */
+  label: string;
   path: string;
   component: string;
   icon?: string;
@@ -25,41 +27,52 @@ export const CONSOLE_ENTRY = 'console:entry:access';
 export const PAGE_CAPABILITIES = pageCapabilities as Record<string, string[]>;
 
 export const PAGES: PageDef[] = [
-  { key: 'workplace', path: '/workplace', component: './dashboard/workplace', icon: 'home',
+  { key: 'workplace', label: '审批运营中心', path: '/workplace',
+    component: './dashboard/workplace', icon: 'home',
     readCapabilities: PAGE_CAPABILITIES.workplace },
-  { key: 'org.contacts', path: '/org/contacts', component: './org/Contacts', icon: 'contacts',
-    readCapabilities: PAGE_CAPABILITIES['org.contacts'] },
-  { key: 'approval.forms', path: '/approval/forms', component: './approval/FormManagementList',
+  { key: 'org.contacts', label: '通讯录', path: '/org/contacts', component: './org/Contacts',
+    icon: 'contacts', readCapabilities: PAGE_CAPABILITIES['org.contacts'] },
+  { key: 'approval.forms', label: '表单管理', path: '/approval/forms',
+    component: './approval/FormManagementList',
     icon: 'form', readCapabilities: PAGE_CAPABILITIES['approval.forms'] },
-  { key: 'approval.records', path: '/approval/records', component: './approval/RecordList',
+  { key: 'approval.records', label: '审批记录查询', path: '/approval/records',
+    component: './approval/RecordList',
     icon: 'search', readCapabilities: PAGE_CAPABILITIES['approval.records'] },
-  { key: 'approval.monitor', path: '/approval/monitor', component: './approval/WorkflowMonitor',
+  { key: 'approval.monitor', label: '流程运行监控', path: '/approval/monitor',
+    component: './approval/WorkflowMonitor',
     icon: 'dashboard', readCapabilities: PAGE_CAPABILITIES['approval.monitor'] },
-  { key: 'report.center', path: '/report/center', component: './report/Center', icon: 'fund',
+  { key: 'report.center', label: '报表中心', path: '/report/center',
+    component: './report/Center', icon: 'fund',
     readCapabilities: PAGE_CAPABILITIES['report.center'] },
-  { key: 'report.view', path: '/report/view', component: './report/Dashboard', icon: 'dashboard',
-    readCapabilities: PAGE_CAPABILITIES['report.view'] },
-  { key: 'report.export', path: '/report/export', component: './report/Export', icon: 'export',
-    readCapabilities: PAGE_CAPABILITIES['report.export'] },
-  { key: 'security.roles', path: '/security/roles', component: './security/Role', icon: 'idcard',
+  { key: 'report.view', label: '数据看板', path: '/report/view', component: './report/Dashboard',
+    icon: 'dashboard', readCapabilities: PAGE_CAPABILITIES['report.view'] },
+  { key: 'report.export', label: '数据导出', path: '/report/export', component: './report/Export',
+    icon: 'export', readCapabilities: PAGE_CAPABILITIES['report.export'] },
+  { key: 'security.roles', label: '角色管理', path: '/security/roles',
+    component: './security/Role', icon: 'idcard',
     readCapabilities: PAGE_CAPABILITIES['security.roles'] },
-  { key: 'security.user-permissions', path: '/security/user-permissions',
+  { key: 'security.user-permissions', label: '用户权限分配', path: '/security/user-permissions',
     component: './security/UserPermission', icon: 'key',
     readCapabilities: PAGE_CAPABILITIES['security.user-permissions'] },
-  { key: 'security.audit-log', path: '/security/audit-log', component: './security/AuditLog',
+  { key: 'security.audit-log', label: '操作日志审计', path: '/security/audit-log',
+    component: './security/AuditLog',
     icon: 'fileSearch', readCapabilities: PAGE_CAPABILITIES['security.audit-log'] },
-  { key: 'security.menu', path: '/security/menu', component: './security/Menu', icon: 'menu',
+  { key: 'security.menu', label: '菜单管理', path: '/security/menu',
+    component: './security/Menu', icon: 'menu',
     readCapabilities: PAGE_CAPABILITIES['security.menu'] },
-  { key: 'settings.company', path: '/settings/company', component: './settings/Company',
+  { key: 'settings.company', label: '企业基础信息', path: '/settings/company',
+    component: './settings/Company',
     icon: 'bank', readCapabilities: PAGE_CAPABILITIES['settings.company'] },
-  { key: 'settings.s3', path: '/settings/s3', component: './settings/S3Storage', icon: 'cloud',
-    readCapabilities: PAGE_CAPABILITIES['settings.s3'] },
-  { key: 'settings.wecom', path: '/settings/wecom', component: './settings/Wecom',
+  { key: 'settings.s3', label: 'S3 存储', path: '/settings/s3', component: './settings/S3Storage',
+    icon: 'cloud', readCapabilities: PAGE_CAPABILITIES['settings.s3'] },
+  { key: 'settings.wecom', label: '企业微信', path: '/settings/wecom',
+    component: './settings/Wecom',
     icon: 'wechat', readCapabilities: PAGE_CAPABILITIES['settings.wecom'] },
-  { key: 'settings.identity-providers', path: '/settings/identity-providers',
+  { key: 'settings.identity-providers', label: '身份提供方', path: '/settings/identity-providers',
     component: './settings/IdentityProviders', icon: 'safetyCertificate',
     readCapabilities: PAGE_CAPABILITIES['settings.identity-providers'] },
-  { key: 'settings.backup', path: '/settings/backup', component: './settings/Backup',
+  { key: 'settings.backup', label: '系统备份', path: '/settings/backup',
+    component: './settings/Backup',
     icon: 'database', readCapabilities: PAGE_CAPABILITIES['settings.backup'] },
 ];
 
@@ -139,7 +152,7 @@ export function navToMenuData(nodes: NavNode[]): MenuDataItem[] {
     items.push({
       key: page.key,
       path: page.path,
-      name: node.name ?? page.key,
+      name: node.name ?? page.label,
       icon: node.icon ?? page.icon,
     });
   });
