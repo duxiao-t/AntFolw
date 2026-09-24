@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 public class AuthorizationService {
     private final JdbcTemplate jdbcTemplate;
     private final Map<Long, CachedSnapshot> cache = new ConcurrentHashMap<>();
+    /** 全局授权失效代次：evictAll 递增，用来识破"清空与回填"的竞态。 */
+    private final java.util.concurrent.atomic.AtomicLong epoch =
+        new java.util.concurrent.atomic.AtomicLong();
 
     public Optional<PrincipalHolder.Principal> principalForRequest(long userId, UUID sessionId) {
         UserState state = userState(userId);
@@ -54,8 +57,15 @@ public class AuthorizationService {
         cache.remove(userId);
     }
 
-    /** 全局授权变更（菜单编排、能力目录）后一次性失效所有快照。 */
+    /**
+     * 全局授权变更（菜单编排、能力目录）后一次性失效所有快照。
+     *
+     * <p>先递增失效代次再清缓存：装载中的请求靠代次变化察觉"我这次装载可能混了失效前的数据"。
+     * 全局变更**不改动各用户的 authz_version**，所以只 clear() 挡不住正在进行的装载——
+     * 它会把失效前算出来的快照重新插回缓存并长期命中（见 cachedSnapshot）。
+     */
     public void evictAll() {
+        epoch.incrementAndGet();
         cache.clear();
     }
 
@@ -63,12 +73,26 @@ public class AuthorizationService {
         // 原来是把 loadSnapshot（内含多次查库）放在一把**全局**锁里，于是任何一次缓存未命中
         // 都会把全站请求串行在数据库往返上。ConcurrentHashMap.compute 只锁住该用户的桶，
         // 同一用户不会重复装载，不同用户互不阻塞。
-        return cache.compute(state.userId(), (userId, cached) -> {
-            if (cached != null && cached.version() == state.authzVersion()) {
-                return cached;
+        //
+        // 代价是 clear() 不再与装载互斥，于是要靠 epoch 把"清空与回填的竞态"补回来。
+        for (int attempt = 0; attempt < 3; attempt++) {
+            long startEpoch = epoch.get();
+            CachedSnapshot cached = cache.compute(state.userId(), (userId, existing) -> {
+                if (existing != null && existing.version() == state.authzVersion()
+                        && existing.epoch() == startEpoch) {
+                    return existing;
+                }
+                return new CachedSnapshot(state.authzVersion(), loadSnapshot(state), startEpoch);
+            });
+            if (epoch.get() == startEpoch) {
+                return cached.snapshot();
             }
-            return new CachedSnapshot(state.authzVersion(), loadSnapshot(state));
-        }).snapshot();
+            // 装载期间发生过全局失效：这份快照可能混了失效前的数据。只移除"仍是我们刚放进去
+            // 的那一份"（两参 remove 比较值），避免误删别的线程已经重算好的新快照。
+            cache.remove(state.userId(), cached);
+        }
+        // 连续失效（极罕见）：退回不缓存的装载，宁可多查一次库也不返回过期权限。
+        return loadSnapshot(state);
     }
 
     public void requirePermission(String permission) {
@@ -677,10 +701,11 @@ public class AuthorizationService {
 
     // GrantRow / InstanceAccess 与下面对应的取数方法包内可见，供红线回归测试构造与打桩
     // （AuthorizationServiceTest 直接驱动 instanceVisibility 的被指派人分支）。
-    private record CachedSnapshot(long version, AuthzSnapshot snapshot) { }
-    private record RoleBase(long roleId, String code) { }
+    private record CachedSnapshot(long version, AuthzSnapshot snapshot, long epoch) { }
+    record RoleBase(long roleId, String code) { }
     record GrantRow(String permissionCode, String scopeOverride) { }
-    private record UserState(long userId, String username, String displayName, String status,
+    // 与 GrantRow 一样放宽到包内可见：AuthorizationServiceTest 需要构造它们来复现缓存竞态。
+    record UserState(long userId, String username, String displayName, String status,
                              long authzVersion, Long departmentId) { }
     record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
     private record FormDataAccess(Long createdBy, Long startedDepartmentId) { }

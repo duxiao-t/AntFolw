@@ -4,15 +4,24 @@ import com.antflow.auth.PrincipalHolder;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
+import org.springframework.jdbc.core.RowMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -277,5 +286,63 @@ class AuthorizationServiceTest {
         return new AuthorizationService.AuthzSnapshot(7L, departmentId, admin,
             Set.of(role.code()), Set.of("workflow:instance:read"),
             Map.of("workflow:instance:read", List.of(role)));
+    }
+
+    /**
+     * 全局失效（菜单编排、能力目录变更）不改动各用户的 authz_version，所以单靠 cache.clear()
+     * 挡不住"正在装载"的请求：它会把失效前算出来的快照重新插回缓存并长期命中。
+     * 这条用例把 evictAll() 精确地压在装载中间，断言缓存里留下的是失效**之后**的权限。
+     */
+    @Test
+    void globalEvictDuringLoadDoesNotLeaveAStaleSnapshotCached() throws Exception {
+        CountDownLatch inLoad = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean firstRoleRead = new AtomicBoolean(true);
+
+        when(jdbcTemplate.query(contains("FROM t_user WHERE id = ?"),
+            any(ResultSetExtractor.class), any(Object[].class)))
+            .thenReturn(new AuthorizationService.UserState(7L, "u", "U", "ACTIVE", 1L, 10L));
+        when(jdbcTemplate.query(contains("FROM t_user_role ur"),
+            any(RowMapper.class), any(Object[].class)))
+            .thenAnswer(invocation -> {
+                if (firstRoleRead.compareAndSet(true, false)) {
+                    // 首次装载：卡在这里，让 evictAll() 落在"装载中"，此时读到的还是旧角色。
+                    inLoad.countDown();
+                    release.await(5, TimeUnit.SECONDS);
+                    return List.of(new AuthorizationService.RoleBase(1L, "operator"));
+                }
+                // 失效之后重装的这一次才看得到新授予的角色。
+                return List.of(new AuthorizationService.RoleBase(1L, "operator"),
+                    new AuthorizationService.RoleBase(2L, "reporter"));
+            });
+        when(jdbcTemplate.query(contains("FROM t_role_permission granted"),
+            any(RowMapper.class), any(Object[].class)))
+            // 只有"失效之后才授予"的 reporter（role id = 2）带这个能力。若两次装载都返回同一个
+            // grant，断言就失去区分力——那正是这条用例第一版的错。
+            .thenAnswer(invocation -> {
+                // Mockito 会把可变参数展开：单参数时 getArgument(2) 直接是那个值。
+                Object raw = invocation.getArgument(2);
+                Object roleId = raw instanceof Object[] args
+                    ? (args.length > 0 ? args[0] : null) : raw;
+                return Long.valueOf(2L).equals(roleId)
+                    ? List.of(new AuthorizationService.GrantRow("form:data:export", null))
+                    : List.of();
+            });
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<AuthorizationService.AuthzSnapshot> loading =
+                pool.submit(() -> service.snapshot(7L));
+            assertThat(inLoad.await(5, TimeUnit.SECONDS)).isTrue();
+            service.evictAll();
+            release.countDown();
+
+            assertThat(loading.get(5, TimeUnit.SECONDS).permissions())
+                .contains("form:data:export");
+            // 关键：缓存里不能留着那份失效前的快照——再取一次必须还是新权限。
+            assertThat(service.snapshot(7L).permissions()).contains("form:data:export");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }
