@@ -58,8 +58,10 @@ services:
       AUDIT_ARCHIVE_KEY_ID: test-isolated-v1
       ANTFLOW_INTEGRATION_ENCRYPTION_KEY: ${ANTFLOW_INTEGRATION_ENCRYPTION_KEY:?set ANTFLOW_INTEGRATION_ENCRYPTION_KEY}
       ANTFLOW_AUTH_COOKIE_PREFIX: antflow-test
-      ANTFLOW_PUBLIC_BASE_URL: http://10.0.0.250:17070
-      CORS_ALLOWED_ORIGIN_PATTERNS: http://10.0.0.250:17070,http://127.0.0.2:17070
+      # 隔离栈的对外地址。原来写死了 10.0.0.250（那台机器上的 host-only IP），换台机器
+      # 端口就绑不上、整套栈起不来。改成变量，默认回环；需要别的地址就 ANTFLOW_TEST_HOST。
+      ANTFLOW_PUBLIC_BASE_URL: http://${ANTFLOW_TEST_HOST:-127.0.0.1}:17070
+      CORS_ALLOWED_ORIGIN_PATTERNS: http://${ANTFLOW_TEST_HOST:-127.0.0.1}:17070
       ANTFLOW_OIDC_ALLOWED_HOSTS: ""
       ANTFLOW_OIDC_HTTPS_ONLY: "false"
       ANTFLOW_WECOM_BASE_URL: http://127.0.0.1:9
@@ -84,8 +86,7 @@ services:
       dockerfile: Dockerfile.test
       target: web
     ports:
-      - "127.0.0.2:17070:80"
-      - "10.0.0.250:17070:80"
+      - "${ANTFLOW_TEST_HOST:-127.0.0.1}:17070:80"
     depends_on:
       - backend
     networks:

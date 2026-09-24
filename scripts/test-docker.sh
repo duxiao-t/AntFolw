@@ -200,9 +200,11 @@ start() {
   fi
   build_artifacts
   compose up -d --build
+  # 对外地址与 compose.test.yaml 的端口绑定同源，默认回环（原来写死 10.0.0.250）。
+  local test_host="${ANTFLOW_TEST_HOST:-127.0.0.1}"
   for _ in $(seq 1 90); do
-    if curl --fail --silent --show-error http://10.0.0.250:17070/actuator/health >/dev/null; then
-      echo 'Isolated test environment: http://10.0.0.250:17070'
+    if curl --fail --silent --show-error "http://${test_host}:17070/actuator/health" >/dev/null; then
+      echo "Isolated test environment: http://${test_host}:17070"
       return
     fi
     sleep 2
