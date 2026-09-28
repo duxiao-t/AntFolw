@@ -19,7 +19,9 @@ export function flattenFormFields(nodes: any[]): FormFieldOption[] {
   const result: FormFieldOption[] = [];
   const visit = (list: any[], inTable = false) => {
     for (const node of list) {
-      if (!node?.id) continue;
+      if (!node) continue;
+      // 容器先于 id 判断：脏数据里没有 id 的 span_layout/table_list 不该让里面的字段
+      // 被静默丢掉（丢掉的字段在流程里就成了"已删除"的引用）。
       if (node.type === 'span_layout') {
         if (Array.isArray(node.children)) visit(node.children, inTable);
         continue;
@@ -28,6 +30,7 @@ export function flattenFormFields(nodes: any[]): FormFieldOption[] {
         if (Array.isArray(node.children)) visit(node.children, true);
         continue;
       }
+      if (!node.id) continue;
       if (node.type === 'description') continue;
       result.push({
         id: node.id,
@@ -36,6 +39,9 @@ export function flattenFormFields(nodes: any[]): FormFieldOption[] {
         required: Boolean(node.rules?.required ?? node.props?.required),
         inTable,
         defaultValue: node.props?.defaultValue,
+        // 外部数据源的绑定要带出去：条件分支的"值"下拉得按它去查服务端候选，
+        // 不然绑了外部源的字段在条件里还是显示内置的静态选项。
+        optionSource: node.props?.optionSource,
         options: Array.isArray(node.props?.options)
           ? node.props.options
               .filter(
@@ -205,6 +211,9 @@ const formPermsIssue = (
   return null;
 };
 
+/** 脏 schema 里 `groups`/`headers`/`parameters` 可能不是数组：一律当空数组，别让校验自己炸。 */
+const rowsOf = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+
 const isEmptyDefaultValue = (value: unknown): boolean =>
   value == null ||
   (typeof value === 'string' && value.trim() === '') ||
@@ -237,13 +246,13 @@ const commentPresetsIssue = (node: TreeNode): string | null => {
 
 const conditionReady = (node: TreeNode): boolean => {
   if (node.props?.isDefault) return true;
-  const groups = node.props?.groups ?? [];
+  const groups = rowsOf(node.props?.groups);
   return (
     groups.length > 0 &&
     groups.every(
       (group: any) =>
-        (group.conditions?.length ?? 0) > 0 &&
-        group.conditions.every((condition: any) => {
+        rowsOf(group?.conditions).length > 0 &&
+        rowsOf(group?.conditions).every((condition: any) => {
           const valueReady =
             condition.operator === 'in'
               ? Array.isArray(condition.value) &&
@@ -251,9 +260,10 @@ const conditionReady = (node: TreeNode): boolean => {
                 condition.value.every((value: unknown) =>
                   Boolean(String(value).trim()),
                 )
-              : condition.value !== undefined &&
+              : // 用 isEmptyDefaultValue 而不是 String(value).trim()：后者会把
+                // null 变成 'null' 混过去，等于"没填值也算配好了"。
                 !Array.isArray(condition.value) &&
-                String(condition.value).trim() !== '';
+                !isEmptyDefaultValue(condition.value);
           return !!condition.field && !!condition.operator && valueReady;
         }),
     )
@@ -277,8 +287,8 @@ const conditionFieldIssue = (
   fieldTypes?: Map<string, string>,
 ): string | null => {
   if (!fieldTypes || node.props?.isDefault) return null;
-  for (const group of node.props?.groups ?? []) {
-    for (const condition of group.conditions ?? []) {
+  for (const group of rowsOf(node.props?.groups)) {
+    for (const condition of rowsOf(group?.conditions)) {
       if (condition.field && !fieldTypes.has(condition.field)) {
         return `分支条件引用的表单字段 ${condition.field} 已删除，请重新选择`;
       }
@@ -319,16 +329,16 @@ const triggerReady = (node: TreeNode): boolean => {
   } catch {
     validUrl = false;
   }
-  const rowsReady = (props.headers ?? []).every(
+  const rowsReady = rowsOf(props.headers).every(
     (row: any) =>
-      String(row.key ?? '').trim() && String(row.value ?? '').trim(),
+      String(row?.key ?? '').trim() && String(row?.value ?? '').trim(),
   );
-  const parametersReady = (props.parameters ?? []).every(
+  const parametersReady = rowsOf(props.parameters).every(
     (row: any) =>
-      String(row.key ?? '').trim() &&
-      (row.source === 'FIELD'
-        ? String(row.fieldId ?? '').trim()
-        : row.value !== undefined),
+      String(row?.key ?? '').trim() &&
+      (row?.source === 'FIELD'
+        ? String(row?.fieldId ?? '').trim()
+        : row?.value !== undefined),
   );
   return (
     validUrl &&
@@ -348,9 +358,9 @@ const missingTriggerField = (
   fieldTypes?: Map<string, string>,
 ): string | null => {
   if (!fieldTypes) return null;
-  const row = (node.props?.parameters ?? []).find(
+  const row = rowsOf(node.props?.parameters).find(
     (parameter: any) =>
-      parameter.source === 'FIELD' &&
+      parameter?.source === 'FIELD' &&
       parameter.fieldId &&
       !fieldTypes.has(parameter.fieldId),
   );
