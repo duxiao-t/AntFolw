@@ -9,7 +9,9 @@ import { OptionSourceDrawer } from './OptionSourceDrawer';
 import type { SourceSummary } from './optionSourceTypes';
 
 const useStyles = createStyles(({ token }) => ({
-  head: { display: 'flex', alignItems: 'center', gap: 8 },
+  head: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  // 状态徽标在窄屏下会被压成一字一行（"可使用"竖着排），钉住不换行。
+  status: { whiteSpace: 'nowrap' },
   name: { fontWeight: 500, color: 'var(--af-color-text)' },
   code: { color: 'var(--af-color-muted)', fontSize: 12 },
   meta: {
@@ -145,7 +147,9 @@ export default function OptionSources() {
                     <span className={styles.bar} aria-hidden />
                     <span className={styles.name}>{name}</span>
                     <Badge status={source.status === 'ACTIVE' ? 'success' : 'default'}
-                      text={source.status === 'ACTIVE' ? '可使用' : '已停用'} />
+                      text={<span className={styles.status}>
+                        {source.status === 'ACTIVE' ? '可使用' : '已停用'}
+                      </span>} />
                   </div>
                   <span className={styles.meta}>{source.code}</span>
                 </div>
