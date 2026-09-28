@@ -71,4 +71,37 @@ describe('form schema defaults', () => {
     const result = applySchemaDefaults(schema, {});
     expect(result.items).toBeUndefined();
   });
+
+  it('fills the current user/department for pickers that ask for it', () => {
+    expect(schemaDefaultValue(
+      { id: 'u', type: 'user_picker', props: { defaultToCurrent: true } },
+      { userId: 3, deptId: 7 },
+    )).toBe(3);
+    expect(schemaDefaultValue(
+      { id: 'd', type: 'dept_picker', props: { defaultToCurrent: true } },
+      { userId: 3, deptId: 7 },
+    )).toBe(7);
+    // 多选也只填一个（maxCount 至少是 1）。
+    expect(schemaDefaultValue(
+      { id: 'u', type: 'user_picker', props: { defaultToCurrent: true, multiple: true } },
+      { userId: 3 },
+    )).toEqual([3]);
+  });
+
+  it('does not invent a picker default when the caller has no id', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'u', type: 'user_picker', props: { defaultToCurrent: true } },
+      { id: 'd', type: 'dept_picker', props: { defaultToCurrent: true } },
+    ];
+    // 预览页（iframe 里没有登录态）传的就是 undefined；部门没配的人只有 userId。
+    expect(applySchemaDefaults(schema, {})).toEqual({});
+    expect(applySchemaDefaults(schema, {}, { userId: 3 })).toEqual({ u: 3 });
+  });
+
+  it('keeps an existing picker value instead of overwriting it', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'u', type: 'user_picker', props: { defaultToCurrent: true } },
+    ];
+    expect(applySchemaDefaults(schema, { u: 9 }, { userId: 3 })).toEqual({ u: 9 });
+  });
 });

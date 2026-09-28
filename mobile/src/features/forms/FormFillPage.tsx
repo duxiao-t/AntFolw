@@ -152,11 +152,12 @@ export function FormFillPage() {
         schemaVersion: formQuery.data.version,
         userId: user?.id ?? null,
       }),
+      { userId: user?.id, deptId: user?.deptId },
     );
     setValues(nextValues);
     setInitialValues(nextValues);
     setInitialized(true);
-  }, [code, initialDraftId, draftQuery.data, draftQuery.isPending, formQuery.data, reworkQuery.data, reworkQuery.isPending, reworkTaskId, user?.id]);
+  }, [code, initialDraftId, draftQuery.data, draftQuery.isPending, formQuery.data, reworkQuery.data, reworkQuery.isPending, reworkTaskId, user?.deptId, user?.id]);
 
   useEffect(() => {
     if (!user || !formQuery.data) {

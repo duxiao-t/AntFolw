@@ -84,7 +84,9 @@ public class WorkflowOutboxDispatcher {
                     locked_at = NULL, locked_by = NULL, last_error = left(?, 2000)
                 WHERE id = ? AND status = 'RUNNING' AND locked_by = ?
                 """, message, event.id(), workerId);
-            log.warn("Workflow outbox {} delivery failed: {}", event.id(), message);
+            // 把异常对象一起传给日志：NPE 这类没有 message 的错误只会留下一个 "NullPointerException"，
+            // 没堆栈就定位不到是哪个监听器抛的（这次排查只能靠翻库）。
+            log.warn("Workflow outbox {} delivery failed", event.id(), error);
         }
     }
 

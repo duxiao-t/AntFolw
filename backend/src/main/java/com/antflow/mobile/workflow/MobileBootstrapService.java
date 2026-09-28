@@ -36,7 +36,7 @@ public class MobileBootstrapService {
                 .or(cc -> cc.eq("status", "CC").isNull("read_at"))));
         return new MobileBootstrapDto(
             new MobileUserDto(user.getId(), user.getUsername(), user.getDisplayName(),
-                departmentName(user), user.getEmployeeNo(),
+                departmentName(user), user.getDeptId(), user.getEmployeeNo(),
                 List.copyOf(roles)),
             pendingCount.intValue() + Math.toIntExact(workflowMapper.countUnreadCc(userId)),
             draftService == null ? 0 : Math.toIntExact(draftService.count(userId)),

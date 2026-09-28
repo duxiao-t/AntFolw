@@ -18,11 +18,21 @@ export function formatDateTime(date: Date, format: string): string {
 
 /**
  * 计算字段在填报时的默认值：
+ * - 用户/部门选择勾选"默认填充当前用户/部门"时取当前登录人的 id；
  * - 日期组件勾选"默认当前时间"时取当前时间；
  * - 否则返回配置的自定义默认值字符串。
  */
-export function schemaDefaultValue(node: MobileSchemaNode): unknown {
+export function schemaDefaultValue(
+  node: MobileSchemaNode,
+  current?: { userId?: number; deptId?: number },
+): unknown {
   const props = node.props ?? {};
+  if (props.defaultToCurrent === true) {
+    const id = node.type === 'dept_picker' ? current?.deptId : current?.userId;
+    if (id == null) return undefined;
+    // 多选也只填一个：maxCount 至少是 1，不会越界。
+    return props.multiple === true ? [id] : id;
+  }
   if (props.defaultNow === true) {
     if (node.type === 'date') {
       const format = typeof props.format === 'string' && props.format
@@ -50,6 +60,7 @@ export function schemaDefaultValue(node: MobileSchemaNode): unknown {
 export function applySchemaDefaults(
   nodes: MobileSchemaNode[],
   values: MobileFormValues,
+  current?: { userId?: number; deptId?: number },
 ): MobileFormValues {
   const next: MobileFormValues = { ...values };
   const visit = (list: MobileSchemaNode[]) => {
@@ -57,10 +68,10 @@ export function applySchemaDefaults(
       if (node.type === 'table_list') {
         continue; // 明细表行内默认值由字段组件自己处理
       }
-      const current = next[node.id];
-      const isEmpty = current == null || current === '';
+      const currentValue = next[node.id];
+      const isEmpty = currentValue == null || currentValue === '';
       if (isEmpty) {
-        const def = schemaDefaultValue(node);
+        const def = schemaDefaultValue(node, current);
         if (def !== undefined && def !== '') {
           next[node.id] = def;
         }

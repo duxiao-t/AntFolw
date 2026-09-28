@@ -794,6 +794,14 @@ function renderComponentSettings(
               onChange={(value) => updateProps({ maxCount: value })}
             />
           </PanelField>
+          <Checkbox
+            checked={props.defaultToCurrent === true}
+            onChange={(event) =>
+              updateProps({ defaultToCurrent: event.target.checked })
+            }
+          >
+            默认填充当前用户
+          </Checkbox>
           <UserPickerScopeFields props={props} updateProps={updateProps} />
         </Space>
       );
@@ -823,6 +831,14 @@ function renderComponentSettings(
               onChange={(value) => updateProps({ rootDeptId: value })}
             />
           </PanelField>
+          <Checkbox
+            checked={props.defaultToCurrent === true}
+            onChange={(event) =>
+              updateProps({ defaultToCurrent: event.target.checked })
+            }
+          >
+            默认填充当前部门
+          </Checkbox>
           <Checkbox
             checked={props.selectableParent !== false}
             onChange={(event) =>

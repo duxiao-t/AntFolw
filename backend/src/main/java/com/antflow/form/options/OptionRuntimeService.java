@@ -48,7 +48,7 @@ public class OptionRuntimeService {
         JsonNode field = field(scope, request.fieldId());
         if (field == null) throw new HiddenResourceException("option field not found");
         JsonNode source = source(field, scope);
-        requireVersion(source, false);
+        requireVersion(field, source, false);
         List<String> path = request.path() == null ? List.of() : request.path();
         if (path.size() > 10 || path.stream().anyMatch(v -> v == null || v.length() > 500)) bad("分步路径无效");
         List<String> selected = request.selectedValues();
@@ -87,7 +87,7 @@ public class OptionRuntimeService {
             items.subList(from, Math.min(items.size(), from + size)), items.size(), page, size);
     }
 
-    public void validateBinding(JsonNode source) { requireVersion(source, true); }
+    public void validateBinding(JsonNode field, JsonNode source) { requireVersion(field, source, true); }
 
     public void validateValue(JsonNode field, Object value, Map<?, ?> values) {
         if (empty(value)) return;
@@ -95,7 +95,7 @@ public class OptionRuntimeService {
         // 未真正绑定（`{}`）时按静态选项处理，不该走到外部值校验——调用方也会用 isBound 过滤，
         // 这里是第二道，避免别的入口把 `{}` 送进来直接报 BAD_SCHEMA。
         if (!isBound(source)) return;
-        requireVersion(source, false);
+        requireVersion(field, source, false);
         boolean multiple = "multi_select".equals(field.path("type").asText());
         if (multiple != (value instanceof List<?>)) invalid("下拉值类型不正确");
         List<?> selected = value instanceof List<?> list ? list : List.of(value);
@@ -175,7 +175,7 @@ public class OptionRuntimeService {
             if ("table_list".equals(node.path("type").asText())) validateSchema(node.path("children"));
             if (!dynamic(node)) continue;
             JsonNode source = source(node, scope);
-            requireVersion(source, true);
+            requireVersion(node, source, true);
             validateChain(node, scope, new LinkedHashSet<>());
             Map<String, String> labels = new LinkedHashMap<>();
             for (Map<String, String> row : rows(source, Map.of())) {
@@ -211,7 +211,7 @@ public class OptionRuntimeService {
             }
             if (!isBound(node.path("props").path("optionSource")) || empty(value)) continue;
             JsonNode source = source(node, scope);
-            requireVersion(source, false);
+            requireVersion(node, source, false);
             boolean multiple = "multi_select".equals(node.path("type").asText());
             if (multiple != (value instanceof List<?>)) invalid("下拉值类型不正确");
             List<?> selected = value instanceof List<?> list ? list : List.of(value);
@@ -258,7 +258,10 @@ public class OptionRuntimeService {
         return source;
     }
 
-    private void requireVersion(JsonNode source, boolean forBinding) {
+    private void requireVersion(JsonNode field, JsonNode source, boolean forBinding) {
+        // 报错必须带上**宿主的字段标题**：一张表可能有十几个下拉绑着不同数据源，只报
+        // "数据源版本不存在"维护人得挨个点开找（表单里看到的是标题，不是 sourceId）。
+        String subject = "字段「" + fieldLabel(field) + "」绑定的数据源版本";
         if (!source.path("sourceId").isIntegralNumber() || source.path("sourceId").asLong() <= 0
             || !source.path("versionId").isIntegralNumber() || source.path("versionId").asLong() <= 0) bad("数据源和版本不能为空");
         // forBinding 时额外拒绝"已停用（下架）"的版本：否则维护人直接提交带该 versionId 的 schema
@@ -276,9 +279,9 @@ public class OptionRuntimeService {
                 ? " AND s.status = 'ACTIVE' AND v.disabled_at IS NULL FOR SHARE OF s"
                 : ""),
             rs -> rs.next() ? parse(rs.getString(1)) : null, source.path("sourceId").asLong(), source.path("versionId").asLong());
-        if (columns == null) bad("数据源版本不存在、未发布或不可绑定");
+        if (columns == null) bad(subject + "不存在、未发布或不可绑定");
         Set<String> allowed = new LinkedHashSet<>(); columns.forEach(c -> allowed.add(c.asText()));
-        for (String column : requiredColumns(source)) if (column.isBlank() || !allowed.contains(column)) bad("选项列映射不存在：" + column);
+        for (String column : requiredColumns(source)) if (column.isBlank() || !allowed.contains(column)) bad(subject + "缺少选项列映射：" + column);
         depth(source.path("cascade"));
         if (forBinding && !PrincipalHolder.current().orElseThrow().isAdmin()) {
             Long count = jdbc.queryForObject("""
@@ -289,6 +292,12 @@ public class OptionRuntimeService {
                 """, Long.class, source.path("sourceId").asLong(), authorization.currentUserId(), authorization.currentUserId());
             if (count == null || count == 0) throw new HiddenResourceException("option source not found");
         }
+    }
+
+    /** 字段标题，空则退回字段 id（同 {@code FormDefinitionService} 里 required 报错的取法）。 */
+    private static String fieldLabel(JsonNode field) {
+        if (field == null) return "";
+        return field.path("label").asText(field.path("id").asText(""));
     }
 
     private Set<String> requiredColumns(JsonNode source) {

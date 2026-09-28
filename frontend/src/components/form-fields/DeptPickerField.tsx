@@ -1,8 +1,10 @@
 import { TreeSelect } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import { request } from '@umijs/max';
-import { useState } from 'react';
+import { request, useModel } from '@umijs/max';
+import { useEffect, useState } from 'react';
+import { isEmptyValue } from '../../registry/displayConditions';
 import type { FieldType } from '../../registry/types';
+import { currentPickerDefault } from './pickerDefaults';
 
 export const DeptPickerField: FieldType = {
   type: 'dept_picker',
@@ -50,6 +52,21 @@ export const DeptPickerField: FieldType = {
         .map((r) => toTreeNode(r, rows));
 
     const treeData = toTree(data ?? []);
+    // 同 UserPickerField：默认值是**写进表单的值**，不是显示兜底（见 pickerDefaults 注释）。
+    const currentUser = useModel('@@initialState')?.initialState?.currentUser as
+      | { id?: number; departmentId?: number }
+      | undefined;
+    const defaultValue = currentPickerDefault(node, currentUser);
+    useEffect(() => {
+      if (
+        mode !== 'runtime-fill' ||
+        defaultValue === undefined ||
+        !isEmptyValue(value)
+      ) {
+        return;
+      }
+      onChange?.(defaultValue);
+    }, [mode, defaultValue, value, onChange]);
 
     return (
       <div data-field-id={node.id}>

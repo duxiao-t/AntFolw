@@ -940,7 +940,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
             long badForm = insertForm("DRAFT", boundOptionSchema(sourceId, retired));
             assertThatThrownBy(() -> formDefinitionService.publish(badForm))
                 .isInstanceOf(BizException.class)
-                .hasMessageContaining("不可绑定");
+                .hasMessageContaining("不可绑定")
+                // 还要点名是**哪个字段**：一张表可能有十几个下拉绑着不同数据源，
+                // 只说"数据源版本不存在"维护人得挨个点开猜（字段标题才是他在表单上看到的东西）。
+                .hasMessageContaining("字段「Dept」绑定的数据源版本不存在、未发布或不可绑定");
 
             // 未停用的版本照常可绑定——别把这道闸做成"一律拒绝"。
             long okForm = insertForm("DRAFT", boundOptionSchema(sourceId, usable));
