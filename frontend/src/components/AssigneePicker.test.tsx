@@ -39,4 +39,26 @@ describe('AssigneePicker', () => {
     }));
     expect(screen.getAllByText('审计角色 (AUDIT)').length).toBeGreaterThan(0);
   });
+
+  it('用户候选用显示名 + 工号，不依赖已不再下发的登录账号', async () => {
+    request.mockImplementation((url: string) => {
+      if (url === '/api/pickers/users/selected') return Promise.resolve([
+        { id: 7, displayName: '张三', employeeNo: '000007', department: '研发部' },
+      ]);
+      // 列表端点返回的是窄 DTO：只有 id/displayName/department/employeeNo，没有 username
+      if (url === '/api/pickers/users') return Promise.resolve([
+        { id: 8, displayName: '李四', employeeNo: '000008', department: '财务部' },
+      ]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <AssigneePicker mode="user" value={[7]} onChange={vi.fn()} />
+    </QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getAllByText('张三 (000007) · 研发部').length)
+      .toBeGreaterThan(0));
+    expect(await screen.findByText('李四 (000008) · 财务部')).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+  });
 });

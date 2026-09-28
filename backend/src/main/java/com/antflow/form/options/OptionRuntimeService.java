@@ -119,17 +119,24 @@ public class OptionRuntimeService {
      * "只影响新绑定，已经绑着它的表单不受影响"（同 bindable 里第二条 EXISTS、前端 OptionSources
      * 的提示文案）。拿全量去卡，会让"引用被撤销但字段仍绑定"的表单再也保存/发布不了。
      *
+     * <p>差集的单位是**「字段 + 数据源」这个绑定对**，不是单独的数据源 id：表单原本只有字段 A 绑
+     * 着 S、S 的引用又被撤销时，若只比 sourceId 集合，新加字段 B 也绑 S 会被当成"旧绑定"放行。
+     *
      * @param previousSchemaJson 这张表单**改动前**的 schema（新建表单传 null）
      * @param newSchemaJson      本次要写入的 schema
      */
     public void requireNewBindingsAreReferenced(long formId, String previousSchemaJson,
                                                 String newSchemaJson) {
-        Set<Long> before = new LinkedHashSet<>();
-        collectBoundSources(parse(previousSchemaJson), before);
-        Set<Long> after = new LinkedHashSet<>();
-        collectBoundSources(parse(newSchemaJson), after);
+        Set<String> before = new LinkedHashSet<>();
+        collectBoundPairs(parse(previousSchemaJson), before);
+        Set<String> after = new LinkedHashSet<>();
+        collectBoundPairs(parse(newSchemaJson), after);
         after.removeAll(before);
-        for (Long sourceId : after) {
+        Set<Long> required = new LinkedHashSet<>();
+        for (String pair : after) {
+            required.add(Long.parseLong(pair.substring(pair.indexOf('\u0000') + 1)));
+        }
+        for (Long sourceId : required) {
             Boolean referenced = jdbc.queryForObject("""
                 SELECT EXISTS (SELECT 1 FROM t_form_option_source
                                WHERE form_def_id = ? AND source_id = ?)
@@ -142,15 +149,20 @@ public class OptionRuntimeService {
         }
     }
 
-    /** 收集 schema 里所有已绑定的数据源 id（含 span_layout 与 table_list 内部）。 */
-    private void collectBoundSources(JsonNode schema, Set<Long> target) {
+    /**
+     * 收集 schema 里所有已绑定的**绑定对**（`字段 id + \0 + sourceId`，含 span_layout 与
+     * table_list 内部的字段）。用字段 id 而不是只记 sourceId，才能区分"同一个源被绑到新字段上"。
+     */
+    private void collectBoundPairs(JsonNode schema, Set<String> target) {
         if (schema == null || !schema.isArray()) return;
         for (JsonNode node : flatten(schema)) {
             if ("table_list".equals(node.path("type").asText())) {
-                collectBoundSources(node.path("children"), target);
+                collectBoundPairs(node.path("children"), target);
             }
             JsonNode source = node.path("props").path("optionSource");
-            if (isBound(source)) target.add(source.path("sourceId").asLong());
+            if (isBound(source)) {
+                target.add(node.path("id").asText() + '\u0000' + source.path("sourceId").asLong());
+            }
         }
     }
 

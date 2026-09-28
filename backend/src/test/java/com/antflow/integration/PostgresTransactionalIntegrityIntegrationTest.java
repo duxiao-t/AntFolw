@@ -1064,6 +1064,19 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 null, jsonFor(boundOptionSchema(sourceA, versionA)), null, adminId))
                 .doesNotThrowAnyException();
 
+            // 但"同一个源被绑到**新字段**上"必须拦住：只比 sourceId 集合的话，(A, S) 在旧新集合里
+            // 都有，新增的 (新字段, S) 会被当成旧绑定放行——差集得按「字段 + 源」这个绑定对算。
+            String copiedToNewField = "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\","
+                + "\"props\":{\"optionSource\":{\"sourceId\":" + sourceA + ",\"versionId\":" + versionA
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}},"
+                + "{\"id\":\"dept2\",\"type\":\"select\",\"label\":\"Dept2\",\"props\":{\"optionSource\":"
+                + "{\"sourceId\":" + sourceA + ",\"versionId\":" + versionA
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}]";
+            assertThatThrownBy(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(copiedToNewField), null, adminId))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("可引用表单");
+
             // 新增一条绑定到同样没有被引用的 B → 拒绝
             String both = "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
                 + "{\"optionSource\":{\"sourceId\":" + sourceB + ",\"versionId\":" + versionB

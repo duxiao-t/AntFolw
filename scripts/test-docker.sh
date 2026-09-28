@@ -201,7 +201,12 @@ start() {
   build_artifacts
   compose up -d --build
   # 对外地址与 compose.test.yaml 的端口绑定同源，默认回环（原来写死 10.0.0.250）。
-  local test_host="${ANTFLOW_TEST_HOST:-127.0.0.1}"
+  # 注意取值优先级必须和 Compose 一致：compose() 带 --env-file "$TEST_ENV"，所以 .env.test 里的
+  # ANTFLOW_TEST_HOST 对 Compose 是生效的；只读 shell 变量的话，端口绑在 A、健康检查敲 B，
+  # 一个健康的栈会被判成起不来。
+  local test_host
+  test_host=$(sed -n 's/^ANTFLOW_TEST_HOST=//p' "$TEST_ENV" | tail -n 1 | tr -d '\r')
+  test_host="${ANTFLOW_TEST_HOST:-${test_host:-127.0.0.1}}"
   for _ in $(seq 1 90); do
     if curl --fail --silent --show-error "http://${test_host}:17070/actuator/health" >/dev/null; then
       echo "Isolated test environment: http://${test_host}:17070"

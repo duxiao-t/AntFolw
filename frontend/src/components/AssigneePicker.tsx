@@ -28,8 +28,12 @@ export function AssigneePicker({ mode, value, onChange }: {
   });
   const options = [...(selected ?? []), ...(data ?? [])].map((x: any) => ({
     value: x.id as number,
+    // 列表端点不再下发登录账号（见 DECISIONS 的 picker-list-narrow-dto），所以姓名后面跟工号
+    // 消歧，而不是账号——否则会渲染成"张三 (undefined)"。已选端点仍是完整 DTO，两种形状都有
+    // displayName / employeeNo / department。
     label: mode === 'role' ? `${x.name ?? x.code} (${x.code})`
-      : `${x.displayName ?? x.username} (${x.username})${x.department ? ` · ${x.department}` : ''}`,
+      : `${x.displayName ?? `#${x.id}`}${x.employeeNo ? ` (${x.employeeNo})` : ''}`
+        + `${x.department ? ` · ${x.department}` : ''}`,
   }));
   return (
     <Select
@@ -40,7 +44,7 @@ export function AssigneePicker({ mode, value, onChange }: {
       onSearch={setKw}
       onChange={onChange}
       maxTagCount={3}
-      placeholder={mode === 'user' ? '搜索姓名、账号或部门' : '搜索角色名称或编码'}
+      placeholder={mode === 'user' ? '搜索姓名或部门' : '搜索角色名称或编码'}
       filterOption={false}
       notFoundContent={isFetching ? <Spin size="small" /> : '没有匹配项'}
       options={Array.from(new Map(options.map((option) => [option.value, option])).values())}
