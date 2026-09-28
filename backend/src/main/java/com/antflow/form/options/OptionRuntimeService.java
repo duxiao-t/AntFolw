@@ -347,11 +347,21 @@ public class OptionRuntimeService {
             return context.schema();
         }
         authorization.requireReadableFormData(request.dataId());
+        // 版本口径必须和 instanceId 路径一致：那张表优先用实例的"当前修订版"，
+        // 只在没有修订版时才退回该行的 form_def_version。否则表单修订升级后，同一条记录
+        // 从两个入口会解析出不同的字段与数据源版本（选项显示/查询结果对不上）。
+        // 这条 LEFT JOIN + ORDER BY 在有实例时取最新实例、没有实例时 i.* 为 null 自动兜底。
         JsonNode schema = jdbc.query("""
-            SELECT COALESCE(v.schema, f.schema)::text FROM t_form_data d
+            SELECT COALESCE(v.schema, legacy.schema, f.schema)::text
+            FROM t_form_data d
             JOIN t_form_definition f ON f.id = d.form_def_id
-            LEFT JOIN t_form_definition_version v ON v.form_definition_id = d.form_def_id AND v.version_no = d.form_def_version
+            LEFT JOIN t_process_instance i ON i.form_data_id = d.id
+            LEFT JOIN t_form_data_revision r ON r.id = i.current_form_revision_id
+            LEFT JOIN t_form_definition_version v ON v.id = r.form_definition_version_id
+            LEFT JOIN t_form_definition_version legacy
+              ON legacy.form_definition_id = d.form_def_id AND legacy.version_no = d.form_def_version
             WHERE d.id = ?
+            ORDER BY i.id DESC NULLS LAST LIMIT 1
             """, rs -> rs.next() ? parse(rs.getString(1)) : null, request.dataId());
         if (schema == null) throw new HiddenResourceException("form data not found");
         // 这条填报记录如果属于某个实例，就必须按实例那套可见性判——否则可以拿 dataId
