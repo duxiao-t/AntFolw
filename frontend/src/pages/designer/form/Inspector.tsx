@@ -447,7 +447,8 @@ export function Inspector({ formId }: { formId?: number }) {
           },
           ...(['select', 'multi_select', 'text', 'textarea', 'number'].includes(node.type) ? [{
             key: 'option-source', label: '外部数据与联动',
-            children: <OptionSourceSettings key={node.id} formId={formId} node={node} schema={schema} update={updateProps} />,
+            children: <OptionSourceSettings key={node.id} formId={formId} node={node} schema={schema}
+              update={updateProps} updateNode={updateNode} />,
           }] : []),
           ...(isSelect
             ? [
