@@ -1,8 +1,10 @@
 import { Select, Spin } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import { request } from '@umijs/max';
-import { useState } from 'react';
+import { request, useModel } from '@umijs/max';
+import { useEffect, useState } from 'react';
+import { isEmptyValue } from '../../registry/displayConditions';
 import type { FieldType } from '../../registry/types';
+import { currentPickerDefault } from './pickerDefaults';
 
 export const UserPickerField: FieldType = {
   type: 'user_picker',
@@ -26,7 +28,9 @@ export const UserPickerField: FieldType = {
       // 职务口径（含「部长」）留在服务端，前端只说明是哪个预设。
       scopeParams.leaderOnly = true;
     } else if (scopeType === 'user' && node.props?.scopeUserIds?.length) {
-      scopeParams.userIds = node.props.scopeUserIds;
+      // 逗号串而不是数组：axios 会把数组序列化成 `userIds[]=3`，裸方括号会被 Tomcat 按
+      // RFC 7230 拒掉 → 请求还没进 Spring 就 400（移动端 files.api.ts 早就是 join(',') 的写法）。
+      scopeParams.userIds = node.props.scopeUserIds.join(',');
     }
     const scopeKey = JSON.stringify(scopeParams);
     const { data, isFetching } = useQuery({
@@ -37,6 +41,22 @@ export const UserPickerField: FieldType = {
         request<any[]>('/api/pickers/users', { params: { keyword: kw, ...scopeParams } }),
     });
     const multi = !!node.props?.multiple;
+    // 「默认填充当前用户」= 真的把值写进表单（不是只做个显示兜底），否则用户不改它、
+    // 直接提交时这个字段是空的。只在运行态、且字段还空着时写一次。
+    const currentUser = useModel('@@initialState')?.initialState?.currentUser as
+      | { id?: number; departmentId?: number }
+      | undefined;
+    const defaultValue = currentPickerDefault(node, currentUser);
+    useEffect(() => {
+      if (
+        mode !== 'runtime-fill' ||
+        defaultValue === undefined ||
+        !isEmptyValue(value)
+      ) {
+        return;
+      }
+      onChange?.(defaultValue);
+    }, [mode, defaultValue, value, onChange]);
     return (
       <div data-field-id={node.id}>
         <div style={{ display: 'block', marginBottom: 4 }}>
@@ -51,8 +71,14 @@ export const UserPickerField: FieldType = {
           onSearch={setKw}
           onChange={(v) => onChange?.(v)}
           filterOption={false}
-          // 列表端点不再下发登录账号（那是唯一能被关键字枚举的入口），所以没有 username 可退。
-          options={(data ?? []).map((u: any) => ({ value: u.id, label: u.displayName ?? `#${u.id}` }))}
+          // 列表端点不再下发登录账号（那是唯一能被关键字枚举的入口），所以没有 username 可退，
+          // 用**工号**补区分度：同名的两个人（张三 / 张三）只看姓名分不出来。
+          options={(data ?? []).map((u: any) => ({
+            value: u.id,
+            label: u.employeeNo
+              ? `${u.displayName ?? `#${u.id}`}(${u.employeeNo})`
+              : (u.displayName ?? `#${u.id}`),
+          }))}
           notFoundContent={isFetching ? <Spin size="small" /> : '无匹配用户'}
           placeholder={node.props?.placeholder}
           maxCount={node.props?.maxCount}

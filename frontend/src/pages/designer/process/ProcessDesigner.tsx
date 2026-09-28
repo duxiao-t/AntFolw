@@ -116,9 +116,16 @@ export function ProcessDesignerSurface({
       request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
     enabled: !!formDefId,
   });
-  const formFields = useMemo(
-    () => flattenFormFields(parseJsonValue<any[]>(formDef?.schema, [])),
+  const formSchema = useMemo(
+    () => parseJsonValue<any[]>(formDef?.schema, []),
     [formDef?.schema],
+  );
+  const formFields = useMemo(() => flattenFormFields(formSchema), [formSchema]);
+  // 条件里那些绑了外部数据源的字段，候选取自服务端；设计器的 schema 还没保存，
+  // 所以带上 formId + 当前 schema 走 preview 端点（同手机预览）。
+  const optionPreview = useMemo(
+    () => ({ formId: formDef?.id, schema: formSchema }),
+    [formDef?.id, formSchema],
   );
   const conditionFormFields = formFields.filter((field) => !['audio_upload', 'location'].includes(field.type));
   useEffect(() => {
@@ -247,7 +254,11 @@ export function ProcessDesignerSurface({
           <CcNodeConfig node={selected} formFields={formFields} />
         )}
         {selected?.type === 'CONDITION' && (
-          <ConditionNodeConfig node={selected} formFields={conditionFormFields} />
+          <ConditionNodeConfig
+            node={selected}
+            formFields={conditionFormFields}
+            optionPreview={optionPreview}
+          />
         )}
         {selected?.type === 'PARALLEL' && (
           <ParallelNodeConfig node={selected} />

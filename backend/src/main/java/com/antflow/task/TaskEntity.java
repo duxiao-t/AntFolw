@@ -8,6 +8,11 @@ import lombok.Data;
 public class TaskEntity {
     @TableId(type = IdType.AUTO) private Long id;
     private Long procInstId;
+    /**
+     * 展示用节点名（非表字段）：`node_id` 是内部标识（`node_adurTht3` 这种），直接渲染给用户
+     * 没法看。由 TaskController 按实例快照批量填好，`__rework__` 这类哨兵也会变成中文。
+     */
+    @TableField(exist = false) private String nodeName;
     /** V2 node activation. Null means a legacy V1 task. */
     private Long nodeInstanceId;
     private String nodeId;

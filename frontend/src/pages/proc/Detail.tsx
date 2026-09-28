@@ -21,7 +21,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CAPABILITY, hasCapability } from '../../authz';
 import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
 import {
@@ -177,16 +177,36 @@ export default function DetailPage() {
       currentUserId != null &&
       t.assigneeId === currentUserId,
   );
+  // 编辑框初值：(1) 换任务时一定重置；(2) 同一个任务下服务端数据变了、而用户还没动过手时跟随更新。
+  // 原实现只依赖 `myPending?.id`，详情重新拉取（窗口焦点就会触发）后 effect 不跑，editableValues
+  // 一直留着旧值 —— 用户拿着陈旧数据点"同意"，会把旧值当编辑结果提交回去。
+  // 用户已经改过就不动它，避免把人正在填的内容冲掉。
+  const editableBaselineRef = useRef<{ taskId?: number; data: Record<string, any> }>({ data: {} });
   useEffect(() => {
-    if (myPending) {
+    if (!myPending) return;
+    const sameTask = editableBaselineRef.current.taskId === myPending.id;
+    const untouched =
+      JSON.stringify(editableValues) === JSON.stringify(editableBaselineRef.current.data);
+    if (!sameTask || untouched) {
       setEditableValues(initialFormData);
+      editableBaselineRef.current = { taskId: myPending.id, data: initialFormData };
     }
-    // 每个待办任务只初始化一次，重新拉取详情后字段值以服务端为准。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myPending?.id]);
+  }, [myPending?.id, initialFormData, editableValues]);
   const currentFormModes = useMemo(() => {
     const modes: Record<string, FieldMode> = {};
-    if (!snapshotObj || !myPending) return modes;
+    if (!snapshotObj) return modes;
+    // 发起人视角：ROOT 的 props.formPerms 就是「制单人字段权限」。制单人在 ROOT 没有待办任务，
+    // 只按待办节点取会得到空集 → ROOT 配的 HIDDEN 在详情里形同虚设（返工/待修改期间也一样，
+    // 待办任务本身被 taskType === 'REWORK' 过滤掉了）。文案/口径与后端 starterFieldModes 一致。
+    // 注意发起人视角**保持只读**：ROOT 的 EDITABLE 不是"当前可编辑"，别让它冒出编辑控件。
+    const starter = currentUserId != null
+      && (data as any)?.instance?.startedBy === currentUserId;
+    if (starter) {
+      for (const entry of snapshotObj.props?.formPerms ?? []) {
+        modes[entry.fieldId] = entry.mode === 'HIDDEN' ? 'hidden' : 'readonly';
+      }
+    }
+    if (!myPending) return modes;
     const node = findNodeById(snapshotObj, myPending.nodeId);
     for (const entry of node?.props?.formPerms ?? []) {
       if (entry.mode === 'HIDDEN') modes[entry.fieldId] = 'hidden';
@@ -194,7 +214,7 @@ export default function DetailPage() {
       else modes[entry.fieldId] = 'readonly';
     }
     return modes;
-  }, [snapshotObj, myPending]);
+  }, [snapshotObj, myPending, currentUserId, data]);
   const hasEditableFields = Object.values(currentFormModes).includes('runtime-fill');
   const presetTaskId = approveOpen ? myPending?.id : rejectFor?.taskId;
   const presetsQuery = useQuery({

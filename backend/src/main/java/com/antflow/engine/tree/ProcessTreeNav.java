@@ -26,6 +26,47 @@ public final class ProcessTreeNav {
         return (c == null || c.isNull() || !c.has("id")) ? null : c;
     }
 
+    /** 驳回待改的哨兵：`t_process_instance.current_node_id` 用它表示"等发起人改单"，不是真节点。 */
+    public static final String REWORK_NODE_ID = "__rework__";
+
+    /**
+     * 节点显示名：`props.name` → `props.title` → `name` → 节点 id。
+     * 展示节点时一律走这里，别把内部 id（`node_adurTht3` 这种）直接渲染给用户。
+     */
+    public static String displayName(JsonNode node) {
+        if (node == null) return null;
+        String name = node.path("props").path("name").asText(null);
+        if (name == null || name.isBlank()) name = node.path("props").path("title").asText(null);
+        if (name == null || name.isBlank()) name = node.path("name").asText(null);
+        return name == null || name.isBlank() ? node.path("id").asText() : name;
+    }
+
+    /**
+     * 从实例冻结的流程快照（JSONB 文本）解析节点显示名；快照缺失或解析失败时回退 id。
+     * 列表类接口只该取一次快照、逐行调这个，而不是每行查一次库。
+     */
+    public static String displayNameFromSnapshot(String snapshotJson, String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) return null;
+        if (snapshotJson == null || snapshotJson.isBlank()) return nodeId;
+        try {
+            return displayName(SNAPSHOT_JSON.readTree(snapshotJson), nodeId);
+        } catch (Exception ignored) {
+            return nodeId;
+        }
+    }
+
+    /** 只用于读快照：ObjectMapper 的读取是线程安全的，复用同一个实例。 */
+    private static final com.fasterxml.jackson.databind.ObjectMapper SNAPSHOT_JSON =
+        new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** 按 id 取节点显示名；找不到节点时回退 id。哨兵给专门的中文文案。 */
+    public static String displayName(JsonNode root, String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) return null;
+        if (REWORK_NODE_ID.equals(nodeId)) return "待修改原单";
+        JsonNode node = findById(root, nodeId);
+        return node == null ? nodeId : displayName(node);
+    }
+
     /** 在整棵树内按 id 查找节点（深度优先，含 branchs）。找不到返回 null。 */
     public static JsonNode findById(JsonNode node, String id) {
         if (node == null || node.isNull() || !node.has("id")) return null;

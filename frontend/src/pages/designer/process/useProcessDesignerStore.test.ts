@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { TreeNode } from './types';
 import { useProcessDesignerStore } from './useProcessDesignerStore';
-import { validateProcessTree } from './validation';
+import { flattenFormFields, validateProcessTree } from './validation';
 
 function reset(tree?: TreeNode) {
   useProcessDesignerStore.getState().load(
@@ -338,6 +338,94 @@ describe('process designer validation', () => {
       message: '请完整配置分支条件',
     });
     expect(validateProcessTree(branch(['BJ', 'SH']))).toEqual([]);
+  });
+
+  it('treats a null condition value as not configured', () => {
+    // 以前用 String(value).trim() 判空，null 会变成 'null' 混过去：条件看着配好了、
+    // 其实没有值可比。发布时必须在"请完整配置分支条件"上拦住。
+    const tree: TreeNode = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'conditions',
+        type: 'CONDITIONS',
+        branchs: [
+          {
+            id: 'matched',
+            type: 'CONDITION',
+            props: {
+              groups: [
+                {
+                  groupType: 'AND',
+                  conditions: [
+                    { id: 'rule', field: 'city', operator: '==', value: null },
+                  ],
+                },
+              ],
+            },
+            children: { id: 'approval', type: 'APPROVAL', props: { assignedType: 'SELF' } },
+          },
+          { id: 'default', type: 'CONDITION', props: { isDefault: true } },
+        ],
+      },
+    };
+
+    expect(validateProcessTree(tree as TreeNode)).toContainEqual({
+      nodeId: 'matched',
+      message: '请完整配置分支条件',
+    });
+  });
+
+  it('reports dirty groups/headers/parameters instead of crashing', () => {
+    // 导入的脏流程（字段不是数组）不该让整页校验抛异常——那样连其它问题都报不出来。
+    const tree = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'conditions',
+        type: 'CONDITIONS',
+        branchs: [
+          {
+            id: 'matched',
+            type: 'CONDITION',
+            props: { groups: 'oops' },
+            children: { id: 'approval', type: 'APPROVAL', props: { assignedType: 'SELF' } },
+          },
+          { id: 'default', type: 'CONDITION', props: { isDefault: true } },
+        ],
+      },
+    } as unknown as TreeNode;
+    expect(() => validateProcessTree(tree)).not.toThrow();
+    expect(validateProcessTree(tree)).toContainEqual({
+      nodeId: 'matched',
+      message: '请完整配置分支条件',
+    });
+
+    const webhook = {
+      id: 'root',
+      type: 'ROOT',
+      children: {
+        id: 'trigger',
+        type: 'TRIGGER',
+        props: { url: 'https://example.com/hook', method: 'POST', headers: 'oops', parameters: {} },
+        children: null,
+      },
+    } as unknown as TreeNode;
+    expect(() => validateProcessTree(webhook)).not.toThrow();
+  });
+
+  it('keeps fields inside a container that has no id', () => {
+    // 容器缺 id（脏导入）时子字段不能被静默丢掉：丢掉之后流程里引用它们的节点会变成"字段已删除"。
+    const fields = flattenFormFields([
+      {
+        type: 'span_layout',
+        children: [{ id: 'subject', type: 'text', label: '标题' }],
+      },
+      { type: 'table_list', children: [{ id: 'rows', type: 'user_picker', label: '明细人员' }] },
+    ]);
+
+    expect(fields.map((field) => field.id)).toEqual(['subject', 'rows']);
+    expect(fields[0].optionSource).toBeUndefined();
   });
 
   it('allows async nodes in parallel branches', () => {

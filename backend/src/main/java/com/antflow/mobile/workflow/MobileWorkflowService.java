@@ -678,26 +678,13 @@ public class MobileWorkflowService {
         return collectRejectTargets(node.get("children"), currentNodeId, targets);
     }
 
+    /** 节点显示名统一走 {@link ProcessTreeNav}：桌面/移动/监控同一套口径（含 `__rework__` 哨兵）。 */
     private String nodeName(JsonNode root, String nodeId) {
-        if (nodeId == null || nodeId.isBlank()) {
-            return null;
-        }
-        if ("__rework__".equals(nodeId)) {
-            return "待修改原单";
-        }
-        JsonNode node = ProcessTreeNav.findById(root, nodeId);
-        return node == null ? nodeId : nodeName(node);
+        return ProcessTreeNav.displayName(root, nodeId);
     }
 
     private static String nodeName(JsonNode node) {
-        String name = node.path("props").path("name").asText(null);
-        if (name == null || name.isBlank()) {
-            name = node.path("props").path("title").asText(null);
-        }
-        if (name == null || name.isBlank()) {
-            name = node.path("name").asText(null);
-        }
-        return name == null || name.isBlank() ? node.path("id").asText() : name;
+        return ProcessTreeNav.displayName(node);
     }
 
     private JsonNode readJsonObject(String value, String code) {

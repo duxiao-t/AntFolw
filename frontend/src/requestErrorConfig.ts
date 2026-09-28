@@ -4,6 +4,24 @@ import { message, notification } from 'antd';
 
 const TOKEN_KEY = 'antflow-token';
 
+/**
+ * 认证类接口自己处理失败（登录页会提示"账号或密码错误"）：它们的 401 是"凭据不对"，
+ * 不是"会话失效"，既不该清 token，也不该把人踢回登录页。
+ */
+export function isAuthEndpoint(url: string | undefined): boolean {
+  return String(url ?? '').includes('/api/auth/');
+}
+
+/** 已经在登录页时不要再赋值跳转 —— 同值赋值会让浏览器整页重载（提示一闪而过、redirect 丢失）。 */
+export function isLoginPage(pathname: string): boolean {
+  return pathname.startsWith('/user/login');
+}
+
+function redirectToLogin(): void {
+  if (typeof window === 'undefined' || isLoginPage(window.location.pathname)) return;
+  window.location.href = '/user/login';
+}
+
 // 错误处理方案： 错误类型
 enum ErrorShowType {
   SILENT = 0,
@@ -66,7 +84,7 @@ export const errorConfig: RequestConfig = {
               });
               break;
             case ErrorShowType.REDIRECT:
-              window.location.href = '/user/login';
+              redirectToLogin();
               break;
             default:
               message.error(errorMessage);
@@ -76,9 +94,12 @@ export const errorConfig: RequestConfig = {
         // Axios 的错误 — 请求成功发出且服务器也响应了状态码，但状态代码超出了 2xx 的范围
         const status = error.response.status;
         if (status === 401) {
+          // 认证接口的 401（密码错、refresh 失败）不是会话失效：交给调用方提示，
+          // 别清 token，也别在登录页上再跳一次（同值赋值会整页重载）。
+          if (isAuthEndpoint(opts?.url)) return;
           // Token 失效或缺失 — 清缓存并跳登录。
           localStorage.removeItem(TOKEN_KEY);
-          window.location.href = '/user/login';
+          redirectToLogin();
           return;
         }
         if (status === 403) {
@@ -141,11 +162,13 @@ export const errorConfig: RequestConfig = {
   responseInterceptors: [
     (response) => {
       // 401: redirect to login and clear token (handled also in errorHandler for axios errors)
+      // 注意 `skipErrorHandler` 管不到拦截器，所以这里要独立判断：认证接口不清 token，
+      // 且已经在登录页时不再赋值跳转（同值赋值会整页重载，登录失败的提示会一闪而过）。
       try {
         const status = (response as any).status;
-        if (status === 401) {
+        if (status === 401 && !isAuthEndpoint((response as any).config?.url)) {
           localStorage.removeItem(TOKEN_KEY);
-          window.location.href = '/user/login';
+          redirectToLogin();
         }
       } catch {
         /* ignore */

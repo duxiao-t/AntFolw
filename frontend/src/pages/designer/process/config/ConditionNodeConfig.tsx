@@ -5,14 +5,17 @@ import {
   type ConditionProps,
   ConditionRulesEditor,
   type FieldDef,
+  type OptionPreviewContext,
 } from './ConditionRulesEditor';
 
 export function ConditionNodeConfig({
   node,
   formFields,
+  optionPreview,
 }: {
   node: TreeNode;
   formFields: FieldDef[];
+  optionPreview?: OptionPreviewContext;
 }) {
   const updateProps = useProcessDesignerStore((state) => state.updateProps);
   const updateName = useProcessDesignerStore((state) => state.updateName);
@@ -43,6 +46,7 @@ export function ConditionNodeConfig({
       <ConditionRulesEditor
         props={props}
         formFields={formFields}
+        optionPreview={optionPreview}
         onChange={(next) => updateProps(node.id, next)}
       />
     </Form>

@@ -72,6 +72,15 @@ export type FormFieldOption = {
   required?: boolean;
   inTable?: boolean;
   defaultValue?: unknown;
+  /** 字段绑定的外部数据源（`props.optionSource`）。绑了就不看内置 options，候选要问服务端。 */
+  optionSource?: {
+    sourceId?: unknown;
+    versionId?: unknown;
+    valueColumn?: unknown;
+    labelColumn?: unknown;
+    cascade?: unknown;
+    dependency?: unknown;
+  };
   options?: Array<{
     label: string;
     value: string | number;

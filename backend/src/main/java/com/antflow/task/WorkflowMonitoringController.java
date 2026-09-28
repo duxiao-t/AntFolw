@@ -41,7 +41,8 @@ public class WorkflowMonitoringController {
         ScopeSql outboxScope = instanceScope("instance");
 
         List<Map<String, Object>> stuck = jdbc.queryForList("""
-            SELECT instance.id, instance.current_node_id, instance.started_at
+            SELECT instance.id, instance.current_node_id, instance.started_at,
+                   instance.process_snapshot::text AS process_snapshot
             FROM t_process_instance instance
             WHERE instance.status = 'RUNNING'
               AND NOT EXISTS (SELECT 1 FROM t_task task
@@ -50,24 +51,26 @@ public class WorkflowMonitoringController {
               AND NOT EXISTS (SELECT 1 FROM t_workflow_job job
                               WHERE job.proc_inst_id = instance.id AND job.blocking = true
                                 AND job.status IN ('SCHEDULED', 'RUNNING'))
-              AND """ + scope.sql() + """
+              AND /*scope*/
             ORDER BY instance.started_at LIMIT ?
-            """, withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
 
         // 超时任务按所属**实例**的发起人/发起部门收窄（不是 assignee——否则会漏掉跨部门代办）。
         List<Map<String, Object>> overdue = jdbc.queryForList("""
             SELECT task.id AS task_id, task.proc_inst_id AS instance_id, task.node_id,
-                   task.assignee_id, task.timeout_at
+                   task.assignee_id, task.timeout_at,
+                   instance.process_snapshot::text AS process_snapshot
             FROM t_task task
             JOIN t_process_instance instance ON instance.id = task.proc_inst_id
             WHERE task.status = 'PENDING' AND task.timeout_at < now()
-              AND """ + scope.sql() + """
+              AND /*scope*/
             ORDER BY task.timeout_at LIMIT ?
-            """, withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
 
         // 驳回率：过滤必须在 GROUP BY / 聚合之前，否则被排除的部门会算进分母。
         List<Map<String, Object>> rejectionRates = jdbc.queryForList("""
             SELECT task.node_id,
+                   MAX(instance.process_snapshot::text) AS process_snapshot,
                    COUNT(*) FILTER (WHERE task.status = 'REJECTED') AS rejected,
                    COUNT(*) FILTER (WHERE task.status IN ('APPROVED', 'REJECTED')) AS decided,
                    ROUND(100.0 * COUNT(*) FILTER (WHERE task.status = 'REJECTED')
@@ -75,11 +78,11 @@ public class WorkflowMonitoringController {
                          WHERE task.status IN ('APPROVED', 'REJECTED')), 0), 2) AS reject_rate
             FROM t_task task
             JOIN t_process_instance instance ON instance.id = task.proc_inst_id
-            WHERE """ + scope.sql() + """
+            WHERE /*scope*/
             GROUP BY task.node_id
             HAVING COUNT(*) FILTER (WHERE task.status IN ('APPROVED', 'REJECTED')) > 0
             ORDER BY reject_rate DESC NULLS LAST, decided DESC LIMIT ?
-            """, withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
 
         List<Map<String, Object>> fallbackBacklogs = jdbc.queryForList("""
             SELECT task.assignee_id,
@@ -98,10 +101,10 @@ public class WorkflowMonitoringController {
              AND participant.sequence_no = task.sequence_no
             LEFT JOIN t_user user_row ON user_row.id = task.assignee_id
             WHERE task.status = 'PENDING' AND participant.source LIKE 'FALLBACK%'
-              AND """ + scope.sql() + """
+              AND /*scope*/
             GROUP BY task.assignee_id, user_row.display_name, user_row.username
             ORDER BY pending_count DESC, oldest_pending_at LIMIT ?
-            """, withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
 
         // 事务消息只有 aggregate_type / aggregate_id，按「PROCESS_INSTANCE」关联到实例再收窄；
         // 其它聚合类型在受限范围下**显式排除**，免得将来新的写入方静默绕过范围。
@@ -115,7 +118,14 @@ public class WorkflowMonitoringController {
             JOIN t_process_instance instance
               ON outbox.aggregate_type = 'PROCESS_INSTANCE'
              AND instance.id = outbox.aggregate_id
-            WHERE """ + outboxScope.sql(), outboxScope.args().toArray());
+            WHERE /*scope*/
+            """.replace("/*scope*/", outboxScope.sql()), outboxScope.args().toArray());
+
+        // 这些行来自裸 SQL，没有实体映射：把 node_id 换成展示名（`node_adurTht3` 这种直接给用户看
+        // 没法看），顺手把用于解析的快照去掉，别让它进响应体。
+        fillNodeName(stuck, "current_node_id", "current_node_name");
+        fillNodeName(overdue, "node_id", "node_name");
+        fillNodeName(rejectionRates, "node_id", "node_name");
 
         return Map.of("stuckInstances", stuck, "overdueTasks", overdue,
             "nodeRejectionRates", rejectionRates, "fallbackBacklogs", fallbackBacklogs,
@@ -126,14 +136,32 @@ public class WorkflowMonitoringController {
     private record ScopeSql(String sql, List<Object> args) { }
 
     /**
+     * 把每行里的节点 id 解析成展示名写进另一个 key。行是裸 SQL 的结果（`queryForList` 给的是
+     * 可变 Map），所以直接原地改；解析用的快照用完就删，不进响应体。
+     */
+    private static void fillNodeName(List<Map<String, Object>> rows, String idKey, String nameKey) {
+        for (Map<String, Object> row : rows) {
+            Object nodeId = row.get(idKey);
+            Object snapshot = row.remove("process_snapshot");
+            if (nodeId == null || snapshot == null) continue;
+            row.put(nameKey, com.antflow.engine.tree.ProcessTreeNav.displayNameFromSnapshot(
+                String.valueOf(snapshot), String.valueOf(nodeId)));
+        }
+    }
+
+    /**
      * 调用者在 {@code workflow:monitor:read} 上的行级谓词，作用在流程实例上。
      * 既不允许本人、也没有任何部门范围时返回恒假条件（fail-closed），不能退化成不过滤。
      */
     private ScopeSql instanceScope(String alias) {
         Optional<AuthorizationService.DataScopeFilter> current =
             authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ);
-        // 空 = 没有请求主体（系统内部调用）；本端点是管理端接口，正常不会走到这里。
-        if (current.isEmpty() || current.get().admin() || current.get().unrestricted()) {
+        // 空 = 没有请求主体（系统内部调用）。本端点是管理端接口、正常不会走到这里，
+        // 但"取不到范围"绝不能等于"范围是全部"——和下面空范围一样 fail-closed。
+        if (current.isEmpty()) {
+            return new ScopeSql("1 = 0", List.of());
+        }
+        if (current.get().admin() || current.get().unrestricted()) {
             return new ScopeSql("1 = 1", List.of());
         }
         AuthorizationService.DataScopeFilter scope = current.get();

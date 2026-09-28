@@ -28,6 +28,7 @@ import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.User;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
+import com.antflow.task.WorkflowMonitoringController;
 import com.antflow.task.TaskMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -939,7 +940,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
             long badForm = insertForm("DRAFT", boundOptionSchema(sourceId, retired));
             assertThatThrownBy(() -> formDefinitionService.publish(badForm))
                 .isInstanceOf(BizException.class)
-                .hasMessageContaining("不可绑定");
+                .hasMessageContaining("不可绑定")
+                // 还要点名是**哪个字段**：一张表可能有十几个下拉绑着不同数据源，
+                // 只说"数据源版本不存在"维护人得挨个点开猜（字段标题才是他在表单上看到的东西）。
+                .hasMessageContaining("字段「Dept」绑定的数据源版本不存在、未发布或不可绑定");
 
             // 未停用的版本照常可绑定——别把这道闸做成"一律拒绝"。
             long okForm = insertForm("DRAFT", boundOptionSchema(sourceId, usable));
@@ -3043,6 +3047,55 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     private void setPrincipal(long userId) {
         PrincipalHolder.set(authorizationService.principalForRequest(userId, null).orElseThrow());
+    }
+
+    /**
+     * 监控概览要能在三种范围下都跑通。这条用**真库**跑，因为上一次的教训正是：单测把 JdbcTemplate
+     * mock 掉、只断言 SQL 里 contains("1 = 1")，于是 `AND1 = 1`（Java 文本块吞掉行尾空格）照样"通过"，
+     * 真机上 admin 一打开整页 500。
+     */
+    @Test
+    void workflowMonitorOverviewRunsUnderEveryDataScope() {
+        // 直接 new 一个控制器：这里验的是 SQL 拼装，不是 @PreAuthorize 那条门（测试里没有代理）。
+        WorkflowMonitoringController controller =
+            new WorkflowMonitoringController(jdbcTemplate, authorizationService);
+        long adminId = userId("admin");
+        long scopedUser = insertUser("monitor-scoped");
+        long scopedRole = insertRole("monitor_scoped");
+        long emptyUser = insertUser("monitor-empty");
+        long emptyRole = insertRole("monitor_empty");
+        try {
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'workflow:monitor:read', 'SELF')", scopedRole);
+            assignRole(scopedUser, scopedRole);
+            // DEPARTMENT 但这个用户没有部门 → 谓词集合为空 → 必须恒假（fail-closed），不能退化成不过滤
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'workflow:monitor:read', 'DEPARTMENT')", emptyRole);
+            assignRole(emptyUser, emptyRole);
+
+            // ① admin / unrestricted：谓词是 1 = 1
+            setPrincipal(adminId);
+            assertThat(controller.overview(50)).containsKeys("stuckInstances", "overdueTasks",
+                "nodeRejectionRates", "fallbackBacklogs", "outbox");
+            // ② 受限（本人）：谓词是 (instance.started_by = ?)，参数个数要与占位符对上
+            setPrincipal(scopedUser);
+            assertThat(controller.overview(50)).containsKeys("stuckInstances", "overdueTasks",
+                "nodeRejectionRates", "fallbackBacklogs", "outbox");
+            // ③ 空范围：谓词是 1 = 0
+            setPrincipal(emptyUser);
+            Map<String, Object> empty = controller.overview(50);
+            assertThat(empty).containsKeys("stuckInstances", "overdueTasks", "nodeRejectionRates",
+                "fallbackBacklogs", "outbox");
+            assertThat((List<?>) empty.get("stuckInstances")).isEmpty();
+            assertThat((Map<String, Object>) empty.get("outbox")).containsEntry("dead", 0L);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id IN (?, ?)", scopedUser, emptyUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id IN (?, ?)", scopedRole, emptyRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", scopedUser, emptyUser);
+            authorizationService.evict(scopedUser);
+            authorizationService.evict(emptyUser);
+        }
     }
 
     private Object replaceMenu(MenuService.MenuDocument request, CountDownLatch ready,

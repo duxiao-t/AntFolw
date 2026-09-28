@@ -1,6 +1,6 @@
 import { message, notification } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { errorConfig } from './requestErrorConfig';
+import { errorConfig, isAuthEndpoint, isLoginPage } from './requestErrorConfig';
 
 vi.mock('antd', () => ({
   message: {
@@ -303,5 +303,23 @@ describe('requestErrorConfig', () => {
 
       expect(result.url).toBeUndefined();
     });
+  });
+});
+
+// 「登录失败后整页刷新」那个问题的两条守卫：密码错返回 401，被全局当成会话失效执行
+// window.location.href = '/user/login'，而当前 URL 已经是它 → 整页重载、提示一闪而过。
+describe('401 跳转的守卫', () => {
+  it('认证接口的 401 不当成会话失效（不清 token、不跳登录页）', () => {
+    expect(isAuthEndpoint('/api/auth/login')).toBe(true);
+    expect(isAuthEndpoint('/api/auth/refresh')).toBe(true);
+    expect(isAuthEndpoint('/api/auth/logout')).toBe(true);
+    expect(isAuthEndpoint('/api/instances?page=1')).toBe(false);
+    expect(isAuthEndpoint(undefined)).toBe(false);
+  });
+
+  it('已经在登录页时不再赋值跳转', () => {
+    expect(isLoginPage('/user/login')).toBe(true);
+    expect(isLoginPage('/user/login?redirect=%2Fworkplace')).toBe(true);
+    expect(isLoginPage('/workplace')).toBe(false);
   });
 });

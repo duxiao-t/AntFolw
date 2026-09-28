@@ -1000,7 +1000,7 @@ public class FormDefinitionService {
             if (optionRuntimeService == null) {
                 throw new BizException("BAD_SCHEMA", "共享选项服务不可用");
             }
-            optionRuntimeService.validateBinding(node.path("props").path("optionSource"));
+            optionRuntimeService.validateBinding(node, node.path("props").path("optionSource"));
             return;
         }
         var options = node.path("props").path("options");

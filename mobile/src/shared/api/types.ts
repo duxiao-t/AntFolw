@@ -14,6 +14,8 @@ export interface MobileUser {
   username: string;
   displayName: string;
   department?: string;
+  /** 部门 id：部门选择"默认填充当前部门"要用（显示名 `department` 无法反查）。 */
+  deptId?: number;
   employeeNo?: string;
   avatarUrl?: string;
   roles: string[];
