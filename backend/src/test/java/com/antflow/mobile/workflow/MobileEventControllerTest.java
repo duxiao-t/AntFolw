@@ -3,13 +3,38 @@ package com.antflow.mobile.workflow;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.notify.NotificationEvent;
 import java.io.IOException;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 
 class MobileEventControllerTest {
+
+    @Test
+    void deliversCcEventsThatCarryNoTaskId() {
+        // CC_ASSIGNED 没有任务 id（taskId = null）。原来是 Map.of(...) 拼 payload，撞 null 直接
+        // NPE：异常从 publishEvent 冒回 outbox 投递器 → 这条抄送重试 10 次后进 DEAD，
+        // 表现成"站内通知写了、SSE 永远推不出去"。
+        MobileEventController controller = new MobileEventController(mock(AuthorizationService.class));
+        RecordingEmitter assigned = new RecordingEmitter(false);
+        controller.register(7L, assigned);
+
+        assertThatCode(() -> controller.onNotification(
+            new NotificationEvent(this, "CC_ASSIGNED", 11L, null, 7L, "cc")))
+            .doesNotThrowAnyException();
+
+        assertThat(assigned.sent).isEqualTo(1);
+        Map<String, Object> payload = assigned.dataPayload();
+        assertThat(payload).containsEntry("eventType", "CC_ASSIGNED")
+            .containsEntry("instanceId", 11L);
+        // key 必须还在（值为 null），前端按 key 判断要不要跳任务详情。
+        assertThat(payload).containsKey("taskId");
+        assertThat(payload.get("taskId")).isNull();
+    }
 
     @Test
     void sendsOnlyToTheAssignedUserAndDropsBrokenConnections() {
@@ -36,6 +61,7 @@ class MobileEventControllerTest {
         private final boolean broken;
         private int sent;
         private int completions;
+        private SseEventBuilder last;
 
         private final boolean completionBroken;
 
@@ -48,10 +74,21 @@ class MobileEventControllerTest {
             this.completionBroken = completionBroken;
         }
 
+        /** 事件体里的数据部分（`event:` 那一条是字符串，跳过）。 */
+        @SuppressWarnings("unchecked")
+        Map<String, Object> dataPayload() {
+            if (last == null) return Map.of();
+            for (ResponseBodyEmitter.DataWithMediaType item : last.build()) {
+                if (item.getData() instanceof Map<?, ?> data) return (Map<String, Object>) data;
+            }
+            return Map.of();
+        }
+
         @Override
         public void send(SseEventBuilder builder) throws IOException {
             if (broken) throw new IOException("closed");
             sent++;
+            last = builder;
         }
 
         @Override
