@@ -71,7 +71,9 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
   const contextKey = JSON.stringify(props.optionContext ?? {});
   const context = props.optionContext;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 这三个依赖是故意的——上游字段、节点或数据源版本一变就要重置分步路径与页号；biome 只看到 effect 体里没直接引用它们。
   useEffect(() => { setPath([]); setKeyword(''); setPage(1); }, [parentValue, props.node.id, source?.versionId]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 用 selectedKey/contextKey 这类稳定字符串键代替对象身份；换成 context/selected 会让每次渲染都重新请求（同一 hook 上 biome 同时报"缺 context"和"多 contextKey"，自相矛盾）。
   useEffect(() => {
     if (!context || selected.length === 0) { setLabels([]); return; }
     let active = true;
@@ -79,6 +81,7 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
       .then((response) => { if (active) setLabels(response.items); }).catch(() => {});
     return () => { active = false; };
   }, [contextKey, props.node.id, selectedKey]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 同上——filterKey 是 values 的稳定序列化，用它而不是 values 对象，否则每次渲染都会重拉候选。
   useEffect(() => {
     if (!visible || !context || dependency?.fieldId && (parentValue == null || parentValue === '')) return;
     let active = true;
@@ -105,6 +108,7 @@ export function useDynamicOptions(props: MobileFieldProps, visible: boolean) {
   const autoFillLoaded = useRef(parentValue != null && parentValue !== '');
   const autoFillCallback = useRef(props.onValueChange);
   autoFillCallback.current = props.onValueChange;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 同 labels 那个 effect：只按稳定键重算，context/values 的对象身份每次都变，进来会让自动回填反复触发。
   useEffect(() => {
     if (!dependency?.fieldId || props.node.type !== 'select' || !context) return;
     if (!autoFillLoaded.current) {
