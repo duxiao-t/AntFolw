@@ -123,6 +123,37 @@ describe('外部数据与联动面板', () => {
     expect(await screen.findByTitle('已停用源的下拉（数据源版本当前不可用）')).toBeInTheDocument();
   });
 
+  it('数据源已有新版本时，在能立刻动手的地方提示', async () => {
+    // 钉着的版本落后于最新版：提示就在版本下拉旁边，并点明"要重新发布表单"。
+    request.mockImplementation((url: string) => {
+      if (url === '/api/forms/5/option-sources') {
+        return Promise.resolve([{ ...bindable[0], versionNo: 2, latestVersionNo: 4 }]);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+    const node: SchemaNode = {
+      id: 'city', type: 'select', label: '城市',
+      props: { optionSource: { sourceId: 9, versionId: 91, valueColumn: 'code', labelColumn: 'name' } },
+    };
+
+    renderPanel(node, [node]);
+
+    expect(await screen.findByText('这个数据源已经有 v4，当前钉的是 v2')).toBeInTheDocument();
+    expect(screen.getByText(/再重新发布这张表单/)).toBeInTheDocument();
+  });
+
+  it('钉的就是最新版时不提示', async () => {
+    const node: SchemaNode = {
+      id: 'city', type: 'select', label: '城市',
+      props: { optionSource: { sourceId: 9, versionId: 91, valueColumn: 'code', labelColumn: 'name' } },
+    };
+
+    renderPanel(node, [node]);
+
+    expect(await screen.findByText('保存值所在列')).toBeInTheDocument();
+    expect(screen.queryByText(/这个数据源已经有/)).not.toBeInTheDocument();
+  });
+
   it('三要素齐全时给出候选项预览', async () => {
     const node: SchemaNode = {
       id: 'city', type: 'select', label: '城市',

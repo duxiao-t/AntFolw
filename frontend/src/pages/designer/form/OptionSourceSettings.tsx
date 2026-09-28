@@ -1,6 +1,6 @@
 import { Link, request } from '@umijs/max';
 import { useQuery } from '@tanstack/react-query';
-import { Checkbox, Input, Select, Space, Typography } from 'antd';
+import { Alert, Checkbox, Input, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { isBoundOptionSource } from '../../../components/form-fields/dynamicOptions';
 import type { SchemaNode } from '../../../registry/types';
@@ -183,6 +183,16 @@ export function OptionSourceSettings({ formId, node, schema, update, updateNode 
         <Checkbox checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)}>
           显示历史版本
         </Checkbox>
+        {/* 「想要最新版」的出口就在这一格旁边的版本下拉里：说清"钉着的版本 + 最新版本"，
+            并点明要用上新数据必须重新发布这张表单（AntFlow 不做"跟随最新"，见 DECISIONS）。 */}
+        {selected && selected.latestVersionNo > selected.versionNo && (
+          <Alert
+            type="info"
+            showIcon
+            message={`这个数据源已经有 v${selected.latestVersionNo}，当前钉的是 v${selected.versionNo}`}
+            description="要用上新数据：在上面选新版本，再重新发布这张表单——已发布的表单固定它绑定的版本。"
+          />
+        )}
         {selected && binding && <>
           <Typography.Text>保存值所在列</Typography.Text>
           <Select style={{ width: SELECT_WIDTH }} placeholder="选择保存值的列"
