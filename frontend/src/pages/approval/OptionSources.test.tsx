@@ -119,7 +119,8 @@ describe('选项数据源', () => {
     expect(within(row).getByText('可使用')).toBeInTheDocument();
     expect(within(row).getByText('v2')).toBeInTheDocument();
     expect(within(row).getByText('2 张表单在用')).toBeInTheDocument();
-    expect(within(row).getByText('2026-09-28 10:30')).toBeInTheDocument();
+    // 只断言"格式化成了时间"，不写死具体时刻：CI 跑在 UTC、本机在 +08，写死必然有一边红。
+    expect(within(row).getByText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)).toBeInTheDocument();
     // 未被使用的那行也要说清楚，不能空着让人猜。
     const idle = (await screen.findByText('另一个源')).closest('tr') as HTMLElement;
     expect(within(idle).getByText('未被使用')).toBeInTheDocument();

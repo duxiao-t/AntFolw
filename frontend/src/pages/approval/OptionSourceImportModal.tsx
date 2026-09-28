@@ -168,11 +168,14 @@ export function OptionSourceImportModal({ sourceId, open, onClose, onImported }:
             共 {preview.rowCount} 行 · {preview.columns.length} 列，下面显示前 {preview.rows.length} 行
           </Typography.Text>
           <Table size="small" scroll={{ x: 'max-content', y: 260 }} pagination={false}
-            // 直接用行下标做 key：往原始行里塞 key 会盖掉同名的导入列
-            // （列名恰好叫 key 时，预览显示的是行号、导入存的却是原值）。
-            rowKey={(_, index) => String(index)}
-            dataSource={preview.rows}
-            columns={preview.columns.map((column) => ({ title: column, dataIndex: column, ellipsis: true }))} />
+            // 包一层再给行号做 key：既不能往原始行里塞字段（列名恰好叫 key 时会盖掉它，
+            // 预览显示行号、导入存的却是原值），也不能用 rowKey 的 index 参数（antd 6 已弃用）。
+            // 行内容可能重复（选项允许重复），所以不能用内容做 key。
+            rowKey={(item) => String(item.index)}
+            dataSource={preview.rows.map((row, index) => ({ index, row }))}
+            columns={preview.columns.map((column) => ({
+              title: column, dataIndex: ['row', column], ellipsis: true,
+            }))} />
         </>}
       </Space>
     </Modal>
