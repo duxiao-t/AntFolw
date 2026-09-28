@@ -282,6 +282,9 @@ export function buildActivityItems({
 
 export function nodeLabel(root: ProcessNode | null, id?: string | null) {
   if (!id) return '未记录节点';
+  // 「驳回待改」不是真节点：`current_node_id` 存的是哨兵，直接展示会看到 `__rework__`。
+  // 文案与后端 ProcessTreeNav.displayNameFromSnapshot 对齐。
+  if (id === '__rework__') return '待修改';
   const node = findNode(root, id);
   return nodeName(node, id);
 }

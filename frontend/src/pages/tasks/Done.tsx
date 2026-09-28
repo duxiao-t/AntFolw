@@ -16,7 +16,8 @@ export default function DonePage() {
       search={false}
       columns={[
         { title: 'ID', dataIndex: 'id' },
-        { title: '节点', dataIndex: 'nodeId' },
+        // nodeId 是内部标识：后端已按实例快照补了 nodeName，优先用它。
+        { title: '节点', dataIndex: 'nodeName', render: (_: unknown, row: any) => row.nodeName ?? row.nodeId },
         { title: '流程', dataIndex: 'procInstId' },
         { title: '状态', dataIndex: 'status',
           valueEnum: {

@@ -2,6 +2,7 @@ import { ProTable } from '@ant-design/pro-components';
 import { Link, useNavigate } from '@umijs/max';
 import { request } from '@umijs/max';
 import { Button } from 'antd';
+import { nodeLabel, parseProcessSnapshot } from './detailPresentation';
 
 export default function SentPage() {
   const navigate = useNavigate();
@@ -30,7 +31,9 @@ export default function SentPage() {
             REJECTED: { text: '已驳回', status: 'Error' },
             WITHDRAWN: { text: '已撤回', status: 'Default' },
           } },
-        { title: '当前节点', dataIndex: 'currentNodeId' },
+        // currentNodeId 是内部节点 id（甚至可能是 __rework__ 哨兵）：用响应里已有的流程快照换中文名。
+        { title: '当前节点', dataIndex: 'currentNodeId',
+          render: (_, row: any) => nodeLabel(parseProcessSnapshot(row.processSnapshot), row.currentNodeId) },
         { title: '发起时间', dataIndex: 'startedAt' },
         { title: '完成时间', dataIndex: 'finishedAt' },
         { title: '操作', render: (_, i: any) => (

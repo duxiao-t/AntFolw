@@ -26,7 +26,9 @@ export const UserPickerField: FieldType = {
       // 职务口径（含「部长」）留在服务端，前端只说明是哪个预设。
       scopeParams.leaderOnly = true;
     } else if (scopeType === 'user' && node.props?.scopeUserIds?.length) {
-      scopeParams.userIds = node.props.scopeUserIds;
+      // 逗号串而不是数组：axios 会把数组序列化成 `userIds[]=3`，裸方括号会被 Tomcat 按
+      // RFC 7230 拒掉 → 请求还没进 Spring 就 400（移动端 files.api.ts 早就是 join(',') 的写法）。
+      scopeParams.userIds = node.props.scopeUserIds.join(',');
     }
     const scopeKey = JSON.stringify(scopeParams);
     const { data, isFetching } = useQuery({

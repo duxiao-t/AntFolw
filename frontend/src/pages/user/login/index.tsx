@@ -83,18 +83,31 @@ const Login: React.FC = () => {
     setSubmitting(true);
     setUserLoginState({});
     try {
-      const result = await request<{ accessToken: string }>('/api/auth/login', {
-        method: 'POST',
-        data: { username: values.username, password: values.password },
-      });
-      localStorage.setItem('antflow-token', result.accessToken);
+      let accessToken: string;
+      try {
+        // 密码错时后端返回 401 —— 那不是"会话失效"，由这里自己提示；不让全局处理器
+        // 清 token / 跳登录页（在登录页上再赋一次 /user/login 会整页重载，提示一闪而过）。
+        const result = await request<{ accessToken: string }>('/api/auth/login', {
+          method: 'POST',
+          skipErrorHandler: true,
+          data: { username: values.username, password: values.password },
+        });
+        accessToken = result.accessToken;
+      } catch {
+        setUserLoginState({ status: 'error' });
+        message.error(intl.formatMessage({ id: 'pages.login.failure', defaultMessage: '登录失败，请检查账号和密码' }));
+        return;
+      }
+      // 认证已经成功、token 也已写入；从这里开始的失败不能再报"账号或密码错误"。
+      localStorage.setItem('antflow-token', accessToken);
       message.success(intl.formatMessage({ id: 'pages.login.success', defaultMessage: '登录成功' }));
-      await fetchUserInfo();
+      try {
+        await fetchUserInfo();
+      } catch {
+        message.warning('登录成功，但加载用户信息失败，请刷新页面重试');
+      }
       const redirect = getSafeRedirectUrl(new URL(window.location.href).searchParams.get('redirect'));
       window.location.href = redirect;
-    } catch {
-      setUserLoginState({ status: 'error' });
-      message.error(intl.formatMessage({ id: 'pages.login.failure', defaultMessage: '登录失败，请检查账号和密码' }));
     } finally {
       setSubmitting(false);
     }

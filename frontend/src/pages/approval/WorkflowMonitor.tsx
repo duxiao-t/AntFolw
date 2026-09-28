@@ -15,6 +15,7 @@ import '../Welcome.css';
 type StuckInstance = {
   id: number;
   current_node_id?: string;
+  current_node_name?: string;
   started_at: string;
 };
 
@@ -22,12 +23,14 @@ type OverdueTask = {
   task_id: number;
   instance_id: number;
   node_id: string;
+  node_name?: string;
   assignee_id: number;
   timeout_at: string;
 };
 
 type RejectionRate = {
   node_id: string;
+  node_name?: string;
   rejected: number;
   decided: number;
   reject_rate?: number;
@@ -143,7 +146,7 @@ export default function WorkflowMonitor() {
               locale={{ emptyText: empty('没有发现卡死实例') }}
               columns={[
                 { title: '实例', dataIndex: 'id', width: 90, render: (id: number) => <span className="mono-cell">#{id}</span> },
-                { title: '当前节点', dataIndex: 'current_node_id', ellipsis: true, render: (value?: string) => value || '未记录' },
+                { title: '当前节点', dataIndex: 'current_node_name', ellipsis: true, render: (_: unknown, row: any) => row.current_node_name ?? row.current_node_id ?? '未记录' },
                 { title: '发起时间', dataIndex: 'started_at', width: 150, render: formatTime },
               ]}
             />
@@ -162,7 +165,7 @@ export default function WorkflowMonitor() {
               columns={[
                 { title: '任务', dataIndex: 'task_id', width: 80, render: (id: number) => <span className="mono-cell">#{id}</span> },
                 { title: '实例', dataIndex: 'instance_id', width: 80 },
-                { title: '节点', dataIndex: 'node_id', ellipsis: true },
+                { title: '节点', dataIndex: 'node_name', ellipsis: true, render: (_: unknown, row: any) => row.node_name ?? row.node_id },
                 { title: '处理人', dataIndex: 'assignee_id', width: 80 },
                 { title: '超时时间', dataIndex: 'timeout_at', width: 150, render: formatTime },
               ]}
@@ -203,7 +206,7 @@ export default function WorkflowMonitor() {
             dataSource={data.nodeRejectionRates}
             locale={{ emptyText: empty('暂无已处理节点数据') }}
             columns={[
-              { title: '节点', dataIndex: 'node_id', ellipsis: true },
+              { title: '节点', dataIndex: 'node_name', ellipsis: true, render: (_: unknown, row: any) => row.node_name ?? row.node_id },
               { title: '已处理', dataIndex: 'decided', width: 110 },
               { title: '驳回', dataIndex: 'rejected', width: 110 },
               { title: '驳回率', dataIndex: 'reject_rate', width: 130, render: (value?: number) => <Tag color={Number(value) >= 30 ? 'red' : 'blue'}>{Number(value ?? 0).toFixed(2)}%</Tag> },

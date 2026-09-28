@@ -57,11 +57,32 @@ public class TaskController {
         int normalizedPage = Math.max(1, page);
         int normalizedSize = Math.min(100, Math.max(1, size));
         int offset = pageOffset(normalizedPage, normalizedSize);
-        return new WorkflowPage<>(
-            taskMapper.selectTaskPage(p.userId(), normalizedView, normalized(status),
-                normalizedSize, offset),
+        List<TaskEntity> records = taskMapper.selectTaskPage(p.userId(), normalizedView,
+            normalized(status), normalizedSize, offset);
+        fillNodeNames(records);
+        return new WorkflowPage<>(records,
             taskMapper.countTaskPage(p.userId(), normalizedView, normalized(status)),
             normalizedPage, normalizedSize);
+    }
+
+    /**
+     * 补展示用节点名。一次取回本页涉及的实例快照再逐行解析——别每行查一次库，
+     * 也别把 `node_id` / `__rework__` 这种内部标识当前端显示。
+     */
+    private void fillNodeNames(List<TaskEntity> tasks) {
+        if (tasks.isEmpty()) return;
+        List<Long> instanceIds = tasks.stream().map(TaskEntity::getProcInstId)
+            .filter(java.util.Objects::nonNull).distinct().toList();
+        if (instanceIds.isEmpty()) return;
+        Map<Long, ProcessInstance> instances = instanceMapper.selectBatchIds(instanceIds).stream()
+            .collect(java.util.stream.Collectors.toMap(ProcessInstance::getId,
+                java.util.function.Function.identity()));
+        for (TaskEntity task : tasks) {
+            ProcessInstance instance = instances.get(task.getProcInstId());
+            task.setNodeName(instance == null ? task.getNodeId()
+                : com.antflow.engine.tree.ProcessTreeNav.displayNameFromSnapshot(
+                    instance.getProcessSnapshot(), task.getNodeId()));
+        }
     }
 
     @PostMapping("/{id}/approve")

@@ -41,7 +41,8 @@ public class WorkflowMonitoringController {
         ScopeSql outboxScope = instanceScope("instance");
 
         List<Map<String, Object>> stuck = jdbc.queryForList("""
-            SELECT instance.id, instance.current_node_id, instance.started_at
+            SELECT instance.id, instance.current_node_id, instance.started_at,
+                   instance.process_snapshot::text AS process_snapshot
             FROM t_process_instance instance
             WHERE instance.status = 'RUNNING'
               AND NOT EXISTS (SELECT 1 FROM t_task task
@@ -57,7 +58,8 @@ public class WorkflowMonitoringController {
         // 超时任务按所属**实例**的发起人/发起部门收窄（不是 assignee——否则会漏掉跨部门代办）。
         List<Map<String, Object>> overdue = jdbc.queryForList("""
             SELECT task.id AS task_id, task.proc_inst_id AS instance_id, task.node_id,
-                   task.assignee_id, task.timeout_at
+                   task.assignee_id, task.timeout_at,
+                   instance.process_snapshot::text AS process_snapshot
             FROM t_task task
             JOIN t_process_instance instance ON instance.id = task.proc_inst_id
             WHERE task.status = 'PENDING' AND task.timeout_at < now()
@@ -68,6 +70,7 @@ public class WorkflowMonitoringController {
         // 驳回率：过滤必须在 GROUP BY / 聚合之前，否则被排除的部门会算进分母。
         List<Map<String, Object>> rejectionRates = jdbc.queryForList("""
             SELECT task.node_id,
+                   MAX(instance.process_snapshot::text) AS process_snapshot,
                    COUNT(*) FILTER (WHERE task.status = 'REJECTED') AS rejected,
                    COUNT(*) FILTER (WHERE task.status IN ('APPROVED', 'REJECTED')) AS decided,
                    ROUND(100.0 * COUNT(*) FILTER (WHERE task.status = 'REJECTED')
@@ -118,6 +121,12 @@ public class WorkflowMonitoringController {
             WHERE /*scope*/
             """.replace("/*scope*/", outboxScope.sql()), outboxScope.args().toArray());
 
+        // 这些行来自裸 SQL，没有实体映射：把 node_id 换成展示名（`node_adurTht3` 这种直接给用户看
+        // 没法看），顺手把用于解析的快照去掉，别让它进响应体。
+        fillNodeName(stuck, "current_node_id", "current_node_name");
+        fillNodeName(overdue, "node_id", "node_name");
+        fillNodeName(rejectionRates, "node_id", "node_name");
+
         return Map.of("stuckInstances", stuck, "overdueTasks", overdue,
             "nodeRejectionRates", rejectionRates, "fallbackBacklogs", fallbackBacklogs,
             "outbox", outbox);
@@ -125,6 +134,20 @@ public class WorkflowMonitoringController {
 
     /** 一段可直接拼进 WHERE 的谓词 + 它绑定的参数（参数顺序与占位符一致）。 */
     private record ScopeSql(String sql, List<Object> args) { }
+
+    /**
+     * 把每行里的节点 id 解析成展示名写进另一个 key。行是裸 SQL 的结果（`queryForList` 给的是
+     * 可变 Map），所以直接原地改；解析用的快照用完就删，不进响应体。
+     */
+    private static void fillNodeName(List<Map<String, Object>> rows, String idKey, String nameKey) {
+        for (Map<String, Object> row : rows) {
+            Object nodeId = row.get(idKey);
+            Object snapshot = row.remove("process_snapshot");
+            if (nodeId == null || snapshot == null) continue;
+            row.put(nameKey, com.antflow.engine.tree.ProcessTreeNav.displayNameFromSnapshot(
+                String.valueOf(snapshot), String.valueOf(nodeId)));
+        }
+    }
 
     /**
      * 调用者在 {@code workflow:monitor:read} 上的行级谓词，作用在流程实例上。

@@ -96,6 +96,7 @@ public class WorkplaceController {
             pendingItems.add(new PendingTaskItem(
                 task.getId(), instance.getId(), instance.getId(), formName(instance, processDefinitions, forms),
                 instance.getStartedBy(), userName(instance.getStartedBy(), users), task.getNodeId(),
+                snapshotNodeName(instance, task.getNodeId()),
                 task.getStatus(), task.getParallelId(), task.getCreatedAt()));
         }
 
@@ -120,6 +121,7 @@ public class WorkplaceController {
             .map(instance -> new RecentInstanceItem(
                 instance.getId(), formName(instance, processDefinitions, forms), instance.getStartedBy(),
                 userName(instance.getStartedBy(), users), instance.getStatus(), instance.getCurrentNodeId(),
+                snapshotNodeName(instance, instance.getCurrentNodeId()),
                 instance.getStartedAt(), instance.getFinishedAt() == null
                     ? instance.getStartedAt() : instance.getFinishedAt()))
             .toList();
@@ -190,6 +192,12 @@ public class WorkplaceController {
         return (int) offset;
     }
 
+    /** 节点显示名：拿实例冻结的流程快照解析，切不出来就回退 id（别把内部 id 当名字展示）。 */
+    private static String snapshotNodeName(ProcessInstance instance, String nodeId) {
+        return com.antflow.engine.tree.ProcessTreeNav.displayNameFromSnapshot(
+            instance.getProcessSnapshot(), nodeId);
+    }
+
     public record Overview(
         long pendingTasks,
         long runningInstances,
@@ -207,6 +215,7 @@ public class WorkplaceController {
         Long applicantId,
         String applicantName,
         String nodeId,
+        String nodeName,
         String status,
         String parallelId,
         OffsetDateTime createdAt) { }
@@ -218,6 +227,7 @@ public class WorkplaceController {
         String startedByName,
         String status,
         String currentNodeId,
+        String currentNodeName,
         OffsetDateTime startedAt,
         OffsetDateTime updatedAt) { }
 }

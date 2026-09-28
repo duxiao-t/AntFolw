@@ -220,7 +220,8 @@ export default function Workplace() {
               columns={[
                 { title: '申请事项', dataIndex: 'formName', ellipsis: true, render: (value: string, item) => <div className="primary-cell"><strong>{value}</strong><small>#{item.instanceId}</small></div> },
                 { title: '申请人', dataIndex: 'applicantName', width: 112 },
-                { title: '当前节点', dataIndex: 'nodeId', width: 118, ellipsis: true },
+                { title: '当前节点', dataIndex: 'nodeName', width: 118, ellipsis: true,
+                  render: (_: unknown, row: any) => row.nodeName ?? row.nodeId },
                 { title: '到达时间', dataIndex: 'createdAt', width: 124, render: (value: string) => formatDate(value) },
                 { title: '操作', key: 'action', width: 170, fixed: 'right', render: (_, item) => <Space size={2}><Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/proc/${item.instanceId}`)}>查看</Button>{canApprove && <Button type="link" size="small" onClick={() => { setAction({ taskId: item.taskId, type: 'approve', formName: item.formName }); setComment(''); }}>审批</Button>}{canReject && <Button type="link" size="small" danger disabled={!!item.parallelId} title={item.parallelId ? '并行审批节点不允许驳回' : undefined} onClick={() => { setAction({ taskId: item.taskId, type: 'reject', formName: item.formName }); setComment(''); }}>驳回</Button>}</Space> },
               ]}
@@ -271,7 +272,8 @@ export default function Workplace() {
                 { title: '表单', dataIndex: 'formName', ellipsis: true, render: (value: string) => <strong>{value}</strong> },
                 { title: '发起人', dataIndex: 'startedByName', width: 110 },
                 { title: '状态', dataIndex: 'status', width: 100, render: (value: Status) => statusTag(value) },
-                { title: '当前节点', dataIndex: 'currentNodeId', width: 118, ellipsis: true, render: (value: string, item) => value ?? (item.status === 'RUNNING' ? '处理中' : '流程结束') },
+                { title: '当前节点', dataIndex: 'currentNodeName', width: 118, ellipsis: true,
+                  render: (_: unknown, item: any) => item.currentNodeName ?? item.currentNodeId ?? (item.status === 'RUNNING' ? '处理中' : '流程结束') },
                 { title: '更新时间', dataIndex: 'updatedAt', width: 124, render: (value: string) => formatDate(value) },
               ]}
               scroll={{ x: 650 }}
