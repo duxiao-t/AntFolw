@@ -192,8 +192,10 @@ describe('advanced mobile fields', () => {
 
   it('候选查询飞行期间先清空旧结果（否则会点中上一个关键字的人）', async () => {
     const user = userEvent.setup();
-    let releaseSearch: (() => void) | null = null;
-    const gate = new Promise<void>((resolve) => { releaseSearch = resolve; });
+    // 用对象属性而不是 let 变量存 resolve：TS 的控制流分析看不到 Promise executor 里的赋值，
+    // 直接写 `let f: (() => void) | null = null` 会让调用点被收窄成 null（tsc -b 报 TS2349）。
+    const gateControl: { release?: () => void } = {};
+    const gate = new Promise<void>((resolve) => { gateControl.release = resolve; });
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url = decodeURIComponent(String(input));
       if (url.includes('keyword=李四')) {
@@ -220,7 +222,7 @@ describe('advanced mobile fields', () => {
     await waitFor(() => expect(screen.queryByRole('option', { name: /张三/ }))
       .not.toBeInTheDocument());
 
-    releaseSearch?.();
+    gateControl.release?.();
     expect(await screen.findByRole('option', { name: /李四/ })).toBeInTheDocument();
   });
 
