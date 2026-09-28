@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 @RequestMapping("/api/departments")
@@ -22,6 +24,7 @@ public class DepartmentController {
 
     /** 公司下完整部门树（含 ltree 子树递归） */
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_READ + "')")
     public List<Department> tree(@RequestParam Long companyId) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_READ);
         List<Department> all = service.tree(companyId);
@@ -35,9 +38,9 @@ public class DepartmentController {
         direct.addAll(userRead);
         Set<Long> included = withAncestors(all, direct);
         Set<Long> departmentWrite = manageableDepartments(
-            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE);
+            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
         Set<Long> userWrite = manageableDepartments(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         return all.stream().filter(department -> included.contains(department.getId()))
             .peek(department -> {
                 department.setContextOnly(!direct.contains(department.getId()));
@@ -48,13 +51,14 @@ public class DepartmentController {
     }
 
     @PostMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department create(@RequestBody Department d) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
         if (d.getParentId() == null) {
-            authorizationService.requireAllDataScope(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE);
+            authorizationService.requireAllDataScope(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
         } else {
             authorizationService.requireManageableDepartment(
-                com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, d.getParentId());
+                com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, d.getParentId());
         }
         return auditService.execute(() -> service.create(d),
             created -> auditService.success("org.department.create", "DEPARTMENT",
@@ -64,18 +68,19 @@ public class DepartmentController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, id);
+            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         if (body.containsKey("parentId")) {
             Long parentId = body.get("parentId") == null ? null
                 : ((Number) body.get("parentId")).longValue();
             if (parentId == null) {
                 authorizationService.requireAllDataScope(
-                    com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE);
+                    com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
             } else {
                 authorizationService.requireManageableDepartment(
-                    com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, parentId);
+                    com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, parentId);
             }
         }
         return auditService.execute(() -> updateDepartment(id, body),
@@ -87,9 +92,10 @@ public class DepartmentController {
     }
 
     @PutMapping("/{id}/order")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department moveOrder(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, id);
+            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         return auditService.execute(
             () -> service.moveOrder(id, String.valueOf(body.get("direction"))),
             updated -> auditService.success("org.department.reorder", "DEPARTMENT", id,
@@ -98,16 +104,17 @@ public class DepartmentController {
     }
 
     @PutMapping("/{id}/position")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department movePosition(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, id);
+            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         Object targetId = body.get("targetId");
         if (targetId == null) {
             throw new BizException("BAD_TARGET", "目标部门不能为空");
         }
         long targetDepartmentId = ((Number) targetId).longValue();
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, targetDepartmentId);
+            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, targetDepartmentId);
         return auditService.execute(
             () -> service.movePosition(id, targetDepartmentId,
                 String.valueOf(body.get("placement"))),
@@ -118,9 +125,10 @@ public class DepartmentController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public void delete(@PathVariable Long id) {
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_WRITE, id);
+            com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         auditService.execute(() -> service.delete(id),
             () -> auditService.success("org.department.delete", "DEPARTMENT", id,
                 AuditService.RiskLevel.CRITICAL,
@@ -128,6 +136,7 @@ public class DepartmentController {
     }
 
     @GetMapping("/{id}/path")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_READ + "')")
     public List<Department> path(@PathVariable Long id) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_READ);
         if (!authorizationService.visibleDepartments(

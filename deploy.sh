@@ -28,6 +28,7 @@ classify_changes() {
   local path
   while IFS= read -r path; do
     case "$path" in
+      frontend/config/page-capabilities.json) build_backend=1; build_frontend=1; image_backend=1; image_web=1 ;;
       backend/*) build_backend=1; image_backend=1 ;;
       frontend/*) build_frontend=1; image_web=1 ;;
       mobile/*) build_mobile=1; image_web=1 ;;
@@ -76,6 +77,7 @@ self_test() {
   done <<'CASES'
 backend/src/App.java|100:10:00:0
 frontend/src/App.tsx\nmobile/package-lock.json|011:01:01:0
+frontend/config/page-capabilities.json|110:11:00:0
 Dockerfile.local|000:11:00:0
 infra/docker/nginx.conf|000:01:00:0
 compose.yaml|000:11:00:1

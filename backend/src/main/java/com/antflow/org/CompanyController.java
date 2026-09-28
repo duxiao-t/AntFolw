@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/companies")
@@ -18,16 +19,16 @@ public class CompanyController {
     private final AuditService auditService;
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_COMPANY_READ + "')")
     public List<Company> all() {
-        if (!authorizationService.hasPermission(PermissionCodes.ORG_DEPARTMENT_READ)) {
-            authorizationService.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
-        }
+        authorizationService.requirePermission(PermissionCodes.ORG_COMPANY_READ);
         return mapper.selectList(null);
     }
 
     @PostMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_COMPANY_MANAGE + "')")
     public Company create(@RequestBody Company c) {
-        authorizationService.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorizationService.requirePermission(PermissionCodes.SYSTEM_COMPANY_MANAGE);
         return auditService.execute(() -> {
             mapper.insert(c);
             return c;

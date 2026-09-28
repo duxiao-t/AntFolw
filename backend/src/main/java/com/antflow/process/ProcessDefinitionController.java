@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/processes/definitions")
@@ -20,38 +21,58 @@ public class ProcessDefinitionController {
     private final AuditService auditService;
 
     @GetMapping
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_READ
+        + "', '" + PermissionCodes.FORM_DEFINITION_READ + "')")
     public List<ProcessDefinition> list() {
-        authorizationService.requirePermission(PermissionCodes.FORM_DEFINITION_READ);
+        authorizationService.requireAnyPermission(PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         var principal = PrincipalHolder.current().orElseThrow();
-        return service.listAuthorized(principal.userId(), principal.isAdmin());
+        // 维护人集合一次查出来再过滤：原来每个流程一行 SQL（canMaintainFormAny → hasFormMaintainer），
+        // 列表有多长就查多少次。能力校验已由上面的 requireAnyPermission 完成，这里只剩维护关系。
+        java.util.Optional<java.util.Set<Long>> maintained =
+            authorizationService.maintainableFormIds(principal.userId());
+        if (maintained.isEmpty()) {
+            return service.list();
+        }
+        java.util.Set<Long> formIds = maintained.get();
+        return service.list().stream()
+            .filter(definition -> formIds.contains(definition.getFormDefId()))
+            .toList();
     }
 
     @GetMapping("/by-form/{formDefId}")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_READ
+        + "', '" + PermissionCodes.FORM_DEFINITION_READ + "')")
     public ProcessDefinition byForm(@PathVariable Long formDefId) {
-        authorizationService.requireFormAction(formDefId, PermissionCodes.FORM_DEFINITION_READ);
+        authorizationService.requireFormMaintenanceAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         return service.latestPublishedForForm(formDefId);
     }
 
     @GetMapping("/draft/by-form/{formDefId}")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_MANAGE
+        + "', '" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public ProcessDefinition draftByForm(@PathVariable Long formDefId) {
-        authorizationService.requireFormAction(formDefId, PermissionCodes.FORM_DEFINITION_DESIGN);
+        authorizationService.requireFormMaintenanceAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_MANAGE, PermissionCodes.FORM_DEFINITION_MANAGE);
         return service.findByForm(formDefId);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_READ
+        + "', '" + PermissionCodes.FORM_DEFINITION_READ + "')")
     public ProcessDefinition get(@PathVariable Long id) {
         ProcessDefinition definition = service.getById(id);
         if (definition == null) throw new com.antflow.authz.HiddenResourceException("process not found");
-        authorizationService.requireFormAction(definition.getFormDefId(),
-            PermissionCodes.FORM_DEFINITION_READ);
+        authorizationService.requireFormMaintenanceAny(definition.getFormDefId(),
+            PermissionCodes.WORKFLOW_DEFINITION_READ, PermissionCodes.FORM_DEFINITION_READ);
         return definition;
     }
 
     @PostMapping
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_MANAGE
+        + "', '" + PermissionCodes.FORM_DEFINITION_MANAGE + "')")
     public ProcessDefinition save(@RequestBody SaveBody body) {
         var p = PrincipalHolder.current().orElseThrow();
-        authorizationService.requireFormAction(body.formDefId(),
-            PermissionCodes.FORM_DEFINITION_DESIGN);
+        authorizationService.requireFormMaintenanceAny(body.formDefId(),
+            PermissionCodes.WORKFLOW_DEFINITION_MANAGE, PermissionCodes.FORM_DEFINITION_MANAGE);
         return auditService.execute(
             () -> service.saveOrUpdateDraft(body.id(), body.formDefId(), body.process(),
                 p.userId()),
@@ -62,11 +83,13 @@ public class ProcessDefinitionController {
     }
 
     @PostMapping("/{id}/publish")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_PUBLISH
+        + "', '" + PermissionCodes.FORM_DEFINITION_PUBLISH + "')")
     public ProcessDefinition publish(@PathVariable Long id) {
         ProcessDefinition definition = service.getById(id);
         if (definition == null) throw new com.antflow.authz.HiddenResourceException("process not found");
-        authorizationService.requireFormAction(definition.getFormDefId(),
-            PermissionCodes.FORM_DEFINITION_PUBLISH);
+        authorizationService.requireFormMaintenanceAny(definition.getFormDefId(),
+            PermissionCodes.WORKFLOW_DEFINITION_PUBLISH, PermissionCodes.FORM_DEFINITION_PUBLISH);
         return auditService.execute(() -> service.publish(id),
             published -> auditService.success("workflow.definition.publish",
                 "PROCESS_DEFINITION", id, AuditService.RiskLevel.HIGH,
@@ -76,8 +99,10 @@ public class ProcessDefinitionController {
     }
 
     @DeleteMapping("/by-form/{formDefId}")
+    @PreAuthorize("@authz.consoleAny('" + PermissionCodes.WORKFLOW_DEFINITION_DELETE
+        + "', '" + PermissionCodes.FORM_DEFINITION_DELETE + "')")
     public void deleteByForm(@PathVariable Long formDefId) {
-        authorizationService.requireFormAction(formDefId, PermissionCodes.FORM_DEFINITION_DELETE);
+        authorizationService.requireFormMaintenanceAny(formDefId, PermissionCodes.WORKFLOW_DEFINITION_DELETE, PermissionCodes.FORM_DEFINITION_DELETE);
         ProcessDefinition existing = service.findByForm(formDefId);
         auditService.execute(() -> service.deleteByForm(formDefId),
             () -> auditService.success("workflow.definition.delete", "PROCESS_DEFINITION",

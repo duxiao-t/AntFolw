@@ -19,6 +19,8 @@ import { App, Button, Empty, Modal, Progress, Result, Skeleton, Space, Table, Ta
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { CAPABILITY, hasCapability } from '../authz';
+import { PAGE_BY_KEY, pageAllowed } from './registry';
 import './Welcome.css';
 import {
   ApprovalCommentEditor,
@@ -70,13 +72,16 @@ const statusMeta: Record<string, { label: string; color: string; icon: ReactNode
   WITHDRAWN: { label: '已撤回', color: '#5f6f80', icon: <ClockCircleOutlined /> },
 };
 
+// 卡片可见性必须与路由门禁用同一套判定（registry.pageAllowed）：早先这里只查单个能力点，
+// 而 org.contacts 需要 org:company:read + org:department:read + org:user:read 三个，
+// 只拿到 org:user:read 的人会看到「组织架构」卡片，点进去却是 403。
 const managementLinks = [
-  { href: '/approval/forms', label: '表单管理', detail: '维护表单与流程配置', icon: <FileTextOutlined />, permission: 'page.approval.forms' },
-  { href: '/approval/records', label: '审批记录', detail: '查询实例与审批轨迹', icon: <AuditOutlined />, permission: 'page.approval.records' },
-  { href: '/approval/monitor', label: '流程监控', detail: '定位卡死、超时和消息积压', icon: <AlertOutlined />, permission: 'workflow.instance.override' },
-  { href: '/org/contacts', label: '组织架构', detail: '管理部门与人员信息', icon: <TeamOutlined />, permission: 'page.org.contacts' },
-  { href: '/security/roles', label: '权限与安全', detail: '角色、权限与审计入口', icon: <SafetyCertificateOutlined />, permission: 'page.security.roles' },
-  { href: '/report/center', label: '报表中心', detail: '查看业务数据报表', icon: <BarChartOutlined />, permission: 'page.report.center' },
+  { pageKey: 'approval.forms', label: '表单管理', detail: '维护表单与流程配置', icon: <FileTextOutlined /> },
+  { pageKey: 'approval.records', label: '审批记录', detail: '查询实例与审批轨迹', icon: <AuditOutlined /> },
+  { pageKey: 'approval.monitor', label: '流程监控', detail: '定位卡死、超时和消息积压', icon: <AlertOutlined /> },
+  { pageKey: 'org.contacts', label: '组织架构', detail: '管理部门与人员信息', icon: <TeamOutlined /> },
+  { pageKey: 'security.roles', label: '权限与安全', detail: '角色、权限与审计入口', icon: <SafetyCertificateOutlined /> },
+  { pageKey: 'report.center', label: '报表中心', detail: '查看业务数据报表', icon: <BarChartOutlined /> },
 ];
 
 function formatDate(value?: string) {
@@ -102,9 +107,8 @@ export default function Workplace() {
     | undefined;
   const roles = user?.roles ?? [];
   const permissions = user?.permissions ?? [];
-  const can = (permission: string) => roles.includes('admin') || permissions.includes(permission);
-  const canApprove = roles.includes('admin') || permissions.includes('workflow.task.approve');
-  const canReject = roles.includes('admin') || permissions.includes('workflow.task.reject');
+  const canApprove = hasCapability(user, CAPABILITY.workflowTaskApprove);
+  const canReject = hasCapability(user, CAPABILITY.workflowTaskReject);
   const displayName = user?.displayName ?? user?.name ?? user?.username ?? '当前用户';
   const [pendingPage, setPendingPage] = useState(1);
   const [pendingSize, setPendingSize] = useState(8);
@@ -165,7 +169,10 @@ export default function Workplace() {
   }
 
   const totalStatuses = Object.values(data.statusBreakdown).reduce((sum, value) => sum + value, 0);
-  const visibleManagementLinks = managementLinks.filter((item) => can(item.permission));
+  const visibleManagementLinks = managementLinks.filter((item) => {
+    const page = PAGE_BY_KEY[item.pageKey];
+    return page ? pageAllowed(page, roles, permissions) : false;
+  });
 
   return (
     <div className="workplace-page">
@@ -274,7 +281,7 @@ export default function Workplace() {
 
         <section className="workplace-section management-section" aria-labelledby="management-title">
           <div className="section-heading"><div><p className="section-kicker">CONTROL ROOM</p><h2 id="management-title">管理入口</h2></div></div>
-          {visibleManagementLinks.length ? <div className="management-list">{visibleManagementLinks.map((item) => <Link className="management-link" to={item.href} key={item.href}><span className="management-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><span className="management-arrow">→</span></Link>)}</div> : <EmptyPanel text="当前账号暂无管理模块权限" />}
+          {visibleManagementLinks.length ? <div className="management-list">{visibleManagementLinks.map((item) => <Link className="management-link" to={PAGE_BY_KEY[item.pageKey].path} key={item.pageKey}><span className="management-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><span className="management-arrow">→</span></Link>)}</div> : <EmptyPanel text="当前账号暂无管理模块权限" />}
         </section>
       </div>
 

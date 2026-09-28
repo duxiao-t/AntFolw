@@ -1,82 +1,46 @@
-/**
- * @see https://umijs.org/docs/max/access#access
- * */
+import {
+  CONSOLE_ENTRY,
+  HIDDEN_CAPABILITIES,
+  HIDDEN_ANY_OF_CAPABILITIES,
+  PAGES,
+  accessKey,
+  pageAllowed,
+} from './pages/registry';
+
 type AuthorizedCurrentUser = API.CurrentUser & {
   permissions?: string[];
 };
 
+/**
+ * 访问控制由能力点直接派生：新增页面只改 src/pages/registry.ts。
+ * admin 角色隐式拥有全部能力；菜单可见性只看只读能力集。
+ */
 export default function access(
   initialState: { currentUser?: AuthorizedCurrentUser } | undefined,
 ) {
   const { currentUser } = initialState ?? {};
   const roles = currentUser?.roles ?? [];
-  const permissions = currentUser?.permissions ?? [];
+  const permissions = (currentUser as { permissions?: string[] } | undefined)?.permissions ?? [];
   const admin = roles.includes('admin');
   const can = (permission: string) => admin || permissions.includes(permission);
-  const page = (permission: string) => admin || permissions.includes(permission);
-  return {
+
+  const result: Record<string, boolean | ((permission: string) => boolean)> = {
     canAdmin: admin,
-    canAccessWorkplace: page('page.workplace'),
-    canDesigner:
-      page('page.approval.forms') && can('form.definition.design'),
-    canReadForms:
-      page('page.approval.forms') && can('form.definition.read'),
-    canCreateForm:
-      page('page.approval.forms') && can('form.definition.create'),
-    canReadInstances:
-      page('page.approval.records') && can('workflow.instance.read'),
-    canManageOrg:
-      page('page.org.contacts') &&
-      can('org.department.read') &&
-      can('org.user.read'),
-    canWriteDepartments: can('org.department.write'),
-    canWriteUsers: can('org.user.write'),
-    canManageSecurity:
-      (page('page.security.roles') &&
-          can('security.role.read') &&
-          can('security.permission.read')) ||
-      admin ||
-      (page('page.security.audit_log') && can('security.audit.read')),
-    canManageRoles:
-      page('page.security.roles') &&
-      can('security.role.read') &&
-      can('security.permission.read'),
-    canAssignRoles: admin,
-    canReadAudit:
-      page('page.security.audit_log') && can('security.audit.read'),
-    canReadReportCenter:
-      page('page.report.center') && can('form.data.read'),
-    canReadReportExport:
-      page('page.report.export') && can('form.data.export'),
-    canReadReportDashboard:
-      page('page.report.dashboard') && can('form.data.read'),
-    canReadReports:
-      (page('page.report.center') || page('page.report.export') ||
-        page('page.report.dashboard')) && can('form.data.read'),
-    canManageSettings:
-      page('page.settings.company') || page('page.settings.s3') ||
-      page('page.settings.wecom') || page('page.settings.identity_providers') || page('page.settings.backup'),
-    canManageCompany:
-      page('page.settings.company') && can('org.company.manage'),
-    canManageS3: page('page.settings.s3'),
-    canManageWecom:
-      page('page.settings.wecom') && can('org.company.manage'),
-    canManageIdentityProviders: page('page.settings.identity_providers'),
-    canManageBackup:
-      page('page.settings.backup') && can('system.backup.manage'),
-    canUseRuntime:
-      page('page.workplace') && can('form.runtime.read'),
-    canUseTasks:
-      page('page.workplace') && can('workflow.task.read'),
-    canUseProcesses:
-      page('page.workplace') && can('workflow.instance.read'),
-    canUseProcessDetail:
-      page('page.workplace') &&
-      (can('workflow.task.read') || can('workflow.instance.read')),
-    canApproveTask: can('workflow.task.approve'),
-    canRejectTask: can('workflow.task.reject'),
-    canWithdrawInstance: can('workflow.instance.withdraw'),
-    canOverrideWorkflow: can('workflow.instance.override'),
-    canRetryAutomation: can('workflow.automation.retry'),
+    can,
+    canEnterConsole: can(CONSOLE_ENTRY),
   };
+
+  PAGES.forEach((page) => {
+    result[accessKey(page.key)] = pageAllowed(page, roles, permissions);
+  });
+  // 隐藏页同样要走管理端入口。后端这些端点一律是 @authz.console(...) / consoleAny(...)，
+  // 本身就要求 CONSOLE_ACCESS；前端早先只判业务能力，导致没有入口能力的账号能打开
+  // /tasks /proc /designer 这些桌面页，然后每个请求都 403，页面只剩一片报错。
+  Object.entries(HIDDEN_CAPABILITIES).forEach(([key, permission]) => {
+    result[key] = result.canEnterConsole && can(permission);
+  });
+  Object.entries(HIDDEN_ANY_OF_CAPABILITIES).forEach(([key, codesForEntry]) => {
+    result[key] = result.canEnterConsole && codesForEntry.some(can);
+  });
+  return result;
 }

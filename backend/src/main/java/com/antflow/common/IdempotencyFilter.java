@@ -8,7 +8,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.annotation.Order;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -33,8 +32,8 @@ public class IdempotencyFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest req) {
         String path = req.getRequestURI();
         return !METHODS.contains(req.getMethod().toUpperCase())
-            || !(path.startsWith("/api/mobile/") || path.startsWith("/api/auth/login")
-                || path.startsWith("/api/forms/") || path.startsWith("/api/processes/"));
+            || !(path.startsWith("/api/mobile/") || path.startsWith("/api/forms/")
+                || path.startsWith("/api/processes/"));
     }
 
     @Override
@@ -42,10 +41,17 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String key = readKey(req);
         if (key == null) { chain.doFilter(req, res); return; }
+        var principal = PrincipalHolder.current();
+        if (principal.isEmpty()) { chain.doFilter(req, res); return; }
 
         byte[] body = req.getInputStream().readAllBytes();
-        long userId = currentUserId();
-        IdempotencyService.Claim claim = service.claim(userId, req.getMethod(), req.getRequestURI(), key, body);
+        long userId = principal.get().userId();
+        // 幂等键只能由「用户 + 路由 + 客户端给的 key」决定，不能掺 authzVersion：
+        // 角色/菜单一变版本就变，24h 内重试同一个提交会被当成新请求，副作用重放（重复提交/重复审批）。
+        // 也不能改键的形态——已落库的旧记录还在 TTL 内，换了形态就命中不到。
+        // （要做到"权限变化后不重放旧响应"，应在重放前单独校验当前授权，而不是改键空间。）
+        IdempotencyService.Claim claim = service.claim(userId, req.getMethod(), req.getRequestURI(),
+            key, body);
         if (claim.replay() != null) {
             write(res, claim.replay(), true, null);
             return;
@@ -91,13 +97,6 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             if (value != null && !value.isBlank()) return value.trim();
         }
         return null;
-    }
-
-    private static long currentUserId() {
-        var principal = PrincipalHolder.current();
-        if (principal.isPresent()) return principal.get().userId();
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.isAuthenticated() ? 0L : 0L;
     }
 
     private static final class CachedBodyRequest extends HttpServletRequestWrapper {

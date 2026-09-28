@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping({"/api/mobile/events", "/api/workflow/events"})
@@ -34,6 +35,7 @@ public class MobileEventController {
     private final Map<Long, CopyOnWriteArraySet<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public ResponseEntity<SseEmitter> events() {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         long userId = PrincipalHolder.current().orElseThrow().userId();

@@ -36,16 +36,27 @@ export async function fetchMobileDrafts() {
   return apiRequest<MobileDraft[]>('/api/mobile/drafts');
 }
 
-export async function createMobileDraft(formCode: string, data: MobileFormValues) {
+export async function createMobileDraft(
+  formCode: string,
+  data: MobileFormValues,
+  idempotencyKey: string,
+) {
   return apiRequest<number>('/api/mobile/drafts', {
     method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ formCode, data }),
   });
 }
 
-export async function updateMobileDraft(id: number, formCode: string, data: MobileFormValues) {
+export async function updateMobileDraft(
+  id: number,
+  formCode: string,
+  data: MobileFormValues,
+  idempotencyKey: string,
+) {
   return apiRequest<MobileDraft>(`/api/mobile/drafts/${id}`, {
     method: 'PUT',
+    headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ formCode, data }),
   });
 }

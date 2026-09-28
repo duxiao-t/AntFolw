@@ -1,5 +1,4 @@
 import {
-  CheckOutlined,
   DeleteOutlined,
   LockOutlined,
   PlusOutlined,
@@ -8,6 +7,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
+import { request, useModel } from '@umijs/max';
 import {
   App,
   Button,
@@ -23,37 +23,33 @@ import {
   Typography,
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
-import { request, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../authz';
 import './Security.less';
-import { displayPermissionName } from './permissionLabels';
-import {
-  mergePermissionTreeSelection,
-  resolvePermissionSelection,
-} from './permissionDependencies';
 
 type Permission = {
   code: string;
   name: string;
-  category: string;
+  domain: string;
+  domainLabel: string;
   riskLevel: 'NORMAL' | 'HIGH' | 'CRITICAL';
   sortOrder: number;
-  kind: 'PAGE' | 'ACTION';
   adminOnly: boolean;
-  requiredPermissionCodes: string[];
+  scopeable: boolean;
+  defaultScope: string | null;
 };
+
+type Grant = { code: string; scopeOverride: string | null; departmentIds: number[] };
 
 type Role = {
   id: number;
   code: string;
   name: string;
   description?: string;
-  dataScope: string;
   enabled: boolean;
   builtin: boolean;
   version: number;
-  permissionCodes: string[];
-  customDepartmentIds: number[];
+  permissions: Grant[];
   userCount: number;
 };
 
@@ -67,40 +63,19 @@ const scopeOptions = [
   { value: 'ALL', label: '全部数据' },
 ];
 
+const scopeLabels: Record<string, string> = Object.fromEntries(
+  scopeOptions.map((option) => [option.value, option.label]),
+);
 const riskLabel = { NORMAL: '普通', HIGH: '高风险', CRITICAL: '关键' };
 const riskColor = { NORMAL: 'default', HIGH: 'orange', CRITICAL: 'red' };
 
-function buildPermissionTree(
-  permissions: Permission[],
-  disabled: boolean,
-): DataNode[] {
+/** 把能力点按域分组，域顺序即目录顺序。 */
+function groupByDomain(permissions: Permission[]): Array<[string, Permission[]]> {
   const groups = new Map<string, Permission[]>();
   permissions.forEach((permission) => {
-    groups.set(permission.category, [
-      ...(groups.get(permission.category) ?? []), permission,
-    ]);
+    groups.set(permission.domainLabel, [...(groups.get(permission.domainLabel) ?? []), permission]);
   });
-  return [...groups.entries()].map(([category, items]) => ({
-    key: `group:${category}`,
-    title: <span className="security-tree__group">{category}</span>,
-    disableCheckbox: disabled,
-    children: items.sort((a, b) => a.sortOrder - b.sortOrder).map((permission) => ({
-      key: permission.code,
-      disabled: disabled || permission.adminOnly,
-      title: (
-        <span className="security-tree__item">
-          <span>
-            <strong>{displayPermissionName(permission.code, permission.name)}</strong>
-            <code>{permission.code}</code>
-          </span>
-          {permission.adminOnly && <Tag icon={<LockOutlined />}>仅管理员</Tag>}
-          {permission.riskLevel !== 'NORMAL' && (
-            <Tag color={riskColor[permission.riskLevel]}>{riskLabel[permission.riskLevel]}</Tag>
-          )}
-        </span>
-      ),
-    })),
-  }));
+  return [...groups.entries()];
 }
 
 export default function RolePage() {
@@ -114,12 +89,12 @@ export default function RolePage() {
   const [draft, setDraft] = useState(false);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
-  const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(new Set());
-  const [autoAddedPermissions, setAutoAddedPermissions] = useState<Set<string>>(new Set());
-  const currentUser = initialState?.currentUser as any;
+  const [grants, setGrants] = useState<Map<string, Grant>>(new Map());
+  const currentUser = initialState?.currentUser as
+    | { roles?: string[]; permissions?: string[] }
+    | undefined;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const canWrite = isAdmin || (currentUser?.permissions ?? []).includes('security.role.write');
-  const dataScope = Form.useWatch('dataScope', form);
+  const canWrite = hasCapability(currentUser, CAPABILITY.securityRoleManage);
 
   const load = async () => {
     const [roleRows, permissionRows] = await Promise.all([
@@ -129,8 +104,9 @@ export default function RolePage() {
     setRoles(roleRows);
     setPermissions(permissionRows);
     if (canWrite) {
-      const rows = await request<DepartmentCandidate[]>('/api/security/role-department-candidates');
-      setDepartments(rows);
+      setDepartments(
+        await request<DepartmentCandidate[]>('/api/security/role-department-candidates'),
+      );
     }
   };
 
@@ -141,40 +117,84 @@ export default function RolePage() {
     if (!query) return roles;
     return roles.filter((role) => `${role.name} ${role.code}`.toLowerCase().includes(query));
   }, [roles, search]);
-  const pagePermissions = useMemo(() => permissions.filter((permission) => permission.kind === 'PAGE'), [permissions]);
-  const actionPermissions = useMemo(() => permissions.filter((permission) => permission.kind === 'ACTION'), [permissions]);
+
   const disabledEditor = !canWrite || !!editing?.builtin;
+  const permissionByCode = useMemo(
+    () => new Map(permissions.map((permission) => [permission.code, permission])),
+    [permissions],
+  );
 
   const edit = (role?: Role) => {
     setDraft(!role);
     setEditing(role ?? null);
-    const values = role ?? {
-      code: '', name: '', description: '', dataScope: 'SELF', enabled: true,
-      permissionCodes: [], customDepartmentIds: [],
-    };
-    form.setFieldsValue(values);
-    setSelectedPermissions(new Set(values.permissionCodes));
-    setAutoAddedPermissions(new Set());
+    form.setFieldsValue(role ?? { code: '', name: '', description: '', enabled: true });
+    setGrants(new Map((role?.permissions ?? []).map((grant) => [grant.code, grant])));
   };
 
-  const updatePermissionSelection = (checked: React.Key[], activePermissions: Permission[]) => {
-    const all = [...pagePermissions, ...actionPermissions];
-    const merged = mergePermissionTreeSelection(checked.map(String), selectedPermissions,
-      new Set(activePermissions.map((permission) => permission.code)));
-    const result = resolvePermissionSelection(merged, selectedPermissions,
-      autoAddedPermissions, all);
-    if (result.cascaded) {
-      message.info('已同步取消依赖该权限的页面或操作');
-    }
-    setAutoAddedPermissions(result.autoAdded);
-    setSelectedPermissions(result.selected);
-    form.setFieldValue('permissionCodes', [...result.selected]);
+  const updateGrant = (code: string, patch: Partial<Grant>) => {
+    setGrants((current) => {
+      const next = new Map(current);
+      const existing = next.get(code) ?? { code, scopeOverride: null, departmentIds: [] };
+      next.set(code, { ...existing, ...patch });
+      return next;
+    });
   };
 
-  const checkedTreeKeys = (checked: React.Key[] | { checked: React.Key[] }) => {
-    const keys = Array.isArray(checked) ? checked : checked.checked;
-    return keys as React.Key[];
-  };
+  const permissionTree = useMemo((): DataNode[] => {
+    return groupByDomain(permissions).map(([domainLabel, items]) => ({
+      key: `group:${domainLabel}`,
+      title: <span className="security-tree__group">{domainLabel}</span>,
+      disableCheckbox: true,
+      selectable: false,
+      children: items.sort((a, b) => a.sortOrder - b.sortOrder).map((permission) => {
+        const grant = grants.get(permission.code);
+        return {
+          key: permission.code,
+          disabled: disabledEditor || (!isAdmin && permission.adminOnly),
+          title: (
+            <span className="security-tree__item">
+              <span>
+                <strong>{permission.name}</strong>
+                <code>{permission.code}</code>
+              </span>
+              <Space size={6} onClick={(event) => event.stopPropagation()}>
+                {permission.adminOnly && <Tag icon={<LockOutlined />}>超管专属</Tag>}
+                {permission.riskLevel !== 'NORMAL' && (
+                  <Tag color={riskColor[permission.riskLevel]}>
+                    {riskLabel[permission.riskLevel]}
+                  </Tag>
+                )}
+                {permission.scopeable && grant && (
+                  <Select
+                    size="small"
+                    style={{ width: 150 }}
+                    disabled={disabledEditor}
+                    value={grant.scopeOverride ?? 'DEFAULT'}
+                    onChange={(value) => updateGrant(permission.code, {
+                      scopeOverride: value === 'DEFAULT' ? null : value,
+                      departmentIds: value === 'CUSTOM' ? grant.departmentIds : [],
+                    })}
+                    options={[
+                      {
+                        value: 'DEFAULT',
+                        label: `默认（${scopeLabels[permission.defaultScope ?? ''] ?? '不限制'}）`,
+                      },
+                      ...scopeOptions,
+                    ]}
+                  />
+                )}
+              </Space>
+            </span>
+          ),
+        };
+      }),
+    }));
+  }, [permissions, grants, disabledEditor, isAdmin]);
+
+  const customGrants = useMemo(
+    () => [...grants.values()].filter((grant) => grant.scopeOverride === 'CUSTOM'),
+    [grants],
+  );
 
   const save = async () => {
     const values = await form.validateFields();
@@ -182,8 +202,12 @@ export default function RolePage() {
     try {
       const payload = {
         ...values,
-        permissionCodes: [...selectedPermissions],
         version: editing?.version,
+        permissions: [...grants.values()].map((grant) => ({
+          code: grant.code,
+          scopeOverride: grant.scopeOverride,
+          departmentIds: grant.departmentIds,
+        })),
       };
       await request(editing ? `/api/security/roles/${editing.id}` : '/api/security/roles', {
         method: editing ? 'PUT' : 'POST',
@@ -191,15 +215,15 @@ export default function RolePage() {
       });
       message.success(editing ? '角色已更新' : '角色已创建');
       setDraft(false);
-      await load();
       const saved = await request<Role[]>('/api/security/roles');
+      setRoles(saved);
       const selected = saved.find((role) => role.code === values.code);
       if (selected) {
-        setRoles(saved);
         setEditing(selected);
         form.setFieldsValue(selected);
-        setSelectedPermissions(new Set(selected.permissionCodes));
+        setGrants(new Map(selected.permissions.map((grant) => [grant.code, grant])));
       }
+      window.dispatchEvent(new Event('antflow:refresh-authz'));
     } finally {
       setSaving(false);
     }
@@ -214,13 +238,6 @@ export default function RolePage() {
     await load();
   };
 
-  const pageCheckedKeys = pagePermissions.filter((permission) => selectedPermissions.has(permission.code))
-    .map((permission) => permission.code);
-  const actionCheckedKeys = actionPermissions.filter((permission) => selectedPermissions.has(permission.code))
-    .map((permission) => permission.code);
-  const pageTree = buildPermissionTree(pagePermissions, disabledEditor);
-  const actionTree = buildPermissionTree(actionPermissions, disabledEditor);
-
   return (
     <PageContainer title={false} className="security-page">
       <div className="security-workspace">
@@ -230,7 +247,9 @@ export default function RolePage() {
               <Typography.Title level={4}>角色</Typography.Title>
               <Typography.Text type="secondary">{roles.length} 个角色</Typography.Text>
             </div>
-            {canWrite && <Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>新建</Button>}
+            {canWrite && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>新建</Button>
+            )}
           </div>
           <Input
             allowClear
@@ -252,9 +271,13 @@ export default function RolePage() {
                     <Typography.Text strong>{role.name}</Typography.Text>
                     {role.builtin && <SafetyCertificateOutlined className="security-muted-icon" />}
                   </Space>
-                  <Typography.Text type="secondary" className="security-role-list__code">{role.code}</Typography.Text>
+                  <Typography.Text type="secondary" className="security-role-list__code">
+                    {role.code}
+                  </Typography.Text>
                 </div>
-                <Tag color={role.enabled ? 'green' : 'default'}>{role.enabled ? '启用' : '停用'}</Tag>
+                <Tag color={role.enabled ? 'green' : 'default'}>
+                  {role.enabled ? '启用' : '停用'}
+                </Tag>
               </List.Item>
             )}
           />
@@ -267,74 +290,126 @@ export default function RolePage() {
             <>
               <header className="security-editor__header">
                 <div>
-                  <Typography.Title level={3}>{editing ? editing.name : '新建角色'}</Typography.Title>
+                  <Typography.Title level={3}>
+                    {editing ? editing.name : '新建角色'}
+                  </Typography.Title>
                   <Typography.Text type="secondary">
-                    {editing?.code ?? '配置角色的页面访问与操作权限'}
+                    {editing?.code ?? '勾选能力，并只在需要例外时调整数据范围'}
                   </Typography.Text>
                 </div>
                 <Space>
                   {editing && !editing.builtin && canWrite && (
-                    <Popconfirm title="删除该角色？" description="仅未分配成员的角色可删除。" onConfirm={() => remove(editing)}>
+                    <Popconfirm
+                      title="删除该角色？"
+                      description="仅未分配成员的角色可删除。"
+                      onConfirm={() => remove(editing)}
+                    >
                       <Button danger icon={<DeleteOutlined />}>删除</Button>
                     </Popconfirm>
                   )}
-                  {canWrite && <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={disabledEditor} onClick={save}>保存更改</Button>}
+                  {canWrite && !editing?.builtin && (
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      loading={saving}
+                      onClick={save}
+                    >
+                      保存
+                    </Button>
+                  )}
                 </Space>
               </header>
 
-              <Form form={form} layout="vertical" requiredMark="optional" className="security-form">
+              <Form form={form} layout="vertical" className="security-form" disabled={disabledEditor}>
                 <div className="security-form__grid">
                   <Form.Item label="角色名称" name="name" rules={[{ required: true, message: '请输入角色名称' }]}>
-                    <Input disabled={disabledEditor} maxLength={128} />
+                    <Input placeholder="例如：表单流程管理员" />
                   </Form.Item>
                   <Form.Item label="角色编码" name="code" rules={[{ required: true, message: '请输入角色编码' }]}>
-                    <Input disabled={disabledEditor || !!editing} maxLength={64} placeholder="department_manager" />
+                    <Input disabled={!!editing} placeholder="小写字母、数字、下划线" />
                   </Form.Item>
                 </div>
-                <Form.Item label="说明" name="description">
-                  <Input.TextArea disabled={disabledEditor} rows={2} maxLength={500} />
-                </Form.Item>
                 <div className="security-form__grid">
-                  <Form.Item label="数据范围" name="dataScope" rules={[{ required: true }]}>
-                    <Select disabled={disabledEditor} options={scopeOptions} />
+                  <Form.Item label="说明" name="description">
+                    <Input placeholder="可选" />
                   </Form.Item>
-                  <Form.Item label="状态" name="enabled" valuePropName="checked">
-                    <Select disabled={disabledEditor} options={[{ value: true, label: '启用' }, { value: false, label: '停用' }]} />
+                  <Form.Item label="状态" name="enabled">
+                    <Select
+                      options={[{ value: true, label: '启用' }, { value: false, label: '停用' }]}
+                    />
                   </Form.Item>
                 </div>
-                {dataScope === 'CUSTOM' && (
-                  <Form.Item label="指定部门" name="customDepartmentIds" rules={[{ required: true, message: '请选择部门' }]}>
-                    <Select disabled={disabledEditor} mode="multiple" showSearch={{ optionFilterProp: 'label' }} options={departments.map((row) => ({ value: row.id, label: row.name }))} />
-                  </Form.Item>
-                )}
-                <div className="security-permission-toolbar">
-                  <div>
-                    <Typography.Title level={5}>权限路径</Typography.Title>
-                    <Typography.Text type="secondary">页面决定可见范围，操作决定可执行动作</Typography.Text>
-                  </div>
-                  <Space size={6}>
-                    <Tag color="blue">页面 {pagePermissions.filter((item) => selectedPermissions.has(item.code)).length}</Tag>
-                    <Tag>操作 {actionPermissions.filter((item) => selectedPermissions.has(item.code)).length}</Tag>
-                  </Space>
-                </div>
-                <div className="security-permission-grid">
-                  <section className="security-permission-panel">
-                    <div className="security-permission-panel__title"><span>页面访问</span><Typography.Text type="secondary">菜单与路由</Typography.Text></div>
-                    <Tree checkable checkedKeys={pageCheckedKeys} treeData={pageTree}
-                      onCheck={(checked) => updatePermissionSelection(checkedTreeKeys(checked), pagePermissions)}
-                      showLine={{ showLeafIcon: false }} />
-                  </section>
-                  <section className="security-permission-panel">
-                    <div className="security-permission-panel__title"><span>操作权限</span><Typography.Text type="secondary">按钮与接口</Typography.Text></div>
-                    <Tree checkable checkedKeys={actionCheckedKeys} treeData={actionTree}
-                      onCheck={(checked) => updatePermissionSelection(checkedTreeKeys(checked), actionPermissions)}
-                      showLine={{ showLeafIcon: false }} />
-                  </section>
-                </div>
-                {editing?.builtin && (
-                  <div className="security-readonly-note"><CheckOutlined /> 内置角色策略不可编辑</div>
-                )}
               </Form>
+
+              {editing?.builtin && (
+                <div className="security-readonly-note">内置角色的能力策略不可修改，仅可查看。</div>
+              )}
+
+              <div className="security-permission-toolbar">
+                <Typography.Title level={5}>能力</Typography.Title>
+                <Typography.Text type="secondary">
+                  按域勾选。带范围选择的能力可覆盖默认范围，未覆盖即使用默认值。
+                </Typography.Text>
+              </div>
+
+              <div className="security-permission-panel">
+                <Tree
+                  checkable
+                  selectable={false}
+                  disabled={disabledEditor}
+                  checkedKeys={[...grants.keys()]}
+                  onCheck={(checked) => {
+                    const keys = (Array.isArray(checked) ? checked : checked.checked)
+                      .map(String)
+                      .filter((key) => !key.startsWith('group:'));
+                    setGrants((current) => {
+                      const next = new Map<string, Grant>();
+                      keys.forEach((code) => {
+                        next.set(code, current.get(code) ?? {
+                          code, scopeOverride: null, departmentIds: [],
+                        });
+                      });
+                      return next;
+                    });
+                  }}
+                  treeData={permissionTree}
+                />
+              </div>
+
+              {customGrants.length > 0 && (
+                <>
+                  <div className="security-permission-toolbar">
+                    <Typography.Title level={5}>指定部门</Typography.Title>
+                    <Typography.Text type="secondary">
+                      以下能力选择了「指定部门」，请为每项选择部门。
+                    </Typography.Text>
+                  </div>
+                  <div className="security-permission-panel">
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      {customGrants.map((grant) => (
+                        <div key={grant.code} className="security-tree__item">
+                          <span>
+                            <strong>{permissionByCode.get(grant.code)?.name ?? grant.code}</strong>
+                            <code>{grant.code}</code>
+                          </span>
+                          <Select
+                            mode="multiple"
+                            allowClear
+                            style={{ minWidth: 320 }}
+                            placeholder="选择部门"
+                            disabled={disabledEditor}
+                            value={grant.departmentIds}
+                            options={departments.map((department) => ({
+                              value: department.id, label: department.name,
+                            }))}
+                            onChange={(value) => updateGrant(grant.code, { departmentIds: value })}
+                          />
+                        </div>
+                      ))}
+                    </Space>
+                  </div>
+                </>
+              )}
             </>
           )}
         </main>

@@ -4,6 +4,8 @@ import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.FormGrantService;
 import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.authz.RoleAdminService;
 import com.antflow.engine.BizException;
 import com.antflow.engine.NoAssigneeFoundException;
@@ -11,10 +13,16 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormProcessPublishService;
+import com.antflow.form.options.OptionSourceService;
 import com.antflow.form.FormDefinitionMapper;
+import com.antflow.form.FormDefinitionService;
+import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
+import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.mobile.workflow.MobileAppService;
+import com.antflow.navigation.MenuService;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.User;
@@ -42,6 +50,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -60,6 +70,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest(properties = {
@@ -68,7 +79,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     "antflow.automation.recovery-interval-ms=3600000",
     "antflow.outbox.poll-interval-ms=3600000",
     "antflow.wecom.schedule-poll-interval-ms=3600000",
-    "antflow.mobile.files.storage=test"
+    "antflow.mobile.files.storage=test",
+    "antflow.jwt.secret=test-secret-0123456789-test-secret-0123456789",
+    // 引导口令放在测试自己这里（pom 的全局属性会盖掉外部传值，故已从 pom 移除）。
+    // 用非公开口令：初始化器会拒绝已知共享口令，而 V48 会把种子账号打成哨兵，
+    // 测试的 Spring 上下文必须能把它解开。
+    "antflow.auth.bootstrap-admin-password=test-bootstrap-password",
+    "antflow.auth.bootstrap-bob-password=test-bootstrap-password"
 })
 @Import(PostgresTransactionalIntegrityIntegrationTest.TestFileStorageConfig.class)
 class PostgresTransactionalIntegrityIntegrationTest {
@@ -144,6 +161,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private DataSource dataSource;
     @Autowired private ProcessEngine processEngine;
     @Autowired private UserService userService;
     @Autowired private AuditService auditService;
@@ -156,7 +174,138 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private RoleAdminService roleAdminService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
     @Autowired private FormDataService formDataService;
+    @Autowired private FormDataMapper formDataMapper;
+    @Autowired private FormDefinitionService formDefinitionService;
+    @Autowired private MobileDraftService mobileDraftService;
+    @Autowired private MobileAppService mobileAppService;
+    @Autowired private MenuService menuService;
     @Autowired private WecomService wecomService;
+    @Autowired private OptionSourceService optionSourceService;
+    @Autowired private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
+
+    /**
+     * 隐藏字段的选项可见性必须按"调用者自己所处的节点"判，而不是只看发起人。
+     * 三条路径（instanceId / dataId / selectedValues 回查）共用同一套判据，这里走前两条。
+     */
+    @Test
+    void optionFieldVisibilityFollowsTheViewersOwnNode() {
+        long starter = userId("admin");
+        long first = insertUser("vis-first");
+        long second = insertUser("vis-second");
+        long reader = insertUser("vis-reader");
+        long approverRole = insertRole("vis-approver");
+        jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code) "
+            + "VALUES (?, 'workflow:task:read')", approverRole);
+        assignRole(first, approverRole);
+        assignRole(second, approverRole);
+        long readerRole = insertRole("vis-instance-reader");
+        jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+            + "VALUES (?, 'workflow:instance:read', 'ALL'), (?, 'form:data:read', 'ALL')",
+            readerRole, readerRole);
+        assignRole(reader, readerRole);
+
+        long sourceId = insertOptionSource("vis_source");
+        long versionId = optionSourceVersionId(sourceId);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_row(version_id, row_no, data) "
+            + "VALUES (?, 1, '{\"col\":\"甲\"}'::jsonb)", versionId);
+        java.util.function.Function<String, String> boundSelect = id ->
+            "{\"id\":\"" + id + "\",\"type\":\"select\",\"label\":\"F\",\"props\":{\"optionSource\":"
+                + "{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}";
+        String schema = "[" + boundSelect.apply("plain") + "," + boundSelect.apply("hiddenA")
+            + "," + boundSelect.apply("hiddenB") + "]";
+        // a1 把 hiddenA 设为隐藏、a2 把 hiddenB 设为隐藏。
+        String flow = """
+            {"id":"root","type":"ROOT","children":{
+              "id":"a1","type":"APPROVAL","props":{"assignedType":"ASSIGN_USER",
+                "assignedUser":[%d],"mode":"OR","formPerms":[{"fieldId":"hiddenA","mode":"HIDDEN"}]},
+              "children":{"id":"a2","type":"APPROVAL","props":{"assignedType":"ASSIGN_USER",
+                "assignedUser":[%d],"mode":"OR","formPerms":[{"fieldId":"hiddenB","mode":"HIDDEN"}]},
+                "children":null}}}
+            """.formatted(first, second);
+        long formId = insertForm("DRAFT", schema, starter);
+        long processId = insertProcess(formId, "DRAFT", flow);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long createdInstance = 0L;
+        try {
+            PrincipalHolder.set(new PrincipalHolder.Principal(starter, "admin", List.of("admin")));
+            publishService.publish(formId, processId);
+            Map<String, Object> started = processEngine.start(
+                new StartCmd(code, Map.of(), Map.of()), starter);
+            final long instanceId = ((Number) started.get("instanceId")).longValue();
+            createdInstance = instanceId;
+            long dataId = jdbcTemplate.queryForObject(
+                "SELECT form_data_id FROM t_process_instance WHERE id = ?", Long.class, instanceId);
+            long firstTask = ((List<?>) started.get("firstTaskIds")).stream()
+                .map(Number.class::cast).mapToLong(Number::longValue).findFirst().orElseThrow();
+
+            // 发起人：沿用 ROOT 的 formPerms（ROOT 没配 → 不受影响）
+            assertThat(queryOptionsByInstance(instanceId, "hiddenA")).isNotEmpty();
+
+            // a1 处理人：自己节点没隐藏 hiddenB → 必须查得到（不能被"任一节点隐藏"误伤）
+            setPrincipal(first);
+            assertThat(queryOptionsByInstance(instanceId, "hiddenB")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByInstance(instanceId, "hiddenA"))
+                .isInstanceOf(HiddenResourceException.class);
+
+            // 用 SQL 推进到 a2 而不是 processEngine.approve：t_task_history 是 append-only
+            // （触发器保护），一旦走了真审批就没法清理这次测试留下的实例。
+            jdbcTemplate.update("UPDATE t_task SET status = 'APPROVED', approved_by = ?, "
+                + "approved_at = now() WHERE id = ?", first, firstTask);
+            jdbcTemplate.update("INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, "
+                + "approval_mode, task_type, version) "
+                + "VALUES (?, 'a2', ?, 'PENDING', 'OR_SIGN', 'APPROVAL', 0)", instanceId, second);
+
+            // a2 处理人：反过来
+            setPrincipal(second);
+            assertThat(queryOptionsByInstance(instanceId, "hiddenA")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByInstance(instanceId, "hiddenB"))
+                .isInstanceOf(HiddenResourceException.class);
+
+            // 不是处理人（只有实例读 + 数据读权限）：任一节点隐藏就拒；没隐藏的照常
+            setPrincipal(reader);
+            assertThat(queryOptionsByInstance(instanceId, "plain")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByInstance(instanceId, "hiddenA"))
+                .isInstanceOf(HiddenResourceException.class);
+            // 拿 dataId 绕不开：同一条记录反查实例后按同一套判
+            assertThat(queryOptionsByDataId(dataId, "plain")).isNotEmpty();
+            assertThatThrownBy(() -> queryOptionsByDataId(dataId, "hiddenB"))
+                .isInstanceOf(HiddenResourceException.class);
+        } finally {
+            PrincipalHolder.clear();
+            cleanupOptionVisibilityFixture(sourceId, approverRole, readerRole);
+        }
+    }
+
+    private List<com.antflow.form.options.OptionRuntimeService.OptionValue> queryOptionsByInstance(
+            long instanceId, String fieldId) {
+        return optionRuntimeService.query(new com.antflow.form.options.OptionRuntimeService.OptionQuery(
+            null, null, instanceId, null, fieldId, null, 1, 20, Map.of(), List.of(), null)).items();
+    }
+
+    private List<com.antflow.form.options.OptionRuntimeService.OptionValue> queryOptionsByDataId(
+            long dataId, String fieldId) {
+        return optionRuntimeService.query(new com.antflow.form.options.OptionRuntimeService.OptionQuery(
+            null, null, null, dataId, fieldId, null, 1, 20, Map.of(), List.of(), null)).items();
+    }
+
+    /**
+     * 由引擎启动的实例清不掉：`t_task_history` 是 append-only（触发器保护），而它引用 proc_inst_id，
+     * 于是 instance → form_data → form_definition 这条链都得留着——与
+     * {@code workflowHistoryIsAppendOnlyAtDatabaseBoundary} 一样，测完不回收。
+     * 只回收本次独有的数据源与角色，避免影响"按列表断言"的用例。
+     */
+    private void cleanupOptionVisibilityFixture(long sourceId, long approverRole, long readerRole) {
+        // 源→版本的 FK 不级联，得按 行 → 版本 → 源 的顺序删。
+        jdbcTemplate.update("DELETE FROM t_option_data_source_row WHERE version_id IN "
+            + "(SELECT id FROM t_option_data_source_version WHERE source_id = ?)", sourceId);
+        jdbcTemplate.update("DELETE FROM t_option_data_source_version WHERE source_id = ?", sourceId);
+        jdbcTemplate.update("DELETE FROM t_form_option_source WHERE source_id = ?", sourceId);
+        jdbcTemplate.update("DELETE FROM t_option_data_source WHERE id = ?", sourceId);
+        jdbcTemplate.update("DELETE FROM t_user_role WHERE role_id IN (?, ?)", approverRole, readerRole);
+        jdbcTemplate.update("DELETE FROM t_role WHERE id IN (?, ?)", approverRole, readerRole);
+    }
 
     @Test
     void directSubmissionConsumesOnlyItsSourceDraft() {
@@ -166,19 +315,894 @@ class PostgresTransactionalIntegrityIntegrationTest {
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
         long draftId = insertDraft(formId, adminId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
+                List.of(), draftId);
 
-        formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
-            List.of(), draftId);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
 
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
+            long invalidDraftId = insertDraft(formId, adminId);
+            assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
+                List.of(), invalidDraftId)).isInstanceOf(BizException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, invalidDraftId))
+                .isEqualTo(1L);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
 
-        long invalidDraftId = insertDraft(formId, adminId);
-        assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
-            List.of(), invalidDraftId)).isInstanceOf(BizException.class);
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, invalidDraftId))
+    @Test
+    void formDataPageUsesCapabilityScopeWithoutFormUsageGrant() {
+        long userId = insertUser("all-scope-" + UUID.randomUUID());
+        long roleId = insertRole("all_scope_" + UUID.randomUUID().toString().replace("-", ""));
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long dataId = insertSubmittedData(formId, userId("admin"));
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, 'form:data:read', 'ALL')
+                """, roleId);
+            setPrincipal(userId);
+
+            Page<com.antflow.form.runtime.FormData> visible = formDataService.authorizedPage(
+                1, 20, null, null, null, userId, false);
+            assertThat(visible.getRecords()).extracting(com.antflow.form.runtime.FormData::getId)
+                .contains(dataId);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void directSubmissionRequiresGrantAndDraftListRemainsSelfService() {
+        long userId = insertUser("direct-submit-" + UUID.randomUUID());
+        long allowedForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long deniedForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long deniedDraft = insertDraft(deniedForm, userId);
+        assignRole(userId, roleId("employee"));
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+            VALUES (?, 'USER', ?, ?)
+            """, allowedForm, userId, userId("admin"));
+        String allowedCode = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, allowedForm);
+        String deniedCode = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, deniedForm);
+        try {
+            setPrincipal(userId);
+            var drafts = mobileDraftService.list(userId);
+            assertThat(drafts)
+                .extracting(com.antflow.mobile.workflow.MobileDraftDto::id)
+                .containsExactly(deniedDraft);
+            assertThat(drafts.get(0).readOnly()).isTrue();
+            assertThat(mobileDraftService.count(userId)).isEqualTo(1L);
+
+            assertThatThrownBy(() -> formDataService.submit(deniedCode, "SUBMITTED",
+                Map.of("subject", "blocked"), userId, List.of(), deniedDraft))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, deniedDraft))
+                .isEqualTo(1L);
+
+            FormDataService.SubmitResult submitted = formDataService.submit(allowedCode,
+                "SUBMITTED", Map.of("subject", "allowed"), userId, List.of());
+            assertThat(submitted.dataId()).isNotNull();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id IN (?, ?)",
+                allowedForm, deniedForm);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
+                allowedForm, deniedForm);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
+                allowedForm, deniedForm);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void mobileCatalogAndDetailUseTheSameFormUsageGrant() {
+        long grantedUser = insertUser("mobile-granted-" + UUID.randomUUID());
+        long ungrantedUser = insertUser("mobile-ungranted-" + UUID.randomUUID());
+        long roleId = insertRole("mobile_runtime_"
+            + UUID.randomUUID().toString().replace("-", ""));
+        long firstForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long secondForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code)
+                VALUES (?, 'form:runtime:read')
+                """, roleId);
+            assignRole(grantedUser, roleId);
+            assignRole(ungrantedUser, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)
+                """, firstForm, grantedUser, userId("admin"),
+                secondForm, grantedUser, userId("admin"));
+
+            assertThat(mobileAppService.list(grantedUser, null, null))
+                .extracting("formId")
+                .contains(firstForm, secondForm);
+            assertThat(mobileAppService.list(ungrantedUser, null, null)).isEmpty();
+            assertThat(authorizationService.canUseForm(firstForm, grantedUser)).isTrue();
+            assertThat(authorizationService.canUseForm(firstForm, ungrantedUser)).isFalse();
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
+                firstForm, secondForm);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
+                firstForm, secondForm);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id IN (?, ?)",
+                grantedUser, ungrantedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)",
+                grantedUser, ungrantedUser);
+            authorizationService.evict(grantedUser);
+            authorizationService.evict(ungrantedUser);
+        }
+    }
+
+    @Test
+    void formDefinitionListAndActionsShareMaintainerPredicate() {
+        long userId = insertUser("form-scope-" + UUID.randomUUID());
+        long roleId = insertRole("form_scope_" + UUID.randomUUID().toString().replace("-", ""));
+        long ownForm = insertForm("DRAFT", VALID_SCHEMA, userId);
+        long otherForm = insertForm("DRAFT", VALID_SCHEMA);
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, 'form:definition:read', 'SELF'),
+                       (?, 'form:definition:manage', 'SELF')
+                """, roleId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+                VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)
+                """, ownForm, userId, userId("admin"),
+                otherForm, userId, userId("admin"));
+            jdbcTemplate.update("""
+                INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+                VALUES (?, ?, ?)
+                """, ownForm, userId, userId("admin"));
+            setPrincipal(userId);
+
+            Page<FormDefinitionMapper.Summary> page = formDefinitionService.list(
+                1, 100, null, null, userId, false);
+            assertThat(page.getRecords()).extracting(FormDefinitionMapper.Summary::id)
+                .contains(ownForm).doesNotContain(otherForm);
+            page.getRecords().forEach(row -> authorizationService.requireFormMaintenance(
+                row.id(), PermissionCodes.FORM_DEFINITION_READ));
+            assertThatCode(() -> authorizationService.requireFormMaintenance(
+                ownForm, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
+            assertThatThrownBy(() -> authorizationService.requireFormMaintenance(
+                otherForm, PermissionCodes.FORM_DEFINITION_MANAGE))
+                .isInstanceOf(HiddenResourceException.class);
+
+            jdbcTemplate.update("""
+                INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+                VALUES (?, ?, ?)
+                """, otherForm, userId, userId("admin"));
+            Page<FormDefinitionMapper.Summary> expanded = formDefinitionService.list(
+                1, 100, null, null, userId, false);
+            assertThat(expanded.getRecords()).extracting(FormDefinitionMapper.Summary::id)
+                .contains(ownForm, otherForm);
+            assertThatCode(() -> authorizationService.requireFormMaintenance(
+                otherForm, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_maintainer WHERE form_def_id IN (?, ?)",
+                ownForm, otherForm);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id IN (?, ?)",
+                ownForm, otherForm);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id IN (?, ?)",
+                ownForm, otherForm);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void menuReplacementUsesCanonicalCapabilitiesAndAtomicVersion() throws Exception {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        MenuService.MenuDocument original;
+        try {
+            original = menuService.menu();
+            assertThatThrownBy(() -> menuService.replace(
+                new MenuService.MenuDocument(original.version(), List.of())))
+                .isInstanceOfSatisfying(BizException.class, error ->
+                    assertThat(error.getCode()).isEqualTo("MENU_REQUIRED"));
+            MenuService.MenuNode unknown = new MenuService.MenuNode(
+                "ghost", null, "PAGE", "ghost", "幽灵页", null,
+                List.of(), 10, true, List.of());
+            assertThatThrownBy(() -> menuService.replace(
+                new MenuService.MenuDocument(original.version(), List.of(unknown))))
+                .isInstanceOfSatisfying(BizException.class, error ->
+                    assertThat(error.getCode()).isEqualTo("MENU_PAGE_KEY_UNKNOWN"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+        MenuService.MenuNode forged = new MenuService.MenuNode(
+            "workplace", null, "PAGE", "workplace", "工作台", "home",
+            List.of("security:role:manage"), 10, true, List.of());
+        MenuService.MenuDocument request = new MenuService.MenuDocument(
+            original.version(), List.of(forged));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Object>> futures = List.of(
+            executor.submit(() -> replaceMenu(request, ready, start)),
+            executor.submit(() -> replaceMenu(request, ready, start)));
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        List<Object> outcomes;
+        try {
+            outcomes = List.of(futures.get(0).get(20, TimeUnit.SECONDS),
+                futures.get(1).get(20, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(outcomes.stream().filter(MenuService.MenuDocument.class::isInstance).count())
             .isEqualTo(1L);
+        assertThat(outcomes.stream().filter(BizException.class::isInstance)
+            .map(BizException.class::cast).map(BizException::getCode))
+            .containsExactly("MENU_VERSION_CONFLICT");
+        MenuService.MenuDocument saved = outcomes.stream()
+            .filter(MenuService.MenuDocument.class::isInstance)
+            .map(MenuService.MenuDocument.class::cast).findFirst().orElseThrow();
+        assertThat(saved.nodes().get(0).requiredPermissions()).isEmpty();
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        try {
+            menuService.replace(new MenuService.MenuDocument(saved.version(), original.nodes()));
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void v41RemovesLegacyAdminOnlyAndPageDerivedGrants() {
+        String schema = "migration_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("40").load().migrate();
+            Long employeeRoleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_role WHERE code = 'employee'", Long.class);
+            Long bobId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'bob'", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code) VALUES "
+                + "(?, 'security:user_role:read'), (?, 'integration:storage:manage')",
+                employeeRoleId, employeeRoleId);
+            Long before = jdbcTemplate.queryForObject(
+                "SELECT authz_version FROM " + schema + ".t_user WHERE id = ?", Long.class, bobId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("41").load().migrate();
+
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
+                + ".t_role_permission WHERE role_id = ? AND permission_code IN "
+                + "('security:user_role:read', 'integration:storage:manage')",
+                Long.class, employeeRoleId)).isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT authz_version FROM " + schema + ".t_user WHERE id = ?", Long.class, bobId))
+                .isEqualTo(before + 1);
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v42BackfillsCreatorsAndQualifiedManagersWithoutPromotingOrdinaryUsers() {
+        String schema = "maintainer_migration_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("41").load().migrate();
+            Long adminId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'admin'", Long.class);
+            Long bobId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'bob'", Long.class);
+            Long managerRoleId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_role(code, name) VALUES ('migration_manager', 'Migration manager') "
+                + "RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_user_role(user_id, role_id) VALUES (?, ?)", bobId, managerRoleId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:definition:manage', 'SELF')", managerRoleId);
+            Long plainUserId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_user(employee_no, username, password_hash, display_name, status) "
+                + "SELECT '990001', 'migration_plain', password_hash, 'Migration plain', 'ACTIVE' "
+                + "FROM " + schema + ".t_user WHERE id = ? RETURNING id", Long.class, bobId);
+            Long employeeRoleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_role WHERE code = 'employee'", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_user_role(user_id, role_id) VALUES (?, ?)", plainUserId, employeeRoleId);
+            Long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status, created_by) "
+                + "VALUES ('maintainer_migration', 'Maintainer migration', '[]', '{}', "
+                + "'DRAFT', ?) RETURNING id", Long.class, adminId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by) "
+                + "VALUES (?, 'USER', ?, ?), (?, 'USER', ?, ?)",
+                formId, bobId, adminId, formId, plainUserId, adminId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForList("SELECT user_id FROM " + schema
+                + ".t_form_maintainer WHERE form_def_id = ? ORDER BY user_id",
+                Long.class, formId)).containsExactlyInAnyOrder(adminId, bobId)
+                .doesNotContain(plainUserId);
+            assertThat(jdbcTemplate.queryForObject("SELECT scopeable FROM " + schema
+                + ".t_permission WHERE code = 'form:definition:manage'", Boolean.class)).isFalse();
+            assertThat(jdbcTemplate.queryForObject("SELECT scope_override FROM " + schema
+                + ".t_role_permission WHERE role_id = ? "
+                + "AND permission_code = 'form:definition:manage'", String.class, managerRoleId))
+                .isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT scopeable FROM " + schema
+                + ".t_permission WHERE code = 'form:data:read'", Boolean.class)).isTrue();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v43ProtectsTheLastActiveMaintainerOnAV42Database() throws Exception {
+        String schema = "last_maintainer_migration_"
+            + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("42").load().migrate();
+            Long adminId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'admin'", Long.class);
+            Long bobId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_user WHERE username = 'bob'", Long.class);
+            Long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status, created_by) "
+                + "VALUES ('last_maintainer', 'Last maintainer', '[]', '{}', 'DRAFT', ?) "
+                + "RETURNING id", Long.class, adminId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_maintainer(form_def_id, user_id, granted_by) VALUES (?, ?, ?)",
+                formId, adminId, adminId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThatThrownBy(() -> jdbcTemplate.update("UPDATE " + schema
+                + ".t_user SET status = 'DISABLED' WHERE id = ?", adminId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_maintainer(form_def_id, user_id, granted_by) VALUES (?, ?, ?)",
+                formId, bobId, adminId);
+            assertThat(jdbcTemplate.update("UPDATE " + schema
+                + ".t_user SET status = 'DISABLED' WHERE id = ?", adminId)).isEqualTo(1);
+
+            jdbcTemplate.update("UPDATE " + schema
+                + ".t_user SET status = 'ACTIVE' WHERE id = ?", adminId);
+            List<Throwable> outcomes = runConcurrently(adminId,
+                () -> jdbcTemplate.update("UPDATE " + schema
+                    + ".t_user SET status = 'DISABLED' WHERE id = ?", adminId),
+                () -> jdbcTemplate.update("UPDATE " + schema
+                    + ".t_user SET status = 'DISABLED' WHERE id = ?", bobId));
+            assertThat(outcomes.stream().filter(Objects::isNull).count()).isEqualTo(1L);
+            assertThat(outcomes.stream().filter(Objects::nonNull).toList())
+                .singleElement().isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
+                + ".t_form_maintainer maintenance JOIN " + schema
+                + ".t_user user_row ON user_row.id = maintenance.user_id "
+                + "WHERE maintenance.form_def_id = ? AND user_row.status = 'ACTIVE'",
+                Long.class, formId)).isEqualTo(1L);
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v46BackfillsFormOptionSourceReferences() {
+        String schema = "form_option_source_migration_"
+            + UUID.randomUUID().toString().replace("-", "");
+        try {
+            // 先停在 V45：那时候还没有引用表，表单只能把绑定写在 schema 里。
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("45").load().migrate();
+            long sourceId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_option_data_source(code, name) VALUES ('ledger', 'Ledger') RETURNING id",
+                Long.class);
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, version, schema, settings, status, deleted) "
+                + "VALUES ('ref_form', 'Ref form', 1, jsonb_build_array(jsonb_build_object("
+                + "'id', 'dept', 'type', 'select', 'label', 'Dept', 'props', jsonb_build_object("
+                + "'optionSource', jsonb_build_object('sourceId', ?::bigint)))), "
+                + "'{}'::jsonb, 'DRAFT', 0) RETURNING id", Long.class, sourceId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForList("SELECT source_id FROM " + schema
+                + ".t_form_option_source WHERE form_def_id = ?", Long.class, formId))
+                .containsExactly(sourceId);
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v48RotatesOnlySharedWecomPasswordsAndRevokesTheirSessions() {
+        String schema = "wecom_password_migration_"
+            + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("47").load().migrate();
+            long companyId = jdbcTemplate.queryForObject(
+                "SELECT id FROM " + schema + ".t_company ORDER BY id LIMIT 1", Long.class);
+            long rotatedId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_user(employee_no, username, password_hash, display_name, status) "
+                + "VALUES ('wx-rotate', 'wx-rotate', crypt('qwer1234', gen_salt('bf', 10)), "
+                + "'Rotate', 'ACTIVE') RETURNING id", Long.class);
+            long preservedId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_user(employee_no, username, password_hash, display_name, status) "
+                + "VALUES ('wx-keep', 'wx-keep', crypt('kept-secret', gen_salt('bf', 10)), "
+                + "'Keep', 'ACTIVE') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_wecom_user_mapping(company_id, wecom_user_id, user_id) VALUES (?, ?, ?)",
+                companyId, "wx-rotate", rotatedId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_wecom_user_mapping(company_id, wecom_user_id, user_id) VALUES (?, ?, ?)",
+                companyId, "wx-keep", preservedId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_auth_session(user_id, refresh_token_hash, csrf_token_hash, device_name, expires_at) "
+                + "VALUES (?, 'rotate-refresh', 'rotate-csrf', 'test', now() + interval '1 day')",
+                rotatedId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForObject("SELECT password_hash = crypt('qwer1234', "
+                + "password_hash) FROM " + schema + ".t_user WHERE id = ?", Boolean.class,
+                rotatedId)).isFalse();
+            assertThat(jdbcTemplate.queryForObject("SELECT password_hash = crypt('kept-secret', "
+                + "password_hash) FROM " + schema + ".t_user WHERE id = ?", Boolean.class,
+                preservedId)).isTrue();
+            assertThat(jdbcTemplate.queryForObject("SELECT password_hash FROM " + schema
+                + ".t_user WHERE username = 'admin'", String.class))
+                .isEqualTo("!ANTFLOW_BOOTSTRAP_REQUIRED!");
+            assertThat(jdbcTemplate.queryForObject("SELECT revoked_at IS NOT NULL FROM " + schema
+                + ".t_auth_session WHERE user_id = ?", Boolean.class, rotatedId)).isTrue();
+
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status) VALUES "
+                + "('bi_redact', 'BI redact', '[{\"id\":\"secret\",\"type\":\"text\"},"
+                + "{\"id\":\"count\",\"type\":\"number\"}]'::jsonb, '{}'::jsonb, "
+                + "'PUBLISHED') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "SELECT id, 1, schema, 'test' FROM " + schema
+                + ".t_form_definition WHERE id = ?", formId);
+            long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, '{\"secret\":\"private\",\"count\":42,"
+                + "\"unknown\":\"hidden\"}'::jsonb, 'SUBMITTED') RETURNING id",
+                Long.class, formId);
+            assertThat(jdbcTemplate.queryForObject("SELECT value_text FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'secret'",
+                String.class, dataId)).isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT value_json::text FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'unknown'",
+                String.class, dataId)).isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT value_text FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'count'",
+                String.class, dataId)).isEqualTo("42");
+            assertThat(jdbcTemplate.queryForObject("SELECT employee_no FROM " + schema
+                + ".v_user_catalog WHERE id = ?", String.class, rotatedId)).isNull();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void ledgerResolvesLabelsFromTheRowsOwnVersionAndJoinsMultiSelectLabels() {
+        String schema = "ledger_version_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").target("48").load().migrate();
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status) VALUES "
+                + "('ledger_v', 'Ledger', '[{\"id\":\"pick\",\"type\":\"multi_select\","
+                + "\"label\":\"新下拉\",\"props\":{\"options\":[{\"value\":\"a\","
+                + "\"label\":\"X\"},{\"value\":\"b\",\"label\":\"Y\"}]}}]'::jsonb, "
+                + "'{}'::jsonb, 'PUBLISHED') RETURNING id", Long.class);
+            // v1 是这一行数据当时的 schema；之后字段改名、选项显示名也改了。
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "VALUES (?, 1, '[{\"id\":\"pick\",\"type\":\"multi_select\","
+                + "\"label\":\"旧下拉\",\"props\":{\"options\":[{\"value\":\"a\","
+                + "\"label\":\"甲\"},{\"value\":\"b\",\"label\":\"乙\"}]}}]'::jsonb, 'v1')",
+                formId);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "VALUES (?, 2, '[{\"id\":\"pick\",\"type\":\"multi_select\","
+                + "\"label\":\"新下拉\",\"props\":{\"options\":[{\"value\":\"a\","
+                + "\"label\":\"X\"},{\"value\":\"b\",\"label\":\"Y\"}]}}]'::jsonb, 'v2')",
+                formId);
+            long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, '{\"pick\":[\"a\",\"b\"]}'::jsonb, 'SUBMITTED') RETURNING id",
+                Long.class, formId);
+
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            assertThat(jdbcTemplate.queryForObject("SELECT field_label FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'pick'",
+                String.class, dataId)).isEqualTo("旧下拉");
+            assertThat(jdbcTemplate.queryForObject("SELECT value_label FROM " + schema
+                + ".v_form_ledger WHERE data_id = ? AND field_id = 'pick'",
+                String.class, dataId)).isEqualTo("甲、乙");
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void bindableListsOnlySourcesTheFormReferences() {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT",
+            "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":{}}]");
+        long referenced = insertOptionSource("ref_" + UUID.randomUUID().toString().replace("-", ""));
+        long unreferenced = insertOptionSource("unref_" + UUID.randomUUID().toString().replace("-", ""));
+        long bound = insertOptionSource("bound_" + UUID.randomUUID().toString().replace("-", ""));
+        jdbcTemplate.update("INSERT INTO t_form_option_source(form_def_id, source_id) VALUES (?, ?)",
+            formId, referenced);
+        jdbcTemplate.update("INSERT INTO t_form_option_source(form_def_id, source_id) VALUES (?, ?)",
+            formId, bound);
+        // 绑定写在 schema 里、但引用行被撤掉：仍要出现在候选里，否则该字段的版本下拉会空掉。
+        jdbcTemplate.update("DELETE FROM t_form_option_source WHERE form_def_id = ? AND source_id = ?",
+            formId, bound);
+        jdbcTemplate.update("UPDATE t_form_definition SET schema = jsonb_build_array("
+            + "jsonb_build_object('id', 'dept', 'type', 'select', 'label', 'Dept', 'props', "
+            + "jsonb_build_object('optionSource', jsonb_build_object('sourceId', ?::bigint)))) "
+            + "WHERE id = ?", bound, formId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThat(optionSourceService.bindable(formId))
+                .extracting(OptionSourceService.BindableSource::id)
+                .containsExactlyInAnyOrder(referenced, bound);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void retiredVersionLeavesThePickerButKeepsServingBoundForms() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("retire_" + UUID.randomUUID().toString().replace("-", ""));
+        long v1 = optionSourceVersionId(sourceId);
+        // 表单钉着 v1（这就是「在用」的来源）。
+        long formId = insertForm("DRAFT", optionSchema(sourceId, v1));
+        // 再发一版，然后把它停用。
+        long v2 = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'PUBLISHED', '[\"col\"]'::jsonb, 3, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            optionSourceService.disableVersion(sourceId, v2);
+
+            // 停用后的版本不再进候选；表单钉着的 v1 照常在（否则版本下拉会显示空白）。
+            assertThat(optionSourceService.bindable(formId))
+                .extracting(OptionSourceService.BindableSource::versionId)
+                .containsExactly(v1);
+            // 读路径完全不受影响：v1 仍是 PUBLISHED，钉着它的表单照常能读候选。
+            assertThat(optionSourceService.previewRows(sourceId, v1, 10)).isNotNull();
+            // 「最新」回落到仍然可用的 v1。
+            assertThat(optionSourceService.detail(sourceId).source().publishedVersionId())
+                .isEqualTo(v1);
+
+            optionSourceService.enableVersion(sourceId, v2);
+            assertThat(optionSourceService.bindable(formId))
+                .extracting(OptionSourceService.BindableSource::versionId)
+                .containsExactlyInAnyOrder(v1, v2);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void publishingABindingToARetiredVersionIsRefused() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("retirepub_" + UUID.randomUUID().toString().replace("-", ""));
+        // insertOptionSource 建的是 v1（可用），这里再加一个已发布但会被停用的 v2。
+        long usable = optionSourceVersionId(sourceId);
+        long retired = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'PUBLISHED', '[\"col\"]'::jsonb, 1, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            optionSourceService.disableVersion(sourceId, retired);
+
+            // 停用只把版本从候选列表里移除是不够的：直接提交带该 versionId 的 schema 再发布就绕过去了。
+            long badForm = insertForm("DRAFT", boundOptionSchema(sourceId, retired));
+            assertThatThrownBy(() -> formDefinitionService.publish(badForm))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("不可绑定");
+
+            // 未停用的版本照常可绑定——别把这道闸做成"一律拒绝"。
+            long okForm = insertForm("DRAFT", boundOptionSchema(sourceId, usable));
+            assertThat(formDefinitionService.publish(okForm).getStatus()).isEqualTo("PUBLISHED");
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void formListKeywordSearchWorksAgainstRealPostgres() {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            // 连接串带 stringtype=unspecified：参数以 unknown 送到 PG，CONCAT 少了 ::text 会 500。
+            assertThat(formDefinitionService.list(1, 50, code.substring(0, 8), null, adminId, true)
+                .getRecords()).extracting(FormDefinitionMapper.Summary::id).contains(formId);
+            assertThat(formDefinitionService.list(1, 50, "Integration form", null, adminId, true)
+                .getRecords()).extracting(FormDefinitionMapper.Summary::id).contains(formId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void mobileListSearchWorksAgainstRealPostgres() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long dataId = insertSubmittedData(formId, adminId);
+        String businessNo = jdbcTemplate.queryForObject(
+            "SELECT business_no FROM t_form_data WHERE id = ?", String.class, dataId);
+
+        // 这三个查询都带 keyword；参数没转成 text 时 PG 直接 "could not determine data type"。
+        assertThatCode(() -> mobileWorkflowMapper.selectTaskPage(adminId, "todo", "x", null, 20, 0))
+            .doesNotThrowAnyException();
+        assertThatCode(() -> mobileWorkflowMapper.selectInstancePage(adminId, "x", null, 20, 0))
+            .doesNotThrowAnyException();
+        // 光"不抛异常"也可能是因为什么都没查到，所以这条要求真的命中。
+        assertThat(mobileWorkflowMapper.selectInitiatedPage(adminId, businessNo, null, 50, 0))
+            .extracting(MobileWorkflowMapper.InitiatedRow::id)
+            .contains(dataId);
+    }
+
+    @Test
+    void unpublishIsRefusedWhileAFormBindsTheVersion() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("unpub_" + UUID.randomUUID().toString().replace("-", ""));
+        long versionId = optionSourceVersionId(sourceId);
+        long formId = insertForm("DRAFT", optionSchema(sourceId, versionId));
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThatThrownBy(() -> optionSourceService.unpublish(sourceId, versionId))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("不能取消发布");
+
+            // 解绑之后就能退回待发布——这就是「发布错了」的退路。
+            jdbcTemplate.update("UPDATE t_form_definition SET schema = '[]'::jsonb WHERE id = ?", formId);
+            assertThat(optionSourceService.unpublish(sourceId, versionId).status()).isEqualTo("DRAFT");
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void discardDropsOnlyDraftVersions() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("discard_" + UUID.randomUUID().toString().replace("-", ""));
+        long publishedId = optionSourceVersionId(sourceId);
+        long draftId = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'DRAFT', '[\"col\"]'::jsonb, 2, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_row(version_id, row_no, data) "
+            + "VALUES (?, 1, '{\"col\":\"a\"}'::jsonb), (?, 2, '{\"col\":\"b\"}'::jsonb)",
+            draftId, draftId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            assertThatThrownBy(() -> optionSourceService.discardVersion(sourceId, publishedId))
+                .isInstanceOf(BizException.class).hasMessageContaining("先取消发布");
+
+            optionSourceService.discardVersion(sourceId, draftId);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_option_data_source_row WHERE version_id = ?", Long.class, draftId))
+                .isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_option_data_source_version WHERE source_id = ? AND status = 'DRAFT'",
+                Long.class, sourceId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    private long optionSourceVersionId(long sourceId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT id FROM t_option_data_source_version WHERE source_id = ?", Long.class, sourceId);
+    }
+
+    /**
+     * 「可引用表单」清单只拦**新增**绑定：撤销引用不该让已经绑着它的表单失去保存能力，
+     * 否则表单 1/14 那种状态（引用被撤销、字段仍绑着）会直接卡死。
+     */
+    @Test
+    void optionReferenceListOnlyGatesNewBindings() {
+        long adminId = userId("admin");
+        long sourceA = insertOptionSource("ref_gate_a");
+        long sourceB = insertOptionSource("ref_gate_b");
+        long versionA = optionSourceVersionId(sourceA);
+        long versionB = optionSourceVersionId(sourceB);
+        // 表单本来就绑着 A，且 A 对该表单**没有**引用行（模拟撤销引用后的状态）。
+        long formId = insertForm("PUBLISHED", boundOptionSchema(sourceA, versionA));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            // 原样再存一次：旧绑定照常放行
+            assertThatCode(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(boundOptionSchema(sourceA, versionA)), null, adminId))
+                .doesNotThrowAnyException();
+
+            // 但"同一个源被绑到**新字段**上"必须拦住：只比 sourceId 集合的话，(A, S) 在旧新集合里
+            // 都有，新增的 (新字段, S) 会被当成旧绑定放行——差集得按「字段 + 源」这个绑定对算。
+            String copiedToNewField = "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\","
+                + "\"props\":{\"optionSource\":{\"sourceId\":" + sourceA + ",\"versionId\":" + versionA
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}},"
+                + "{\"id\":\"dept2\",\"type\":\"select\",\"label\":\"Dept2\",\"props\":{\"optionSource\":"
+                + "{\"sourceId\":" + sourceA + ",\"versionId\":" + versionA
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}]";
+            assertThatThrownBy(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(copiedToNewField), null, adminId))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("可引用表单");
+
+            // 新增一条绑定到同样没有被引用的 B → 拒绝
+            String both = "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
+                + "{\"optionSource\":{\"sourceId\":" + sourceB + ",\"versionId\":" + versionB
+                + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}]";
+            assertThatThrownBy(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(both), null, adminId))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("可引用表单");
+
+            // 把 B 加回该表单的可引用清单后放行
+            jdbcTemplate.update("INSERT INTO t_form_option_source(form_def_id, source_id, created_by) "
+                + "VALUES (?, ?, ?)", formId, sourceB, adminId);
+            assertThatCode(() -> formDefinitionService.saveDraft(formId, code, "Integration form",
+                null, jsonFor(both), null, adminId))
+                .doesNotThrowAnyException();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_option_source WHERE form_def_id = ?", formId);
+        }
+    }
+
+    private Object jsonFor(String schema) {
+        try {
+            return flowJson.readValue(schema, Object.class);
+        } catch (Exception error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    // ===== V40 换算里三条「只记录、不修改」的存量权限事实（见 docs/DECISIONS.md）=====
+    // 这三条都不是 bug 修复，而是把**当前行为**钉住：哪天有人要改，得先让它们红。
+
+    /** ① form:authorization:manage 在 V40 是 scopeable=false，换算时旧 t_role.data_scope 被丢成 NULL。 */
+    @Test
+    void v40DropsTheOldDataScopeOfTheFormAuthorizationCapability() {
+        String schema = "v40_scope_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "39");
+            long roleId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_role(code, name, data_scope) "
+                + "VALUES ('scope_probe', 'probe', 'DEPARTMENT') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code) "
+                + "VALUES (?, 'form.authorization.manage')", roleId);
+
+            migrateTo(schema, null);
+
+            assertThat(jdbcTemplate.queryForObject("SELECT scope_override FROM " + schema
+                + ".t_role_permission WHERE role_id = ? "
+                + "AND permission_code = 'form:authorization:manage'", String.class, roleId))
+                .as("scopeable=false 的能力在换算时拿不到覆盖值，旧部门范围就此丢失")
+                .isNull();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    /** ② 旧的 create 与 design 都收敛到同一个写能力，粒度没了（拿到 create 就等于能 design）。 */
+    @Test
+    void v40MergesFormCreateAndDesignIntoOneWriteCapability() {
+        String schema = "v40_merge_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "39");
+            long roleId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_role(code, name, data_scope) "
+                + "VALUES ('create_probe', 'probe', 'ALL') RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role_permission(role_id, permission_code) "
+                + "VALUES (?, 'form.definition.create')", roleId);
+
+            migrateTo(schema, null);
+
+            assertThat(jdbcTemplate.queryForList("SELECT permission_code FROM " + schema
+                + ".t_role_permission WHERE role_id = ?", String.class, roleId))
+                .as("只授过 create 的角色，换算后拿到的是合并后的写能力")
+                .contains("form:definition:manage");
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    /** ③ 内置角色改名（user → employee）没有冲突保护：已有 employee 角色时整个 V40 回滚。 */
+    @Test
+    void v40RenameRollsBackWhenAnEmployeeRoleAlreadyExists() {
+        String schema = "v40_rename_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "39");
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_role(code, name, data_scope) VALUES ('employee', '自建员工', 'ALL')");
+
+            assertThatThrownBy(() -> migrateTo(schema, null))
+                .as("t_role.code 唯一，裸 UPDATE 撞上自建 employee 会让整个 V40 回滚")
+                .hasMessageContaining("employee");
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    private void migrateTo(String schema, String target) {
+        var configuration = Flyway.configure().dataSource(dataSource)
+            .defaultSchema(schema).schemas(schema).locations("classpath:db/migration");
+        if (target != null) {
+            configuration = configuration.target(target);
+        }
+        configuration.load().migrate();
+    }
+
+    private static String optionSchema(long sourceId, long versionId) {
+        return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":"
+            + "{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId + "}}}]";
+    }
+
+    /** 带完整列映射的绑定，能过 requireVersion 的列检查——用来测"能不能发布"这类到了后面的路径。 */
+    private static String boundOptionSchema(long sourceId, long versionId) {
+        return "[{\"id\":\"dept\",\"type\":\"select\",\"label\":\"Dept\",\"props\":{\"optionSource\":"
+            + "{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId
+            + ",\"valueColumn\":\"col\",\"labelColumn\":\"col\"}}}]";
+    }
+
+    private long insertOptionSource(String code) {
+        long sourceId = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source(code, name) "
+            + "VALUES (?, 'Integration source') RETURNING id", Long.class, code);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_version(source_id, version_no, "
+            + "status, columns_json, row_count, sha256) "
+            + "VALUES (?, 1, 'PUBLISHED', '[\"col\"]'::jsonb, 2, 'deadbeef')", sourceId);
+        return sourceId;
     }
 
     @Test
@@ -1013,6 +2037,18 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void authorizationSnapshotUsesTheMigratedCapabilitySchema() {
+        long adminId = userId("admin");
+        authorizationService.evict(adminId);
+
+        assertThat(authorizationService.principalForRequest(adminId, null))
+            .hasValueSatisfying(principal -> {
+                assertThat(principal.roles()).contains("admin");
+                assertThat(principal.permissions()).contains(PermissionCodes.CONSOLE_ACCESS);
+            });
+    }
+
+    @Test
     void desktopWorkflowPagesFilterPermissionsBeforeLimitAndCount() {
         long viewerId = insertUser("page_viewer_" + UUID.randomUUID());
         long ownerId = insertUser("page_owner_" + UUID.randomUUID());
@@ -1038,11 +2074,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, visibleInstanceId, ownerId, viewerId);
 
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
-            "authorized", null, ownerId, null, 1, 0))
+            "authorized", null, ownerId, null, null, null, 1, 0))
             .extracting(com.antflow.task.ProcessInstance::getId)
             .containsExactly(visibleInstanceId);
         assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
-            "authorized", null, ownerId, null)).isEqualTo(1L);
+            "authorized", null, ownerId, null, null, null)).isEqualTo(1L);
 
         long mineDataId = insertSubmittedData(formId, viewerId);
         long reworkDataId = insertSubmittedData(formId, viewerId);
@@ -1057,11 +2093,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, ?, 'RUNNING', '__rework__', ?, now() + interval '1 minute')
             """, processId, reworkDataId, viewerId);
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
-            "mine", null, null, null, 10, 0))
+            "mine", null, null, null, null, null, 10, 0))
             .extracting(com.antflow.task.ProcessInstance::getId)
             .containsExactly(mineInstanceId);
         assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
-            "mine", null, null, null)).isEqualTo(1L);
+            "mine", null, null, null, null, null)).isEqualTo(1L);
 
         jdbcTemplate.update("""
             INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, approval_mode, task_type)
@@ -1077,6 +2113,86 @@ class PostgresTransactionalIntegrityIntegrationTest {
             .extracting(com.antflow.task.TaskEntity::getStatus)
             .containsExactlyInAnyOrder("APPROVED", "RESUBMITTED");
         assertThat(taskMapper.countTaskPage(viewerId, "done", "APPROVED")).isEqualTo(1L);
+    }
+
+    @Test
+    void desktopRecordSearchUsesBusinessFieldsDateBoundsAndTheOriginalVisibilityPredicate() {
+        long viewerId = insertUser("record_viewer_" + UUID.randomUUID());
+        long applicantId = insertUser("record_applicant_" + UUID.randomUUID());
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        long departmentId = insertDepartment(companyId, "记录查询测试部门");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(viewerId));
+        OffsetDateTime from = OffsetDateTime.parse("2026-09-01T00:00:00+08:00");
+        OffsetDateTime to = from.plusDays(1);
+        List<Long> instanceIds = new java.util.ArrayList<>();
+        try {
+            jdbcTemplate.update("UPDATE t_form_definition SET name = '记录查询采购申请' WHERE id = ?",
+                formId);
+            jdbcTemplate.update("UPDATE t_user SET display_name = '记录查询申请人' WHERE id = ?",
+                applicantId);
+            for (OffsetDateTime time : List.of(from, from.minusSeconds(1), to, from.plusHours(1))) {
+                long dataId = insertSubmittedData(formId, applicantId);
+                instanceIds.add(jdbcTemplate.queryForObject("""
+                    INSERT INTO t_process_instance(proc_def_id, form_data_id, status,
+                        current_node_id, started_by, started_dept_id, started_at)
+                    VALUES (?, ?, 'RUNNING', 'record_manager', ?, ?, ?) RETURNING id
+                    """, Long.class, processId, dataId, applicantId, departmentId, time));
+            }
+            for (long instanceId : instanceIds.subList(0, 3)) {
+                jdbcTemplate.update("""
+                    INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status,
+                        approval_mode, task_type)
+                    VALUES (?, 'record_manager', ?, 'PENDING', 'OR_SIGN', 'APPROVAL')
+                    """, instanceId, viewerId);
+            }
+            long visibleId = instanceIds.get(0);
+            String businessNo = jdbcTemplate.queryForObject("""
+                SELECT data.business_no FROM t_form_data data
+                JOIN t_process_instance pi ON pi.form_data_id = data.id WHERE pi.id = ?
+                """, String.class, visibleId);
+            String formCode = jdbcTemplate.queryForObject(
+                "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+            var applicant = jdbcTemplate.queryForMap(
+                "SELECT username, employee_no FROM t_user WHERE id = ?", applicantId);
+
+            for (String keyword : List.of("记录查询采购", formCode, businessNo, "记录查询申请人",
+                String.valueOf(applicant.get("username")), String.valueOf(applicant.get("employee_no")),
+                "记录查询测试部门", "record_manager", String.valueOf(visibleId), "#" + visibleId)) {
+                var records = processInstanceMapper.selectInstancePage(viewerId, false, true, false,
+                    "authorized", "RUNNING", null, keyword, from, to, 20, 0);
+                assertThat(records).as("keyword %s", keyword)
+                    .extracting(com.antflow.task.ProcessInstance::getId).containsExactly(visibleId);
+                assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
+                    "authorized", "RUNNING", null, keyword, from, to)).isEqualTo(records.size());
+                assertThat(records.get(0).getFormName()).isEqualTo("记录查询采购申请");
+                assertThat(records.get(0).getFormCode()).isEqualTo(formCode);
+                assertThat(records.get(0).getBusinessNo()).isEqualTo(businessNo);
+                assertThat(records.get(0).getApplicantName()).isEqualTo("记录查询申请人");
+                assertThat(records.get(0).getApplicantEmployeeNo())
+                    .isEqualTo(applicant.get("employee_no"));
+                assertThat(records.get(0).getApplicantDepartment()).isEqualTo("记录查询测试部门");
+            }
+
+            jdbcTemplate.update("UPDATE t_process_instance SET current_node_id = '__rework__' WHERE id = ?",
+                visibleId);
+            assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
+                "authorized", "REWORK", null, null, from, to, 20, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).containsExactly(visibleId);
+            assertThat(processInstanceMapper.countInstancePage(viewerId, false, true, false,
+                "authorized", "REWORK", null, null, from, to)).isEqualTo(1L);
+            assertThat(processInstanceMapper.selectInstancePage(viewerId, false, false, false,
+                "authorized", null, null, "记录查询", from, to, 20, 0)).isEmpty();
+        } finally {
+            instanceIds.forEach(id -> jdbcTemplate.update("DELETE FROM t_task WHERE proc_inst_id = ?", id));
+            instanceIds.forEach(id -> jdbcTemplate.update("DELETE FROM t_process_instance WHERE id = ?", id));
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", viewerId, applicantId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", departmentId);
+        }
     }
 
     @Test
@@ -1391,7 +2507,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     void concurrentAdminDisableAndRoleRemovalLeaveAnActiveAdmin() throws Exception {
         long seedAdminId = userId("admin");
         long adminRoleId = roleId("admin");
-        long userRoleId = roleId("user");
+        long userRoleId = roleId("employee");
         long firstAdminId = insertUser("concurrent-admin-a-" + UUID.randomUUID());
         long secondAdminId = insertUser("concurrent-admin-b-" + UUID.randomUUID());
         assignRole(firstAdminId, adminRoleId);
@@ -1676,13 +2792,109 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     private long insertForm(String status, String schema) {
+        return insertForm(status, schema, userId("admin"));
+    }
+
+    @Test
+    void instanceReadScopeDoesNotDependOnFormUsageGrant() {
+        long viewerId = insertUser("instance-scope-" + UUID.randomUUID());
+        long roleId = insertRole("instance_scope_"
+            + UUID.randomUUID().toString().replace("-", ""));
+        long ownerId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(ownerId));
+        long dataId = insertSubmittedData(formId, ownerId);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
+            VALUES (?, ?, 'RUNNING', ?) RETURNING id
+            """, Long.class, processId, dataId, ownerId);
+        try {
+            assignRole(viewerId, roleId);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, 'workflow:instance:read', 'ALL')
+                """, roleId);
+            setPrincipal(viewerId);
+
+            assertThat(authorizationService.instanceVisibility(instanceId, viewerId))
+                .isEqualTo(AuthorizationService.InstanceVisibility.FULL);
+            assertThat(processInstanceMapper.selectInstancePage(viewerId, false, false, true,
+                "authorized", null, null, null, null, null, 20, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).contains(instanceId);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_process_instance WHERE id = ?", instanceId);
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", viewerId);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", viewerId);
+            authorizationService.evict(viewerId);
+        }
+    }
+
+    @Test
+    void formMaintainersCannotBeEmptyAndConcurrentReplacementConflicts() throws Exception {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = formDefinitionService.saveDraft(null,
+            "maintainer_" + UUID.randomUUID().toString().replace("-", ""),
+            "Maintainer test", "", List.of(), Map.of(), adminId).getId();
+        var staleDefinition = formDefinitionMapper.selectById(formId);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        int version;
+        try {
+            version = formGrantService.getMaintainers(formId).version();
+            assertThatThrownBy(() -> formGrantService.replaceMaintainers(formId,
+                new FormGrantService.FormMaintainerWriteRequest(version, Set.of())))
+                .isInstanceOfSatisfying(BizException.class, error ->
+                    assertThat(error.getCode()).isEqualTo("FORM_MAINTAINER_REQUIRED"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        List<Future<Object>> futures = List.of(
+            executor.submit(() -> replaceMaintainers(formId, version, Set.of(adminId), ready, start)),
+            executor.submit(() -> replaceMaintainers(formId, version, Set.of(bobId), ready, start)));
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        try {
+            List<Object> outcomes = List.of(futures.get(0).get(20, TimeUnit.SECONDS),
+                futures.get(1).get(20, TimeUnit.SECONDS));
+            assertThat(outcomes.stream()
+                .filter(FormGrantService.FormMaintainerDto.class::isInstance).count())
+                .isEqualTo(1L);
+            assertThat(outcomes.stream().filter(BizException.class::isInstance)
+                .map(BizException.class::cast).map(BizException::getCode))
+                .containsExactly("FORM_MAINTAINER_VERSION_CONFLICT");
+            assertThat(jdbcTemplate.queryForList("""
+                SELECT user_id FROM t_form_maintainer WHERE form_def_id = ?
+                """, Long.class, formId)).hasSize(1);
+            staleDefinition.setName("Renamed after authorization update");
+            formDefinitionMapper.updateById(staleDefinition);
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT authz_version FROM t_form_definition WHERE id = ?
+                """, Integer.class, formId)).isEqualTo(version + 1);
+        } finally {
+            executor.shutdownNow();
+            jdbcTemplate.update("DELETE FROM t_form_maintainer WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    private long insertForm(String status, String schema, long creatorId) {
         String code = "IT_" + UUID.randomUUID().toString().replace("-", "");
         return jdbcTemplate.queryForObject("""
             INSERT INTO t_form_definition(code, name, version, schema, settings, status,
                                           created_by, deleted)
             VALUES (?, 'Integration form', 1, ?::jsonb, '{}'::jsonb, ?, ?, 0)
             RETURNING id
-            """, Long.class, code, schema, status, userId("admin"));
+            """, Long.class, code, schema, status, creatorId);
     }
 
     private long insertSubmittedData(long formId, long creatorId) {
@@ -1808,6 +3020,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, Long.class, username, username);
     }
 
+    private long insertRole(String code) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_role(code, name, enabled, builtin, version)
+            VALUES (?, ?, true, false, 0) RETURNING id
+            """, Long.class, code, code);
+    }
+
     private long insertDepartment(long companyId, String name) {
         String path = "test_" + UUID.randomUUID().toString().replace("-", "");
         return jdbcTemplate.queryForObject("""
@@ -1820,6 +3039,40 @@ class PostgresTransactionalIntegrityIntegrationTest {
     private void assignRole(long userId, long roleId) {
         jdbcTemplate.update("INSERT INTO t_user_role(user_id, role_id) VALUES (?, ?)",
             userId, roleId);
+    }
+
+    private void setPrincipal(long userId) {
+        PrincipalHolder.set(authorizationService.principalForRequest(userId, null).orElseThrow());
+    }
+
+    private Object replaceMenu(MenuService.MenuDocument request, CountDownLatch ready,
+                               CountDownLatch start) throws InterruptedException {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        ready.countDown();
+        start.await(10, TimeUnit.SECONDS);
+        try {
+            return menuService.replace(request);
+        } catch (Throwable error) {
+            return error;
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    private Object replaceMaintainers(long formId, int version, Set<Long> userIds,
+                                      CountDownLatch ready, CountDownLatch start)
+            throws InterruptedException {
+        PrincipalHolder.set(new PrincipalHolder.Principal(1L, "admin", List.of("admin")));
+        ready.countDown();
+        start.await(10, TimeUnit.SECONDS);
+        try {
+            return formGrantService.replaceMaintainers(formId,
+                new FormGrantService.FormMaintainerWriteRequest(version, userIds));
+        } catch (Throwable error) {
+            return error;
+        } finally {
+            PrincipalHolder.clear();
+        }
     }
 
     private long userId(String username) {

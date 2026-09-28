@@ -33,10 +33,6 @@ vi.mock('@ant-design/pro-components', () => ({
   SettingDrawer: () => null,
 }));
 
-vi.mock('@ant-design/icons', () => ({
-  LinkOutlined: () => null,
-}));
-
 vi.mock('./requestErrorConfig', () => ({
   errorConfig: {},
 }));
@@ -54,6 +50,7 @@ describe('app getInitialState', () => {
       hash: '',
     };
     window.history.pushState({}, '', '/welcome');
+    localStorage.setItem('antflow-token', 'test-token');
   });
 
   it('should fetch currentUser when not on login page', async () => {

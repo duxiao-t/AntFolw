@@ -22,6 +22,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, history, request, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../authz';
 import { FormRenderer } from '../../components/FormRenderer/FormRenderer';
 import {
   ApprovalCommentEditor,
@@ -106,14 +107,12 @@ export default function DetailPage() {
   const qc = useQueryClient();
   const { initialState } = useModel('@@initialState');
   const currentUserId = (initialState?.currentUser as any)?.id;
-  const roles = (initialState?.currentUser as any)?.roles ?? [];
-  const permissions = (initialState?.currentUser as any)?.permissions ?? [];
-  const isAdmin = roles.includes('admin');
-  const canOverride = isAdmin || permissions.includes('workflow.instance.override');
-  const canRetryAutomation = isAdmin || permissions.includes('workflow.automation.retry');
-  const canApprove = isAdmin || permissions.includes('workflow.task.approve');
-  const canReject = isAdmin || permissions.includes('workflow.task.reject');
-  const canWithdraw = isAdmin || permissions.includes('workflow.instance.withdraw');
+  const currentUser = initialState?.currentUser as any;
+  const canOverride = hasCapability(currentUser, CAPABILITY.workflowInstanceOverride);
+  const canRetryAutomation = hasCapability(currentUser, CAPABILITY.workflowAutomationRetry);
+  const canApprove = hasCapability(currentUser, CAPABILITY.workflowTaskApprove);
+  const canReject = hasCapability(currentUser, CAPABILITY.workflowTaskReject);
+  const canWithdraw = hasCapability(currentUser, CAPABILITY.workflowInstanceWithdraw);
 
   const detailQuery = useQuery<{
     runtime: Record<string, any>;
@@ -224,7 +223,7 @@ export default function DetailPage() {
     queryFn: async () => {
       const people = await Promise.all(actorIds.map(async (actorId) => {
         try {
-          return await request<PersonView>(`/api/mobile/users/${actorId}`, {
+          return await request<PersonView>(`/api/pickers/users/${actorId}`, {
             skipErrorHandler: true,
           });
         } catch {
@@ -563,6 +562,7 @@ export default function DetailPage() {
                         schema={formSchema}
                         mode="readonly"
                         fieldModes={currentFormModes}
+                        optionContext={{ instanceId: Number(id) }}
                         value={myPending ? editableValues : initialFormData}
                         onChange={hasEditableFields ? setEditableValues : undefined}
                       />

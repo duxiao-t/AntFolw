@@ -1,132 +1,111 @@
 import { describe, expect, it } from 'vitest';
 import access from './access';
+import { CONSOLE_ENTRY, PAGES, accessKey } from './pages/registry';
+
+const currentUser = (roles: string[], permissions: string[]) =>
+  ({ roles, permissions }) as any;
 
 describe('access', () => {
-  it('should return canAdmin true when user has admin role', () => {
-    const initialState = {
-      currentUser: {
-        userid: '1',
-        name: 'Admin User',
-        avatar: 'https://example.com/avatar.png',
-        roles: ['admin'],
-        permissions: [],
-      },
-    };
-
-    const result = access(initialState);
-
+  it('grants every page and capability to admin implicitly', () => {
+    const result = access({ currentUser: currentUser(['admin'], []) });
     expect(result.canAdmin).toBe(true);
-    expect(result.canDesigner).toBe(true);
-    expect(result.canOverrideWorkflow).toBe(true);
+    expect(result.canEnterConsole).toBe(true);
+    PAGES.forEach((page) => {
+      expect(result[accessKey(page.key)]).toBe(true);
+    });
+    expect((result.can as (permission: string) => boolean)('system:backup:manage')).toBe(true);
   });
 
-  it('should return canAdmin false when user has non-admin role', () => {
-    const initialState = {
-      currentUser: {
-        userid: '2',
-        name: 'Regular User',
-        avatar: 'https://example.com/avatar.png',
-        roles: ['user'],
-        permissions: [
-          'page.workplace', 'page.approval.forms', 'page.approval.records',
-          'workflow.instance.read', 'form.definition.read', 'form.definition.design',
-        ],
-      },
-    };
-
-    const result = access(initialState);
+  it('derives page visibility from capabilities (employee sees console + workplace only)', () => {
+    const result = access({
+      currentUser: currentUser(['employee'], [
+        CONSOLE_ENTRY, 'form:runtime:read', 'workflow:task:read',
+      ]),
+    });
 
     expect(result.canAdmin).toBe(false);
-    expect(result.canDesigner).toBe(true);
-    expect(result.canReadInstances).toBe(true);
-    expect(result.canManageOrg).toBe(false);
-    expect(result.canAssignRoles).toBe(false);
-  });
-
-  it('delegates organization pages but keeps role assignment administrator-only', () => {
-    const result = access({
-      currentUser: {
-        userid: '4',
-        name: 'Delegated Manager',
-        avatar: '',
-        roles: ['manager'],
-        permissions: [
-          'page.org.contacts',
-          'org.department.read',
-          'org.user.read',
-          'security.user_role.read',
-        ],
-      },
-    });
-
-    expect(result.canManageOrg).toBe(true);
-    expect(result.canAssignRoles).toBe(false);
-  });
-
-  it('allows an approver to open task detail without record-query permission', () => {
-    const result = access({
-      currentUser: {
-        userid: '5',
-        name: 'Approver',
-        avatar: '',
-        roles: ['approver'],
-        permissions: [
-          'page.workplace',
-          'workflow.task.read',
-          'workflow.task.approve',
-        ],
-      },
-    });
-
+    expect(result.canEnterConsole).toBe(true);
+    expect(result[accessKey('workplace')]).toBe(true);
+    expect(result[accessKey('approval.forms')]).toBe(false);
+    expect(result[accessKey('settings.backup')]).toBe(false);
     expect(result.canUseTasks).toBe(true);
+  });
+
+  it('hides every console page when the account cannot enter the console', () => {
+    const result = access({
+      currentUser: currentUser(['employee'], ['form:runtime:read', 'workflow:task:read']),
+    });
+
+    expect(result.canEnterConsole).toBe(false);
+    expect(result[accessKey('workplace')]).toBe(false);
+  });
+
+  it('requires all read capabilities for 通讯录 and keeps 用户权限分配 administrator-only', () => {
+    const partial = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:user:read']),
+    });
+    expect(partial[accessKey('org.contacts')]).toBe(false);
+
+    const full = access({
+      currentUser: currentUser(['user'], [
+        CONSOLE_ENTRY, 'org:company:read', 'org:department:read', 'org:user:read',
+      ]),
+    });
+    expect(full[accessKey('org.contacts')]).toBe(true);
+    expect((full.can as (permission: string) => boolean)('security:user_role:manage')).toBe(false);
+  });
+
+  it('lets an approver open task detail without record-query capability', () => {
+    const result = access({
+      currentUser: currentUser(['user'], [
+        CONSOLE_ENTRY, 'workflow:task:read', 'workflow:task:approve',
+      ]),
+    });
+
     expect(result.canUseProcessDetail).toBe(true);
-    expect(result.canUseProcesses).toBe(false);
-    expect(result.canApproveTask).toBe(true);
-    expect(result.canRejectTask).toBe(false);
+    expect((result.can as (permission: string) => boolean)('workflow:task:approve')).toBe(true);
+    expect(result[accessKey('approval.records')]).toBe(false);
   });
 
-  it('requires company management permission for WeCom settings', () => {
-    const pageOnly = access({ currentUser: {
-      userid: '6', name: 'Viewer', avatar: '', roles: ['viewer'],
-      permissions: ['page.settings.wecom'],
-    } });
-    const manager = access({ currentUser: {
-      userid: '7', name: 'Manager', avatar: '', roles: ['manager'],
-      permissions: ['page.settings.wecom', 'org.company.manage'],
-    } });
+  it('gates 企业微信 on the integration capability instead of company info', () => {
+    const withoutIntegration = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:company:read']),
+    });
+    expect(withoutIntegration[accessKey('settings.wecom')]).toBe(false);
 
-    expect(pageOnly.canManageWecom).toBe(false);
-    expect(manager.canManageWecom).toBe(true);
+    const withIntegration = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'integration:wecom:manage']),
+    });
+    expect(withIntegration[accessKey('settings.wecom')]).toBe(true);
   });
 
-  it('should return canAdmin false when user roles are empty', () => {
-    const initialState = {
-      currentUser: {
-        userid: '3',
-        name: 'Guest User',
-        avatar: 'https://example.com/avatar.png',
-        roles: [],
-      },
-    };
+  it('exposes 新建一级部门 only to holders of org:department:manage', () => {
+    // 回归：该按钮曾绑定到一个从不存在的 access 键（access.canWriteDepartments），
+    // 取值恒为 undefined，导致对所有角色（含 admin）永久禁用。
+    const without = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:department:read']),
+    });
+    expect(without.canOrgDepartmentManage).toBe(false);
 
-    const result = access(initialState);
-
-    expect(result.canAdmin).toBe(false);
+    const withCapability = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:department:manage']),
+    });
+    expect(withCapability.canOrgDepartmentManage).toBe(true);
   });
 
-  it('should return canAdmin false when currentUser is undefined', () => {
-    const initialState = {
-      currentUser: undefined,
-    };
+  it('lets either 表单管理员 or 流程管理员 open the designers', () => {
+    const formAdmin = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'form:definition:manage']),
+    });
+    expect(formAdmin.canDesigner).toBe(true);
 
-    const result = access(initialState);
-
-    expect(result.canAdmin).toBeFalsy();
-  });
-
-  it('should return canAdmin false when initialState is undefined', () => {
-    const result = access(undefined);
-
-    expect(result.canAdmin).toBeFalsy();
+    const workflowAdmin = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'workflow:definition:manage']),
+    });
+    expect(workflowAdmin.canDesigner).toBe(true);
+    const unrelated = access({
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'workflow:task:read']),
+    });
+    expect(unrelated.canDesigner).toBe(false);
   });
 });

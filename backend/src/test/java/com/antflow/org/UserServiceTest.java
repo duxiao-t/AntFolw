@@ -14,12 +14,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import org.mockito.ArgumentCaptor;
+
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.contains;
@@ -44,7 +49,8 @@ class UserServiceTest {
         when(userMapper.selectBatchIds(any())).thenReturn(List.of(manager));
         when(authorizationService.inCurrentDataScope(any(), eq(1L), eq(10L))).thenReturn(true);
 
-        List<User> users = service.listAuthorized(null, null);
+        List<User> users = service.listAuthorized(
+            UserService.UserQuery.of(null, null, null, null, null, null));
 
         assertEquals("张经理", users.get(0).getManagerDisplayName());
         verify(userMapper).selectBatchIds(List.of(2L));
@@ -69,7 +75,7 @@ class UserServiceTest {
 
         assertEquals(List.of(candidate), candidates);
         verify(authorizationService).requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, 10L);
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, 10L);
     }
 
     @Test
@@ -172,7 +178,8 @@ class UserServiceTest {
         user.setDisplayName("Duplicate User");
         when(userMapper.selectCount(any())).thenReturn(1L);
 
-        BizException error = assertThrows(BizException.class, () -> service.create(user, List.of()));
+        BizException error = assertThrows(BizException.class,
+            () -> service.create(user, List.of(), "test-password"));
 
         assertEquals("USERNAME_EXISTS", error.getCode());
         assertEquals("账号已存在", error.getMessage());
@@ -197,7 +204,8 @@ class UserServiceTest {
         when(userMapper.selectCount(any())).thenReturn(0L);
         when(departmentMapper.selectById(999L)).thenReturn(null);
 
-        BizException error = assertThrows(BizException.class, () -> service.create(user, List.of()));
+        BizException error = assertThrows(BizException.class,
+            () -> service.create(user, List.of(), "test-password"));
 
         assertEquals("DEPARTMENT_NOT_FOUND", error.getCode());
         assertEquals("所属部门不存在", error.getMessage());
@@ -297,6 +305,35 @@ class UserServiceTest {
     }
 
     @Test
+    void lastActiveFormMaintainerCannotBeDisabled() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        UserService service = new UserService(userMapper, userRoleMapper,
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            jdbcTemplate, Mockito.mock(FormalNumberService.class),
+            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class));
+        User user = user(9L, 10L, null, "ACTIVE");
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
+            Mockito.<ResultSetExtractor<UserService.WecomLoginState>>any(), eq(9L)))
+            .thenReturn(new UserService.WecomLoginState(1L, 1, true));
+        when(jdbcTemplate.queryForObject(contains("t_form_maintainer"),
+            eq(Boolean.class), eq(9L), eq(9L))).thenReturn(true);
+
+        BizException error = assertThrows(BizException.class,
+            () -> service.setWecomLoginAccess(9L, false));
+
+        assertEquals("LAST_FORM_MAINTAINER_PROTECTED", error.getCode());
+        assertEquals("ACTIVE", user.getStatus());
+        verify(userMapper, never()).updateById(any(User.class));
+        verify(sessions, never()).revokeAll(9L);
+    }
+
+    @Test
     void hardDisabledWecomUserCannotBeManuallyAllowed() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
@@ -317,13 +354,23 @@ class UserServiceTest {
     }
 
     @Test
-    void nonAdministratorCannotChangeWecomLoginAccess() {
+    void nonAdministratorCannotChangeAnAdministratorsWecomLoginAccess() {
         UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserRoleMapper userRoleMapper = Mockito.mock(UserRoleMapper.class);
+        RoleMapper roleMapper = Mockito.mock(RoleMapper.class);
         AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
-        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
-            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
-            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
-            Mockito.mock(JdbcTemplate.class), authorizationService);
+        UserService service = newService(userMapper, userRoleMapper, roleMapper,
+            Mockito.mock(PasswordEncoder.class), Mockito.mock(DepartmentMapper.class),
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class),
+            authorizationService);
+        // 目标用户是管理员：只持 ORG_USER_CREDENTIALS_MANAGE 的委派管理员不能动它——
+        // 改登录方式/重置口令都等于接管管理员账号。
+        UserRole membership = new UserRole();
+        membership.setRoleId(1L);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(membership));
+        Role adminRole = new Role();
+        adminRole.setCode("admin");
+        when(roleMapper.selectById(1L)).thenReturn(adminRole);
         doThrow(new org.springframework.security.access.AccessDeniedException("denied"))
             .when(authorizationService).requireAdmin();
 
@@ -459,6 +506,98 @@ class UserServiceTest {
         verify(jdbcTemplate).query(contains("FOR UPDATE"),
             Mockito.<ResultSetExtractor<Long>>any());
         verify(userRoleMapper, never()).delete(any(QueryWrapper.class));
+    }
+
+    /** 「部门领导」范围：职务过滤的一个预设值，其余（能力 + 逐行数据范围）沿用原路径。 */
+    @Test
+    void leaderScopeFiltersCandidatesByPositionTitle() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            Mockito.mock(JdbcTemplate.class));
+        when(userMapper.selectList(any())).thenReturn(List.of());
+
+        service.listAuthorized(UserService.UserQuery.of(null, null, null, true, null, null));
+
+        ArgumentCaptor<QueryWrapper<User>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(userMapper).selectList(captor.capture());
+        // 参数是懒物化的：先取 SQL 片段，paramNameValuePairs 才会被填上。
+        String segment = captor.getValue().getSqlSegment();
+        assertTrue(segment.contains("position"), "部门领导范围应按职务过滤，实际条件: " + segment);
+        assertTrue(captor.getValue().getParamNameValuePairs().values().stream()
+                .anyMatch(value -> String.valueOf(value).contains("部长")),
+            "实际参数: " + captor.getValue().getParamNameValuePairs());
+    }
+
+    /** 自由文本「指定职位」同样走职务过滤；显式名单则按 id 收窄。 */
+    @Test
+    void positionAndExplicitUserListNarrowCandidates() {
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
+            Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
+            Mockito.mock(JdbcTemplate.class));
+        when(userMapper.selectList(any())).thenReturn(List.of());
+
+        service.listAuthorized(UserService.UserQuery.of(null, null, null, null, "经理", List.of(7L, 8L)));
+
+        ArgumentCaptor<QueryWrapper<User>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(userMapper).selectList(captor.capture());
+        String segment = captor.getValue().getSqlSegment();
+        assertTrue(segment.contains("position"), "指定职位应按职务过滤: " + segment);
+        assertTrue(segment.contains("id"), "指定人员应按 id 收窄: " + segment);
+        assertTrue(captor.getValue().getParamNameValuePairs().values().stream()
+                .anyMatch(value -> String.valueOf(value).contains("经理")),
+            "实际参数: " + captor.getValue().getParamNameValuePairs());
+    }
+
+    /** 自助改密码：校验原密码，成功后只下线「其它」会话（当前会话要能继续用）。 */
+    @Test
+    void changingOwnPasswordVerifiesCurrentPasswordAndKeepsThisSession() {
+        UUID keep = UUID.randomUUID();
+        User user = new User();
+        user.setId(9L);
+        user.setPasswordHash("hash-old");
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        PasswordEncoder encoder = Mockito.mock(PasswordEncoder.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(encoder.matches("old-pass", "hash-old")).thenReturn(true);
+        when(encoder.encode("new-pass-123")).thenReturn("hash-new");
+
+        service(userMapper, encoder, sessions).changeOwnPassword(9L, keep, "old-pass", "new-pass-123");
+
+        assertEquals("hash-new", user.getPasswordHash());
+        verify(sessions).revokeAllExcept(9L, keep);
+    }
+
+    @Test
+    void changingOwnPasswordRejectsWrongCurrentPasswordAndKeepsSessions() {
+        UUID keep = UUID.randomUUID();
+        User user = new User();
+        user.setId(9L);
+        user.setPasswordHash("hash-old");
+        UserMapper userMapper = Mockito.mock(UserMapper.class);
+        PasswordEncoder encoder = Mockito.mock(PasswordEncoder.class);
+        AuthSessionService sessions = Mockito.mock(AuthSessionService.class);
+        when(userMapper.selectById(9L)).thenReturn(user);
+        when(encoder.matches("wrong", "hash-old")).thenReturn(false);
+
+        assertThrows(BizException.class,
+            () -> service(userMapper, encoder, sessions).changeOwnPassword(9L, keep, "wrong", "new-pass-123"));
+
+        assertEquals("hash-old", user.getPasswordHash());
+        verify(sessions, never()).revokeAllExcept(anyLong(), any());
+    }
+
+    private static UserService service(UserMapper userMapper, PasswordEncoder encoder,
+                                       AuthSessionService sessions) {
+        return new UserService(userMapper, Mockito.mock(UserRoleMapper.class),
+            Mockito.mock(RoleMapper.class), encoder, Mockito.mock(DepartmentMapper.class),
+            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class),
+            Mockito.mock(FormalNumberService.class), Mockito.mock(AuthorizationService.class),
+            sessions, Mockito.mock(AuditService.class));
     }
 
     private static UserService newService(UserMapper userMapper, UserRoleMapper userRoleMapper,

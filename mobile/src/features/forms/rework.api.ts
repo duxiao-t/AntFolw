@@ -26,9 +26,14 @@ export function fetchReworkTask(taskId: number) {
   return apiRequest<ReworkTask>(`/api/mobile/rework-tasks/${taskId}`);
 }
 
-export function saveReworkTask(taskId: number, values: MobileFormValues) {
+export function saveReworkTask(
+  taskId: number,
+  values: MobileFormValues,
+  idempotencyKey: string,
+) {
   return apiRequest<ReworkTask>(`/api/mobile/rework-tasks/${taskId}`, {
     method: 'PUT',
+    headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ data: values, files: collectMobileFileRefs(values) }),
   });
 }

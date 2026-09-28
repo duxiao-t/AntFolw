@@ -3,7 +3,9 @@ package com.antflow.form.runtime;
 import com.antflow.common.FormalNumberService;
 import com.antflow.common.BusinessNumberService;
 import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
+import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
@@ -18,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Map;
@@ -38,6 +41,9 @@ public class FormDataService {
     private final FormDefinitionMapper formDefinitionMapper;
     private final MobileFileLinkService fileLinkService;
     private final MobileDraftService draftService;
+    /** 可选注入：老的单测直接 new 本类，不给它传这个依赖。 */
+    @Autowired(required = false)
+    private DefinitionVersionRepository versions;
 
     /**
      * MVP demo — independent submission (DRAFT or SUBMITTED) outside the workflow engine.
@@ -61,8 +67,20 @@ public class FormDataService {
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
         }
-        formDefinitionService.validateSubmission(fd.getSchema(), data);
+        if (userId == null || authorizationService.currentUserId() != userId) {
+            throw new AccessDeniedException("submission user does not match current principal");
+        }
+        authorizationService.requireFormUse(fd.getId());
         String normalizedStatus = status == null ? "SUBMITTED" : status;
+        // 挂了已发布流程的表单只能走引擎发起。否则直接提交会造出 status=SUBMITTED、却没有
+        // t_process_instance/审批任务的记录——桌面 /api/forms/data 与移动 /api/mobile/submissions
+        // 都调这里，客户端只是"按 settings.workflowEnabled 自己选路"，服务端不兜底就能被绕过。
+        if (!"DRAFT".equals(normalizedStatus) && versions != null
+                && versions.hasPublishedProcess(fd.getId())) {
+            throw new BizException("FORM_HAS_PROCESS",
+                "该表单已启用审批流程，请从发起入口提交");
+        }
+        formDefinitionService.validateSubmission(fd.getSchema(), data);
         Object storedData = "DRAFT".equals(normalizedStatus)
             ? data
             : formDefinitionService.filterVisibleSubmission(fd.getSchema(), data);
@@ -85,12 +103,15 @@ public class FormDataService {
     public record SubmitResult(Long dataId, String businessNo) { }
 
     public List<FormData> mySubmissions(Long userId, String formCode) {
-        var q = new QueryWrapper<FormData>().eq("created_by", userId);
+        Long formDefId = null;
         if (formCode != null) {
             var fd = formDefinitionService.getByCode(formCode);
-            if (fd != null) q.eq("form_def_id", fd.getId());
+            // 指定了 code 却查不到（改名/下架/写错）时必须返回空：早先 formDefId 落成 null，
+            // 而下传给 SQL 的 null 含义是"不过滤表单"，于是把该用户**所有**表单的提交都吐了出来。
+            if (fd == null) return List.of();
+            formDefId = fd.getId();
         }
-        return mapper.selectList(q);
+        return mapper.selectMySubmissions(userId, formDefId);
     }
 
     public Page<FormData> adminPage(long page, long size, Long formDefId,
@@ -108,24 +129,9 @@ public class FormDataService {
     public Page<FormData> authorizedPage(long page, long size, Long formDefId,
                                          String status, Long createdBy,
                                          long userId, boolean admin) {
-        if (admin) {
-            return adminPage(page, size, formDefId, status, createdBy);
-        }
-        var q = new QueryWrapper<FormData>();
-        if (formDefId != null) q.eq("form_def_id", formDefId);
-        if (status != null && !status.isBlank()) q.eq("status", status);
-        if (createdBy != null) q.eq("created_by", createdBy);
-        q.orderByDesc("created_at").orderByDesc("id");
-        List<FormData> readable = mapper.selectList(q).stream()
-            .filter(data -> authorizationService.canReadFormData(data.getId(), userId))
-            .toList();
-        long safePage = Math.max(page, 1);
-        long safeSize = Math.min(Math.max(size, 1), 100);
-        int from = (int) Math.min((safePage - 1) * safeSize, readable.size());
-        int to = (int) Math.min(from + safeSize, readable.size());
-        Page<FormData> result = Page.of(safePage, safeSize, readable.size());
-        result.setRecords(readable.subList(from, to));
-        return enrichAdminPage(result);
+        // 非 admin 的能力数据范围由 DataPermissionPolicyHandler 在 SQL 层注入，
+        // 这里统一走 SQL 分页，避免把整表读进内存再过滤。
+        return adminPage(page, size, formDefId, status, createdBy);
     }
 
     public FormData getById(Long id) {

@@ -617,14 +617,14 @@ function formatBytes(bytes: number) {
 function uploadHint(accept: string, multiple: boolean) {
   const prefix = multiple ? '支持多文件' : '支持单文件';
   if (!accept || accept.trim() === '') {
-    return prefix + ' · 任意格式';
+    return `${prefix} · 任意格式`;
   }
   const trimmed = accept.trim();
   if (trimmed === 'image/*') {
-    return prefix + ' · 图片格式';
+    return `${prefix} · 图片格式`;
   }
   if (trimmed === 'video/*') {
-    return prefix + ' · 视频格式';
+    return `${prefix} · 视频格式`;
   }
   const formats = accept
     .split(',')
@@ -641,7 +641,7 @@ function uploadHint(accept: string, multiple: boolean) {
     });
   const uniqueFormats = Array.from(new Set(formats)).slice(0, 4);
   const formatText = uniqueFormats.length > 0 ? uniqueFormats.join('、') : '常用文件';
-  return prefix + ' · ' + formatText;
+  return `${prefix} · ${formatText}`;
 }
 
 function errorMessage(error: unknown) {

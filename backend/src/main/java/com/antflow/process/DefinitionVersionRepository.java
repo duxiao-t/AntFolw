@@ -6,7 +6,12 @@ import com.antflow.form.runtime.FormData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -73,6 +78,23 @@ public class DefinitionVersionRepository {
             """, rs -> rs.next() ? form(rs) : null, code);
     }
 
+    /**
+     * 这张表单是否已经挂着**已发布**的流程定义。
+     *
+     * <p>用来兜底「有流程的表单必须走引擎发起」：直接提交（`/api/forms/data`、`/api/mobile/submissions`）
+     * 会造出没有 `t_process_instance` 的提交记录，等于绕过审批。注意 {@link #runtimeProcessForForm}
+     * 不筛状态，草稿流程也会命中，所以这里单独加 `status = 'PUBLISHED'`。
+     */
+    public boolean hasPublishedProcess(long formDefinitionId) {
+        Boolean exists = jdbc.queryForObject("""
+            SELECT EXISTS (
+              SELECT 1 FROM t_process_definition
+              WHERE form_def_id = ? AND status = 'PUBLISHED'
+            )
+            """, Boolean.class, formDefinitionId);
+        return Boolean.TRUE.equals(exists);
+    }
+
     public ProcessDefinition runtimeProcessForForm(long formDefinitionId) {
         return jdbc.query("""
             SELECT process.id, process.form_def_id, version.version_no,
@@ -85,6 +107,31 @@ public class DefinitionVersionRepository {
             ) version ON true
             WHERE process.form_def_id = ?
             """, rs -> rs.next() ? process(rs) : null, formDefinitionId);
+    }
+
+    /** runtimeProcessForForm 的批量版：一次取回多张表单，而不是每张表单一次往返。 */
+    public Map<Long, ProcessDefinition> runtimeProcessesForForms(Collection<Long> formDefinitionIds) {
+        if (formDefinitionIds == null || formDefinitionIds.isEmpty()) return Map.of();
+        List<Long> ids = formDefinitionIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return Map.of();
+        String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+        Map<Long, ProcessDefinition> found = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT process.id, process.form_def_id, version.version_no,
+                   version.process::text, process.created_by, process.created_at
+            FROM t_process_definition process
+            JOIN LATERAL (
+                SELECT * FROM t_process_definition_version candidate
+                WHERE candidate.process_definition_id = process.id
+                ORDER BY candidate.version_no DESC, candidate.id DESC LIMIT 1
+            ) version ON true
+            WHERE process.form_def_id IN (""" + placeholders + ")",
+            rs -> {
+                ProcessDefinition value = process(rs);
+                found.put(value.getFormDefId(), value);
+            },
+            ids.toArray());
+        return found;
     }
 
     public long processVersionId(long processDefinitionId, int versionNo) {

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 import com.antflow.mobile.workflow.MobileFileRef;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/forms/data")
@@ -19,6 +20,7 @@ public class FormDataController {
     private final AuthorizationService authorizationService;
 
     @PostMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_RUNTIME_READ + "')")
     public Map<String, Object> submit(@RequestBody SubmitRequest body) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
@@ -36,12 +38,14 @@ public class FormDataController {
     }
 
     @GetMapping
+    @PreAuthorize("@authz.consoleEntry()")
     public List<FormData> mySubmissions(@RequestParam(required = false) String formCode) {
         var p = PrincipalHolder.current().orElseThrow();
         return service.mySubmissions(p.userId(), formCode);
     }
 
     @GetMapping("/admin")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DATA_READ + "')")
     public Page<FormData> adminPage(@RequestParam(defaultValue = "1") long page,
                                     @RequestParam(defaultValue = "20") long size,
                                     @RequestParam(required = false) Long formDefId,
@@ -54,6 +58,7 @@ public class FormDataController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.consoleEntry()")
     public FormData get(@PathVariable Long id) {
         authorizationService.requireReadableFormData(id);
         return service.getById(id);

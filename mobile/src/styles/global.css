@@ -2588,8 +2588,15 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 子元素是 block，父级的 text-overflow 对它们不生效，必须各自截断，
+   否则「部门 · 工号 xxx」在工号/账号很长时会溢出选择框。 */
 .picker-value strong,
-.picker-value small { display: block; }
+.picker-value small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .picker-value strong { font-size: 12.5px; line-height: 1.3; }
 .picker-value small {
   margin-top: 1px;
@@ -3883,6 +3890,18 @@ body {
   width: 42px;
   color: var(--af-color-primary);
   font-size: 12px;
+  font-weight: 700;
+}
+/* 分步筛选的「上一步」放在列表上方，不占头部三列网格的左槽（否则标题会被挤偏）。 */
+.af-full-picker__back-step {
+  align-self: flex-start;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--af-radius-control);
+  background: color-mix(in srgb, var(--af-color-primary) 10%, transparent);
+  color: var(--af-color-primary);
+  font-size: 13px;
   font-weight: 700;
 }
 .af-full-picker__head h3 {

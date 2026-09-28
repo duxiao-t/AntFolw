@@ -39,8 +39,8 @@ def login(user, pw):
 # Smoke with idempotency key wired: attempt via headers (server-side currently NOT wired)
 # Try both HeaderIdempotency-Key and X-Idempotency-Key; document if not deduped.
 adminTok, sa, ba = login("admin", "ant.design"); bobTok, sb, bb = login("bob", "ant.design")
-record("login admin", sa, ba, 200)
-record("login bob",   sb, bb, 200)
+record("login admin", sa, "<redacted>", 200)
+record("login bob",   sb, "<redacted>", 200)
 adminHdr = {"Authorization":"Bearer "+adminTok}; bobHdr = {"Authorization":"Bearer "+bobTok}
 
 # Use LEAVE_REQ form. Build small start.
@@ -53,10 +53,12 @@ inst1 = json.loads(b1).get("instanceId") if s1==200 else None
 inst2 = json.loads(b2).get("instanceId") if s2==200 else None
 record("start#1 (Idempotency-Key)", s1, b1, 200)
 record("start#2 (Idempotency-Key replay)", s2, b2, 200)
-deduped = (inst1 == inst2)
-record("Idempotency-Key-same-key-deduped", "PASS" if deduped else "FAIL-GAP", f"i1={inst1} i2={inst2}", "expect equal")
+deduped = s1 == 200 and s2 == 200 and inst1 is not None and inst1 == inst2
+record("Idempotency-Key-same-key-deduped", "PASS" if deduped else "FAIL", f"i1={inst1} i2={inst2}", "PASS")
 
 # Print summary
 for r in RESULTS:
     print(f"{r[0]:<40} status={str(r[1]):<5} expect={str(r[2]):<20} body={r[3]}")
 print("TOTAL:", len(RESULTS))
+if any(str(actual) not in str(expect).split("/") for _, actual, expect, _ in RESULTS):
+    raise SystemExit(1)

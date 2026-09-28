@@ -4,15 +4,24 @@ import com.antflow.auth.PrincipalHolder;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
+import org.springframework.jdbc.core.RowMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -29,7 +38,7 @@ class AuthorizationServiceTest {
     @Test
     void requireAdminDoesNotAcceptDelegatedPermissions() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
-            Set.of("manager"), Set.of("org.user.write", "security.user_role.write"),
+            Set.of("manager"), Set.of("org:user:manage", "security:user_role:manage"),
             1L, 10L, null));
 
         assertThatThrownBy(service::requireAdmin)
@@ -46,14 +55,14 @@ class AuthorizationServiceTest {
         var unrelatedAllRole = new AuthorizationService.RoleGrant(2L, "reporter",
             DataScope.ALL, Set.of());
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, 10L, false,
-            Set.of("operator", "reporter"), Set.of("workflow.instance.read", "form.data.export"),
+            Set.of("operator", "reporter"), Set.of("workflow:instance:read", "form:data:export"),
             Map.of(
-                "workflow.instance.read", List.of(selfRole),
-                "form.data.export", List.of(unrelatedAllRole)
+                "workflow:instance:read", List.of(selfRole),
+                "form:data:export", List.of(unrelatedAllRole)
             ));
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 10L)).isFalse();
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 7L, 99L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 10L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 7L, 99L)).isTrue();
     }
 
     @Test
@@ -61,11 +70,11 @@ class AuthorizationServiceTest {
         var role = new AuthorizationService.RoleGrant(3L, "custom-manager",
             DataScope.CUSTOM, Set.of(20L, 30L));
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, 10L, false,
-            Set.of("custom-manager"), Set.of("form.data.read"),
-            Map.of("form.data.read", List.of(role)));
+            Set.of("custom-manager"), Set.of("form:data:read"),
+            Map.of("form:data:read", List.of(role)));
 
-        assertThat(service.inDataScope(snapshot, "form.data.read", 8L, 20L)).isTrue();
-        assertThat(service.inDataScope(snapshot, "form.data.read", 8L, 21L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "form:data:read", 8L, 20L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "form:data:read", 8L, 21L)).isFalse();
     }
 
     @Test
@@ -74,8 +83,8 @@ class AuthorizationServiceTest {
             DataScope.DEPARTMENT, Set.of());
         var snapshot = snapshot(role, 10L, false);
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 10L)).isTrue();
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 11L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 10L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 11L)).isFalse();
     }
 
     @Test
@@ -88,8 +97,8 @@ class AuthorizationServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), eq(30L), eq(10L)))
             .thenReturn(false);
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 20L)).isTrue();
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 8L, 30L)).isFalse();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 20L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 8L, 30L)).isFalse();
     }
 
     @Test
@@ -98,7 +107,7 @@ class AuthorizationServiceTest {
             DataScope.ALL, Set.of());
         var snapshot = snapshot(role, 10L, false);
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 99L, 999L)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 99L, 999L)).isTrue();
     }
 
     @Test
@@ -106,13 +115,13 @@ class AuthorizationServiceTest {
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, null, true,
             Set.of("admin"), Set.of(), Map.of());
 
-        assertThat(service.inDataScope(snapshot, "workflow.instance.read", 99L, null)).isTrue();
+        assertThat(service.inDataScope(snapshot, "workflow:instance:read", 99L, null)).isTrue();
     }
 
     @Test
     void requireFormUseByCodeAllowsGrantedPublishedForm() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
-            Set.of("user"), Set.of("form.runtime.read"), 1L, 10L, null));
+            Set.of("user"), Set.of("form:runtime:read"), 1L, 10L, null));
         AuthorizationService spied = Mockito.spy(service);
         Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
         when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
@@ -124,7 +133,7 @@ class AuthorizationServiceTest {
     @Test
     void requireFormUseByCodeHidesUngrantedPublishedForm() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
-            Set.of("user"), Set.of("form.runtime.read"), 1L, 10L, null));
+            Set.of("user"), Set.of("form:runtime:read"), 1L, 10L, null));
         AuthorizationService spied = Mockito.spy(service);
         Mockito.doReturn(false).when(spied).hasFormGrant(10L, 7L);
         when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
@@ -141,6 +150,38 @@ class AuthorizationServiceTest {
             eq("leave"))).thenReturn(null);
 
         assertThatThrownBy(() -> service.requireFormUseByCode("leave"))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
+    void formMaintenanceRequiresBothAtomicCapabilityAndMaintainerMembership() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
+            Set.of("manager"), Set.of(PermissionCodes.FORM_DEFINITION_MANAGE),
+            1L, 10L, null));
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(true).when(spied).hasFormMaintainer(10L, 7L);
+
+        assertThatCode(() -> spied.requireFormMaintenance(
+            10L, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
+
+        Mockito.doReturn(false).when(spied).hasFormMaintainer(10L, 7L);
+        assertThatThrownBy(() -> spied.requireFormMaintenance(
+            10L, PermissionCodes.FORM_DEFINITION_MANAGE))
+            .isInstanceOf(HiddenResourceException.class);
+    }
+
+    @Test
+    void usageGrantDoesNotMakeUserAFormMaintainer() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
+            Set.of("manager"), Set.of(PermissionCodes.FORM_DEFINITION_MANAGE,
+                PermissionCodes.FORM_RUNTIME_READ), 1L, 10L, null));
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
+        Mockito.doReturn(false).when(spied).hasFormMaintainer(10L, 7L);
+
+        assertThatCode(() -> spied.requireFormUse(10L)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> spied.requireFormMaintenance(
+            10L, PermissionCodes.FORM_DEFINITION_MANAGE))
             .isInstanceOf(HiddenResourceException.class);
     }
 
@@ -181,10 +222,163 @@ class AuthorizationServiceTest {
             .doesNotContain("delegated_from");
     }
 
+    // ===== 红线回归：这两条钉住的行为一旦被"顺手修正"，审批人会立刻看不到待办 =====
+
+    /**
+     * 红线 1：审批人靠「持有 workflow:task:read + 我是被指派人」拿到实例全量可见性，
+     * 与数据范围无关。因此该能力的标签是「查看被指派任务」而不是按范围裁剪；
+     * 若有人把它改成按数据范围过滤，这个测试会失败。
+     */
+    @Test
+    void redLineTaskAssigneeSeesAssignedInstanceWithoutInstanceReadCapability() {
+        var assigneeGrant = new AuthorizationService.RoleGrant(2L, "employee",
+            DataScope.SELF, Set.of());
+        // 关键：只有 workflow:task:read，没有 workflow:instance:read，
+        // 且实例发起人是别人（99L）、发起部门也超出 SELF 范围。
+        var assignee = new AuthorizationService.AuthzSnapshot(8L, 10L, false,
+            Set.of("employee"), Set.of(PermissionCodes.WORKFLOW_TASK_READ),
+            Map.of(PermissionCodes.WORKFLOW_TASK_READ, List.of(assigneeGrant)));
+
+        AuthorizationService spied = Mockito.spy(service);
+        Mockito.doReturn(assignee).when(spied).snapshot(8L);
+        Mockito.doReturn(new AuthorizationService.InstanceAccess(99L, 42L))
+            .when(spied).instanceAccess(501L);
+        Mockito.doReturn(true).when(spied).isReadableTaskAssignee(501L, 8L);
+
+        assertThat(spied.canReadFullInstance(501L, 8L)).isTrue();
+
+        // 对照：摘掉该能力后同一实例不再全量可见，证明可见性确实来自被指派人分支。
+        var withoutCapability = new AuthorizationService.AuthzSnapshot(8L, 10L, false,
+            Set.of("employee"), Set.of(), Map.of());
+        Mockito.doReturn(withoutCapability).when(spied).snapshot(8L);
+        assertThat(spied.canReadFullInstance(501L, 8L)).isFalse();
+        assertThat(spied.instanceVisibility(501L, 8L))
+            .isEqualTo(AuthorizationService.InstanceVisibility.NONE);
+    }
+
+    /**
+     * 红线 2：非可配范围的能力（defaultScope == null）解析为 ALL。
+     * 这是惰性正确的——这些能力的范围只被当布尔用、从不消费；一旦改成 SELF/NONE，
+     * 会波及 workflow:task:approve 等员工路径。
+     */
+    @Test
+    void redLineNonScopeableCapabilityResolvesToUnrestrictedScope() {
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.WORKFLOW_TASK_READ, null)))
+            .isEqualTo(DataScope.ALL);
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.WORKFLOW_TASK_APPROVE, null)))
+            .isEqualTo(DataScope.ALL);
+
+        // 可配范围的能力取目录默认值，而不是 ALL。
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.FORM_DATA_READ, null)))
+            .isEqualTo(DataScope.SELF);
+
+        // 显式覆盖值优先于目录默认。
+        assertThat(AuthorizationService.effectiveScope(
+            new AuthorizationService.GrantRow(PermissionCodes.FORM_DATA_READ, "ALL")))
+            .isEqualTo(DataScope.ALL);
+    }
+
+    /**
+     * 同一请求内对"当前主体自己"的重复判权不该反复读 t_user：认证阶段已经查过并确认 ACTIVE，
+     * 版本也在 principal 上。UserService.listAuthorized 是每行调一次判权的典型，原先等于每行一条 SELECT。
+     */
+    @Test
+    void repeatedSnapshotForTheCurrentPrincipalDoesNotRequeryTheUserTable() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "u", "U",
+            Set.of("operator"), Set.of("workflow:instance:read"), 1L, 10L, null));
+        when(jdbcTemplate.query(contains("FROM t_user_role ur"),
+            any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
+
+        service.snapshot(7L);
+        service.snapshot(7L);
+        service.snapshot(7L);
+
+        Mockito.verify(jdbcTemplate, Mockito.never()).query(
+            contains("FROM t_user WHERE id = ?"),
+            any(ResultSetExtractor.class), any(Object[].class));
+    }
+
+    /**
+     * 但不能把"主体版本未知"当成有效版本直接命中缓存——那种情况下必须回查 t_user，
+     * 否则停用账号会继续被放行。
+     */
+    @Test
+    void unknownPrincipalVersionStillReadsAndEnforcesTheUserStatus() {
+        PrincipalHolder.set(new PrincipalHolder.Principal(7L, "u", List.of("operator")));
+        when(jdbcTemplate.query(contains("FROM t_user WHERE id = ?"),
+            any(ResultSetExtractor.class), any(Object[].class)))
+            .thenReturn(new AuthorizationService.UserState(7L, "u", "U", "DISABLED", 1L, 10L));
+
+        assertThatThrownBy(() -> service.snapshot(7L))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+            .hasMessageContaining("disabled");
+    }
+
     private static AuthorizationService.AuthzSnapshot snapshot(
             AuthorizationService.RoleGrant role, Long departmentId, boolean admin) {
         return new AuthorizationService.AuthzSnapshot(7L, departmentId, admin,
-            Set.of(role.code()), Set.of("workflow.instance.read"),
-            Map.of("workflow.instance.read", List.of(role)));
+            Set.of(role.code()), Set.of("workflow:instance:read"),
+            Map.of("workflow:instance:read", List.of(role)));
+    }
+
+    /**
+     * 全局失效（菜单编排、能力目录变更）不改动各用户的 authz_version，所以单靠 cache.clear()
+     * 挡不住"正在装载"的请求：它会把失效前算出来的快照重新插回缓存并长期命中。
+     * 这条用例把 evictAll() 精确地压在装载中间，断言缓存里留下的是失效**之后**的权限。
+     */
+    @Test
+    void globalEvictDuringLoadDoesNotLeaveAStaleSnapshotCached() throws Exception {
+        CountDownLatch inLoad = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean firstRoleRead = new AtomicBoolean(true);
+
+        when(jdbcTemplate.query(contains("FROM t_user WHERE id = ?"),
+            any(ResultSetExtractor.class), any(Object[].class)))
+            .thenReturn(new AuthorizationService.UserState(7L, "u", "U", "ACTIVE", 1L, 10L));
+        when(jdbcTemplate.query(contains("FROM t_user_role ur"),
+            any(RowMapper.class), any(Object[].class)))
+            .thenAnswer(invocation -> {
+                if (firstRoleRead.compareAndSet(true, false)) {
+                    // 首次装载：卡在这里，让 evictAll() 落在"装载中"，此时读到的还是旧角色。
+                    inLoad.countDown();
+                    release.await(5, TimeUnit.SECONDS);
+                    return List.of(new AuthorizationService.RoleBase(1L, "operator"));
+                }
+                // 失效之后重装的这一次才看得到新授予的角色。
+                return List.of(new AuthorizationService.RoleBase(1L, "operator"),
+                    new AuthorizationService.RoleBase(2L, "reporter"));
+            });
+        when(jdbcTemplate.query(contains("FROM t_role_permission granted"),
+            any(RowMapper.class), any(Object[].class)))
+            // 只有"失效之后才授予"的 reporter（role id = 2）带这个能力。若两次装载都返回同一个
+            // grant，断言就失去区分力——那正是这条用例第一版的错。
+            .thenAnswer(invocation -> {
+                // Mockito 会把可变参数展开：单参数时 getArgument(2) 直接是那个值。
+                Object raw = invocation.getArgument(2);
+                Object roleId = raw instanceof Object[] args
+                    ? (args.length > 0 ? args[0] : null) : raw;
+                return Long.valueOf(2L).equals(roleId)
+                    ? List.of(new AuthorizationService.GrantRow("form:data:export", null))
+                    : List.of();
+            });
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<AuthorizationService.AuthzSnapshot> loading =
+                pool.submit(() -> service.snapshot(7L));
+            assertThat(inLoad.await(5, TimeUnit.SECONDS)).isTrue();
+            service.evictAll();
+            release.countDown();
+
+            assertThat(loading.get(5, TimeUnit.SECONDS).permissions())
+                .contains("form:data:export");
+            // 关键：缓存里不能留着那份失效前的快照——再取一次必须还是新权限。
+            assertThat(service.snapshot(7L).permissions()).contains("form:data:export");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

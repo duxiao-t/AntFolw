@@ -70,6 +70,24 @@ beforeEach(() => {
 });
 
 describe('DraftListPage', () => {
+  it('keeps a revoked form draft visible for deletion but disables continuation', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse([{
+      id: 101,
+      formCode: 'leave',
+      formName: '请假申请',
+      formVersion: 3,
+      data: {},
+      schema: [],
+      readOnly: true,
+    }]));
+
+    renderDrafts();
+
+    expect(await screen.findByText('使用权限已撤销，仅可删除')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '请假申请 已不可用' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '删除 请假申请' })).toBeEnabled();
+  });
+
   it('shows draft metadata, field completion and continue link', async () => {
     renderDrafts();
 

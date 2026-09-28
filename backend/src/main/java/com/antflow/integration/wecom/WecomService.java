@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -59,7 +60,6 @@ public class WecomService {
     private static final int USER_BATCH_SIZE = 200;
     private static final int MANAGER_POOL_SIZE = 12;
     private static final long MANAGER_BATCH_INTERVAL_MS = 350;
-    private static final String DEFAULT_WECOM_PASSWORD = "qwer1234";
     private static final LocalTime DEFAULT_SCHEDULE_TIME = LocalTime.of(3, 0);
     private static final DateTimeFormatter SCHEDULE_TIME_FORMAT =
         DateTimeFormatter.ofPattern("HH:mm:ss");
@@ -93,8 +93,8 @@ public class WecomService {
     }
 
     public SettingsDto settings(long companyId) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
-        requireCompany(companyId);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
+        requireCompanyAccess(companyId);
         Config config = config(companyId);
         return new SettingsDto(companyId, config == null ? "" : config.corpId(),
             config != null && !config.encryptedSecret().isBlank(), latestJob(companyId),
@@ -130,8 +130,8 @@ public class WecomService {
                                     Boolean jsSdkEnabled, Boolean messageEnabled,
                                     Boolean scheduleEnabled, String scheduleTime,
                                     String scheduleMode) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
-        requireCompany(companyId);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
+        requireCompanyAccess(companyId);
         String normalizedCorpId = corpId == null ? "" : corpId.trim();
         if (normalizedCorpId.isBlank() || normalizedCorpId.length() > 128) {
             throw new BizException("WECOM_CORP_ID_REQUIRED", "请输入有效的 CorpID");
@@ -206,10 +206,10 @@ public class WecomService {
 
     @Transactional(rollbackFor = Exception.class)
     public JobDto start(long companyId, String syncMode) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
-        authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_WRITE);
-        authorization.requireAllDataScope(PermissionCodes.ORG_USER_WRITE);
-        requireCompany(companyId);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
+        authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_MANAGE);
+        authorization.requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
+        requireCompanyAccess(companyId);
         if (config(companyId) == null) {
             throw new BizException("WECOM_NOT_CONFIGURED", "请先保存企业微信连接配置");
         }
@@ -240,8 +240,10 @@ public class WecomService {
     }
 
     public JobDto job(long id) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
-        return job(id, true);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
+        JobDto result = job(id, true);
+        requireCompanyAccess(result.companyId());
+        return result;
     }
 
     @Scheduled(fixedDelayString = "${antflow.wecom.schedule-poll-interval-ms:60000}",
@@ -406,8 +408,8 @@ public class WecomService {
     private SyncContext loadContext(long companyId, List<WecomUser> externalUsers, boolean full) {
         SyncContext context = new SyncContext();
         context.roleId = jdbc.queryForObject(
-            "SELECT id FROM t_role WHERE code = 'user' AND enabled = true", Long.class);
-        if (context.roleId == 0) throw new SyncUserException("内置 user 角色不存在");
+            "SELECT id FROM t_role WHERE code = 'employee' AND enabled = true", Long.class);
+        if (context.roleId == 0) throw new SyncUserException("内置 employee 角色不存在");
         List<LocalUserState> localUsers = jdbc.query("""
             SELECT u.id, u.username, u.employee_no, u.phone, u.email, u.display_name,
                    u.position, u.gender, u.status, m.wecom_user_id,
@@ -494,7 +496,6 @@ public class WecomService {
         int updated = 0;
         for (int index = 0; index < batch.size(); index++) {
             WecomUser user = batch.get(index);
-            boolean existingMapping = context.mappedIds.containsKey(user.userId());
             Long localId = context.mappedIds.get(user.userId());
             if (localId == null) localId = matchLocal(context, user.phone(), user.email());
             if (localId == null) {
@@ -502,7 +503,7 @@ public class WecomService {
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
                 String employeeNo = wecomEmployeeNo(context, user.userId(), null);
                 String username = wecomUsername(context, employeeNo, null);
-                String password = passwords.encode(DEFAULT_WECOM_PASSWORD);
+                String password = passwords.encode(UUID.randomUUID().toString());
                 inserts.add(new Object[]{departmentId, employeeNo, username, password,
                     displayName(user), email(user), phone(user), position(user), gender(user.gender()),
                     effectiveUserStatus(user.status(), null)});
@@ -514,9 +515,8 @@ public class WecomService {
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
                 String employeeNo = wecomEmployeeNo(context, user.userId(), localId);
                 String username = wecomUsername(context, employeeNo, localId);
-                updates.add(new Object[]{username,
-                    existingMapping ? null : passwords.encode(DEFAULT_WECOM_PASSWORD),
-                    employeeNo, departmentId, displayName(user), phone(user), email(user),
+                updates.add(new Object[]{username, employeeNo, departmentId, displayName(user),
+                    phone(user), email(user),
                     position(user), gender(user.gender()), localId});
                 updated++;
             }
@@ -567,8 +567,7 @@ public class WecomService {
             """, mappings);
         if (!updates.isEmpty()) {
             jdbc.batchUpdate("""
-                UPDATE t_user SET username = ?, password_hash = COALESCE(?, password_hash),
-                    employee_no = ?, dept_id = ?, display_name = ?,
+                UPDATE t_user SET username = ?, employee_no = ?, dept_id = ?, display_name = ?,
                     phone = COALESCE(NULLIF(?, ''), phone),
                     email = COALESCE(NULLIF(?, ''), email),
                     position = ?, gender = ?
@@ -1053,6 +1052,21 @@ public class WecomService {
         Long count = jdbc.queryForObject("SELECT COUNT(*) FROM t_company WHERE id = ?",
             Long.class, companyId);
         if (count == null || count == 0) throw new BizException("COMPANY_NOT_FOUND", "企业不存在");
+    }
+
+    private void requireCompanyAccess(long companyId) {
+        requireCompany(companyId);
+        PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
+        if (principal.isAdmin()) return;
+        Long count = jdbc.queryForObject("""
+            SELECT COUNT(*)
+            FROM t_user user_row
+            JOIN t_department department ON department.id = user_row.dept_id
+            WHERE user_row.id = ? AND department.company_id = ?
+            """, Long.class, principal.userId(), companyId);
+        if (count == null || count == 0) {
+            throw new com.antflow.authz.HiddenResourceException("company not found");
+        }
     }
 
     private String errorJson(List<String> errors) {

@@ -32,6 +32,7 @@ services:
       SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${HIKARI_POOL_SIZE:-10}
       MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics
       JWT_SECRET: 275901518e1677d5506b5857912d003e72d99ffe16aeb3e76157a0d3fa25fd9d
+      ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD: write-load-admin-only
       MINIO_ENDPOINT: http://unused-minio:9000
       MINIO_ACCESS_KEY: write-load-minio
       MINIO_SECRET_KEY: write-load-minio-secret

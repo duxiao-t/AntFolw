@@ -6,6 +6,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { formRegistry } from '../../registry/formRegistry';
 import type { FieldMode, SchemaNode } from '../../registry/types';
 import { visibleNodeIds } from '../../registry/displayConditions';
+import { clearLinkedValues } from '../form-fields/clearLinkedValues';
 import './FormRenderer.less';
 
 type Props = {
@@ -20,6 +21,13 @@ type Props = {
   onDesignerNodeDuplicate?(id: string): void;
   onDesignerNodeRemove?(id: string): void;
   visibleIds?: ReadonlySet<string>;
+  optionContext?: {
+    formCode?: string;
+    formVersion?: number;
+    instanceId?: number;
+    dataId?: number;
+  };
+  scopeSchema?: SchemaNode[];
 };
 
 function useDesignerListFlip(isEnabled: boolean, deps: unknown[]) {
@@ -318,6 +326,8 @@ export function FormRenderer({
   sortableIds,
   placeholderId,
   visibleIds: inheritedVisibleIds,
+  optionContext,
+  scopeSchema,
 }: Props) {
   const isDesigner = mode === 'designer-preview';
   const visibleIds = inheritedVisibleIds ?? visibleNodeIds(schema, value ?? {});
@@ -358,12 +368,15 @@ export function FormRenderer({
             value={nodeValue}
             fieldModes={fieldModes}
             visibleIds={visibleIds}
+            values={value ?? {}}
+            optionContext={optionContext}
+            scopeSchema={scopeSchema ?? schema}
             onChange={(v: any) => {
               if (flatContainer) {
                 onChange?.(v);
                 return;
               }
-              onChange?.({ ...(value ?? {}), [node.id]: v });
+              onChange?.(clearLinkedValues(scopeSchema ?? schema, node.id, { ...(value ?? {}), [node.id]: v }));
             }}
           />
         );

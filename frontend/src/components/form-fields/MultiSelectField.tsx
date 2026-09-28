@@ -1,6 +1,7 @@
 import { Input, Select } from 'antd';
 import { useEffect, useState } from 'react';
 import type { FieldType } from '../../registry/types';
+import { isDynamicOption, useDynamicOptions } from './dynamicOptions';
 import { SelectField } from './SelectField';
 import {
   customValuesFrom,
@@ -27,7 +28,8 @@ export const MultiSelectField: FieldType = {
       { id: 'option_3', label: '选项3', value: 'option_3' },
     ],
   },
-  Component: ({ node, mode, value, onChange }) => {
+  Component: ({ node, mode, value, onChange, values, optionContext }) => {
+    // Hooks below always run: a node can switch between static and external options while editing.
     const options = visibleSelectOptions(node.props?.options);
     const allOptions = normalizeSelectOptions(node.props?.options);
     const displayStyle = normalizeSelectDisplayStyle(node.props?.displayStyle);
@@ -46,6 +48,9 @@ export const MultiSelectField: FieldType = {
       ...currentValues.filter((item) => !customValues.includes(item)),
       ...(otherActive ? [OTHER_OPTION_VALUE] : []),
     ];
+    if (isDynamicOption(node)) {
+      return <DynamicMultiSelect node={node} mode={mode} value={value} onChange={onChange} values={values} optionContext={optionContext} />;
+    }
     return (
       <div data-field-id={node.id}>
         <div style={{ display: 'block', marginBottom: 4 }}>
@@ -123,3 +128,47 @@ export const MultiSelectField: FieldType = {
   },
   ConfigPanel: SelectField.ConfigPanel,
 };
+
+function DynamicMultiSelect({ node, mode, value, onChange, values, optionContext }: any) {
+  const dynamic = useDynamicOptions(node, values, optionContext);
+  const selected = Array.isArray(value) ? value : [];
+  const isLevel = dynamic.stage === 'LEVEL';
+  return (
+    <div data-field-id={node.id}>
+      <div style={{ display: 'block', marginBottom: 4 }}>{node.label}{node.props?.required ? ' *' : ''}</div>
+      {mode === 'readonly' ? <div className="form-select-readonly">{selected.map((item) => dynamic.labels.find((option) => option.value === String(item))?.label ?? item).join('、') || '未填写'}</div> : (
+        <Select
+          mode={isLevel ? undefined : 'multiple'}
+          disabled={mode !== 'runtime-fill' || dynamic.loading}
+          loading={dynamic.loading}
+          value={isLevel ? undefined : selected}
+          options={[...dynamic.labels, ...dynamic.options].filter((item, index, all) => all.findIndex((candidate) => candidate.value === item.value) === index)}
+          placeholder={dynamic.error ?? (isLevel ? `请选择第 ${dynamic.path.length + 1} 级` : node.props?.placeholder)}
+          showSearch
+          filterOption={false}
+          onSearch={dynamic.search}
+          maxCount={node.props?.maxCount}
+          onChange={(next: string | string[]) => { if (isLevel) dynamic.advance(String(next)); else onChange?.(next); }}
+          onClear={() => { dynamic.reset(); onChange?.([]); }}
+          allowClear
+          style={{ width: '100%' }}
+          // 滚到底继续取下一页，与 SelectField 一致。原来那个「更多选项」按钮依赖已经删掉的
+          // dynamic.page/next，算出来是 NaN 比较，早就渲染不出来了。
+          onPopupScroll={(event: any) => {
+            const list = event.currentTarget as HTMLElement;
+            if (list.scrollHeight - list.scrollTop - list.clientHeight < 48) dynamic.loadMore();
+          }}
+          popupRender={(menu: any) => (
+            <>
+              {menu}
+              {dynamic.loadingMore
+                ? <div style={{ padding: '8px 12px', color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>加载中…</div>
+                : null}
+            </>
+          )}
+        />
+      )}
+      {dynamic.path.length > 0 ? <button type="button" onClick={dynamic.back}>上一步</button> : null}
+    </div>
+  );
+}

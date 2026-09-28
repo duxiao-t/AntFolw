@@ -211,6 +211,11 @@ describe('privacy-safe telemetry', () => {
     });
   });
 
+  it('drops query values from caller-provided routes', () => {
+    expect(sanitizeTelemetryEvent({ name: 'route', route: '/tasks?token=private#detail' }).route)
+      .toBe('/tasks');
+  });
+
   it('never sends token/password/form values via transport payload', () => {
     const captured: TelemetryEvent[] = [];
     setTelemetryTransport((event) => {

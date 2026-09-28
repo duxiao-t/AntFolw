@@ -26,4 +26,11 @@ public class ProcessInstance {
     private Long startedDeptId;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime startedAt;
     private java.time.OffsetDateTime finishedAt;
+
+    @TableField(exist = false) private String formCode;
+    @TableField(exist = false) private String formName;
+    @TableField(exist = false) private String businessNo;
+    @TableField(exist = false) private String applicantName;
+    @TableField(exist = false) private String applicantEmployeeNo;
+    @TableField(exist = false) private String applicantDepartment;
 }

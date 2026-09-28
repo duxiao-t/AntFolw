@@ -98,9 +98,12 @@ export function isLoginPath(pathname: string): boolean {
 }
 
 export function safeReturnUrl(candidate: string | null | undefined): string | null {
-  if (!candidate) return null;
-  if (!candidate.startsWith('/')) return null;
-  if (candidate.startsWith('//')) return null;
-  if (candidate.includes('://')) return null;
-  return candidate;
+  if (!candidate?.startsWith('/') || candidate.includes('\\')) return null;
+  try {
+    const target = new URL(candidate, window.location.origin);
+    return target.origin === window.location.origin && target.pathname.startsWith('/')
+      ? `${target.pathname}${target.search}${target.hash}` : null;
+  } catch {
+    return null;
+  }
 }

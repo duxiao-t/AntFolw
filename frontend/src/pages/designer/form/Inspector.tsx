@@ -22,18 +22,23 @@ import {
   PlusOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
+import { request } from '@umijs/max';
 import { useState } from 'react';
+import { AssigneePicker } from '../../../components/AssigneePicker';
 import { findById, formRegistry } from '../../../registry/formRegistry';
 import type { DisplayCondition, SchemaNode } from '../../../registry/types';
 import { SelectOptionsEditor } from './SelectOptionsEditor';
 import { MatrixAxisEditor } from './MatrixAxisEditor';
 import { DisplayRulesEditor } from './DisplayRulesEditor';
 import { normalizeMatrixProps } from '../../../components/form-fields/matrixFill';
+import { isBoundOptionSource } from '../../../components/form-fields/dynamicOptions';
 import {
   normalizeSelectDisplayStyle,
   type SelectDisplayStyle,
 } from '../../../registry/selectOptions';
 import { useFormDesignerStore } from './useFormDesignerStore';
+import { OptionSourceSettings } from './OptionSourceSettings';
 
 const selectDisplayStyles: Array<{
   value: SelectDisplayStyle;
@@ -203,6 +208,93 @@ function PanelField({
   );
 }
 
+/**
+ * 「用户选择」字段的选择范围。抽成子组件是因为 Inspector 用 switch 渲染各字段类型，
+ * 在里面直接调 useQuery 会破坏 hooks 规则。
+ *
+ * 一次只用一个维度，各自只管自己的取值；后端把它们当作相互独立的收窄条件。
+ */
+function UserPickerScopeFields({
+  props,
+  updateProps,
+}: {
+  props: Record<string, any>;
+  updateProps: (patch: Record<string, any>) => void;
+}) {
+  const scopeType = props.scopeType ?? 'all';
+  const departments = useQuery({
+    queryKey: ['picker-departments'],
+    queryFn: () => request<any[]>('/api/pickers/departments'),
+    // 只有选了「指定部门」才需要这份清单，不选就不请求。
+    enabled: scopeType === 'department',
+  });
+  // 切换维度时清掉其它维度的值，避免残留一个用不上的配置。
+  const switchTo = (next: string) => updateProps({
+    scopeType: next,
+    scopeDeptId: next === 'department' ? props.scopeDeptId : undefined,
+    scopePosition: next === 'position' ? props.scopePosition : undefined,
+    scopeUserIds: next === 'user' ? props.scopeUserIds : undefined,
+  });
+  return (
+    <>
+      <PanelField label="选择范围">
+        <Select
+          value={scopeType}
+          options={[
+            { label: '全部用户', value: 'all' },
+            { label: '指定部门（含下级）', value: 'department' },
+            { label: '指定职位', value: 'position' },
+            { label: '部门领导', value: 'leader' },
+            { label: '指定人员', value: 'user' },
+          ]}
+          onChange={switchTo}
+        />
+      </PanelField>
+      {scopeType === 'department' && (
+        <PanelField label="限定部门（含所有下级）">
+          <Select
+            showSearch
+            allowClear
+            style={{ width: '100%' }}
+            placeholder="选择部门"
+            loading={departments.isFetching}
+            value={props.scopeDeptId}
+            options={(departments.data ?? []).map((department: any) => ({
+              value: department.id,
+              label: department.name,
+            }))}
+            onChange={(value) => updateProps({ scopeDeptId: value })}
+          />
+        </PanelField>
+      )}
+      {scopeType === 'position' && (
+        <PanelField label="职务包含">
+          <Input
+            allowClear
+            placeholder="例如：工程师"
+            value={props.scopePosition}
+            onChange={(event) => updateProps({ scopePosition: event.target.value })}
+          />
+        </PanelField>
+      )}
+      {scopeType === 'user' && (
+        <PanelField label="限定人员（候选只限这些人）">
+          <AssigneePicker
+            mode="user"
+            value={props.scopeUserIds ?? []}
+            onChange={(ids) => updateProps({ scopeUserIds: ids })}
+          />
+        </PanelField>
+      )}
+      <Typography.Text type="secondary">
+        {scopeType === 'leader'
+          ? '「部门领导」即职务带「部长」的人员。'
+          : '候选人的最终结果还会按你的数据范围收窄。'}
+      </Typography.Text>
+    </>
+  );
+}
+
 function InspectorHeader({
   label,
   type,
@@ -220,7 +312,7 @@ function InspectorHeader({
   );
 }
 
-export function Inspector() {
+export function Inspector({ formId }: { formId?: number }) {
   const selectedId = useFormDesignerStore((s) => s.selectedId);
   const schema = useFormDesignerStore((s) => s.schema);
   const updateNode = useFormDesignerStore((s) => s.updateNode);
@@ -353,6 +445,10 @@ export function Inspector() {
               </Typography.Text>
             ),
           },
+          ...(['select', 'multi_select', 'text', 'textarea', 'number'].includes(node.type) ? [{
+            key: 'option-source', label: '外部数据与联动',
+            children: <OptionSourceSettings key={node.id} formId={formId} node={node} schema={schema} update={updateProps} />,
+          }] : []),
           ...(isSelect
             ? [
                 {
@@ -644,7 +740,7 @@ function renderComponentSettings(
     case 'multi_select':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <SelectOptionsEditor
+          {!isBoundOptionSource(node.props) && <SelectOptionsEditor
             value={props.options}
             multiple={node.type === 'multi_select'}
             defaultValue={props.defaultValue}
@@ -654,7 +750,7 @@ function renderComponentSettings(
             onEnableColorsChange={(enableOptionColor, options) =>
               updateProps({ enableOptionColor, options })
             }
-          />
+          />}
           <Checkbox
             checked={props.allowClear !== false}
             onChange={(event) => updateProps({ allowClear: event.target.checked })}
@@ -698,35 +794,7 @@ function renderComponentSettings(
               onChange={(value) => updateProps({ maxCount: value })}
             />
           </PanelField>
-          <PanelField label="选择范围">
-            <Select
-              value={props.scopeType ?? 'all'}
-              options={[
-                { label: '全部用户', value: 'all' },
-                { label: '指定部门', value: 'department' },
-              ]}
-              onChange={(scopeType) =>
-                updateProps({
-                  scopeType,
-                  scopeDeptId:
-                    scopeType === 'department' ? props.scopeDeptId : undefined,
-                })
-              }
-            />
-          </PanelField>
-          {props.scopeType === 'department' && (
-            <PanelField label="部门 ID">
-              <InputNumber
-                min={1}
-                style={{ width: '100%' }}
-                value={props.scopeDeptId}
-                onChange={(value) => updateProps({ scopeDeptId: value })}
-              />
-            </PanelField>
-          )}
-          <Typography.Text type="secondary">
-            当前用户接口支持按部门 ID 限定范围；可视化部门选择器后续接入。
-          </Typography.Text>
+          <UserPickerScopeFields props={props} updateProps={updateProps} />
         </Space>
       );
     case 'dept_picker':

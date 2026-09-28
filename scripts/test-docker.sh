@@ -40,6 +40,7 @@ ensure_test_env() {
     "MINIO_ROOT_USER=antflow-test" \
     "MINIO_ROOT_PASSWORD=$(random_secret 24)" \
     "JWT_SECRET=$(random_secret 32)" \
+    "ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD=$(random_secret 24)" \
     "AUDIT_ARCHIVE_ENCRYPTION_SECRET=$(random_secret 32)" \
     "ANTFLOW_INTEGRATION_ENCRYPTION_KEY=$(random_secret 32)" \
     "BACKUP_ENCRYPTION_SECRET=$(random_secret 32)" > "$tmp"
@@ -199,9 +200,16 @@ start() {
   fi
   build_artifacts
   compose up -d --build
+  # 对外地址与 compose.test.yaml 的端口绑定同源，默认回环（原来写死 10.0.0.250）。
+  # 注意取值优先级必须和 Compose 一致：compose() 带 --env-file "$TEST_ENV"，所以 .env.test 里的
+  # ANTFLOW_TEST_HOST 对 Compose 是生效的；只读 shell 变量的话，端口绑在 A、健康检查敲 B，
+  # 一个健康的栈会被判成起不来。
+  local test_host
+  test_host=$(sed -n 's/^ANTFLOW_TEST_HOST=//p' "$TEST_ENV" | tail -n 1 | tr -d '\r')
+  test_host="${ANTFLOW_TEST_HOST:-${test_host:-127.0.0.1}}"
   for _ in $(seq 1 90); do
-    if curl --fail --silent --show-error http://10.0.0.250:17070/actuator/health >/dev/null; then
-      echo 'Isolated test environment: http://10.0.0.250:17070'
+    if curl --fail --silent --show-error "http://${test_host}:17070/actuator/health" >/dev/null; then
+      echo "Isolated test environment: http://${test_host}:17070"
       return
     fi
     sleep 2

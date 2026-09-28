@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.PermissionCodes;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionMapper;
 import com.antflow.org.User;
@@ -37,9 +38,9 @@ class WorkplaceControllerTest {
     void overviewReturnsOnlyVisibleWorkflowData() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "operator", List.of("operator")));
         var authorization = mock(AuthorizationService.class);
-        doNothing().when(authorization).requirePermission("page.workplace");
-        when(authorization.hasPermission("workflow.instance.read")).thenReturn(true);
-        when(authorization.hasPermission("workflow.task.read")).thenReturn(true);
+        doNothing().when(authorization).requirePermission(PermissionCodes.CONSOLE_ACCESS);
+        when(authorization.hasPermission("workflow:instance:read")).thenReturn(true);
+        when(authorization.hasPermission("workflow:task:read")).thenReturn(true);
 
         var task = new TaskEntity();
         task.setId(51L);
@@ -68,7 +69,7 @@ class WorkplaceControllerTest {
         when(tasks.countMyInbox(7L, "PENDING")).thenReturn(1L);
         var instances = mock(ProcessInstanceMapper.class);
         when(instances.selectInstancePage(7L, false, true, true, "authorized",
-            null, null, null, 50, 100))
+            null, null, null, null, null, 50, 100))
             .thenReturn(List.of(instance));
         when(instances.selectBatchIds(any())).thenReturn(List.of(instance));
         when(instances.selectWorkplaceStatusCounts(eq(7L), eq(false), eq(true), eq(true),
@@ -101,9 +102,9 @@ class WorkplaceControllerTest {
     void overviewDoesNotReadWorkflowDataWithoutWorkflowPermission() {
         PrincipalHolder.set(new PrincipalHolder.Principal(8L, "viewer", List.of("viewer")));
         var authorization = mock(AuthorizationService.class);
-        doNothing().when(authorization).requirePermission("page.workplace");
-        when(authorization.hasPermission("workflow.instance.read")).thenReturn(false);
-        when(authorization.hasPermission("workflow.task.read")).thenReturn(false);
+        doNothing().when(authorization).requirePermission(PermissionCodes.CONSOLE_ACCESS);
+        when(authorization.hasPermission("workflow:instance:read")).thenReturn(false);
+        when(authorization.hasPermission("workflow:task:read")).thenReturn(false);
         var tasks = mock(TaskOperationService.class);
 
         var controller = new WorkplaceController(authorization, tasks, mock(ProcessInstanceMapper.class),

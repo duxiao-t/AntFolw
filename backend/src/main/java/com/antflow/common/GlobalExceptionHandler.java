@@ -21,6 +21,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.util.DisconnectedClientHelper;
 
 import java.util.HashMap;
@@ -122,6 +123,12 @@ public class GlobalExceptionHandler {
             AuditService.RiskLevel.HIGH, "FILE_TOO_LARGE", e);
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
             .body(envelope("FILE_TOO_LARGE", "uploaded file exceeds size limit"));
+    }
+
+    /** Long-lived SSE requests end normally when the browser closes or the service restarts. */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public ResponseEntity<Void> handleAsyncTimeout() {
+        return ResponseEntity.noContent().build();
     }
 
     @ExceptionHandler(Exception.class)

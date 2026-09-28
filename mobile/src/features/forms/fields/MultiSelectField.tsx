@@ -1,4 +1,3 @@
-import { DownOutline } from 'antd-mobile-icons';
 import { Input } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileFieldProps } from '../schema/types';
@@ -10,13 +9,22 @@ import {
   FieldShell,
   InlineFieldOptions,
   isRequired,
+  positiveInteger,
   selectDisplayStyle,
 } from './fieldShared';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
+import { DynamicSelectField } from './DynamicSelectField';
+import { isBoundOptionSource } from './dynamicOptions';
+import { PickerOptionList, PickerSearchInput, PickerTrigger } from './SelectPicker';
 
 const OTHER_OPTION_VALUE = '__antflow_other__';
 
 export function MultiSelectField(props: MobileFieldProps) {
+  if (isBoundOptionSource(props.node.props)) return <DynamicSelectField {...props} multiple />;
+  return <StaticMultiSelectField {...props} />;
+}
+
+function StaticMultiSelectField(props: MobileFieldProps) {
   const label = fieldLabel(props.node);
   const values = useMemo(() => arrayValue(props.value), [props.value]);
   const [selected, setSelected] = useState<Array<string | number>>(values);
@@ -27,9 +35,9 @@ export function MultiSelectField(props: MobileFieldProps) {
   const searchable = props.node.props?.showSearch === true;
   const clearable = props.node.props?.allowClear !== false;
   const displayStyle = selectDisplayStyle(props.node);
-  const maxCount = typeof props.node.props?.maxCount === 'number'
-    ? props.node.props.maxCount
-    : undefined;
+  // 归一成"正整数或 undefined"：内联样式那边本来就是这条规则（Number.isInteger && > 0），
+  // 这里若把 0 / 负数 / 小数当上限，就会出现两种展示样式上限不一致。
+  const maxCount = positiveInteger(props.node.props?.maxCount);
   const allOptions = allFieldOptions(props.node);
   const useColor = props.node.props?.enableOptionColor === true;
   const otherOption = options.find((option) => option.isOther);
@@ -104,9 +112,7 @@ export function MultiSelectField(props: MobileFieldProps) {
           />
         ) : (
         <>
-          <button
-            type="button"
-            className={`control form-picker control--multi${selectedLabels.length > 0 ? '' : ' af-field-picker--placeholder'}`}
+          <PickerTrigger labels={selectedLabels} placeholder={placeholder}
             onClick={() => {
               setKeyword('');
               setDraftSelected([
@@ -114,21 +120,11 @@ export function MultiSelectField(props: MobileFieldProps) {
                 ...(otherSelected ? [OTHER_OPTION_VALUE] : []),
               ]);
               setVisible(true);
-            }}
-          >
-            {selectedLabels.length > 0 ? (
-              <span className="selected-tags">
-                {selectedLabels.map((item) => <span key={item}>{item}</span>)}
-              </span>
-            ) : (
-              <span className="picker-value">{placeholder}</span>
-            )}
-            <DownOutline aria-hidden="true" />
-          </button>
+            }} />
           <MobileSelectionPopup
             visible={visible}
             title={`选择${label}`}
-            subtitle={`已选 ${draftSelected.length} 项`}
+            subtitle={`已选 ${draftSelected.length}${maxCount !== undefined ? ` / ${maxCount}` : ''} 项`}
             presentation="sheet"
             headerAction={clearable && draftSelected.length > 0 ? (
               <button
@@ -152,53 +148,24 @@ export function MultiSelectField(props: MobileFieldProps) {
             )}
           >
             {searchable ? (
-              <input
-                type="search"
-                className="af-full-picker__search"
-                aria-label={`搜索${label}`}
-                placeholder="搜索选项"
-                value={keyword}
-                onChange={(event) => setKeyword(event.currentTarget.value)}
-              />
+              <PickerSearchInput label={`搜索${label}`} placeholder="搜索选项"
+                value={keyword} onChange={setKeyword} />
             ) : null}
-            <fieldset className="af-full-picker__list af-full-picker__fieldset">
-              <legend className="visually-hidden">{label}</legend>
-              {visibleOptions.map((option) => {
-                const checked = draftSelected.includes(
-                  option.isOther ? OTHER_OPTION_VALUE : option.value,
-                );
-                return (
-                  <label
-                    key={option.value}
-                    data-checked={checked ? 'true' : 'false'}
-                    data-disabled={option.disabled ? 'true' : 'false'}
-                    className="af-full-picker__option af-full-picker__option--select af-full-picker__option--check"
-                  >
-                    <span
-                      className="af-full-picker__avatar af-full-picker__avatar--choice"
-                      aria-hidden="true"
-                      style={useColor && option.color ? { background: option.color } : undefined}
-                    >
-                      {option.label.trim().slice(0, 1)}
-                    </span>
-                    <span className="af-full-picker__option-text">
-                      <strong>{option.label}</strong>
-                    </span>
-                    <input
-                      type="checkbox"
-                      aria-label={option.label}
-                      checked={checked}
-                      disabled={option.disabled}
-                      className="af-full-picker__native-check"
-                      onChange={() => toggleDraft(option.isOther ? OTHER_OPTION_VALUE : option.value)}
-                    />
-                  </label>
-                );
+            <PickerOptionList label={label} multiple useColor={useColor}
+              options={visibleOptions.map((option) => {
+                const value = option.isOther ? OTHER_OPTION_VALUE : option.value;
+                return {
+                  value,
+                  label: option.label,
+                  color: option.color,
+                  // 到了上限把未选中的项置灰，否则点击毫无反应会像卡住了。
+                  disabled: option.disabled
+                    || (maxCount !== undefined && draftSelected.length >= maxCount
+                      && !draftSelected.includes(value)),
+                  selected: draftSelected.includes(value),
+                };
               })}
-              {visibleOptions.length === 0 ? (
-                <p className="af-full-picker__empty" role="status">没有匹配的选项</p>
-              ) : null}
-            </fieldset>
+              onSelect={(option) => toggleDraft(option.value)} />
           </MobileSelectionPopup>
         </>
         )
@@ -243,11 +210,13 @@ export function MultiSelectField(props: MobileFieldProps) {
   }
 
   function toggleDraft(value: string | number) {
-    setDraftSelected((current) =>
-      current.includes(value)
-        ? current.filter((item) => item !== value)
-        : [...current, value],
-    );
+    setDraftSelected((current) => {
+      if (current.includes(value)) return current.filter((item) => item !== value);
+      // 内联样式那边把 maxCount 传给了 InlineFieldOptions，下拉样式这条路完全没判——
+      // 同一份配置换个展示样式上限就失效。收口到这里，两种样式共用。
+      if (maxCount !== undefined && current.length >= maxCount) return current;
+      return [...current, value];
+    });
   }
 }
 

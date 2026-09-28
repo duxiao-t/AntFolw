@@ -92,7 +92,11 @@ describe('ProfilePage', () => {
 
     expect(await screen.findByText('登录目标页')).toBeInTheDocument();
     expect(useAuthStore.getState().status).toBe('anonymous');
-    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+    // 同 SecurityPage.test：clear() 与 navigate 在同一 tick，页面可能在被卸载前把它的查询
+    // 再挂一次（空壳、无数据）。这条用例要钉的是"用户数据不残留"，所以断言数据而不是条数。
+    expect(queryClient.getQueryData(['private', 'cached'])).toBeUndefined();
+    expect(queryClient.getQueryCache().getAll()
+      .filter((query) => query.state.data !== undefined)).toHaveLength(0);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/auth/logout'))).toBe(true);
   });
 });

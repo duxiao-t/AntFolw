@@ -374,6 +374,43 @@ describe('TaskDetailPage', () => {
     });
   });
 
+  it('enables dynamic options for editable approval fields', async () => {
+    const editableDetail = {
+      ...TASK_DETAIL,
+      schema: [{
+        id: 'category',
+        type: 'select',
+        label: '审批分类',
+        props: {
+          optionSource: {
+            sourceId: 1,
+            versionId: 2,
+            valueColumn: '编码',
+            labelColumn: '名称',
+          },
+        },
+      }],
+      formData: { category: '' },
+      processSnapshot: {
+        id: 'root',
+        type: 'ROOT',
+        children: {
+          id: 'a1',
+          type: 'APPROVAL',
+          props: {
+            name: '直属主管',
+            formPerms: [{ fieldId: 'category', mode: 'EDITABLE' }],
+          },
+        },
+      },
+    } as typeof TASK_DETAIL;
+    setupFetch({ detail: editableDetail });
+
+    renderDetail();
+
+    expect(await screen.findByRole('button', { name: '选择审批分类' })).toBeEnabled();
+  });
+
   it('does not expose fields hidden by the current approval node', async () => {
     const hiddenDetail: typeof TASK_DETAIL = {
       ...TASK_DETAIL,

@@ -10,6 +10,7 @@ import java.util.List;
 @Mapper
 public interface TaskMapper extends BaseMapper<TaskEntity> {
     @Select("SELECT * FROM t_task WHERE id = #{id} FOR UPDATE")
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     TaskEntity selectForUpdate(@Param("id") Long id);
 
     @Select("""

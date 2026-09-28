@@ -278,6 +278,8 @@ export function FormDesignerSurface({
   } =
     useFormDesignerStore();
   const [definition, setDefinition] = useState<FormDefinition | null>(null);
+  // 同一张表单只从服务端取一次属性。
+  const fetchedFormId = useRef<string | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [visualIds, setVisualIds] = useState<string[]>(() =>
     schema.map((node) => node.id),
@@ -373,13 +375,27 @@ export function FormDesignerSurface({
   );
 
   // Load existing definition when id is provided (not 'new').
+  //
+  // 这里做两件**不能混在一起**的事，守卫也只能守住第二件：
+  // ① setDefinition —— 本组件的局部属性（保存时要用的 code/name/description/settings），必须每次拿到；
+  // ② loadSchema   —— 把 schema 灌进 store，**只在 store 里不是这张表单时做**，否则切步骤再
+  //    切回来会把没保存的编辑冲掉（store 才是内容的真相，服务端那份是"上次保存的状态"）。
+  // 之前把守卫加在 effect 开头，连 ① 一起短路了：局部 definition 永远是 null，保存时发出编造的
+  // 兜底值（name 变"未命名表单"、settings 变 {}），把表单属性冲掉。
   useEffect(() => {
     if (!id || id === 'new') return;
+    if (fetchedFormId.current === String(id)) return;
+    fetchedFormId.current = String(id);
     (async () => {
       try {
         const fd = await request<FormDefinition>(`/api/forms/definitions/${id}`);
+        // 请求期间路由可能已经切到另一张表单：这份响应已过期，落地会把 A 的属性/schema
+        // 写到 B 身上（或盖掉 B 还没保存的编辑）。
+        if (fetchedFormId.current !== String(id)) return;
         setDefinition(fd);
-        loadSchema(parseJsonValue(fd.schema, []));
+        if (useFormDesignerStore.getState().loadedFormId !== String(id)) {
+          loadSchema(parseJsonValue(fd.schema, []), String(id));
+        }
       } catch (_error) {
         message.error('加载表单失败');
       }
@@ -387,18 +403,21 @@ export function FormDesignerSurface({
   }, [id, loadSchema, message]);
 
   const save = useMutation({
-    mutationFn: () =>
-      request('/api/forms/definitions', {
+    mutationFn: () => {
+      // 属性没加载完就别保存：下面那些 `?? 兜底` 会把真实的 name/settings 覆盖成编造值。
+      if (!definition) throw new Error('表单属性还没加载完，请刷新后重试');
+      return request('/api/forms/definitions', {
         method: 'POST',
         data: {
           id: id === 'new' ? null : Number(id),
-          code: definition?.code ?? `form_${Date.now()}`,
-          name: definition?.name ?? '未命名表单',
-          description: definition?.description ?? '',
+          code: definition.code,
+          name: definition.name,
+          description: definition.description ?? '',
           schema,
-          settings: parseJsonValue(definition?.settings, {}),
+          settings: parseJsonValue(definition.settings, {}),
         },
-      }),
+      });
+    },
     onSuccess: (res: any) => {
       setDefinition(res);
       onSaved?.(res);
@@ -521,7 +540,7 @@ export function FormDesignerSurface({
             />
           </main>
           <aside className="form-designer__inspector">
-            <Inspector />
+            <Inspector formId={Number.isFinite(Number(id)) ? Number(id) : undefined} />
           </aside>
         </div>
         <DragOverlay dropAnimation={null}>

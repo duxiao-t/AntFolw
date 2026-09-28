@@ -123,6 +123,23 @@ describe('Contacts CSV helpers', () => {
     expect(csv).toBe('姓名,工号,账号,手机,邮箱,职务,性别\r\n"张三,主管",000001,zhangsan,13800000000,"z""s@example.com",研发,男');
   });
 
+  it('neutralizes spreadsheet formulas in exported member fields', () => {
+    const csv = buildMembersCsv([{
+      displayName: '=HYPERLINK("https://evil.example")',
+      employeeNo: '000001',
+      username: '+cmd',
+      phone: '',
+      email: ' safe@example.com',
+      position: '\t@SUM(1,1)',
+      gender: 'M',
+      deptId: 2,
+    }]);
+
+    expect(csv).toContain('"\'=HYPERLINK(""https://evil.example"")"');
+    expect(csv).toContain("'+cmd");
+    expect(csv).toContain('"\'\t@SUM(1,1)"');
+  });
+
   it('imports Chinese-header CSV rows into the selected department', () => {
     const result = parseMembersCsv('姓名,工号,账号,手机,邮箱,职务,性别\n李四,000002,lisi,13900000000,lisi@example.com,产品,女', 7);
 
@@ -177,5 +194,51 @@ describe('Contacts bulk action helpers', () => {
     ]);
 
     expect(summary).toEqual({ successCount: 2, failedCount: 1 });
+  });
+});
+
+describe('Contacts CSV round trip', () => {
+  it('导出的文件原样导回来，值不变（含类公式值）', () => {
+    const member = {
+      displayName: '=SUM(A1)',
+      employeeNo: '100001',
+      username: 'alice',
+      phone: '13800000000',
+      email: 'alice@example.com',
+      position: '+组长',
+      gender: 'F',
+      deptId: 7,
+    };
+
+    const parsed = parseMembersCsv(buildMembersCsv([member]), 7);
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows).toEqual([{
+      displayName: '=SUM(A1)',
+      employeeNo: '100001',
+      username: 'alice',
+      phone: '13800000000',
+      email: 'alice@example.com',
+      position: '+组长',
+      gender: 'F',
+      deptId: 7,
+    }]);
+  });
+
+  it('含逗号与引号的值也能往返', () => {
+    const member = {
+      displayName: '张三, "阿三"',
+      employeeNo: '',
+      username: 'zhangsan',
+      phone: '',
+      email: '',
+      position: '',
+      gender: 'M',
+      deptId: 1,
+    };
+
+    const parsed = parseMembersCsv(buildMembersCsv([member]), 1);
+
+    expect(parsed.rows[0].displayName).toBe('张三, "阿三"');
   });
 });

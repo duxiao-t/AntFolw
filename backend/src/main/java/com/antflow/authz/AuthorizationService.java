@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 public class AuthorizationService {
     private final JdbcTemplate jdbcTemplate;
     private final Map<Long, CachedSnapshot> cache = new ConcurrentHashMap<>();
+    /** 全局授权失效代次：evictAll 递增，用来识破"清空与回填"的竞态。 */
+    private final java.util.concurrent.atomic.AtomicLong epoch =
+        new java.util.concurrent.atomic.AtomicLong();
 
     public Optional<PrincipalHolder.Principal> principalForRequest(long userId, UUID sessionId) {
         UserState state = userState(userId);
@@ -29,14 +32,7 @@ public class AuthorizationService {
             cache.remove(userId);
             return Optional.empty();
         }
-        CachedSnapshot cached = cache.get(userId);
-        AuthzSnapshot snapshot;
-        if (cached != null && cached.version() == state.authzVersion()) {
-            snapshot = cached.snapshot();
-        } else {
-            snapshot = loadSnapshot(state);
-            cache.put(userId, new CachedSnapshot(state.authzVersion(), snapshot));
-        }
+        AuthzSnapshot snapshot = cachedSnapshot(state);
         return Optional.of(new PrincipalHolder.Principal(
             userId,
             state.username(),
@@ -50,21 +46,63 @@ public class AuthorizationService {
     }
 
     public AuthzSnapshot snapshot(long userId) {
+        // 快路径：请求主体自己。认证时 principalForRequest 已经查过 t_user 并确认 ACTIVE，
+        // 版本也带在 principal 上，所以同一请求内再查一次 t_user 是纯浪费——而 snapshot 会被
+        // currentSnapshot / hasPermission(userId,…) / inCurrentDataScope 等入口反复调用
+        // （UserService.listAuthorized 就是每行一次），原先等于每行一条 SELECT。
+        PrincipalHolder.Principal principal = PrincipalHolder.current().orElse(null);
+        if (principal != null && principal.userId() == userId && principal.authzVersion() > 0) {
+            return cachedSnapshot(new UserState(userId, principal.username(),
+                principal.displayName(), "ACTIVE", principal.authzVersion(),
+                principal.departmentId()));
+        }
         UserState state = userState(userId);
         if (state == null || !"ACTIVE".equals(state.status())) {
             throw new AccessDeniedException("user is disabled");
         }
-        CachedSnapshot cached = cache.get(userId);
-        if (cached != null && cached.version() == state.authzVersion()) {
-            return cached.snapshot();
-        }
-        AuthzSnapshot snapshot = loadSnapshot(state);
-        cache.put(userId, new CachedSnapshot(state.authzVersion(), snapshot));
-        return snapshot;
+        return cachedSnapshot(state);
     }
 
     public void evict(long userId) {
         cache.remove(userId);
+    }
+
+    /**
+     * 全局授权变更（菜单编排、能力目录）后一次性失效所有快照。
+     *
+     * <p>先递增失效代次再清缓存：装载中的请求靠代次变化察觉"我这次装载可能混了失效前的数据"。
+     * 全局变更**不改动各用户的 authz_version**，所以只 clear() 挡不住正在进行的装载——
+     * 它会把失效前算出来的快照重新插回缓存并长期命中（见 cachedSnapshot）。
+     */
+    public void evictAll() {
+        epoch.incrementAndGet();
+        cache.clear();
+    }
+
+    private AuthzSnapshot cachedSnapshot(UserState state) {
+        // 原来是把 loadSnapshot（内含多次查库）放在一把**全局**锁里，于是任何一次缓存未命中
+        // 都会把全站请求串行在数据库往返上。ConcurrentHashMap.compute 只锁住该用户的桶，
+        // 同一用户不会重复装载，不同用户互不阻塞。
+        //
+        // 代价是 clear() 不再与装载互斥，于是要靠 epoch 把"清空与回填的竞态"补回来。
+        for (int attempt = 0; attempt < 3; attempt++) {
+            long startEpoch = epoch.get();
+            CachedSnapshot cached = cache.compute(state.userId(), (userId, existing) -> {
+                if (existing != null && existing.version() == state.authzVersion()
+                        && existing.epoch() == startEpoch) {
+                    return existing;
+                }
+                return new CachedSnapshot(state.authzVersion(), loadSnapshot(state), startEpoch);
+            });
+            if (epoch.get() == startEpoch) {
+                return cached.snapshot();
+            }
+            // 装载期间发生过全局失效：这份快照可能混了失效前的数据。只移除"仍是我们刚放进去
+            // 的那一份"（两参 remove 比较值），避免误删别的线程已经重算好的新快照。
+            cache.remove(state.userId(), cached);
+        }
+        // 连续失效（极罕见）：退回不缓存的装载，宁可多查一次库也不返回过期权限。
+        return loadSnapshot(state);
     }
 
     public void requirePermission(String permission) {
@@ -73,6 +111,21 @@ public class AuthorizationService {
             throw new AuthorizationFailureException("MISSING_PERMISSION",
                 "missing permission: " + permission);
         }
+    }
+
+    /** 多个能力任一即可（例如"表单管理员或流程管理员"都能配置流程）。 */
+    public void requireAnyPermission(String... permissions) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        for (String permission : permissions) {
+            if (principal.permissions().contains(permission)) {
+                return;
+            }
+        }
+        throw new AuthorizationFailureException("MISSING_PERMISSION",
+            "missing permission: " + String.join(" or ", permissions));
     }
 
     public void requireAdmin() {
@@ -87,6 +140,16 @@ public class AuthorizationService {
             && (principal.isAdmin() || principal.permissions().contains(permission));
     }
 
+    /**
+     * 指定用户（而不是当前请求主体）是否持有该能力。
+     * 服务层按 userId 判定时必须用这个——与 canUseForm/hasFormGrant 一样以入参用户为准，
+     * 否则"按 A 用户查数据"和"用当前主体的能力判定"会错配。
+     */
+    public boolean hasPermission(long userId, String permission) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        return snapshot.admin() || snapshot.permissions().contains(permission);
+    }
+
     public boolean isAdmin() {
         return principal().isAdmin();
     }
@@ -98,6 +161,34 @@ public class AuthorizationService {
     public AuthzSnapshot currentSnapshot() {
         PrincipalHolder.Principal principal = principal();
         return snapshot(principal.userId());
+    }
+
+    /**
+     * 供数据权限拦截器使用：某能力在当前请求下的行级过滤条件。
+     *
+     * <p>返回空表示"无请求主体"（系统内部任务），调用方应跳过注入；
+     * admin 表示管理员旁路；unrestricted 表示非管理员的 ALL 范围；
+     * 既无 selfAllowed 又无 departmentIds 表示该能力缺失 → 调用方应注入 1=0（fail-closed）。
+     */
+    public Optional<DataScopeFilter> currentDataScope(String permissionCode) {
+        if (PrincipalHolder.current().isEmpty()) {
+            return Optional.empty();
+        }
+        AuthzSnapshot snapshot = currentSnapshot();
+        if (snapshot.admin()) {
+            return Optional.of(new DataScopeFilter(true, true, false,
+                snapshot.userId(), Set.of()));
+        }
+        List<RoleGrant> grants = snapshot.permissionRoles().getOrDefault(permissionCode, List.of());
+        boolean all = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.ALL);
+        boolean self = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.SELF);
+        Set<Long> departments = all ? Set.of() : manageableDepartments(snapshot, permissionCode);
+        return Optional.of(new DataScopeFilter(false, all, self,
+            snapshot.userId(), departments));
+    }
+
+    public record DataScopeFilter(boolean admin, boolean unrestricted, boolean selfAllowed,
+                                  long userId, Set<Long> departmentIds) {
     }
 
     public boolean inCurrentDataScope(String permission, Long ownerId, Long departmentId) {
@@ -182,31 +273,110 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
-    public void requireFormAction(long formId, String permission) {
+    /**
+     * 该用户有使用授权的表单 id 集合，用于列表类的批量过滤。
+     * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"一个都没有"。
+     */
+    public Optional<Set<Long>> usableFormIds(long userId) {
+        if (snapshot(userId).admin()) {
+            return Optional.empty();
+        }
+        // 与 hasFormGrant 同一套判定，只是去掉了 form_def_id 这一维。
+        return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
+            SELECT grant_row.form_def_id
+            FROM t_form_resource_grant grant_row
+            WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = ?)
+               OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
+                    SELECT ur.role_id
+                    FROM t_user_role ur
+                    JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
+                    WHERE ur.user_id = ?))
+               OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
+                    SELECT 1
+                    FROM t_user grant_user
+                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
+                    JOIN t_department grant_department
+                      ON grant_department.id = grant_row.subject_id
+                    WHERE grant_user.id = ?
+                      AND user_department.path <@ grant_department.path))
+            """, Long.class, userId, userId, userId)));
+    }
+
+    /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
+    public void requireFormUse(long formId) {
         PrincipalHolder.Principal principal = principal();
         if (principal.isAdmin()) {
             return;
         }
-        requirePermission(permission);
+        requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         if (!hasFormGrant(formId, principal.userId())) {
             throw new HiddenResourceException("form not found");
         }
     }
 
-    public void requireFormManagementScope(long formId, String permission) {
-        requireFormAction(formId, permission);
-        if (isAdmin()) return;
-        FormManagementAccess resource = jdbcTemplate.query("""
-            SELECT form.created_by, creator.dept_id
-            FROM t_form_definition form
-            LEFT JOIN t_user creator ON creator.id = form.created_by
-            WHERE form.id = ? AND form.deleted = 0
-            """, rs -> rs.next() ? new FormManagementAccess(
-                nullableLong(rs, "created_by"), nullableLong(rs, "dept_id")) : null, formId);
-        if (resource == null) throw new HiddenResourceException("form not found");
-        if (!inCurrentDataScope(permission, resource.createdBy(), resource.departmentId())) {
-            throw new AuthorizationFailureException("OUTSIDE_DATA_SCOPE",
-                "form is outside the permitted data scope");
+    public boolean canUseForm(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        return snapshot.admin()
+            || (snapshot.permissions().contains(PermissionCodes.FORM_RUNTIME_READ)
+                && hasFormGrant(formId, userId));
+    }
+
+    public boolean hasFormMaintainer(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        if (snapshot.admin()) {
+            return true;
+        }
+        Long count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*)
+            FROM t_form_maintainer maintainer
+            JOIN t_form_definition form ON form.id = maintainer.form_def_id
+              AND form.deleted = 0
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+              AND user_row.status = 'ACTIVE'
+            WHERE maintainer.form_def_id = ? AND maintainer.user_id = ?
+            """, Long.class, formId, userId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 该用户维护的表单 id 集合，用于列表类的批量过滤。
+     * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"什么都不维护"。
+     */
+    public Optional<Set<Long>> maintainableFormIds(long userId) {
+        if (snapshot(userId).admin()) {
+            return Optional.empty();
+        }
+        return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
+            SELECT maintainer.form_def_id
+            FROM t_form_maintainer maintainer
+            JOIN t_form_definition form ON form.id = maintainer.form_def_id
+              AND form.deleted = 0
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+              AND user_row.status = 'ACTIVE'
+            WHERE maintainer.user_id = ?
+            """, Long.class, userId)));
+    }
+
+    /** 模板操作入口：非管理员必须同时是维护人并持有对应原子能力。 */
+    public void requireFormMaintenance(long formId, String permission) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        requirePermission(permission);
+        if (!hasFormMaintainer(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    public void requireFormMaintenanceAny(long formId, String... permissions) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        requireAnyPermission(permissions);
+        if (!hasFormMaintainer(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
         }
     }
 
@@ -222,7 +392,7 @@ public class AuthorizationService {
         if (formId == null) {
             throw new HiddenResourceException("form not found");
         }
-        requireFormAction(formId, PermissionCodes.FORM_RUNTIME_READ);
+        requireFormUse(formId);
     }
 
     public void requireReadableInstance(long instanceId) {
@@ -254,7 +424,6 @@ public class AuthorizationService {
             return InstanceVisibility.FULL;
         }
         if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_INSTANCE_READ)
-            && hasFormGrant(resource.formDefId(), userId)
             && inDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
                 resource.startedBy(), resource.startedDepartmentId())) {
             return InstanceVisibility.FULL;
@@ -291,8 +460,7 @@ public class AuthorizationService {
         }
         requirePermission(permission);
         AuthzSnapshot snapshot = snapshot(principal.userId());
-        if (!hasFormGrant(resource.formDefId(), principal.userId())
-            || !inDataScope(snapshot, permission, resource.startedBy(),
+        if (!inDataScope(snapshot, permission, resource.startedBy(),
                 resource.startedDepartmentId())) {
             throw new AccessDeniedException("instance is outside your management scope");
         }
@@ -315,7 +483,6 @@ public class AuthorizationService {
             return true;
         }
         return snapshot.permissions().contains(PermissionCodes.FORM_DATA_READ)
-            && hasFormGrant(resource.formDefId(), userId)
             && inDataScope(snapshot, PermissionCodes.FORM_DATA_READ,
                 resource.createdBy(), resource.startedDepartmentId());
     }
@@ -341,19 +508,31 @@ public class AuthorizationService {
                 "SELECT id FROM t_department ORDER BY id", Long.class));
         }
         Set<Long> result = new LinkedHashSet<>();
+        // 同一个查询在这几个分支里是重复的（多个 ALL 授权、多个"本部门及下级"授权都查同一份），
+        // 而 currentDataScope 是数据权限拦截器的热路径——按需算一次再复用，别让查询次数随授权项增长。
+        List<Long> allDepartments = null;
+        List<Long> departmentSubtree = null;
         for (RoleGrant grant : snapshot.permissionRoles().getOrDefault(permission, List.of())) {
             switch (grant.dataScope()) {
-                case ALL -> result.addAll(jdbcTemplate.queryForList(
-                    "SELECT id FROM t_department ORDER BY id", Long.class));
+                case ALL -> {
+                    if (allDepartments == null) {
+                        allDepartments = jdbcTemplate.queryForList(
+                            "SELECT id FROM t_department ORDER BY id", Long.class);
+                    }
+                    result.addAll(allDepartments);
+                }
                 case DEPARTMENT -> addIfPresent(result, snapshot.departmentId());
                 case DEPARTMENT_AND_DESCENDANTS -> {
                     if (snapshot.departmentId() != null) {
-                        result.addAll(jdbcTemplate.queryForList("""
-                            SELECT child.id FROM t_department child
-                            JOIN t_department parent ON parent.id = ?
-                            WHERE child.path <@ parent.path
-                            ORDER BY child.path
-                            """, Long.class, snapshot.departmentId()));
+                        if (departmentSubtree == null) {
+                            departmentSubtree = jdbcTemplate.queryForList("""
+                                SELECT child.id FROM t_department child
+                                JOIN t_department parent ON parent.id = ?
+                                WHERE child.path <@ parent.path
+                                ORDER BY child.path
+                                """, Long.class, snapshot.departmentId());
+                        }
+                        result.addAll(departmentSubtree);
                     }
                 }
                 case CUSTOM -> result.addAll(grant.customDepartmentIds());
@@ -413,21 +592,19 @@ public class AuthorizationService {
         return count != null && count > 0;
     }
 
-    private InstanceAccess instanceAccess(long instanceId) {
+    InstanceAccess instanceAccess(long instanceId) {
         return jdbcTemplate.query("""
-            SELECT pi.started_by, pi.started_dept_id, data.form_def_id
+            SELECT pi.started_by, pi.started_dept_id
             FROM t_process_instance pi
-            JOIN t_form_data data ON data.id = pi.form_data_id
             WHERE pi.id = ?
             """, rs -> rs.next() ? new InstanceAccess(
                 nullableLong(rs, "started_by"),
-                nullableLong(rs, "started_dept_id"),
-                rs.getLong("form_def_id")) : null, instanceId);
+                nullableLong(rs, "started_dept_id")) : null, instanceId);
     }
 
     private FormDataAccess formDataAccess(long formDataId) {
         return jdbcTemplate.query("""
-            SELECT data.created_by, data.form_def_id, pi.started_dept_id,
+            SELECT data.created_by, pi.started_dept_id,
                    submitter.dept_id AS submitter_dept_id
             FROM t_form_data data
             LEFT JOIN t_process_instance pi ON pi.form_data_id = data.id
@@ -437,37 +614,49 @@ public class AuthorizationService {
             LIMIT 1
             """, rs -> rs.next() ? new FormDataAccess(
                 nullableLong(rs, "created_by"),
-                rs.getLong("form_def_id"),
                 nullableLong(rs, "started_dept_id") != null
                     ? nullableLong(rs, "started_dept_id")
                     : nullableLong(rs, "submitter_dept_id")) : null, formDataId);
     }
 
     private AuthzSnapshot loadSnapshot(UserState user) {
-        List<RoleGrant> roles = jdbcTemplate.query("""
-            SELECT role.id, role.code, role.data_scope
+        List<RoleBase> roles = jdbcTemplate.query("""
+            SELECT role.id, role.code
             FROM t_user_role ur
             JOIN t_role role ON role.id = ur.role_id
             WHERE ur.user_id = ? AND role.enabled = true
             ORDER BY role.id
-            """, (rs, row) -> new RoleGrant(
-                rs.getLong("id"),
-                rs.getString("code"),
-                DataScope.valueOf(rs.getString("data_scope")),
-                customDepartments(rs.getLong("id"))), user.userId());
+            """, (rs, row) -> new RoleBase(rs.getLong("id"), rs.getString("code")),
+            user.userId());
         boolean admin = roles.stream().anyMatch(role -> "admin".equals(role.code()));
 
+        // 数据范围按「角色 × 能力」解析：覆盖值优先，否则取能力目录声明的默认范围。
         Map<String, List<RoleGrant>> permissionRoles = new HashMap<>();
-        for (RoleGrant role : roles) {
-            List<String> rolePermissions = admin && "admin".equals(role.code())
-                ? jdbcTemplate.queryForList("SELECT code FROM t_permission ORDER BY sort_order, code",
-                    String.class)
-                : jdbcTemplate.queryForList("""
-                    SELECT permission_code FROM t_role_permission
-                    WHERE role_id = ? ORDER BY permission_code
-                    """, String.class, role.roleId());
-            for (String permission : rolePermissions) {
-                permissionRoles.computeIfAbsent(permission, key -> new ArrayList<>()).add(role);
+        for (RoleBase role : roles) {
+            if (admin && "admin".equals(role.code())) {
+                jdbcTemplate.queryForList("""
+                    SELECT code FROM t_permission WHERE deprecated_at IS NULL
+                    ORDER BY sort_order, code
+                    """, String.class).forEach(code -> permissionRoles
+                    .computeIfAbsent(code, key -> new ArrayList<>())
+                    .add(new RoleGrant(role.roleId(), role.code(), DataScope.ALL, Set.of())));
+                continue;
+            }
+            List<GrantRow> grants = jdbcTemplate.query("""
+                SELECT granted.permission_code, granted.scope_override
+                FROM t_role_permission granted
+                JOIN t_permission permission ON permission.code = granted.permission_code
+                WHERE granted.role_id = ? AND permission.deprecated_at IS NULL
+                  AND permission.admin_only = false
+                ORDER BY granted.permission_code
+                """, (rs, row) -> new GrantRow(rs.getString("permission_code"),
+                rs.getString("scope_override")), role.roleId());
+            for (GrantRow grant : grants) {
+                DataScope scope = effectiveScope(grant);
+                permissionRoles.computeIfAbsent(grant.permissionCode(), key -> new ArrayList<>())
+                    .add(new RoleGrant(role.roleId(), role.code(), scope,
+                        scope == DataScope.CUSTOM
+                            ? customDepartments(role.roleId(), grant.permissionCode()) : Set.of()));
             }
         }
         Set<String> permissions = new LinkedHashSet<>(permissionRoles.keySet());
@@ -480,10 +669,26 @@ public class AuthorizationService {
             Collections.unmodifiableMap(immutableGrants));
     }
 
-    private Set<Long> customDepartments(long roleId) {
+    /**
+     * 覆盖值优先；未覆盖时取能力声明的默认范围；能力不支持范围管理时视为不限制。
+     *
+     * <p>包内可见（而非 private）是为了让 {@code AuthorizationServiceTest} 直接钉住
+     * "defaultScope == null → ALL" 这一分支：它是红线，改动会波及审批人待办可见性。
+     */
+    static DataScope effectiveScope(GrantRow grant) {
+        if (grant.scopeOverride() != null && !grant.scopeOverride().isBlank()) {
+            return DataScope.valueOf(grant.scopeOverride());
+        }
+        PermissionCatalog.Entry entry = PermissionCatalog.require(grant.permissionCode());
+        return entry.defaultScope() == null ? DataScope.ALL : entry.defaultScope();
+    }
+
+    private Set<Long> customDepartments(long roleId, String permissionCode) {
         return Collections.unmodifiableSet(new LinkedHashSet<>(jdbcTemplate.queryForList(
-            "SELECT department_id FROM t_role_department WHERE role_id = ? ORDER BY department_id",
-            Long.class, roleId)));
+            """
+            SELECT department_id FROM t_role_permission_department
+            WHERE role_id = ? AND permission_code = ? ORDER BY department_id
+            """, Long.class, roleId, permissionCode)));
     }
 
     private UserState userState(long userId) {
@@ -516,12 +721,16 @@ public class AuthorizationService {
         }
     }
 
-    private record CachedSnapshot(long version, AuthzSnapshot snapshot) { }
-    private record UserState(long userId, String username, String displayName, String status,
+    // GrantRow / InstanceAccess 与下面对应的取数方法包内可见，供红线回归测试构造与打桩
+    // （AuthorizationServiceTest 直接驱动 instanceVisibility 的被指派人分支）。
+    private record CachedSnapshot(long version, AuthzSnapshot snapshot, long epoch) { }
+    record RoleBase(long roleId, String code) { }
+    record GrantRow(String permissionCode, String scopeOverride) { }
+    // 与 GrantRow 一样放宽到包内可见：AuthorizationServiceTest 需要构造它们来复现缓存竞态。
+    record UserState(long userId, String username, String displayName, String status,
                              long authzVersion, Long departmentId) { }
-    private record InstanceAccess(Long startedBy, Long startedDepartmentId, Long formDefId) { }
-    private record FormDataAccess(Long createdBy, Long formDefId, Long startedDepartmentId) { }
-    private record FormManagementAccess(Long createdBy, Long departmentId) { }
+    record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
+    private record FormDataAccess(Long createdBy, Long startedDepartmentId) { }
 
     public record RoleGrant(long roleId, String code, DataScope dataScope,
                             Set<Long> customDepartmentIds) { }

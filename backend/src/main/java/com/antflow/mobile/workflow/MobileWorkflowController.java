@@ -1,9 +1,11 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthenticatedOnly;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.audit.AuditService;
+import com.antflow.form.runtime.FormDataService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/mobile")
@@ -27,10 +30,12 @@ public class MobileWorkflowController {
     private final MobileDraftService draftService;
     private final MobileWorkflowService workflowService;
     private final ApprovalPreviewService approvalPreviewService;
+    private final FormDataService formDataService;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
 
     @PostMapping("/drafts")
+    @AuthenticatedOnly
     public Long createDraft(@RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
         return auditService.execute(
@@ -42,6 +47,7 @@ public class MobileWorkflowController {
     }
 
     @PutMapping("/drafts/{id}")
+    @AuthenticatedOnly
     public MobileDraftDto updateDraft(@PathVariable Long id,
                                       @RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
@@ -55,6 +61,7 @@ public class MobileWorkflowController {
     }
 
     @DeleteMapping("/drafts/{id}")
+    @AuthenticatedOnly
     public void deleteDraft(@PathVariable Long id) {
         long userId = principal().userId();
         auditService.execute(() -> draftService.delete(id, userId),
@@ -64,16 +71,19 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/drafts")
+    @AuthenticatedOnly
     public List<MobileDraftDto> drafts() {
         return draftService.list(principal().userId());
     }
 
     @GetMapping("/drafts/{id}")
+    @AuthenticatedOnly
     public MobileDraftDto draft(@PathVariable Long id) {
         return draftService.get(id, principal().userId());
     }
 
     @GetMapping("/forms/{code}")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FORM_RUNTIME_READ + "')")
     public MobileFormDto form(@PathVariable String code) {
         principal();
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
@@ -81,12 +91,14 @@ public class MobileWorkflowController {
     }
 
     @PostMapping("/forms/{code}/approval-preview")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FORM_RUNTIME_READ + "')")
     public ApprovalPreviewDto approvalPreview(@PathVariable String code,
                                                @RequestBody ApprovalPreviewRequest request) {
         return approvalPreviewService.preview(code, request, principal().userId());
     }
 
     @PostMapping("/instances")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_START + "')")
     public MobileStartResult start(@RequestBody StartMobileInstanceRequest request) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
@@ -103,7 +115,30 @@ public class MobileWorkflowController {
                     request.selfSelected() == null ? 0 : request.selfSelected().size())));
     }
 
+    /**
+     * 无流程表单的直接提交：移动端专用入口，复用桌面端同一 service。
+     * 桌面端入口是 /api/forms/data（要求 console:access），移动端只要求 FORM_RUNTIME_READ。
+     */
+    @PostMapping("/submissions")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.FORM_RUNTIME_READ + "')")
+    public Map<String, Object> submitDirect(@RequestBody DirectSubmitRequest request) {
+        authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
+        long userId = principal().userId();
+        FormDataService.SubmitResult result = formDataService.submit(request.formCode(),
+            request.status(), request.data(), userId,
+            request.files() == null ? List.of() : request.files(), request.draftId());
+        // 草稿没有业务单号（businessNo 为 null），Map.of 不接受 null 会抛 NPE → 500。照桌面端用可变 Map。
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("dataId", result.dataId());
+        response.put("businessNo", result.businessNo());
+        return response;
+    }
+
+    public record DirectSubmitRequest(String formCode, String status, Object data,
+                                      List<MobileFileRef> files, Long draftId) { }
+
     @GetMapping("/instances")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_READ + "')")
     public MobilePageDto<MobileInstanceDto> instances(@RequestParam(defaultValue = "1") int page,
                                                       @RequestParam(defaultValue = "20") int size,
                                                       @RequestParam(required = false) String keyword,
@@ -112,6 +147,7 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/initiated")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_READ + "')")
     public MobilePageDto<MobileInitiatedDto> initiated(@RequestParam(defaultValue = "1") int page,
                                                         @RequestParam(defaultValue = "20") int size,
                                                         @RequestParam(required = false) String keyword,
@@ -120,11 +156,13 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/submissions/{id}")
+    @AuthenticatedOnly
     public MobileDirectSubmissionDetailDto submission(@PathVariable long id) {
         return workflowService.getDirectSubmission(id, principal().userId());
     }
 
     @GetMapping("/instances/{id}")
+    @AuthenticatedOnly
     public MobileInstanceDetailDto instance(@PathVariable Long id) {
         PrincipalHolder.Principal principal = principal();
         MobileInstanceDetailDto detail = workflowService.getInstanceDetail(
@@ -135,6 +173,7 @@ public class MobileWorkflowController {
     }
 
     @PostMapping("/instances/{id}/withdraw")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW + "')")
     public void withdraw(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW);
         long userId = principal().userId();
@@ -147,6 +186,7 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/tasks")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public MobilePageDto<MobileTaskDto> tasks(@RequestParam(defaultValue = "pending") String view,
                                               @RequestParam(defaultValue = "1") int page,
                                               @RequestParam(defaultValue = "20") int size,
@@ -157,6 +197,7 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/tasks/{id}")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public MobileTaskDetailDto task(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         PrincipalHolder.Principal principal = principal();
@@ -168,6 +209,7 @@ public class MobileWorkflowController {
     }
 
     @PostMapping("/tasks/{id}/read")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public void markTaskRead(@PathVariable Long id) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
         auditService.execute(() -> workflowService.markTaskRead(id, principal().userId()),
@@ -177,6 +219,7 @@ public class MobileWorkflowController {
     }
 
     @PostMapping("/tasks/{id}/approve")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_APPROVE + "')")
     public void approve(@PathVariable Long id,
                         @RequestBody(required = false) MobileTaskActionRequest request) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_APPROVE);
@@ -191,6 +234,7 @@ public class MobileWorkflowController {
     }
 
     @PostMapping("/tasks/{id}/reject")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_REJECT + "')")
     public void reject(@PathVariable Long id,
                        @RequestBody(required = false) MobileTaskActionRequest request) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_REJECT);
@@ -203,11 +247,13 @@ public class MobileWorkflowController {
     }
 
     @GetMapping("/rework-tasks/{id}")
+    @AuthenticatedOnly
     public ReworkTaskDto reworkTask(@PathVariable Long id) {
         return workflowService.getReworkTask(id, principal().userId());
     }
 
     @PutMapping("/rework-tasks/{id}")
+    @AuthenticatedOnly
     public ReworkTaskDto saveReworkTask(@PathVariable Long id,
                                         @RequestBody ReworkTaskRequest request) {
         long userId = principal().userId();
@@ -220,6 +266,7 @@ public class MobileWorkflowController {
     }
 
     @PostMapping("/rework-tasks/{id}/resubmit")
+    @AuthenticatedOnly
     public ReworkResult resubmitReworkTask(@PathVariable Long id,
                                            @RequestBody ReworkTaskRequest request) {
         long userId = principal().userId();

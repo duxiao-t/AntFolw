@@ -274,4 +274,12 @@ describe('mobile file api', () => {
     expect(blob.type).toBe('image/png');
     expect(await blob.text()).toBe('image-bytes');
   });
+
+  it('never sends credentials to an external attachment URL', async () => {
+    const request = vi.fn();
+    vi.stubGlobal('fetch', request);
+    await expect(fetchMobileFileBlob('https://evil.example/api/mobile/files/1/content'))
+      .rejects.toThrow('无效的附件地址');
+    expect(request).not.toHaveBeenCalled();
+  });
 });

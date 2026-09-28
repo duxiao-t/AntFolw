@@ -156,7 +156,7 @@ class MobileWorkflowServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.doThrow(new HiddenResourceException("form not found"))
             .when(authorizationService)
-            .requireFormAction(10L, PermissionCodes.FORM_RUNTIME_READ);
+            .requireFormUse(10L);
 
         assertThatThrownBy(() -> service.start(
             new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of()), 7L))
@@ -488,8 +488,7 @@ class MobileWorkflowServiceTest {
         assertThat(detail.code()).isEqualTo("leave");
         assertThat(detail.name()).isEqualTo("请假申请");
         assertThat(detail.version()).isEqualTo(3);
-        Mockito.verify(authorizationService).requireFormAction(10L,
-            PermissionCodes.FORM_RUNTIME_READ);
+        Mockito.verify(authorizationService).requireFormUse(10L);
         assertThat(detail.schema().get(0).path("id").asText()).isEqualTo("days");
         assertThat(detail.process().path("children").path("props").path("assignedType").asText())
             .isEqualTo("SELF_SELECT");

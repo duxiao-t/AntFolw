@@ -16,6 +16,7 @@ import {
   List,
   Modal,
   message,
+  Result,
   Select,
   Space,
   Steps,
@@ -24,11 +25,14 @@ import {
   theme,
   TreeSelect,
 } from 'antd';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { createStyles } from 'antd-style';
+import { CAPABILITY, hasCapability } from '../../authz';
 import { formRegistry } from '../../registry/formRegistry';
 import type { SchemaNode } from '../../registry/types';
+import { isBoundOptionSource } from '../../components/form-fields/dynamicOptions';
 import { FormDesignerSurface } from '../designer/form/FormDesigner';
+import { useFormDesignerStore } from '../designer/form/useFormDesignerStore';
 import { ProcessDesignerSurface } from '../designer/process/ProcessDesigner';
 import type { TreeNode } from '../designer/process/types';
 import {
@@ -83,6 +87,11 @@ type FormGrantCandidates = {
   roles: { id: number; code: string; name: string }[];
   departments: GrantDepartment[];
 };
+type FormMaintainers = {
+  version: number;
+  userIds: number[];
+  users: GrantUser[];
+};
 
 const allSteps = [
   { key: 'basic', title: '表单属性' },
@@ -98,9 +107,8 @@ const useWizardStyles = createStyles(({ token }) => ({
     '& .ant-card-body': { padding: 0 },
   },
   propertiesForm: {
+    // 不设宽度上限：窗口宽时内容会缩在中间、两侧留大片空白。跟随窗口铺满。
     width: '100%',
-    maxWidth: 1120,
-    margin: '0 auto',
   },
   propertiesSection: {
     padding: '26px 30px',
@@ -172,6 +180,14 @@ const useWizardStyles = createStyles(({ token }) => ({
     '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
   },
   fullWidth: { gridColumn: '1 / -1' },
+  saveRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
+    '@media (max-width: 680px)': { flexWrap: 'wrap', gap: 6 },
+  },
+  unsavedHint: { color: token.colorWarning, fontSize: 12 },
   actions: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -202,17 +218,17 @@ function getNodeLabel(node: SchemaNode) {
 }
 
 function grantDepartmentTree(departments: GrantDepartment[]) {
-  const children = new Map<number | undefined, GrantDepartment[]>();
+  const children = new Map<number | null, GrantDepartment[]>();
   departments.forEach((department) => {
-    children.set(department.parentId,
-      [...(children.get(department.parentId) ?? []), department]);
+    const parentId = department.parentId ?? null;
+    children.set(parentId, [...(children.get(parentId) ?? []), department]);
   });
-  const build = (parentId?: number): any[] => (children.get(parentId) ?? []).map((department) => ({
+  const build = (parentId: number | null): any[] => (children.get(parentId) ?? []).map((department) => ({
     value: department.id,
     title: department.name,
     children: build(department.id),
   }));
-  return build();
+  return build(null);
 }
 
 function enrichSchemaLabels(nodes: SchemaNode[]): SchemaNode[] {
@@ -227,11 +243,17 @@ function collectOptionErrors(nodes: SchemaNode[]) {
   const optionTypes = new Set(['select', 'multi_select']);
   const errors: string[] = [];
   nodes.forEach((node) => {
-    if (
-      optionTypes.has(node.type) &&
-      (!Array.isArray(node.props?.options) || node.props.options.length === 0)
-    ) {
-      errors.push(getNodeLabel(node));
+    if (optionTypes.has(node.type)) {
+      if (isBoundOptionSource(node.props)) {
+        // 已绑定外部数据源但值列/显示列没选全（多列数据源需手动选择）。
+        // 发布时后端会拒绝，这里提前告诉管理员，避免只看到一个「选项列映射不存在」。
+        const source = node.props?.optionSource as { valueColumn?: string; labelColumn?: string } | undefined;
+        if (!source?.valueColumn?.trim() || !source?.labelColumn?.trim()) {
+          errors.push(getNodeLabel(node));
+        }
+      } else if (!Array.isArray(node.props?.options) || node.props.options.length === 0) {
+        errors.push(getNodeLabel(node));
+      }
     }
     if (node.children) {
       errors.push(...collectOptionErrors(node.children));
@@ -283,9 +305,11 @@ export default function FormManagementWizard() {
   const formId = isNew ? null : Number(id);
   const currentUser = initialState?.currentUser as any;
   const isAdmin = (currentUser?.roles ?? []).includes('admin');
-  const canManageGrants =
-    isAdmin ||
-    (currentUser?.permissions ?? []).includes('form.authorization.manage');
+  const canManageGrants = hasCapability(currentUser, CAPABILITY.formAuthorizationManage);
+  // 新建表单需要 form:definition:manage，但 /approval/forms/:id/wizard 这条路由只要求
+  // canDesigner（表单管理员**或**流程管理员）。于是只有 workflow:definition:manage 的人
+  // 能打开 /designer/form/new，一路填完，最后 POST /api/forms/definitions 才 403——"存不了"。
+  const canCreateForm = isAdmin || hasCapability(currentUser, CAPABILITY.formDefinitionManage);
 
   const { data: definition } = useQuery<FormDefinition>({
     queryKey: ['form-management-definition', formId],
@@ -295,6 +319,16 @@ export default function FormManagementWizard() {
 
   const watchedWorkflowEnabled = Form.useWatch('workflowEnabled', form);
   const watchedAllCompany = Form.useWatch('allCompany', form);
+  const watchedUserIds = Form.useWatch('userIds', form);
+  const watchedRoleIds = Form.useWatch('roleIds', form);
+  const watchedDepartmentIds = Form.useWatch('departmentIds', form);
+  // 回填做一次就够，键是「哪张表单 + 候选角色是否已知」。
+  const syncedGrantKey = useRef<string | null>(null);
+  const syncedDefinitionId = useRef<number | null>(null);
+  const syncedMaintainerFormId = useRef<number | null>(null);
+  // 保存授权用的乐观锁版本。干净状态下跟随服务端；有未保存编辑就冻结——否则窗口焦点触发的
+  // 刷新会把 version 换成新值，而我们发上去的还是旧字段值，等于**静默覆盖**别人的改动。
+  const grantVersionRef = useRef<number | null>(null);
   const workflowEnabled =
     watchedWorkflowEnabled ?? getWorkflowEnabled(definition?.settings);
   const steps = getSteps(!!workflowEnabled);
@@ -321,6 +355,12 @@ export default function FormManagementWizard() {
     enabled: !!formId && canManageGrants,
   });
 
+  const { data: formMaintainers } = useQuery<FormMaintainers>({
+    queryKey: ['form-management-maintainers', formId],
+    queryFn: () => request<FormMaintainers>(`/api/forms/${formId}/maintainers`),
+    enabled: !!formId && canManageGrants,
+  });
+
   const { data: grantCandidates } = useQuery<FormGrantCandidates>({
     queryKey: ['form-management-grant-candidates', formId ?? 'new'],
     queryFn: () =>
@@ -331,7 +371,7 @@ export default function FormManagementWizard() {
       ),
     enabled: canManageGrants,
   });
-  const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'user')?.id;
+  const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'employee')?.id;
   const visibilitySummary = allCompanyRoleId && formGrant?.roleIds.includes(allCompanyRoleId)
     ? '全公司'
     : [
@@ -339,6 +379,18 @@ export default function FormManagementWizard() {
         formGrant?.roleIds.length ? `${formGrant.roleIds.length} 个角色` : '',
         formGrant?.userIds.length ? `${formGrant.userIds.length} 名人员` : '',
       ].filter(Boolean).join('、') || '仅创建人';
+  // 「全公司可见」是个开关，看着像点一下就生效，但这一整段要按「保存使用范围」才落库。
+  // 没有提示的话，切走页面就会被当成"打开了又自己变回去"。所以把未保存状态写出来。
+  const sameIds = (left?: number[], right?: number[]) =>
+    JSON.stringify([...(left ?? [])].sort((a, b) => a - b))
+      === JSON.stringify([...(right ?? [])].sort((a, b) => a - b));
+  const grantDirty = !!formGrant && (
+    !sameIds(watchedUserIds, formGrant.userIds)
+    || !sameIds(watchedRoleIds, formGrant.roleIds.filter((id) => id !== allCompanyRoleId))
+    || !sameIds(watchedDepartmentIds, formGrant.departmentIds)
+    || (!!allCompanyRoleId
+      && watchedAllCompany !== formGrant.roleIds.includes(allCompanyRoleId))
+  );
   const initialGrantUsers: GrantUser[] =
     formGrant?.users ??
     (currentUser?.id
@@ -355,11 +407,28 @@ export default function FormManagementWizard() {
           },
         ]
       : []);
+  const initialMaintainerUsers: GrantUser[] =
+    formMaintainers?.users ?? initialGrantUsers;
 
+  // 表单内容的唯一真相是设计器的 store（用户正在编辑的那份）。definition.schema 是"上次保存的
+  // 状态"——拿它当真相会让「改完内容保存/发布」把编辑悄悄丢掉，而且后端看什么都没变，
+  // 于是不降级为草稿、版本号也不动。
+  const designerSchema = useFormDesignerStore((s) => s.schema);
+  const designerFormId = useFormDesignerStore((s) => s.loadedFormId);
+  const loadDesignerSchema = useFormDesignerStore((s) => s.loadSchema);
+  const storeHoldsThisForm = designerFormId !== null && designerFormId === String(formId ?? 'new');
   const schema = useMemo(
-    () => parseJsonValue<SchemaNode[]>(definition?.schema, []),
-    [definition?.schema],
+    () => (storeHoldsThisForm
+      ? designerSchema
+      : parseJsonValue<SchemaNode[]>(definition?.schema, [])),
+    [definition?.schema, designerSchema, storeHoldsThisForm],
   );
+  // 不打开设计器也要有 store：进到这一页就把服务端那份灌进去，之后的保存都从 store 取。
+  useEffect(() => {
+    if (!definition) return;
+    if (designerFormId === String(definition.id)) return;
+    loadDesignerSchema(parseJsonValue<SchemaNode[]>(definition.schema, []), String(definition.id));
+  }, [definition, designerFormId, loadDesignerSchema]);
   const previewSchema = useMemo(() => enrichSchemaLabels(schema), [schema]);
   const processTree = useMemo(
     () => parseJsonValue<any>(processDefinition?.process, null),
@@ -460,8 +529,35 @@ export default function FormManagementWizard() {
   const publishErrors = publishChecks.filter((item) => item.status === 'error');
   const canPublish = publishErrors.length === 0;
 
+  // ⚠ 这一段只在「换表单」或「这一张表单还没回填过」时跑，绝不能因为数据刷新就重跑：
+  // 使用范围的四个字段（人员/角色/部门/全公司可见）要按「保存使用范围」才落库，中间是用户的
+  // 未保存编辑。而保存维护人员与保存使用范围共用同一个版本计数器（下面 save 流程断言两者
+  // version 必须相等），所以任何一次保存、以及 react-query 默认的 refetchOnWindowFocus 都会
+  // 换出新的 data 对象——用对象当依赖会让回填重跑，把「全公司可见」这类改动冲回服务端旧值，
+  // 看起来就是"打开了又自己变回未启用"。
+  const grantInitKey = `${formId ?? 'new'}:${allCompanyRoleId ?? ''}`;
+
   useEffect(() => {
-    if (definition) {
+    if (formGrant && !grantDirty) grantVersionRef.current = formGrant.version;
+  }, [formGrant, grantDirty]);
+
+  // 组件被复用到另一个 formId（例如 N → 后退 → new）时必须清干净：Form 里还留着上一张表单的
+  // 人员/角色/部门，三个 synced ref 也非空 → grantDirty 恒为真 → 新表单的授权不会回填，
+  // 保存时反而把上一张表单的授权写过去。
+  const previousFormId = useRef<string | number | null>(formId);
+  useEffect(() => {
+    if (previousFormId.current === formId) return;
+    previousFormId.current = formId;
+    syncedGrantKey.current = null;
+    syncedDefinitionId.current = null;
+    syncedMaintainerFormId.current = null;
+    grantVersionRef.current = null;
+    form.resetFields();
+  }, [formId, form]);
+
+  useEffect(() => {
+    if (definition && syncedDefinitionId.current !== definition.id) {
+      syncedDefinitionId.current = definition.id;
       form.setFieldsValue({
         code: definition.code,
         name: definition.name,
@@ -469,20 +565,35 @@ export default function FormManagementWizard() {
         businessNumber: parseJsonValue<Record<string, any>>(definition.settings, {}).businessNumber,
       });
     }
-    if (canManageGrants && formGrant) {
-      form.setFieldsValue({
-        userIds: formGrant.userIds,
-        roleIds: isAdmin ? formGrant.roleIds.filter((id) => id !== allCompanyRoleId) : [],
-        allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
-        departmentIds: formGrant.departmentIds,
-      });
+    if (canManageGrants && formGrant && syncedGrantKey.current !== grantInitKey) {
+      // 用户已经改过就不覆盖：宁可让保存时报版本冲突，也不要悄悄丢掉他填的东西。
+      if (syncedGrantKey.current === null || !grantDirty) {
+        syncedGrantKey.current = grantInitKey;
+        form.setFieldsValue({
+          userIds: formGrant.userIds,
+          // 非管理员也按服务端回填：早先这里给非管理员写死 []，于是 grantDirty 永远为真
+          // （[] 对比服务端的角色清单），页面上恒显「有未保存的修改」，而且一旦点保存会把
+          // 现有角色授权整片抹掉。候选接口与 canManageGrants 同门禁，非管理员同样拿得到
+          // 全公司角色 id，过滤逻辑不需要分角色。
+          roleIds: formGrant.roleIds.filter((id) => id !== allCompanyRoleId),
+          allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
+          departmentIds: formGrant.departmentIds,
+        });
+      }
+    }
+    // 维护人员同理：只回填一次，否则刷新一下就把没保存的人员选择冲回去。
+    if (canManageGrants && formMaintainers && syncedMaintainerFormId.current !== formId) {
+      syncedMaintainerFormId.current = formId;
+      form.setFieldValue('maintainerIds', formMaintainers.userIds);
     } else if (
       canManageGrants &&
       isNew &&
-      form.getFieldValue('userIds') === undefined
+      (form.getFieldValue('userIds') === undefined ||
+        form.getFieldValue('maintainerIds') === undefined)
     ) {
       form.setFieldsValue({
         userIds: currentUser?.id ? [currentUser.id] : [],
+        maintainerIds: currentUser?.id ? [currentUser.id] : [],
         roleIds: [],
         allCompany: false,
         departmentIds: [],
@@ -495,6 +606,9 @@ export default function FormManagementWizard() {
     definition,
     form,
     formGrant,
+    formMaintainers,
+    grantDirty,
+    grantInitKey,
     isAdmin,
     isNew,
   ]);
@@ -518,16 +632,21 @@ export default function FormManagementWizard() {
           id: formId,
           code: values.code,
           name: values.name,
-          schema: parseJsonValue(definition?.schema, []),
+          schema,
           settings,
         },
       });
-      if (!canManageGrants) return saved;
+      if (!isNew || !canManageGrants) return saved;
 
       try {
-        const latestGrant = await request<FormGrant>(
-          `/api/forms/${saved.id}/grants`,
+        const latestGrant = await request<FormGrant>(`/api/forms/${saved.id}/grants`);
+        const latestMaintainers = await request<FormMaintainers>(
+          `/api/forms/${saved.id}/maintainers`,
         );
+        if (!latestGrant || !latestMaintainers
+            || latestGrant.version !== latestMaintainers.version) {
+          throw new Error('权限设置已被修改，请刷新后重试');
+        }
         const userIds = Array.isArray(values.userIds)
           ? values.userIds
           : latestGrant.userIds;
@@ -542,15 +661,29 @@ export default function FormManagementWizard() {
         const departmentIds = Array.isArray(values.departmentIds)
           ? values.departmentIds
           : latestGrant.departmentIds;
-        await request<FormGrant>(`/api/forms/${saved.id}/grants`, {
+        const maintainerIds = Array.isArray(values.maintainerIds)
+          ? values.maintainerIds
+          : latestMaintainers.userIds;
+        const updatedGrant = await request<FormGrant>(
+          `/api/forms/${saved.id}/grants`, {
+            method: 'PUT',
+            data: {
+              userIds,
+              roleIds,
+              departmentIds,
+              version: latestGrant.version,
+            },
+          },
+        );
+        await request<FormMaintainers>(`/api/forms/${saved.id}/maintainers`, {
           method: 'PUT',
-          data: { userIds, roleIds, departmentIds, version: latestGrant.version },
+          data: { userIds: maintainerIds, version: updatedGrant.version },
         });
       } catch (error: any) {
         const grantError =
           error instanceof Error
             ? error
-            : new Error(error?.message ?? '表单管理员保存失败');
+            : new Error(error?.message ?? '表单权限设置保存失败');
         (grantError as any).formId = saved.id;
         throw grantError;
       }
@@ -563,6 +696,8 @@ export default function FormManagementWizard() {
           : '表单属性已保存',
       );
       qc.invalidateQueries({ queryKey: ['form-management-definition'] });
+      qc.invalidateQueries({ queryKey: ['form-management-grant'] });
+      qc.invalidateQueries({ queryKey: ['form-management-maintainers'] });
       goStep('designer', res.id);
     },
     onError: (error: any) => {
@@ -573,10 +708,65 @@ export default function FormManagementWizard() {
         qc.invalidateQueries({
           queryKey: ['form-management-grant', error.formId],
         });
+        qc.invalidateQueries({
+          queryKey: ['form-management-maintainers', error.formId],
+        });
         goStep('basic', error.formId);
       }
       message.error(error?.message ?? '保存失败');
     },
+  });
+
+  const saveUsageScope = useMutation({
+    mutationFn: async () => {
+      if (!formId || !formGrant) throw new Error('请先保存表单属性');
+      const values = await form.validateFields(['userIds', 'roleIds', 'departmentIds', 'allCompany']);
+      let roleIds = Array.isArray(values.roleIds) ? values.roleIds : formGrant.roleIds;
+      if (isAdmin && allCompanyRoleId) {
+        roleIds = values.allCompany
+          ? [...new Set([...roleIds, allCompanyRoleId])]
+          : roleIds.filter((roleId: number) => roleId !== allCompanyRoleId);
+      }
+      return request<FormGrant>(`/api/forms/${formId}/grants`, {
+        method: 'PUT',
+        data: {
+          // 用快照版本：有未保存编辑时它就是"我读到的那一版"，服务端凭它判冲突，
+          // 而不是拿刚被焦点刷新过的新版本去覆盖别人的改动。
+          version: grantVersionRef.current ?? formGrant.version,
+          userIds: Array.isArray(values.userIds) ? values.userIds : formGrant.userIds,
+          roleIds,
+          departmentIds: Array.isArray(values.departmentIds)
+            ? values.departmentIds : formGrant.departmentIds,
+        },
+      });
+    },
+    onSuccess: async () => {
+      message.success('使用范围已保存，无需重新发布表单');
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['form-management-grant', formId] }),
+        qc.invalidateQueries({ queryKey: ['form-management-maintainers', formId] }),
+      ]);
+    },
+    onError: (error: any) => message.error(error?.message ?? '使用范围保存失败'),
+  });
+
+  const saveMaintainers = useMutation({
+    mutationFn: async () => {
+      if (!formId || !formMaintainers) throw new Error('请先保存表单属性');
+      const values = await form.validateFields(['maintainerIds']);
+      return request<FormMaintainers>(`/api/forms/${formId}/maintainers`, {
+        method: 'PUT',
+        data: { version: formMaintainers.version, userIds: values.maintainerIds },
+      });
+    },
+    onSuccess: async () => {
+      message.success('维护人员已保存');
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['form-management-grant', formId] }),
+        qc.invalidateQueries({ queryKey: ['form-management-maintainers', formId] }),
+      ]);
+    },
+    onError: (error: any) => message.error(error?.message ?? '维护人员保存失败'),
   });
 
   const saveDraft = useMutation({
@@ -633,6 +823,23 @@ export default function FormManagementWizard() {
   const publishAll = useMutation({
     mutationFn: async () => {
       if (!formId) throw new Error('请先保存表单属性');
+      // 先落库再发布：不然画布上没保存的改动会连同发布一起被丢掉，而且"已发布的表单再点发布"
+      // 在后端是空操作——用户会以为发布成功了，其实什么都没发生。
+      const saved = await request<FormDefinition>('/api/forms/definitions', {
+        method: 'POST',
+        data: {
+          id: formId,
+          code: definition?.code,
+          name: definition?.name,
+          description: definition?.description ?? '',
+          schema,
+          settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
+        },
+      });
+      // 内容没变时后端会原样返回 PUBLISHED。但**流程**可能还有未发布的草稿改动，这时不能
+      // 直接返回——否则"只改了流程"的发布会永远停在草稿，界面却提示发布成功。
+      if (saved?.status === 'PUBLISHED'
+          && !(workflowEnabled && processDefinition?.status !== 'PUBLISHED')) return;
       if (workflowEnabled) {
         if (!processDefinition?.id) throw new Error('请先保存流程设计');
         const process = parseJsonValue<any>(processDefinition.process, null);
@@ -738,8 +945,45 @@ export default function FormManagementWizard() {
             <div className={styles.sectionHeader}>
               <span className={styles.sectionMarker} aria-hidden="true" />
               <div>
-                <h2 className={styles.sectionTitle}>表单可见范围</h2>
-                <span className={styles.sectionDescription}>全公司、部门、角色和指定人员取并集；部门授权包含所有下级部门。</span>
+                <h2 className={styles.sectionTitle}>指定维护人员</h2>
+                <span className={styles.sectionDescription}>只有名单内且持有对应表单或流程能力的人员才能设计、发布或删除模板；至少保留一人。</span>
+              </div>
+            </div>
+            <Form.Item
+              label="维护人员"
+              name="maintainerIds"
+              rules={[{
+                validator: (_rule, value?: number[]) =>
+                  value?.length ? Promise.resolve() : Promise.reject(new Error('至少选择一名维护人员')),
+              }]}
+            >
+              <FormGrantUserPicker
+                title="选择维护人员"
+                users={initialMaintainerUsers}
+                departments={grantCandidates?.departments ?? []}
+                endpoint={
+                  formId
+                    ? `/api/forms/${formId}/grants/user-candidates`
+                    : '/api/forms/grant-user-candidates'
+                }
+              />
+            </Form.Item>
+            <Button
+              disabled={!formId}
+              loading={saveMaintainers.isPending}
+              onClick={() => saveMaintainers.mutate()}
+            >
+              保存维护人员
+            </Button>
+          </section>
+        )}
+        {canManageGrants && (
+          <section className={`${styles.propertiesSection} ${styles.dividedSection}`}>
+            <div className={styles.sectionHeader}>
+              <span className={styles.sectionMarker} aria-hidden="true" />
+              <div>
+                <h2 className={styles.sectionTitle}>表单使用范围</h2>
+                <span className={styles.sectionDescription}>控制手机端目录、打开和发起；不授予模板维护或业务数据查看权限。各范围取并集，部门包含所有下级部门。</span>
               </div>
             </div>
             {isAdmin && (
@@ -763,6 +1007,7 @@ export default function FormManagementWizard() {
                 name="userIds"
               >
                 <FormGrantUserPicker
+                  title="选择可使用表单的人员"
                   users={initialGrantUsers}
                   departments={grantCandidates?.departments ?? []}
                   endpoint={
@@ -784,10 +1029,22 @@ export default function FormManagementWizard() {
               )}
               <Form.Item label="部门及下级部门" name="departmentIds">
                 <TreeSelect treeCheckable treeCheckStrictly={false} showCheckedStrategy={TreeSelect.SHOW_PARENT}
-                  maxTagCount="responsive" allowClear treeDefaultExpandAll
+                  maxTagCount="responsive" allowClear
                   treeData={grantDepartmentTree(grantCandidates?.departments ?? [])}
                   placeholder="选择部门后自动包含其下级部门" />
               </Form.Item>
+            </div>
+            <div className={styles.saveRow}>
+              <Button
+                disabled={!formId}
+                loading={saveUsageScope.isPending}
+                onClick={() => saveUsageScope.mutate()}
+              >
+                保存使用范围
+              </Button>
+              {formId && grantDirty && (
+                <span className={styles.unsavedHint}>有未保存的修改</span>
+              )}
             </div>
           </section>
         )}
@@ -808,7 +1065,7 @@ export default function FormManagementWizard() {
           loading={saveBasic.isPending}
           onClick={() => saveBasic.mutate()}
         >
-          保存并进入表单制作
+          保存表单属性
         </Button>
         <Button onClick={() => history.push('/approval/forms')}>
           返回列表
@@ -841,6 +1098,7 @@ export default function FormManagementWizard() {
       >
         <Card title="手机端预览">
           <MobileFormPreview
+            formId={formId ?? undefined}
             title={definition?.name ?? '未命名表单'}
             description={definition?.description}
             schema={previewSchema}
@@ -878,7 +1136,10 @@ export default function FormManagementWizard() {
               <Descriptions.Item label="提交后行为">
                 {workflowEnabled ? '提交后进入审批' : '提交成功后直接完成'}
               </Descriptions.Item>
-              <Descriptions.Item label="可见范围">{visibilitySummary}</Descriptions.Item>
+              <Descriptions.Item label="使用范围">{visibilitySummary}</Descriptions.Item>
+              <Descriptions.Item label="维护人员">
+                {formMaintainers?.userIds.length ?? 1} 人
+              </Descriptions.Item>
               {workflowEnabled && (
                 <Descriptions.Item label="流程状态">
                   {processDefinition?.status ?? '未保存'}
@@ -923,6 +1184,18 @@ export default function FormManagementWizard() {
       </div>
     );
   };
+
+  if (isNew && !canCreateForm) {
+    return (
+      <PageContainer title={false}>
+        <Result
+          status="403"
+          title="没有新建表单的权限"
+          subTitle="当前账号可以设计已有表单的流程，但不能新建表单。"
+        />
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer title={false}>

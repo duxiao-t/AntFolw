@@ -28,10 +28,11 @@ type Props = {
   users?: GrantUser[];
   departments: GrantDepartment[];
   endpoint: string;
+  title?: string;
 };
 
 export default function FormGrantUserPicker({
-  value = [], onChange, users = [], departments, endpoint,
+  value = [], onChange, users = [], departments, endpoint, title = '选择人员',
 }: Props) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -83,8 +84,13 @@ export default function FormGrantUserPicker({
     <div>
       <Space size={[6, 6]} wrap>
         {selectedUsers.slice(0, 5).map((user) => (
-          <Tag key={user.id} closable onClose={() => onChange?.(value.filter((id) => id !== user.id))}>
-            {user.displayName}{user.employeeNo ? ` · ${user.employeeNo}` : ''}
+          <Tag key={user.id} closable style={{ maxWidth: 240 }}
+            onClose={() => onChange?.(value.filter((id) => id !== user.id))}>
+            <span style={{ display: 'inline-block', maxWidth: 190, overflow: 'hidden',
+              textOverflow: 'ellipsis', verticalAlign: 'bottom', whiteSpace: 'nowrap' }}
+              title={`${user.displayName}${user.employeeNo ? ` · ${user.employeeNo}` : ''}`}>
+              {user.displayName}{user.employeeNo ? ` · ${user.employeeNo}` : ''}
+            </span>
           </Tag>
         ))}
         {selectedUsers.length > 5 && <Tag>另有 {selectedUsers.length - 5} 人</Tag>}
@@ -94,7 +100,7 @@ export default function FormGrantUserPicker({
       </Space>
 
       <Modal
-        title="选择可见人员"
+        title={title}
         open={open}
         width={920}
         onCancel={() => setOpen(false)}
@@ -115,7 +121,6 @@ export default function FormGrantUserPicker({
               <Tree
                 treeData={treeData}
                 selectedKeys={departmentId ? [departmentId] : []}
-                defaultExpandAll
                 onSelect={(keys) => {
                   setDepartmentId(keys.length ? Number(keys[0]) : undefined);
                   setPage(1);
@@ -157,9 +162,12 @@ export default function FormGrantUserPicker({
               }}
               columns={[
                 { title: '姓名', dataIndex: 'displayName' },
-                { title: '工号', dataIndex: 'employeeNo', width: 130, render: (text) => text || '-' },
-                { title: '账号', dataIndex: 'username', width: 150 },
-                { title: '部门', dataIndex: 'departmentName', width: 160, render: (text) => text || '未设置' },
+                { title: '工号', dataIndex: 'employeeNo', width: 130, ellipsis: true,
+                  render: (text) => <span title={text}>{text || '-'}</span> },
+                { title: '账号', dataIndex: 'username', width: 150, ellipsis: true,
+                  render: (text) => <span title={text}>{text}</span> },
+                { title: '部门', dataIndex: 'departmentName', width: 160, ellipsis: true,
+                  render: (text) => <span title={text}>{text || '未设置'}</span> },
               ]}
             />
           </div>

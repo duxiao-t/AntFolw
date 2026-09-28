@@ -11,6 +11,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 @RequestMapping("/api/users")
@@ -22,12 +25,23 @@ public class UserController {
     private final AuditService auditService;
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_READ + "')")
     public List<User> list(@RequestParam(required = false) String keyword,
-                           @RequestParam(required = false) Long deptId) {
-        return userService.listAuthorized(keyword, deptId);
+                           @RequestParam(required = false) Long deptId,
+                           @RequestParam(required = false) Boolean includeDescendants,
+                           @RequestParam(required = false) Boolean leaderOnly,
+                           @RequestParam(required = false) String position,
+                           @RequestParam(required = false) List<Long> userIds,
+                           @RequestParam(required = false) String scopeType) {
+        // 指名范围但名单为空 = 零候选。空数组会被序列化丢掉，所以靠 scopeType 区分
+        // "没配范围"和"配了指定人员但一个人都没选"——判据必须在服务端，不能交给客户端。
+        if ("user".equals(scopeType) && (userIds == null || userIds.isEmpty())) return List.of();
+        return userService.listAuthorized(UserService.UserQuery.of(
+            keyword, deptId, includeDescendants, leaderOnly, position, userIds));
     }
 
     @GetMapping("/page")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_READ + "')")
     public Page<User> page(@RequestParam(defaultValue = "1") long page,
                            @RequestParam(defaultValue = "20") long size,
                            @RequestParam(required = false) String keyword,
@@ -37,6 +51,7 @@ public class UserController {
     }
 
     @GetMapping("/manager-candidates")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_READ + "')")
     public List<ManagerCandidate> managerCandidates(@RequestParam Long deptId,
                                                      @RequestParam(required = false) Long excludeUserId,
                                                      @RequestParam(required = false) String keyword) {
@@ -47,8 +62,9 @@ public class UserController {
     }
 
     @PostMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_MANAGE + "')")
     public Map<String, Object> create(@RequestBody Map<String, Object> body) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         String password = body.get("password") == null ? null : String.valueOf(body.get("password"));
         if (password == null) {
             throw new BizException("PASSWORD_REQUIRED", "请设置初始密码");
@@ -66,8 +82,9 @@ public class UserController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_MANAGE + "')")
     public User update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         return auditService.execute(() -> userService.update(id, body), user ->
             auditService.success("org.user.update", "USER", id,
                 AuditService.RiskLevel.HIGH,
@@ -79,14 +96,16 @@ public class UserController {
     }
 
     @PutMapping("/{id}/roles")
+    @PreAuthorize("@authz.console('" + PermissionCodes.SECURITY_USER_ROLE_MANAGE + "')")
     public void setRoles(@PathVariable Long id, @RequestBody List<Long> roleIds) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.SECURITY_USER_ROLE_MANAGE);
         userService.setRoles(id, roleIds);
     }
 
     @PutMapping("/{id}/password")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_CREDENTIALS_MANAGE + "')")
     public void resetPassword(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_CREDENTIALS_MANAGE);
         String password = body.get("newPassword") == null
             ? null : String.valueOf(body.get("newPassword"));
         auditService.execute(() -> userService.resetPassword(id, password),
@@ -96,9 +115,10 @@ public class UserController {
     }
 
     @PutMapping("/{id}/login-access")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_CREDENTIALS_MANAGE + "')")
     public User setLoginAccess(@PathVariable Long id,
                                @Valid @RequestBody LoginAccessRequest request) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_CREDENTIALS_MANAGE);
         return auditService.execute(
             () -> userService.setWecomLoginAccess(id, request.enabled()),
             user -> auditService.success("org.user.login_access.update", "USER", id,
@@ -108,8 +128,9 @@ public class UserController {
     }
 
     @PostMapping("/import")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_MANAGE + "')")
     public ImportResult importUsers(@RequestBody ImportRequest request) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         List<ImportFailure> failures = new java.util.ArrayList<>();
         int successCount = 0;
         List<Map<String, Object>> rows = request == null || request.users() == null
@@ -119,7 +140,7 @@ public class UserController {
             try {
                 User user = toUser(rows.get(index));
                 Long id = auditService.execute(
-                    () -> userService.create(user, List.of(), UserService.DEFAULT_IMPORTED_PASSWORD),
+                    () -> userService.create(user, List.of(), UUID.randomUUID().toString()),
                     createdId -> auditService.success("org.user.import", "USER", createdId,
                         AuditService.RiskLevel.HIGH,
                         Map.of("changedFields", List.of("profile", "password")),
@@ -129,13 +150,13 @@ public class UserController {
                 failures.add(new ImportFailure(rowNumber, exception.getMessage()));
             }
         }
-        return new ImportResult(successCount, failures.size(),
-            UserService.DEFAULT_IMPORTED_PASSWORD, failures);
+        return new ImportResult(successCount, failures.size(), successCount > 0, failures);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_MANAGE + "')")
     public void delete(@PathVariable Long id) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         auditService.execute(() -> userService.delete(id),
             () -> auditService.success("org.user.delete", "USER", id,
                 AuditService.RiskLevel.CRITICAL,
@@ -172,7 +193,7 @@ public class UserController {
 
     public record ImportRequest(List<Map<String, Object>> users) { }
     public record ImportFailure(int row, String message) { }
-    public record ImportResult(int successCount, int failedCount, String defaultPassword,
+    public record ImportResult(int successCount, int failedCount, boolean passwordResetRequired,
                                List<ImportFailure> failures) { }
     public record ManagerCandidate(Long id, String displayName, String employeeNo, Long deptId) { }
     public record LoginAccessRequest(@NotNull Boolean enabled) { }

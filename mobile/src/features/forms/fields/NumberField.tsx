@@ -1,8 +1,10 @@
 import { Input } from 'antd-mobile';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired, readonlySummary, stringValue } from './fieldShared';
+import { useLinkedValue } from './dynamicOptions';
 
 export function NumberField(props: MobileFieldProps) {
+  useLinkedValue(props);
   const label = fieldLabel(props.node);
   return (
     <FieldShell

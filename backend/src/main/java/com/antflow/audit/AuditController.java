@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 @RequestMapping("/api/audit")
@@ -23,6 +25,7 @@ public class AuditController {
     private final AuditService auditService;
 
     @GetMapping("/events")
+    @PreAuthorize("@authz.console('" + PermissionCodes.AUDIT_EVENT_READ + "')")
     public AuditQueryService.AuditPage events(
             @RequestParam(required = false) OffsetDateTime from,
             @RequestParam(required = false) OffsetDateTime to,
@@ -40,11 +43,13 @@ public class AuditController {
     }
 
     @GetMapping("/events/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.AUDIT_EVENT_READ + "')")
     public AuditQueryService.AuditEventDto detail(@PathVariable long id) {
         return queryService.detail(id);
     }
 
     @GetMapping("/export")
+    @PreAuthorize("@authz.console('" + PermissionCodes.AUDIT_EVENT_EXPORT + "')")
     public ResponseEntity<byte[]> export(
             @RequestParam(required = false) OffsetDateTime from,
             @RequestParam(required = false) OffsetDateTime to,
@@ -68,11 +73,13 @@ public class AuditController {
     }
 
     @GetMapping("/archives")
+    @PreAuthorize("@authz.console('" + PermissionCodes.AUDIT_EVENT_READ + "')")
     public List<AuditArchiveService.ArchiveDto> archives() {
         return archiveService.list();
     }
 
     @GetMapping("/archives/{id}/download")
+    @PreAuthorize("@authz.console('" + PermissionCodes.AUDIT_ARCHIVE_DOWNLOAD + "')")
     public ResponseEntity<byte[]> download(@PathVariable UUID id) {
         AuditArchiveService.ArchiveDownload archive = archiveService.download(id);
         auditService.success("security.audit.archive.download", "AUDIT_ARCHIVE", id,

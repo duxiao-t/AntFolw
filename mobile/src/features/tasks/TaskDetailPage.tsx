@@ -120,6 +120,7 @@ export function TaskDetailPage() {
             mode="readonly"
             showDescriptions={false}
             modeOverride={fieldModes}
+            optionContext={{ instanceId: task.instanceId }}
             onValueChange={(fieldId, value) =>
               setEditableValues((previous) => ({ ...previous, [fieldId]: value }))
             }

@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.antflow.authz.PermissionCodes;
 
 @RestController
 @RequestMapping("/api/roles")
@@ -15,8 +17,10 @@ public class RoleController {
     private final AuthorizationService authorizationService;
 
     @GetMapping
+    @PreAuthorize("@authz.console('" + PermissionCodes.SECURITY_ROLE_READ + "')")
     public List<RoleAdminService.RoleDto> all() {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.SECURITY_ROLE_READ);
         return roleAdminService.roles();
     }
 }

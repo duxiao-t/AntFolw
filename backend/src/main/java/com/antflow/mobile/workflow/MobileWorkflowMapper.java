@@ -97,12 +97,12 @@ public interface MobileWorkflowMapper {
         </if>
         <if test="keyword != null and keyword != ''">
           AND (
-            form.name ILIKE CONCAT('%', #{keyword}, '%')
-            OR applicant.display_name ILIKE CONCAT('%', #{keyword}, '%')
-            OR applicant.employee_no ILIKE CONCAT('%', #{keyword}, '%')
-            OR dept.name ILIKE CONCAT('%', #{keyword}, '%')
-            OR data.business_no ILIKE CONCAT('%', #{keyword}, '%')
-            OR t.node_id ILIKE CONCAT('%', #{keyword}, '%')
+            form.name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR applicant.display_name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR applicant.employee_no ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR dept.name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR data.business_no ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR t.node_id ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
           )
         </if>
         ORDER BY t.created_at DESC, t.id DESC
@@ -136,9 +136,9 @@ public interface MobileWorkflowMapper {
         </if>
         <if test="keyword != null and keyword != ''">
           AND (
-            form.name ILIKE CONCAT('%', #{keyword}, '%')
-            OR data.business_no ILIKE CONCAT('%', #{keyword}, '%')
-            OR pi.current_node_id ILIKE CONCAT('%', #{keyword}, '%')
+            form.name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR data.business_no ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR pi.current_node_id ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
           )
         </if>
         ORDER BY pi.started_at DESC, pi.id DESC
@@ -192,9 +192,9 @@ public interface MobileWorkflowMapper {
         </if>
         <if test="keyword != null and keyword != ''">
           AND (
-            form_name ILIKE CONCAT('%', #{keyword}, '%')
-            OR business_no ILIKE CONCAT('%', #{keyword}, '%')
-            OR current_node_id ILIKE CONCAT('%', #{keyword}, '%')
+            form_name ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR business_no ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
+            OR current_node_id ILIKE CONCAT('%', CAST(#{keyword} AS text), '%')
           )
         </if>
         ORDER BY started_at DESC, id DESC

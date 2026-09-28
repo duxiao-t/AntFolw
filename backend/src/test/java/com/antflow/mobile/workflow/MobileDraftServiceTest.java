@@ -3,7 +3,6 @@ package com.antflow.mobile.workflow;
 import com.antflow.engine.BizException;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
-import com.antflow.authz.PermissionCodes;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
@@ -56,6 +55,10 @@ class MobileDraftServiceTest {
             draft.setId(100L);
             return 1;
         }).when(formDataMapper).insert(any(FormData.class));
+        // 列表改走批量判定：usableFormIds 返回空 = 不过滤（管理员口径），默认放行。
+        Mockito.when(authorizationService.hasPermission(Mockito.anyLong(), Mockito.anyString())).thenReturn(true);
+        Mockito.when(authorizationService.usableFormIds(Mockito.anyLong()))
+            .thenReturn(java.util.Optional.empty());
     }
 
     @Test
@@ -74,15 +77,14 @@ class MobileDraftServiceTest {
         assertThat(saved.getStatus()).isEqualTo("DRAFT");
         assertThat(saved.getCreatedBy()).isEqualTo(7L);
         assertThat(objectMapper.readTree(saved.getData()).path("days").asInt()).isEqualTo(2);
-        Mockito.verify(authorizationService).requireFormAction(10L,
-            PermissionCodes.FORM_RUNTIME_READ);
+        Mockito.verify(authorizationService).requireFormUse(10L);
     }
 
     @Test
     void createRejectsFormWithoutUsageGrant() {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
         Mockito.doThrow(new HiddenResourceException("form not found"))
-            .when(authorizationService).requireFormAction(10L, PermissionCodes.FORM_RUNTIME_READ);
+            .when(authorizationService).requireFormUse(10L);
 
         assertThatThrownBy(() -> service.create("leave",
             objectMapper.createObjectNode(), 7L))
@@ -101,8 +103,7 @@ class MobileDraftServiceTest {
         assertThat(updated.getId()).isEqualTo(101L);
         assertThat(objectMapper.readTree(updated.getData()).path("days").asInt()).isEqualTo(5);
         Mockito.verify(formDataMapper).updateById(updated);
-        Mockito.verify(authorizationService).requireFormAction(10L,
-            PermissionCodes.FORM_RUNTIME_READ);
+        Mockito.verify(authorizationService).requireFormUse(10L);
     }
 
     @Test
@@ -116,7 +117,8 @@ class MobileDraftServiceTest {
     @Test
     void updateRejectsUnpublishedTemplateButGetRemainsReadable() {
         Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "DEPRECATED"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "DEPRECATED")));
 
         assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), 7L))
             .isInstanceOf(BizException.class)
@@ -128,21 +130,33 @@ class MobileDraftServiceTest {
     }
 
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
     void listReturnsOnlyOwnedDraftsWithReadOnlyFlag() {
-        Mockito.when(formDataMapper.selectList(any(QueryWrapper.class)))
+        Mockito.when(formDataMapper.selectMyDrafts(7L))
             .thenReturn(List.of(draft(101L, 7L, "DRAFT"), draft(102L, 7L, "DRAFT")));
-        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
 
         List<MobileDraftDto> drafts = service.list(7L);
 
         assertThat(drafts).hasSize(2);
         assertThat(drafts).allSatisfy(draft -> assertThat(draft.readOnly()).isFalse());
         assertThat(drafts.get(0).schema().get(1).path("id").asText()).isEqualTo("days");
-        ArgumentCaptor<QueryWrapper<FormData>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
-        Mockito.verify(formDataMapper).selectList(captor.capture());
-        assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("CREATED_BY");
-        assertThat(captor.getValue().getSqlSegment().toUpperCase()).contains("STATUS");
+        Mockito.verify(formDataMapper).selectMyDrafts(7L);
+    }
+
+    @Test
+    void revokedUsageGrantKeepsDraftDeletableButMarksItReadOnly() {
+        Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+        Mockito.when(authorizationService.usableFormIds(7L))
+            .thenReturn(java.util.Optional.of(java.util.Set.of()));
+
+        MobileDraftDto dto = service.get(101L, 7L);
+
+        assertThat(dto.readOnly()).isTrue();
+        service.delete(101L, 7L);
+        Mockito.verify(formDataMapper).deleteById(101L);
     }
 
     @Test

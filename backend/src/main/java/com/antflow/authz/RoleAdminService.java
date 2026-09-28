@@ -28,37 +28,82 @@ public class RoleAdminService {
     public List<PermissionDto> permissions() {
         authorizationService.requirePermission(PermissionCodes.SECURITY_PERMISSION_READ);
         return jdbcTemplate.query("""
-            SELECT code, name, category, risk_level, sort_order, kind, admin_only
-            FROM t_permission ORDER BY sort_order, code
-            """, (rs, row) -> new PermissionDto(rs.getString("code"), rs.getString("name"),
-                rs.getString("category"), rs.getString("risk_level"), rs.getInt("sort_order"),
-                rs.getString("kind"), rs.getBoolean("admin_only"),
-                PagePermissionPolicy.dependencies(rs.getString("code"))));
+            SELECT code, name, domain, risk_level, sort_order, admin_only, scopeable, default_scope
+            FROM t_permission
+            WHERE deprecated_at IS NULL
+            ORDER BY sort_order, code
+            """, (rs, row) -> {
+            String domain = rs.getString("domain");
+            return new PermissionDto(rs.getString("code"), rs.getString("name"), domain,
+                PermissionCatalog.domainLabel(domain), rs.getString("risk_level"),
+                rs.getInt("sort_order"), rs.getBoolean("admin_only"), rs.getBoolean("scopeable"),
+                rs.getString("default_scope"));
+        });
     }
 
     public List<RoleDto> roles() {
         authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_READ);
-        return jdbcTemplate.query("""
-            SELECT role.id, role.code, role.name, role.description, role.data_scope,
-                   role.enabled, role.builtin, role.version,
-                   COALESCE((SELECT array_agg(permission.permission_code
-                       ORDER BY permission.permission_code)
-                     FROM t_role_permission permission WHERE permission.role_id = role.id),
-                     '{}') AS permission_codes,
-                   COALESCE((SELECT array_agg(department.department_id
-                       ORDER BY department.department_id)
-                     FROM t_role_department department WHERE department.role_id = role.id),
-                     '{}') AS department_ids,
-                   (SELECT COUNT(*) FROM t_user_role user_role
-                     WHERE user_role.role_id = role.id) AS user_count
-            FROM t_role role
-            ORDER BY role.builtin DESC, role.id
-            """, (rs, row) -> new RoleDto(rs.getLong("id"), rs.getString("code"),
-                rs.getString("name"), rs.getString("description"),
-                rs.getString("data_scope"), rs.getBoolean("enabled"),
-                rs.getBoolean("builtin"), rs.getInt("version"),
-                stringArray(rs.getArray("permission_codes")),
-                longArray(rs.getArray("department_ids")), rs.getLong("user_count")));
+        List<RoleBase> bases = jdbcTemplate.query(BASE_SQL + " ORDER BY role.builtin DESC, role.id",
+            (rs, row) -> roleBase(rs));
+        Map<Long, List<PermissionGrantDto>> grants = grantsFor(
+            bases.stream().map(RoleBase::id).toList());
+        return bases.stream().map(base -> toDto(base,
+            grants.getOrDefault(base.id(), List.of()))).toList();
+    }
+
+    private static final String BASE_SQL = """
+        SELECT role.id, role.code, role.name, role.description,
+               role.enabled, role.builtin, role.version,
+               (SELECT COUNT(*) FROM t_user_role user_role
+                 WHERE user_role.role_id = role.id) AS user_count
+        FROM t_role role
+        """;
+
+    private static RoleBase roleBase(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new RoleBase(rs.getLong("id"), rs.getString("code"), rs.getString("name"),
+            rs.getString("description"), rs.getBoolean("enabled"), rs.getBoolean("builtin"),
+            rs.getInt("version"), rs.getLong("user_count"));
+    }
+
+    private static RoleDto toDto(RoleBase base, List<PermissionGrantDto> grants) {
+        return new RoleDto(base.id(), base.code(), base.name(), base.description(),
+            base.enabled(), base.builtin(), base.version(), grants, base.userCount());
+    }
+
+    /** 角色 × 能力授权，含各自的数据范围覆盖值与自定义部门明细。 */
+    private Map<Long, List<PermissionGrantDto>> grantsFor(List<Long> roleIds) {
+        if (roleIds.isEmpty()) {
+            return Map.of();
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(roleIds.size(), "?"));
+        Map<Long, Map<String, String>> scopes = new LinkedHashMap<>();
+        jdbcTemplate.query("""
+            SELECT granted.role_id, granted.permission_code, granted.scope_override
+            FROM t_role_permission granted
+            JOIN t_permission permission ON permission.code = granted.permission_code
+            WHERE permission.deprecated_at IS NULL AND granted.role_id IN (%s)
+            ORDER BY permission.sort_order, granted.permission_code
+            """.formatted(placeholders), rs -> {
+            scopes.computeIfAbsent(rs.getLong("role_id"), key -> new LinkedHashMap<>())
+                .put(rs.getString("permission_code"), rs.getString("scope_override"));
+        }, roleIds.toArray());
+        Map<String, List<Long>> departments = new LinkedHashMap<>();
+        jdbcTemplate.query("""
+            SELECT role_id, permission_code, department_id
+            FROM t_role_permission_department
+            WHERE role_id IN (%s)
+            ORDER BY role_id, permission_code, department_id
+            """.formatted(placeholders), rs -> {
+            String key = rs.getLong("role_id") + "|" + rs.getString("permission_code");
+            departments.computeIfAbsent(key, ignored -> new java.util.ArrayList<>())
+                .add(rs.getLong("department_id"));
+        }, roleIds.toArray());
+        Map<Long, List<PermissionGrantDto>> result = new LinkedHashMap<>();
+        scopes.forEach((roleId, byCode) -> result.put(roleId, byCode.entrySet().stream()
+            .map(entry -> new PermissionGrantDto(entry.getKey(), entry.getValue(),
+                List.copyOf(departments.getOrDefault(roleId + "|" + entry.getKey(), List.of()))))
+            .toList()));
+        return result;
     }
 
     public RoleDto role(long id) {
@@ -72,29 +117,27 @@ public class RoleAdminService {
 
     @Transactional
     public RoleDto create(RoleWriteRequest request) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_WRITE);
+        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_MANAGE);
         validateRequest(request, false);
-        validateGrantCeiling(request);
         jdbcTemplate.update("""
-            INSERT INTO t_role(code, name, description, data_scope, enabled, builtin, version)
-            VALUES (?, ?, ?, ?, ?, false, 0)
+            INSERT INTO t_role(code, name, description, enabled, builtin, version)
+            VALUES (?, ?, ?, ?, false, 0)
             """, request.code().trim(), request.name().trim(), normalized(request.description()),
-            request.dataScope().name(), request.enabled());
+            request.enabled());
         Long id = jdbcTemplate.queryForObject("SELECT id FROM t_role WHERE code = ?",
             Long.class, request.code().trim());
-        replaceRoleConfiguration(id, request.permissionCodes(), request.customDepartmentIds());
+        replaceRoleConfiguration(id, request.permissions());
         RoleDto created = requiredRole(id);
         auditService.success("security.role.create", "ROLE", id,
             AuditService.RiskLevel.HIGH,
-            java.util.Map.of("changedFields", List.of("code", "name", "dataScope",
-                "enabled", "permissionCodes", "customDepartmentIds")),
-            java.util.Map.of("permissionCount", request.permissionCodes().size()));
+            java.util.Map.of("changedFields", List.of("code", "name", "enabled", "permissions")),
+            java.util.Map.of("permissionCount", request.permissions().size()));
         return created;
     }
 
     @Transactional
     public RoleDto update(long id, RoleWriteRequest request) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_WRITE);
+        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_MANAGE);
         RoleDto existing = roleOrNull(id);
         if (existing == null) {
             throw new BizException("ROLE_NOT_FOUND", "role not found");
@@ -106,45 +149,49 @@ public class RoleAdminService {
         if (existing.builtin()) {
             if (!existing.code().equals(request.code())
                 || existing.enabled() != request.enabled()
-                || !existing.dataScope().equals(request.dataScope().name())
-                || !new LinkedHashSet<>(existing.permissionCodes())
-                    .equals(new LinkedHashSet<>(request.permissionCodes()))) {
+                || !existing.permissions().stream()
+                    .map(grant -> grantSignature(grant.code(), grant.scopeOverride(),
+                        grant.departmentIds()))
+                    .collect(java.util.stream.Collectors.toSet())
+                    .equals(request.permissions().stream()
+                        .map(grant -> grantSignature(grant.code(), grant.scopeOverride(),
+                            grant.departmentIds()))
+                        .collect(java.util.stream.Collectors.toSet()))) {
                 throw new BizException("BUILTIN_ROLE_PROTECTED", "built-in role policy is immutable");
             }
         } else {
             if (!existing.code().equals(request.code())) {
                 throw new BizException("ROLE_CODE_IMMUTABLE", "role code cannot be changed");
             }
-            validateGrantCeiling(request);
         }
         List<Long> affectedUsers = usersWithRole(id);
         int updated = jdbcTemplate.update("""
             UPDATE t_role
-            SET name = ?, description = ?, data_scope = ?, enabled = ?,
+            SET name = ?, description = ?, enabled = ?,
                 version = version + 1, updated_at = now()
             WHERE id = ? AND version = ?
-            """, request.name().trim(), normalized(request.description()), request.dataScope().name(),
+            """, request.name().trim(), normalized(request.description()),
             request.enabled(), id, request.version());
         if (updated != 1) {
             throw new BizException("ROLE_VERSION_CONFLICT", "role was changed by another administrator");
         }
         if (!existing.builtin()) {
-            replaceRoleConfiguration(id, request.permissionCodes(), request.customDepartmentIds());
+            replaceRoleConfiguration(id, request.permissions());
         }
         bumpUsers(affectedUsers);
         RoleDto result = requiredRole(id);
         auditService.success("security.role.update", "ROLE", id,
             AuditService.RiskLevel.HIGH,
-            java.util.Map.of("changedFields", List.of("name", "description", "dataScope",
-                "enabled", "permissionCodes", "customDepartmentIds")),
+            java.util.Map.of("changedFields", List.of("name", "description", "enabled",
+                "permissions")),
             java.util.Map.of("affectedUserCount", affectedUsers.size(),
-                "permissionCount", request.permissionCodes().size()));
+                "permissionCount", request.permissions().size()));
         return result;
     }
 
     @Transactional
     public void delete(long id, int version) {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_WRITE);
+        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_MANAGE);
         RoleDto existing = roleOrNull(id);
         if (existing == null) {
             return;
@@ -217,11 +264,19 @@ public class RoleAdminService {
     }
 
     public List<DepartmentCandidate> departmentCandidates() {
-        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_WRITE);
+        authorizationService.requirePermission(PermissionCodes.SECURITY_ROLE_MANAGE);
         PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
-        Set<Long> departmentIds = authorizationService.manageableDepartments(
-            authorizationService.snapshot(principal.userId()),
-            PermissionCodes.SECURITY_ROLE_WRITE);
+        Set<Long> departmentIds = new LinkedHashSet<>();
+        if (principal.isAdmin()) {
+            departmentIds.addAll(jdbcTemplate.queryForList(
+                "SELECT id FROM t_department ORDER BY id", Long.class));
+        } else {
+            AuthorizationService.AuthzSnapshot snapshot =
+                authorizationService.snapshot(principal.userId());
+            snapshot.permissions().stream().filter(PermissionCatalog::isScopeable)
+                .forEach(permission -> departmentIds.addAll(
+                    authorizationService.manageableDepartments(snapshot, permission)));
+        }
         if (departmentIds.isEmpty()) {
             return List.of();
         }
@@ -240,19 +295,97 @@ public class RoleAdminService {
         if (request.code() == null || !CODE.matcher(request.code().trim()).matches()) {
             throw new BizException("ROLE_CODE_INVALID", "role code must be lowercase and 2-64 characters");
         }
-        if (request.dataScope() == null) {
-            throw new BizException("DATA_SCOPE_REQUIRED", "data scope is required");
-        }
         if (update && request.version() == null) {
             throw new BizException("ROLE_VERSION_REQUIRED", "role version is required");
         }
+        boolean adminRole = "admin".equals(request.code());
         Set<String> known = new LinkedHashSet<>(jdbcTemplate.queryForList(
-            "SELECT code FROM t_permission", String.class));
-        if (!known.containsAll(request.permissionCodes())) {
-            throw new BizException("PERMISSION_UNKNOWN", "role contains an unknown permission");
+            "SELECT code FROM t_permission WHERE deprecated_at IS NULL", String.class));
+        Set<String> seen = new LinkedHashSet<>();
+        for (PermissionGrantWriteRequest grant : request.permissions()) {
+            if (grant.code() == null || !known.contains(grant.code())) {
+                throw new BizException("PERMISSION_UNKNOWN", "role contains an unknown permission");
+            }
+            if (!seen.add(grant.code())) {
+                throw new BizException("PERMISSION_DUPLICATED", "role contains a duplicated permission");
+            }
+            if (!adminRole && PermissionCatalog.isAdminOnly(grant.code())) {
+                throw new BizException("ADMIN_ONLY_PERMISSION", "超管专属能力不能授予普通角色");
+            }
+            validateScope(grant);
+            validateGrantCeiling(grant);
         }
-        PagePermissionPolicy.validate(request.permissionCodes(), "admin".equals(request.code()));
-        for (Long departmentId : request.customDepartmentIds()) {
+    }
+
+    /**
+     * 授权天花板：非管理员不得把自己不具备的能力/更宽的数据范围授予他人。
+     *
+     * <p>本方法在 {@code 9e76add} 被删除且一直未恢复（原版基于已废弃的
+     * {@code security.role.write} 旧码与已删除的 {@code t_role.data_scope}，无法照搬），
+     * 此处按 V40 之后的"能力 + 每能力范围"模型重写。
+     *
+     * <p>今天对非管理员不可达——角色配置入口由 {@code security:role:manage} 把守且该能力
+     * 是超管专属；保留它是防御纵深：一旦该能力放开给普通角色，这层校验就是唯一的兜底。
+     */
+    void validateGrantCeiling(PermissionGrantWriteRequest grant) {
+        PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
+        if (principal.isAdmin()) {
+            return;
+        }
+        if (!principal.permissions().contains(grant.code())) {
+            throw new AccessDeniedException("cannot grant permissions you do not hold");
+        }
+        String requested = grant.scopeOverride();
+        // 不写覆盖值即"使用能力默认范围"，是推荐用法，不在此处收紧。
+        if (requested == null || requested.isBlank()) {
+            return;
+        }
+        DataScope requestedScope = parseScope(requested);
+        AuthorizationService.AuthzSnapshot snapshot = authorizationService.snapshot(principal.userId());
+        boolean allowed = snapshot.permissionRoles().getOrDefault(grant.code(), List.of()).stream()
+            .anyMatch(held -> covers(held.dataScope(), requestedScope));
+        if (!allowed) {
+            throw new AccessDeniedException("cannot grant a wider data scope than you hold");
+        }
+    }
+
+    /** 授予方持有的范围是否覆盖被请求的范围。 */
+    private static boolean covers(DataScope held, DataScope requested) {
+        return switch (requested) {
+            case SELF -> true;
+            case DEPARTMENT -> held == DataScope.DEPARTMENT
+                || held == DataScope.DEPARTMENT_AND_DESCENDANTS || held == DataScope.ALL;
+            case DEPARTMENT_AND_DESCENDANTS -> held == DataScope.DEPARTMENT_AND_DESCENDANTS
+                || held == DataScope.ALL;
+            case ALL -> held == DataScope.ALL;
+            case CUSTOM -> held == DataScope.CUSTOM || held == DataScope.DEPARTMENT;
+        };
+    }
+
+    private void validateScope(PermissionGrantWriteRequest grant) {
+        Set<Long> departmentIds = grant.departmentIds();
+        if (!PermissionCatalog.isScopeable(grant.code())) {
+            if (grant.scopeOverride() != null || !departmentIds.isEmpty()) {
+                throw new BizException("DATA_SCOPE_NOT_SUPPORTED", "该能力不支持数据范围");
+            }
+            return;
+        }
+        // scopeOverride 为空表示"使用能力默认范围"，这是推荐用法，不是缺参数
+        if (grant.scopeOverride() == null || grant.scopeOverride().isBlank()) {
+            if (!departmentIds.isEmpty()) {
+                throw new BizException("DATA_SCOPE_DEPARTMENT_UNEXPECTED",
+                    "只有自定义数据范围才能选择部门");
+            }
+            return;
+        }
+        DataScope scope = parseScope(grant.scopeOverride());
+        if (scope == DataScope.CUSTOM && departmentIds.isEmpty()) {
+            throw new BizException("DATA_SCOPE_DEPARTMENT_REQUIRED", "自定义数据范围需要选择部门");
+        }
+        if (scope != DataScope.CUSTOM && !departmentIds.isEmpty()) {
+            throw new BizException("DATA_SCOPE_DEPARTMENT_UNEXPECTED", "只有自定义数据范围才能选择部门");
+        }
+        for (Long departmentId : departmentIds) {
             Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_department WHERE id = ?", Long.class, departmentId);
             if (count == null || count == 0) {
@@ -261,76 +394,42 @@ public class RoleAdminService {
         }
     }
 
-    private void validateGrantCeiling(RoleWriteRequest request) {
-        PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
-        if (principal.isAdmin()) {
-            return;
+    private static DataScope parseScope(String value) {
+        if (value == null || value.isBlank()) {
+            throw new BizException("DATA_SCOPE_REQUIRED", "data scope is required");
         }
-        if (!principal.permissions().containsAll(request.permissionCodes())) {
-            throw new AccessDeniedException("cannot grant permissions you do not hold");
+        try {
+            return DataScope.valueOf(value);
+        } catch (IllegalArgumentException error) {
+            throw new BizException("DATA_SCOPE_INVALID", "unknown data scope: " + value);
         }
-        AuthorizationService.AuthzSnapshot snapshot = authorizationService.snapshot(principal.userId());
-        List<AuthorizationService.RoleGrant> grantingRoles = snapshot.permissionRoles()
-            .getOrDefault(PermissionCodes.SECURITY_ROLE_WRITE, List.of());
-        boolean allowed = grantingRoles.stream().anyMatch(grant -> switch (request.dataScope()) {
-            case SELF -> true;
-            case DEPARTMENT -> grant.dataScope() == DataScope.DEPARTMENT
-                || grant.dataScope() == DataScope.DEPARTMENT_AND_DESCENDANTS
-                || grant.dataScope() == DataScope.ALL;
-            case DEPARTMENT_AND_DESCENDANTS -> grant.dataScope() == DataScope.DEPARTMENT_AND_DESCENDANTS
-                || grant.dataScope() == DataScope.ALL;
-            case ALL -> grant.dataScope() == DataScope.ALL;
-            case CUSTOM -> grant.dataScope() == DataScope.CUSTOM
-                || grant.dataScope() == DataScope.DEPARTMENT
-                || grant.dataScope() == DataScope.DEPARTMENT_AND_DESCENDANTS
-                || grant.dataScope() == DataScope.ALL;
-        });
-        if (!allowed) {
-            throw new AccessDeniedException("requested data scope exceeds your authority");
-        }
-        if (request.dataScope() == DataScope.CUSTOM) {
-            Set<Long> manageable = authorizationService.manageableDepartments(snapshot,
-                PermissionCodes.SECURITY_ROLE_WRITE);
-            if (!manageable.containsAll(request.customDepartmentIds())) {
-                throw new AccessDeniedException("custom departments exceed your authority");
+    }
+
+    private void replaceRoleConfiguration(long roleId, Set<PermissionGrantWriteRequest> permissions) {
+        jdbcTemplate.update("DELETE FROM t_role_permission WHERE role_id = ?", roleId);
+        jdbcTemplate.update("DELETE FROM t_role_permission_department WHERE role_id = ?", roleId);
+        for (PermissionGrantWriteRequest grant : permissions) {
+            String scope = PermissionCatalog.isScopeable(grant.code())
+                && grant.scopeOverride() != null && !grant.scopeOverride().isBlank()
+                ? parseScope(grant.scopeOverride()).name() : null;
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, ?, ?)
+                """, roleId, grant.code(), scope);
+            if (DataScope.CUSTOM.name().equals(scope)) {
+                grant.departmentIds().forEach(departmentId -> jdbcTemplate.update("""
+                    INSERT INTO t_role_permission_department(role_id, permission_code, department_id)
+                    VALUES (?, ?, ?)
+                    """, roleId, grant.code(), departmentId));
             }
         }
     }
 
-    private void replaceRoleConfiguration(long roleId, Set<String> permissions,
-                                          Set<Long> customDepartmentIds) {
-        jdbcTemplate.update("DELETE FROM t_role_permission WHERE role_id = ?", roleId);
-        permissions.forEach(permission -> jdbcTemplate.update("""
-            INSERT INTO t_role_permission(role_id, permission_code) VALUES (?, ?)
-            """, roleId, permission));
-        jdbcTemplate.update("DELETE FROM t_role_department WHERE role_id = ?", roleId);
-        customDepartmentIds.forEach(departmentId -> jdbcTemplate.update("""
-            INSERT INTO t_role_department(role_id, department_id) VALUES (?, ?)
-            """, roleId, departmentId));
-    }
-
     private RoleDto roleOrNull(long id) {
-        RoleBase base = jdbcTemplate.query("""
-            SELECT role.id, role.code, role.name, role.description, role.data_scope,
-                   role.enabled, role.builtin, role.version,
-                   (SELECT COUNT(*) FROM t_user_role ur WHERE ur.role_id = role.id) AS user_count
-            FROM t_role role WHERE role.id = ?
-            """, rs -> rs.next() ? new RoleBase(
-                rs.getLong("id"), rs.getString("code"), rs.getString("name"),
-                rs.getString("description"), rs.getString("data_scope"),
-                rs.getBoolean("enabled"), rs.getBoolean("builtin"), rs.getInt("version"),
-                rs.getLong("user_count")) : null, id);
+        RoleBase base = jdbcTemplate.query(BASE_SQL + " WHERE role.id = ?",
+            rs -> rs.next() ? roleBase(rs) : null, id);
         if (base == null) return null;
-        return new RoleDto(base.id(), base.code(), base.name(), base.description(),
-            base.dataScope(), base.enabled(), base.builtin(), base.version(),
-            jdbcTemplate.queryForList("""
-                SELECT permission_code FROM t_role_permission
-                WHERE role_id = ? ORDER BY permission_code
-                """, String.class, id),
-            jdbcTemplate.queryForList("""
-                SELECT department_id FROM t_role_department
-                WHERE role_id = ? ORDER BY department_id
-                """, Long.class, id), base.userCount());
+        return toDto(base, grantsFor(List.of(id)).getOrDefault(id, List.of()));
     }
 
     private RoleDto requiredRole(long id) {
@@ -382,21 +481,25 @@ public class RoleAdminService {
         return List.of();
     }
 
-    public record PermissionDto(String code, String name, String category,
-                                String riskLevel, int sortOrder, String kind,
-                                boolean adminOnly, List<String> requiredPermissionCodes) { }
+    public record PermissionDto(String code, String name, String domain, String domainLabel,
+                                String riskLevel, int sortOrder, boolean adminOnly,
+                                boolean scopeable, String defaultScope) { }
+    /** 一条授权：能力 + 数据范围覆盖值（null=用能力默认）+ 自定义部门明细。 */
+    public record PermissionGrantDto(String code, String scopeOverride, List<Long> departmentIds) { }
     public record RoleDto(long id, String code, String name, String description,
-                          String dataScope, boolean enabled, boolean builtin, int version,
-                          List<String> permissionCodes, List<Long> customDepartmentIds,
-                          long userCount) { }
-    public record RoleWriteRequest(String code, String name, String description,
-                                   DataScope dataScope, boolean enabled, Integer version,
-                                   Set<String> permissionCodes,
-                                   Set<Long> customDepartmentIds) {
+                          boolean enabled, boolean builtin, int version,
+                          List<PermissionGrantDto> permissions, long userCount) { }
+    public record RoleWriteRequest(String code, String name, String description, boolean enabled,
+                                   Integer version,
+                                   Set<PermissionGrantWriteRequest> permissions) {
         public RoleWriteRequest {
-            permissionCodes = permissionCodes == null ? Set.of() : Set.copyOf(permissionCodes);
-            customDepartmentIds = customDepartmentIds == null
-                ? Set.of() : Set.copyOf(customDepartmentIds);
+            permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
+        }
+    }
+    public record PermissionGrantWriteRequest(String code, String scopeOverride,
+                                              Set<Long> departmentIds) {
+        public PermissionGrantWriteRequest {
+            departmentIds = departmentIds == null ? Set.of() : Set.copyOf(departmentIds);
         }
     }
     public record EffectivePermissionDto(long userId, Set<String> roleCodes,
@@ -411,6 +514,14 @@ public class RoleAdminService {
                                long authzVersion) { }
     public record UserRolePage(List<UserRoleView> records, long total, int page, int size) { }
     private record RoleBase(long id, String code, String name, String description,
-                            String dataScope, boolean enabled, boolean builtin, int version,
+                            boolean enabled, boolean builtin, int version,
                             long userCount) { }
+
+    /** 授权签名，用于内置角色「策略不可变」的相等判断。 */
+    private static String grantSignature(String code, String scopeOverride,
+                                         java.util.Collection<Long> departmentIds) {
+        String departments = departmentIds == null ? "" : departmentIds.stream()
+            .sorted().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+        return code + "|" + (scopeOverride == null ? "" : scopeOverride) + "|" + departments;
+    }
 }

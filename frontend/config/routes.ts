@@ -1,6 +1,19 @@
 /**
- * AntFlow 路由配置 — 钉钉式菜单结构
+ * AntFlow 路由配置。
+ *
+ * 菜单可展示页面全部来自 src/pages/registry.ts（唯一真源），这里只做拼装；
+ * 隐藏页 / 设计器 / 运行时入口单独声明，不参与菜单编排。
  */
+import { PAGES, accessKey } from '../src/pages/registry';
+
+const registryRoutes = PAGES.map((page) => ({
+  name: page.key,
+  icon: page.icon,
+  path: page.path,
+  component: page.component,
+  access: accessKey(page.key),
+}));
+
 export default [
   // ===== 登录（无布局）=====
   {
@@ -13,98 +26,20 @@ export default [
     ],
   },
 
-  // ===== 工作台 =====
-  {
-    path: '/workplace',
-    name: 'workplace',
-    icon: 'home',
-    component: './dashboard/workplace',
-    access: 'canAccessWorkplace',
-  },
+  // ===== 菜单页面（注册表派生）=====
+  ...registryRoutes,
 
-  // ===== 组织架构 =====
-  {
-    path: '/org',
-    name: 'org',
-    icon: 'team',
-    access: 'canManageOrg',
-    routes: [
-      { path: '/org', redirect: '/org/contacts' },
-      { name: 'contacts', icon: 'contacts', path: '/org/contacts', component: './org/Contacts', access: 'canManageOrg' },
-    ],
-  },
-
-  // ===== 权限与安全 =====
-  {
-    path: '/security',
-    name: 'security',
-    icon: 'safetyCertificate',
-    access: 'canManageSecurity',
-    routes: [
-      { path: '/security', redirect: '/security/roles' },
-      { name: 'roles', icon: 'idcard', path: '/security/roles', component: './security/Role', access: 'canManageRoles' },
-      { name: 'user-permissions', icon: 'key', path: '/security/user-permissions', component: './security/UserPermission', access: 'canAssignRoles' },
-      { name: 'audit-log', icon: 'fileSearch', path: '/security/audit-log', component: './security/AuditLog', access: 'canReadAudit' },
-    ],
-  },
-
-  // ===== 审批与流程 =====
-  {
-    path: '/approval',
-    name: 'approval',
-    icon: 'audit',
-    routes: [
-      { path: '/approval', redirect: '/approval/forms' },
-      { name: 'forms', icon: 'form', path: '/approval/forms', component: './approval/FormManagementList', access: 'canReadForms' },
-      { name: 'templates', icon: 'fileText', path: '/approval/templates', component: './approval/TemplateList', hideInMenu: true },
-      { name: 'designer', icon: 'partition', path: '/approval/designer', component: './approval/DesignerEntry', hideInMenu: true },
-      { name: 'records', icon: 'search', path: '/approval/records', component: './approval/RecordList', access: 'canReadInstances' },
-      { name: 'monitor', icon: 'dashboard', path: '/approval/monitor', component: './approval/WorkflowMonitor', access: 'canOverrideWorkflow' },
-    ],
-  },
-
-  // ===== 数据与报表 =====
-  {
-    path: '/report',
-    name: 'report',
-    icon: 'barChart',
-    access: 'canReadReports',
-    routes: [
-      { path: '/report', redirect: '/report/center' },
-      { name: 'center', icon: 'fund', path: '/report/center', component: './report/Center', access: 'canReadReportCenter' },
-      { name: 'export', icon: 'export', path: '/report/export', component: './report/Export', access: 'canReadReportExport' },
-      { name: 'view', icon: 'dashboard', path: '/report/view', component: './report/Dashboard', access: 'canReadReportDashboard' },
-    ],
-  },
-
-  // ===== 系统设置 =====
-  {
-    path: '/settings',
-    name: 'settings',
-    icon: 'setting',
-    access: 'canManageSettings',
-    routes: [
-      { path: '/settings', redirect: '/settings/company' },
-      { name: 'company', icon: 'bank', path: '/settings/company', component: './settings/Company', access: 'canManageCompany' },
-      { name: 's3', icon: 'cloud', path: '/settings/s3', component: './settings/S3Storage', access: 'canManageS3' },
-      { name: 'wecom', icon: 'wechat', path: '/settings/wecom', component: './settings/Wecom', access: 'canManageWecom' },
-      { name: 'identityProviders', icon: 'safetyCertificate', path: '/settings/identity-providers', component: './settings/IdentityProviders', access: 'canManageIdentityProviders' },
-      { name: 'backup', icon: 'database', path: '/settings/backup', component: './settings/Backup', access: 'canManageBackup' },
-    ],
-  },
-
-  // ===== 设计器（隐藏）=====
+  // ===== 隐藏页 / 设计器 / 运行时 =====
+  { path: '/approval/templates', component: './approval/TemplateList', hideInMenu: true, access: 'canReadForms' },
+  { path: '/approval/designer', component: './approval/DesignerEntry', hideInMenu: true, access: 'canDesigner' },
   { path: '/approval/forms/new', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canCreateForm' },
   { path: '/approval/forms/:id/wizard', component: './approval/FormManagementWizard', hideInMenu: true, access: 'canDesigner' },
+  { path: '/approval/option-sources', component: './approval/OptionSources', hideInMenu: true, access: 'canManageOptionSources' },
   { path: '/designer/form/:id', component: './designer/form/FormDesigner', hideInMenu: true, access: 'canDesigner' },
   { path: '/designer/process/:formDefId', component: './designer/process/ProcessDesigner', hideInMenu: true, access: 'canDesigner' },
-
-  // ===== 表单后台兼容入口（隐藏）=====
   { path: '/admin/forms', component: './admin/FormList', hideInMenu: true, access: 'canAdmin' },
-  { path: '/admin/form-data', component: './admin/FormData', hideInMenu: true, access: 'canAdmin' },
-  { path: '/approval/form-data', component: './admin/FormData', hideInMenu: true, access: 'canAdmin' },
-
-  // ===== 运行时 / 任务（隐藏）=====
+  { path: '/admin/form-data', component: './admin/FormData', hideInMenu: true, access: 'canReadFormData' },
+  { path: '/approval/form-data', component: './admin/FormData', hideInMenu: true, access: 'canReadFormData' },
   { path: '/runtime/form/:code', component: './runtime/form/Fill', hideInMenu: true, access: 'canUseRuntime' },
   { path: '/runtime/list', component: './runtime/form/List', hideInMenu: true, access: 'canUseRuntime' },
   { path: '/tasks/inbox', component: './tasks/Inbox', hideInMenu: true, access: 'canUseTasks' },
@@ -112,7 +47,7 @@ export default [
   { path: '/proc', component: './proc/Sent', hideInMenu: true, access: 'canUseProcesses' },
   { path: '/proc/:id', component: './proc/Detail', hideInMenu: true, access: 'canUseProcessDetail' },
   { path: '/account/settings', component: './account/settings', hideInMenu: true },
-  { path: '/account/center', component: './account/center', hideInMenu: true },
+  { path: '/account/center', redirect: '/account/settings' },
 
   // ===== 默认 =====
   { path: '/', component: './AuthorizedHome' },

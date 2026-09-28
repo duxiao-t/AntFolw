@@ -14,6 +14,7 @@ import com.antflow.common.BusinessNumberService;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -30,6 +31,8 @@ public class FormDefinitionService {
     private DefinitionVersionRepository versions;
     @Autowired(required = false)
     private BusinessNumberService businessNumbers;
+    @Autowired(required = false)
+    private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
     private static final Set<String> FIELD_TYPES = Set.of(
@@ -73,6 +76,16 @@ public class FormDefinitionService {
     }
     public FormDefinition getById(Long id) { return mapper.selectById(id); }
 
+    /** 批量取表单定义（去重后一次查库），供列表类接口替代逐条 getById。 */
+    public Map<Long, FormDefinition> mapByIds(java.util.Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) return Map.of();
+        List<Long> distinct = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (distinct.isEmpty()) return Map.of();
+        return mapper.selectBatchIds(distinct).stream()
+            .collect(java.util.stream.Collectors.toMap(FormDefinition::getId,
+                java.util.function.Function.identity()));
+    }
+
     private static String normalized(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
@@ -106,11 +119,29 @@ public class FormDefinitionService {
             if ("DEPRECATED".equals(fd.getStatus())) {
                 throw new BizException("NOT_DRAFT", "Only DRAFT form_definitions can be edited");
             }
-            fd.setName(name);
-            fd.setDescription(description);
-            fd.setSchema(writeJson(schema));
-            fd.setSettings(writeJson(settings));
-            fd.setStatus("DRAFT");
+            // 为 null 的字段表示「这次请求没带它」，**保持原值**，不要覆盖。
+            // 这里曾经是无条件写入：客户端一旦漏传（或拿到的是兜底值），name 会被写成"未命名表单"、
+            // settings 会被清成 {}（writeJson(null) 存的是 JSON null，列是 NOT NULL 所以静默通过），
+            // 表单的审批流开关、业务单号配置就这样无声消失。
+            String nextSchema = schema == null ? fd.getSchema() : writeJson(schema);
+            String nextSettings = settings == null ? fd.getSettings() : writeJson(settings);
+            // 数据源的「可引用表单」清单只拦**新增**绑定：引用被撤销后，已经绑着它的字段照常保存
+            // （见 OptionRuntimeService.requireNewBindingsAreReferenced 的说明）。
+            if (schema != null && optionRuntimeService != null) {
+                optionRuntimeService.requireNewBindingsAreReferenced(
+                    fd.getId(), fd.getSchema(), nextSchema);
+            }
+            // 只有 schema/settings 真的变了才降级为草稿。已发布表单改个名称、或只是点了一下保存，
+            // 不该让它掉出手机端目录——发布快照只含 schema/settings，名称与描述不入快照。
+            boolean contentChanged = !sameJson(fd.getSchema(), nextSchema)
+                || !sameJson(fd.getSettings(), nextSettings);
+            if (name != null) fd.setName(name);
+            if (description != null) fd.setDescription(description);
+            fd.setSchema(nextSchema);
+            fd.setSettings(nextSettings);
+            if (contentChanged) {
+                fd.setStatus("DRAFT");
+            }
             mapper.updateById(fd);
         }
         return fd;
@@ -127,14 +158,18 @@ public class FormDefinitionService {
         if (description != null) fd.setDescription(description);
         if (status != null) {
             validateStatus(status);
-            if ("PUBLISHED".equals(status) && !"PUBLISHED".equals(fd.getStatus())) {
-                throw new BizException("USE_PUBLISH", "Use publish endpoint to publish a form");
+            if (!status.equals(fd.getStatus())) {
+                throw new BizException("USE_STATUS_ENDPOINT",
+                    "Use publish/disable endpoints to change form status");
             }
-            fd.setStatus(status);
         }
         if (schema != null || settings != null) {
             if (!"DRAFT".equals(fd.getStatus())) {
                 throw new BizException("NOT_DRAFT", "Only DRAFT form_definitions can change schema/settings");
+            }
+            if (schema != null && optionRuntimeService != null) {
+                optionRuntimeService.requireNewBindingsAreReferenced(
+                    fd.getId(), fd.getSchema(), writeJson(schema));
             }
             if (schema != null) fd.setSchema(writeJson(schema));
             if (settings != null) fd.setSettings(writeJson(settings));
@@ -151,6 +186,9 @@ public class FormDefinitionService {
         }
         if (!"DRAFT".equals(fd.getStatus())) return fd;
         validateSchema(fd.getSchema());
+        if (optionRuntimeService != null) {
+            optionRuntimeService.validateSchema(json.valueToTree(parseSchema(fd.getSchema())));
+        }
         if (businessNumbers != null) businessNumbers.validate(fd);
         fd.setStatus("PUBLISHED");
         fd.setVersion(fd.getVersion() + 1);
@@ -529,6 +567,21 @@ public class FormDefinitionService {
         validateNodeValue(node, values, visibleIds);
     }
 
+    /**
+     * 语义比较两段 JSON。schema/settings 存在 jsonb 列里，读回来会带上 Postgres 自己的排版
+     * （如 {@code "id": "a"} 的空格），所以不能直接比字符串——那会让「原样保存」永远被判为有变化。
+     */
+    private boolean sameJson(String left, String right) {
+        if (Objects.equals(left, right)) {
+            return true;
+        }
+        try {
+            return Objects.equals(json.readTree(left), json.readTree(right));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return false;   // 旧值坏了就当作已变化，仍走降级
+        }
+    }
+
     private String writeJson(Object o) {
         try {
             return json.writeValueAsString(o);
@@ -618,6 +671,17 @@ public class FormDefinitionService {
         }
         if ("dept_picker".equals(type) && !isEmpty(value)) {
             validateDepartmentPickerValue(node, value);
+        }
+        // 判定必须与发布校验一致：`optionSource: {}` 是设计器"选了源还没选版本"的中途状态，
+        // 发布时按未绑定（走内置 options）处理；这里若按 isObject 当成外部绑定去校验，就会出现
+        // **表单能发布、却填不了**（提交时 requireVersion 因缺 sourceId 报 BAD_SCHEMA）。
+        if (Set.of("select", "multi_select").contains(type) && !isEmpty(value)
+            && com.antflow.form.options.OptionRuntimeService.isBound(node.path("props").path("optionSource"))
+            ) {
+            if (optionRuntimeService == null) {
+                throw new BizException("FORM_DATA_INVALID", "共享选项服务不可用");
+            }
+            optionRuntimeService.validateValue(node, value, values);
         }
         int maxLength = rules.path("maxLength").asInt(props.path("maxLength").asInt(-1));
         if (maxLength > -1 && value instanceof String s && s.length() > maxLength) {
@@ -930,6 +994,15 @@ public class FormDefinitionService {
     private record MatrixAxisItem(String id, String label) {}
 
     private void validateSelectOptions(com.fasterxml.jackson.databind.JsonNode node) {
+        // 空对象 {} 是设计器"已选外部数据源但尚未选版本"的中途状态，按未绑定回退到内置 options；
+        // 只有带 sourceId 才走外部数据源校验（sourceId 在但 versionId 缺失仍会由 requireVersion 报错）。
+        if (com.antflow.form.options.OptionRuntimeService.isBound(node.path("props").path("optionSource"))) {
+            if (optionRuntimeService == null) {
+                throw new BizException("BAD_SCHEMA", "共享选项服务不可用");
+            }
+            optionRuntimeService.validateBinding(node.path("props").path("optionSource"));
+            return;
+        }
         var options = node.path("props").path("options");
         if (!options.isArray() || options.isEmpty()) {
             throw new BizException("BAD_SCHEMA", node.path("label").asText(node.path("id").asText()) + " requires options");

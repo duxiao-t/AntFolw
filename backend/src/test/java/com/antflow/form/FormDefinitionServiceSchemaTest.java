@@ -33,6 +33,67 @@ class FormDefinitionServiceSchemaTest {
         service = new FormDefinitionService(mapper, json, Mockito.mock(FormGrantService.class));
     }
 
+    @Test void saveDraftKeepsPublishedFormWhenContentIsUnchanged() throws Exception {
+        // 已发布表单只是改名称、或原样保存，不该被降级为草稿（那会让它掉出手机端目录）。
+        when(mapper.selectById(1L)).thenReturn(published());
+
+        var saved = service.saveDraft(1L, "leave", "新名称", "说明",
+            json.readTree(SCHEMA), json.readTree("{}"), 7L);
+
+        assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
+    }
+
+    @Test void saveDraftDemotesToDraftWhenSchemaChanges() throws Exception {
+        when(mapper.selectById(1L)).thenReturn(published());
+
+        var saved = service.saveDraft(1L, "leave", "新名称", "说明",
+            json.readTree("[{\"id\":\"b\",\"type\":\"text\"}]"), json.readTree("{}"), 7L);
+
+        assertThat(saved.getStatus()).isEqualTo("DRAFT");
+        assertThat(saved.getSchema()).isEqualTo("[{\"id\":\"b\",\"type\":\"text\"}]");
+    }
+
+    @Test void saveDraftKeepsSettingsWhenPayloadOmitsThem() throws Exception {
+        // 客户端漏传 settings 时不能把已有的清成 {}（审批流开关、业务单号配置就藏在这里面）。
+        var existing = published();
+        existing.setSettings("{\"workflowEnabled\": true}");
+        when(mapper.selectById(1L)).thenReturn(existing);
+
+        var saved = service.saveDraft(1L, "leave", "新名称", "说明",
+            json.readTree(SCHEMA), null, 7L);
+
+        assertThat(saved.getSettings()).isEqualTo("{\"workflowEnabled\": true}");
+        // 内容没变，也不该被降级为草稿。
+        assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
+    }
+
+    @Test void saveDraftKeepsNameWhenPayloadOmitsIt() throws Exception {
+        var existing = published();
+        existing.setName("真实名字");
+        when(mapper.selectById(1L)).thenReturn(existing);
+
+        var saved = service.saveDraft(1L, "leave", null, null, json.readTree(SCHEMA), null, 7L);
+
+        assertThat(saved.getName()).isEqualTo("真实名字");
+        assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
+    }
+
+    private static final String SCHEMA = "[{\"id\":\"a\",\"type\":\"text\"}]";
+
+    /**
+     * 已发布表单。schema 故意写成 **Postgres jsonb 读回来的排版**（冒号/逗号后带空格），
+     * 因为真实库里就是这种形式——拿它跟 writeJson 的紧凑输出直接比字符串会永远判定为有变化。
+     */
+    private FormDefinition published() {
+        var fd = new FormDefinition();
+        fd.setId(1L);
+        fd.setCode("leave");
+        fd.setStatus("PUBLISHED");
+        fd.setSchema("[{\"id\": \"a\", \"type\": \"text\"}]");
+        fd.setSettings("{}");
+        return fd;
+    }
+
     @Test void publishAcceptsNonEmptySchema() {
         var fd = new FormDefinition();
         fd.setId(1L);
@@ -44,6 +105,15 @@ class FormDefinitionServiceSchemaTest {
         var pub = service.publish(1L);
         assertThat(pub.getStatus()).isEqualTo("PUBLISHED");
         assertThat(pub.getVersion()).isEqualTo(2);
+    }
+
+    @Test void updateCannotBypassTheDedicatedDisableEndpoint() {
+        var fd = published();
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThatThrownBy(() -> service.update(1L, null, null, "DEPRECATED", null, null))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("publish/disable endpoints");
     }
 
     @Test void publishRejectsSectionType() {

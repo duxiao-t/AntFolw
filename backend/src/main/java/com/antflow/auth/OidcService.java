@@ -146,6 +146,14 @@ public class OidcService {
             throw new BizException("OIDC_CODE_INVALID", "提供方代码格式不正确");
         }
         String issuer = normalizeAndValidateIssuer(input.issuerUri());
+        Provider current = id == null ? null : requireProvider(id);
+        if (current != null && !current.issuerUri().equals(issuer)) {
+            Long bindings = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM t_oidc_identity_binding WHERE provider_id = ?",
+                Long.class, id);
+            requireIssuerChangeSafe(current.issuerUri(), issuer,
+                bindings == null ? 0 : bindings);
+        }
         discover(issuer);
         long actor = authorization.currentUserId();
         if (id == null) {
@@ -163,7 +171,6 @@ public class OidcService {
                 cipher.encrypt(secret, "oidc:" + createdId), createdId);
             id = createdId;
         } else {
-            Provider current = requireProvider(id);
             String encrypted = input.clientSecret() == null || input.clientSecret().isBlank()
                 ? current.encryptedSecret() : cipher.encrypt(input.clientSecret().trim(), "oidc:" + id);
             jdbc.update("""
@@ -178,6 +185,13 @@ public class OidcService {
         }
         long savedId = id;
         return providers().stream().filter(item -> item.id() == savedId).findFirst().orElseThrow();
+    }
+
+    static void requireIssuerChangeSafe(String currentIssuer, String nextIssuer, long bindings) {
+        if (!currentIssuer.equals(nextIssuer) && bindings > 0) {
+            throw new BizException("OIDC_ISSUER_IN_USE",
+                "存在身份绑定时不能更换 OIDC issuer");
+        }
     }
 
     public void delete(long id) {
@@ -386,7 +400,7 @@ public class OidcService {
     }
 
     private void requireManage() {
-        authorization.requirePermission(PermissionCodes.PAGE_SETTINGS_IDENTITY_PROVIDERS);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE);
     }
 
     private void requireActiveUser(long id) {

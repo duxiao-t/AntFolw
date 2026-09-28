@@ -82,6 +82,10 @@ public class ProcessDefinitionService {
             if (pd == null) {
                 throw new BizException("PROCESS_NOT_FOUND", "Process not found: " + id);
             }
+            if (!formDefId.equals(pd.getFormDefId())) {
+                throw new BizException("PROCESS_FORM_MISMATCH",
+                    "Process does not belong to form: " + formDefId);
+            }
             pd.setProcess(writeJson(process));
             pd.setStatus("DRAFT");
             mapper.updateById(pd);
@@ -119,6 +123,28 @@ public class ProcessDefinitionService {
         return published != null ? published : mapper.selectOne(new QueryWrapper<ProcessDefinition>()
             .eq("form_def_id", formDefId).eq("status", "PUBLISHED")
             .orderByDesc("version").last("LIMIT 1"));
+    }
+
+    /**
+     * latestPublishedForForm 的批量版，口径一致（版本表优先，缺的退回已发布行）。
+     * 列表接口用它替代逐张表单调用，把 N 次往返压成最多 2 次。
+     */
+    public Map<Long, ProcessDefinition> latestPublishedForForms(
+            java.util.Collection<Long> formDefIds) {
+        if (formDefIds == null || formDefIds.isEmpty()) return Map.of();
+        Map<Long, ProcessDefinition> result = new java.util.LinkedHashMap<>(
+            versions == null ? Map.of() : versions.runtimeProcessesForForms(formDefIds));
+        List<Long> missing = formDefIds.stream().filter(java.util.Objects::nonNull)
+            .distinct().filter(id -> !result.containsKey(id)).toList();
+        if (!missing.isEmpty()) {
+            // form_def_id 在 t_process_definition 上唯一，一张表单最多一行。
+            for (ProcessDefinition definition : mapper.selectList(
+                    new QueryWrapper<ProcessDefinition>()
+                        .in("form_def_id", missing).eq("status", "PUBLISHED"))) {
+                result.putIfAbsent(definition.getFormDefId(), definition);
+            }
+        }
+        return result;
     }
 
     public ProcessDefinition findByForm(Long formDefId) {
@@ -349,16 +375,6 @@ public class ProcessDefinitionService {
     }
 
     private record OptionField(String type, List<JsonNode> options) { }
-
-    public List<ProcessDefinition> listAuthorized(long userId, boolean admin) {
-        if (admin) return list();
-        return mapper.selectList(new QueryWrapper<ProcessDefinition>().inSql("form_def_id",
-            "SELECT grant_row.form_def_id FROM t_form_resource_grant grant_row "
-                + "WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = " + userId + ") "
-                + "OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN "
-                + "(SELECT ur.role_id FROM t_user_role ur JOIN t_role role ON role.id = ur.role_id "
-                + "WHERE ur.user_id = " + userId + " AND role.enabled = true))"));
-    }
 
     @Transactional
     public void deleteByForm(Long formDefId) {

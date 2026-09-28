@@ -14,7 +14,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,8 +40,7 @@ public class MobileDraftService {
     @Transactional(rollbackFor = Exception.class)
     public Long create(String formCode, JsonNode data, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
-        authorizationService.requireFormAction(formDefinition.getId(),
-            PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(formDefinition.getId());
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
@@ -55,8 +56,7 @@ public class MobileDraftService {
     public FormData update(long draftId, JsonNode data, long userId) {
         FormData draft = requireOwnedDraft(draftId, userId);
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
-        authorizationService.requireFormAction(formDefinition.getId(),
-            PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(formDefinition.getId());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.updateById(draft);
@@ -70,11 +70,9 @@ public class MobileDraftService {
     }
 
     public List<MobileDraftDto> list(long userId) {
-        List<FormData> drafts = formDataMapper.selectList(new QueryWrapper<FormData>()
-            .eq("created_by", userId)
-            .eq("status", DRAFT_STATUS)
-            .orderByDesc("updated_at"));
-        return drafts.stream().map(this::toDto).toList();
+        List<FormData> drafts = formDataMapper.selectMyDrafts(userId);
+        DraftContext context = contextFor(drafts, userId);
+        return drafts.stream().map(draft -> toDto(draft, context)).toList();
     }
 
     public long count(long userId) {
@@ -84,7 +82,37 @@ public class MobileDraftService {
     }
 
     public MobileDraftDto get(long draftId, long userId) {
-        return toDto(requireOwnedDraft(draftId, userId));
+        FormData draft = requireOwnedDraft(draftId, userId);
+        return toDto(draft, contextFor(List.of(draft), userId));
+    }
+
+    /**
+     * 一次请求内按表单去重的共享上下文。原来 toDto 每张草稿都要查三次
+     * （表单定义 / 使用授权 / 已发布流程），草稿列表有多长就乘多少条 SQL。
+     */
+    private record DraftContext(Map<Long, FormDefinition> forms,
+                                java.util.function.Predicate<Long> usable,
+                                Map<Long, Object> processes) { }
+
+    private DraftContext contextFor(List<FormData> drafts, long userId) {
+        List<Long> formIds = drafts.stream().map(FormData::getFormDefId)
+            .filter(Objects::nonNull).distinct().toList();
+        // 定义与流程都按 id 批量取：逐张表单各查一次的话，草稿跨 N 张表单就是 2N 次往返。
+        Map<Long, FormDefinition> forms = formDefinitionService.mapByIds(formIds);
+        Map<Long, Object> processes = new HashMap<>();
+        if (processDefinitionService != null && !formIds.isEmpty()) {
+            processDefinitionService.latestPublishedForForms(formIds)
+                .forEach((formId, definition) -> processes.put(formId, definition.getProcess()));
+        }
+        // canUseForm = 运行时能力 + 使用授权；能力这维一次问清，授权这维一次查全。
+        java.util.Optional<java.util.Set<Long>> granted =
+            authorizationService.hasPermission(userId, PermissionCodes.FORM_RUNTIME_READ)
+                ? authorizationService.usableFormIds(userId)
+                : java.util.Optional.of(java.util.Set.of());
+        java.util.function.Predicate<Long> usable = granted.isEmpty()
+            ? formId -> true   // 管理员：不过滤
+            : formId -> granted.get().contains(formId);
+        return new DraftContext(forms, usable, processes);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -131,17 +159,18 @@ public class MobileDraftService {
         return formDefinition;
     }
 
-    private MobileDraftDto toDto(FormData draft) {
-        FormDefinition formDefinition = formDefinitionService.getById(draft.getFormDefId());
+    private MobileDraftDto toDto(FormData draft, DraftContext context) {
+        FormDefinition formDefinition = context.forms().get(draft.getFormDefId());
         boolean readOnly = formDefinition == null
-            || !PUBLISHED_STATUS.equals(formDefinition.getStatus());
-        Object process = processOf(draft.getFormDefId());
+            || !PUBLISHED_STATUS.equals(formDefinition.getStatus())
+            || !context.usable().test(draft.getFormDefId());
+        Object process = formDefinition == null ? null : context.processes().get(draft.getFormDefId());
         JsonNode schema = readJsonArray(formDefinition == null ? null : formDefinition.getSchema());
         return new MobileDraftDto(
             draft.getId(),
             draft.getFormDefId(),
-            formDefinition == null ? null : formDefinition.getCode(),
-            formDefinition == null ? null : formDefinition.getName(),
+            formDefinition == null ? "" : formDefinition.getCode(),
+            formDefinition == null ? "已下线表单" : formDefinition.getName(),
             draft.getFormDefVersion(),
             formDefinitionService.projectStarterData(draft.getData(), schema, process),
             formDefinitionService.projectStarterSchema(schema, process),

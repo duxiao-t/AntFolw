@@ -182,4 +182,60 @@ describe('DynamicFormRenderer', () => {
     expect(screen.queryByText('内部备注')).not.toBeInTheDocument();
     expect(screen.queryByText('内部信息')).not.toBeInTheDocument();
   });
+
+  it('clears every downstream linked value when an upstream value changes', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'a', type: 'text', label: 'A' },
+      { id: 'b', type: 'text', label: 'B', props: { dataLinkage: { fieldId: 'a' } } },
+      { id: 'c', type: 'text', label: 'C', props: { dataLinkage: { fieldId: 'b' } } },
+    ];
+    const onValueChange = vi.fn();
+
+    render(
+      <DynamicFormRenderer
+        mode="fill"
+        schema={schema}
+        values={{ a: 'old-a', b: 'old-b', c: 'old-c' }}
+        onValueChange={onValueChange}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('A'), { target: { value: 'new-a' } });
+
+    expect(onValueChange.mock.calls).toEqual([
+      ['a', 'new-a'],
+      ['b', undefined],
+      ['c', undefined],
+    ]);
+  });
+
+  it('clears linked descendants inside a table row', () => {
+    const schema: MobileSchemaNode[] = [{
+      id: 'lines',
+      type: 'table_list',
+      label: '明细',
+      children: [
+        { id: 'a', type: 'text', label: 'A' },
+        { id: 'b', type: 'text', label: 'B', props: { dataLinkage: { fieldId: 'a' } } },
+        { id: 'c', type: 'text', label: 'C', props: { dataLinkage: { fieldId: 'b' } } },
+      ],
+    }];
+    const onValueChange = vi.fn();
+
+    render(
+      <DynamicFormRenderer
+        mode="fill"
+        schema={schema}
+        values={{ lines: [{ a: 'old-a', b: 'old-b', c: 'old-c' }] }}
+        onValueChange={onValueChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开 第1行' }));
+    fireEvent.change(screen.getByLabelText('A'), { target: { value: 'new-a' } });
+
+    expect(onValueChange).toHaveBeenLastCalledWith('lines', [{
+      a: 'new-a',
+      b: undefined,
+      c: undefined,
+    }]);
+  });
 });

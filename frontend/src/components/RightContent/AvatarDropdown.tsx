@@ -4,10 +4,11 @@ import {
   SkinOutlined,
 } from '@ant-design/icons';
 import { history, useModel } from '@umijs/max';
+import { useQueryClient } from '@tanstack/react-query';
 import type { MenuProps } from 'antd';
 import { Spin } from 'antd';
 import React, { startTransition } from 'react';
-import { outLogin } from '@/services/ant-design-pro/api';
+import { outLogin } from '@/services/auth';
 import HeaderDropdown from '../HeaderDropdown';
 
 type GlobalHeaderRightProps = {
@@ -41,6 +42,7 @@ const loginOut = async () => {
   } catch {
     // Local logout has already cleared user state; redirect should still proceed.
   }
+  localStorage.removeItem('antflow-token');
   const { search, pathname } = window.location;
   const urlParams = new URL(window.location.href).searchParams;
   const searchParams = new URLSearchParams({
@@ -59,14 +61,17 @@ export const AvatarDropdown: React.FC<GlobalHeaderRightProps> = ({
   children,
 }) => {
   const { initialState, setInitialState } = useModel('@@initialState');
+  const queryClient = useQueryClient();
 
   const onMenuClick: MenuProps['onClick'] = (event) => {
     const { key } = event;
     if (key === 'logout') {
-      startTransition(() => {
-        setInitialState((s) => ({ ...s, currentUser: undefined }));
+      void loginOut().finally(() => {
+        queryClient.clear();
+        startTransition(() => {
+          setInitialState((s) => ({ ...s, currentUser: undefined, navigation: undefined }));
+        });
       });
-      loginOut();
       return;
     }
     if (key === 'theme') {

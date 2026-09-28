@@ -69,7 +69,7 @@ public class MobileWorkflowService {
         if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
-        authorizationService.requireFormAction(form.getId(), PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(form.getId());
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         JsonNode processTree = readJsonObject(
             process == null ? null : process.getProcess(), "BAD_FLOW_JSON");
@@ -87,8 +87,7 @@ public class MobileWorkflowService {
         if (currentForm == null || !PUBLISHED_STATUS.equals(currentForm.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
         }
-        authorizationService.requireFormAction(currentForm.getId(),
-            PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(currentForm.getId());
         if (request.draftId() != null) {
             MobileDraftDto draft = draftService.get(request.draftId(), userId);
             if (!Objects.equals(draft.formCode(), request.formCode())) {

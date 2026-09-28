@@ -38,7 +38,7 @@ class MobileAppControllerTest {
     @Test
     void listsAppsForAnAuthenticatedUser() throws Exception {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "mobile-user", List.of("user")));
-        when(mobileAppService.list("请假", "other")).thenReturn(List.of(
+        when(mobileAppService.list(7L, "请假", "other")).thenReturn(List.of(
             new MobileAppDto(11L, "leave", "请假申请", null, "other", "其他", null)));
 
         mockMvc.perform(get("/api/mobile/apps")

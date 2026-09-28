@@ -27,9 +27,11 @@ public interface WorkflowJobMapper extends BaseMapper<WorkflowJob> {
         WHERE job.id = candidate.id
         RETURNING job.*
         """)
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     WorkflowJob claimDue(@Param("workerId") String workerId);
 
     @Select("SELECT * FROM t_workflow_job WHERE id = #{id} FOR UPDATE")
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     WorkflowJob selectForUpdate(@Param("id") Long id);
 
     @Select("""

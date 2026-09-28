@@ -434,12 +434,18 @@ export default function ContactsPage() {
       if (!result.rows.length) { msg.warning('CSV 中没有可导入的成员'); return; }
 
       const imported = await request<{
-        successCount: number; failedCount: number; defaultPassword: string;
+        successCount: number; failedCount: number; passwordResetRequired: boolean;
       }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
       const { successCount, failedCount } = imported;
       if (successCount) qc.invalidateQueries({ queryKey: ['users-page'] });
-      if (failedCount) msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
-      else msg.success(`已导入 ${successCount} 名成员，初始密码为 ${imported.defaultPassword}`);
+      // 只要建成了账号就得提醒重置密码：后端给的是随机且不返回的密码，这些人自己登不上。
+      // 部分成功时以前只报失败数，把这条盖掉了。
+      const resetHint = successCount ? '；请由管理员为新账号重置密码' : '';
+      if (failedCount) {
+        msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条${resetHint}`);
+      } else {
+        msg.success(`已导入 ${successCount} 名成员${resetHint}`);
+      }
     } catch (_error) {
       msg.error('批量导入失败');
     }
@@ -468,7 +474,9 @@ export default function ContactsPage() {
           <div className="ct-left-top">
             <Input prefix={<SearchOutlined />} placeholder="搜索部门" allowClear
               value={search} onChange={e => setSearch(e.target.value)} />
-            <Button aria-label="新建一级部门" icon={<PlusOutlined />} disabled={!access.canWriteDepartments}
+            {/* 这里只是"够不够格看到按钮"的近似：建一级部门后端还要求该能力具 ALL 数据范围
+                （DepartmentController 的 requireAllDataScope），而前端看不到范围，越范围时由后端返回 403。 */}
+            <Button aria-label="新建一级部门" icon={<PlusOutlined />} disabled={!access.canOrgDepartmentManage}
               onClick={() => { setDeptAddParentId(null); setDeptAddOpen(true); }} />
           </div>
           <div className="ct-tree-wrap">

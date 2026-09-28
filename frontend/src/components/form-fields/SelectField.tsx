@@ -1,6 +1,7 @@
 import { Input, Select } from 'antd';
 import { useEffect, useState } from 'react';
 import type { FieldType } from '../../registry/types';
+import { isDynamicOption, useDynamicOptions } from './dynamicOptions';
 import {
   customValuesFrom,
   InlineSelectOptions,
@@ -26,7 +27,8 @@ export const SelectField: FieldType = {
       { id: 'option_3', label: '选项3', value: 'option_3' },
     ],
   },
-  Component: ({ node, mode, value, onChange }) => {
+  Component: ({ node, mode, value, onChange, values, optionContext }) => {
+    // Hooks below always run: a node can switch between static and external options while editing.
     const options = visibleSelectOptions(node.props?.options);
     const allOptions = normalizeSelectOptions(node.props?.options);
     const displayStyle = normalizeSelectDisplayStyle(node.props?.displayStyle);
@@ -50,6 +52,10 @@ export const SelectField: FieldType = {
     const updateOther = (next: string) => {
       onChange?.(next.trim() ? next : undefined);
     };
+
+    if (isDynamicOption(node)) {
+      return <DynamicSelect node={node} mode={mode} value={value} onChange={onChange} values={values} optionContext={optionContext} />;
+    }
 
     return (
       <div data-field-id={node.id}>
@@ -157,3 +163,51 @@ export const SelectField: FieldType = {
     );
   },
 };
+
+function DynamicSelect({ node, mode, value, onChange, values, optionContext }: any) {
+  const dynamic = useDynamicOptions(node, values, optionContext, onChange);
+  const current = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
+  const isLevel = dynamic.stage === 'LEVEL';
+  const display = isLevel && dynamic.path.length ? `${dynamic.path.join(' / ')} / ` : '';
+  // 与静态下拉一致：只认字段自己的设置。
+  const searchable = node.props?.showSearch === true;
+  const clearable = node.props?.allowClear !== false;
+  return (
+    <div data-field-id={node.id}>
+      <div style={{ display: 'block', marginBottom: 4 }}>{node.label}{node.props?.required ? ' *' : ''}</div>
+      {mode === 'readonly' ? <div className="form-select-readonly">{dynamic.labels.find((item) => item.value === String(current))?.label ?? current ?? '未填写'}</div> : (
+        <Select
+          disabled={mode !== 'runtime-fill' || dynamic.loading}
+          loading={dynamic.loading}
+          value={isLevel ? undefined : current}
+          options={[...dynamic.labels, ...dynamic.options].filter((item, index, all) => all.findIndex((candidate) => candidate.value === item.value) === index)
+            .map((item) => ({ value: item.value, label: `${display}${item.label}` }))}
+          placeholder={dynamic.error ?? (isLevel ? `请选择第 ${dynamic.path.length + 1} 级` : node.props?.placeholder)}
+          showSearch={searchable}
+          filterOption={false}
+          onSearch={searchable ? dynamic.search : undefined}
+          onChange={(next: string) => {
+            if (dynamic.advance(next)) onChange?.(next);
+          }}
+          onClear={() => { dynamic.reset(); onChange?.(undefined); }}
+          allowClear={clearable}
+          // 滚到底继续取下一页，替代原来的「更多选项」按钮。
+          onPopupScroll={(event: any) => {
+            const list = event.currentTarget as HTMLElement;
+            if (list.scrollHeight - list.scrollTop - list.clientHeight < 48) dynamic.loadMore();
+          }}
+          popupRender={(menu: any) => (
+            <>
+              {menu}
+              {dynamic.loadingMore
+                ? <div style={{ padding: '8px 12px', color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>加载中…</div>
+                : null}
+            </>
+          )}
+          style={{ width: '100%' }}
+        />
+      )}
+      {dynamic.path.length > 0 ? <button type="button" onClick={dynamic.back}>上一步</button> : null}
+    </div>
+  );
+}

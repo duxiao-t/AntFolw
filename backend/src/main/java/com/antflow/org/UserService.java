@@ -14,6 +14,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.HashSet;
@@ -22,13 +23,12 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
-    public static final String DEFAULT_IMPORTED_PASSWORD = "ant.design";
-
     private final UserMapper userMapper;
     private final UserRoleMapper userRoleMapper;
     private final RoleMapper roleMapper;
@@ -42,15 +42,8 @@ public class UserService {
     private final AuditService auditService;
 
     @Transactional(rollbackFor = Exception.class)
-    public Long create(User u, List<Long> roleIds) {
-        String rawPassword = u.getPasswordHash() == null
-            ? DEFAULT_IMPORTED_PASSWORD : u.getPasswordHash();
-        return create(u, roleIds, rawPassword);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds, String rawPassword) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         List<Long> normalizedRoleIds = new LinkedHashSet<>(roleIds == null ? List.of() : roleIds)
             .stream().toList();
         if (!normalizedRoleIds.isEmpty() && !authorizationService.isAdmin()) {
@@ -62,7 +55,7 @@ public class UserService {
         validateDisplayName(u.getDisplayName());
         validateDepartment(u.getDeptId());
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, u.getDeptId());
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, u.getDeptId());
         validateManager(null, u.getManagerId(), u.getDeptId());
         validatePassword(rawPassword);
         u.setEmployeeNo(formalNumberService.employeeNo(u.getEmployeeNo(), null));
@@ -77,7 +70,10 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public void setRoles(Long userId, List<Long> roleIds) {
-        authorizationService.requireAdmin();
+        // 与端点能力对齐（原来是 requireAdmin()，导致拿到 security:user_role:manage 的委派管理员
+        // 每个操作都吃 403）。但"能改角色"不能等于"能给自己发管理员"，所以下面单加一道：
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.SECURITY_USER_ROLE_MANAGE);
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -87,6 +83,10 @@ public class UserService {
         validateUserRoles(normalizedRoleIds);
         List<String> currentRoles = rolesOf(userId);
         boolean assigningAdmin = normalizedRoleIds.stream().anyMatch(this::isAdminRole);
+        // 动到 admin 角色（授出去或收回来）仍然必须是超管。
+        if (assigningAdmin || currentRoles.contains("admin")) {
+            authorizationService.requireAdmin();
+        }
         if (currentRoles.contains("admin") || assigningAdmin) {
             lockAdminRole();
             user = userMapper.selectById(userId);
@@ -111,7 +111,7 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         User u = userMapper.selectById(userId);
         if (u == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -121,7 +121,7 @@ public class UserService {
             throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
         }
         authorizationService.requireCurrentDataScope(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, u.getDeptId());
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, userId, u.getDeptId());
         if (!authorizationService.isAdmin() && authorizationService.currentUserId() == userId) {
             throw new BizException("SELF_USER_PROTECTED", "不能删除当前登录账号");
         }
@@ -247,16 +247,76 @@ public class UserService {
             .toList();
     }
 
-    public List<User> listAuthorized(String keyword, Long departmentId) {
+    /**
+     * 「部门领导」的范围定义：职务里带这个称谓。称谓改了只需改这一处。
+     * ponytail: 按职务字符串判定，不是 t_department.leader_id 关系；若 HR 改用别的称谓，改这里一个常量。
+     */
+    public static final String LEADER_TITLE = "部长";
+
+    /**
+     * 用户候选的收窄条件。各条件相互独立、都可为空；选择器一次只用一个维度，
+     * 但它们能自由组合（例如「研发部的部长」= departmentId + position）。
+     * 用 record 而不是一排位置参数：{@code includeDescendants} 与 {@code leaderOnly}
+     * 都是 boolean，排在一起极易传错。
+     *
+     * <p>下面两个方法是「怎么用这些条件」的唯一实现——桌面 /api/users 与移动端选择器
+     * 都调它们，免得两处各写一份慢慢漂移。
+     */
+    public record UserQuery(String keyword, Long departmentId, boolean includeDescendants,
+                            boolean leaderOnly, String position, List<Long> userIds) {
+        public static UserQuery of(String keyword, Long departmentId, Boolean includeDescendants,
+                                   Boolean leaderOnly, String position, List<Long> userIds) {
+            return new UserQuery(keyword, departmentId, Boolean.TRUE.equals(includeDescendants),
+                Boolean.TRUE.equals(leaderOnly), position, userIds);
+        }
+
+        /** 职务过滤的最终值：自由文本优先，否则取「部门领导」的预设称谓；都没有则不过滤。 */
+        public String positionFilter(String leaderTitle) {
+            if (position != null && !position.isBlank()) {
+                return position.trim();
+            }
+            return leaderOnly ? leaderTitle : null;
+        }
+
+        /** 部门收窄最终展开成的 id 集合；返回 null 表示不按部门收窄。 */
+        public Collection<Long> resolveDepartments(DepartmentMapper mapper) {
+            if (departmentId == null) {
+                return null;
+            }
+            return includeDescendants ? mapper.subtreeIds(departmentId) : List.of(departmentId);
+        }
+    }
+
+    public List<User> listAuthorized(UserQuery request) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_READ);
         QueryWrapper<User> query = new QueryWrapper<>();
-        if (keyword != null && !keyword.isBlank()) {
-            query.and(wrapper -> wrapper.like("username", keyword.trim())
-                .or().like("display_name", keyword.trim())
-                .or().like("employee_no", keyword.trim()));
+        if (request.keyword() != null && !request.keyword().isBlank()) {
+            String keyword = request.keyword().trim();
+            query.and(wrapper -> wrapper.like("username", keyword)
+                .or().like("display_name", keyword)
+                .or().like("employee_no", keyword));
         }
-        if (departmentId != null) {
-            query.eq("dept_id", departmentId);
+        // 显式名单：候选只限这些人。仍会被下面的数据范围再过滤一次。
+        // 注意「给了名单但是空的」= 明确要求"零候选"，不能当成"没给过滤"——否则设计器把
+        // "指定人员"清空后，本该没人可选的字段会退化成全员可选。
+        if (request.userIds() != null) {
+            if (request.userIds().isEmpty()) {
+                return List.of();
+            }
+            query.in("id", request.userIds());
+        }
+        Collection<Long> departments = request.resolveDepartments(departmentMapper);
+        if (departments != null) {
+            if (departments.isEmpty()) {
+                return List.of();
+            }
+            query.in("dept_id", departments);
+        }
+        // 「部门领导」只是职务过滤的一个预设值，两者共用一条路径。
+        String positionFilter = request.positionFilter(LEADER_TITLE);
+        if (positionFilter != null) {
+            // LIKE 自动排除职务为空的用户——没有职务的人本来就不是领导。
+            query.like("position", positionFilter);
         }
         List<User> users = userMapper.selectList(query).stream()
             .filter(user -> authorizationService.inCurrentDataScope(
@@ -312,7 +372,7 @@ public class UserService {
 
     public List<User> managerCandidates(Long departmentId, Long excludedUserId, String keyword) {
         authorizationService.requireManageableDepartment(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
         Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);
         if (department == null) {
             throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
@@ -390,10 +450,36 @@ public class UserService {
             && rolesOf(user.getId()).contains("admin") && activeAdminCount() <= 1) {
             throw new BizException("LAST_ADMIN_PROTECTED", "至少保留一个启用的管理员");
         }
+        if ("ACTIVE".equals(user.getStatus()) && "DISABLED".equals(status)
+            && lastActiveFormMaintainer(user.getId())) {
+            throw new BizException("LAST_FORM_MAINTAINER_PROTECTED",
+                "该用户是部分表单的最后一名有效维护人，请先转交维护职责");
+        }
         user.setStatus(status);
         if (!"ACTIVE".equals(status)) {
             authSessionService.revokeAll(user.getId());
         }
+    }
+
+    private boolean lastActiveFormMaintainer(Long userId) {
+        Boolean result = jdbcTemplate.queryForObject("""
+            SELECT EXISTS (
+              SELECT 1
+              FROM t_form_maintainer own_maintenance
+              JOIN t_form_definition form
+                ON form.id = own_maintenance.form_def_id AND form.deleted = 0
+              WHERE own_maintenance.user_id = ?
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM t_form_maintainer other_maintenance
+                  JOIN t_user other_user ON other_user.id = other_maintenance.user_id
+                  WHERE other_maintenance.form_def_id = own_maintenance.form_def_id
+                    AND other_maintenance.user_id <> ?
+                    AND other_user.status = 'ACTIVE'
+                )
+            )
+            """, Boolean.class, userId, userId);
+        return Boolean.TRUE.equals(result);
     }
 
     public void authorizationChanged(Long userId) {
@@ -404,7 +490,7 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public User update(Long userId, Map<String, Object> body) {
-        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_WRITE);
+        authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_MANAGE);
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -417,7 +503,7 @@ public class UserService {
             throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
         }
         authorizationService.requireCurrentDataScope(
-            com.antflow.authz.PermissionCodes.ORG_USER_WRITE, userId, user.getDeptId());
+            com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, userId, user.getDeptId());
         Long originalDepartmentId = user.getDeptId();
         if (body.containsKey("status") && rolesOf(userId).contains("admin")) {
             lockAdminRole();
@@ -439,7 +525,7 @@ public class UserService {
                 ? null : ((Number) body.get("deptId")).longValue();
             validateDepartment(departmentId);
             authorizationService.requireManageableDepartment(
-                com.antflow.authz.PermissionCodes.ORG_USER_WRITE, departmentId);
+                com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
             user.setDeptId(departmentId);
         }
         if (body.containsKey("managerId")) {
@@ -473,7 +559,12 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public User setWecomLoginAccess(Long userId, boolean enabled) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.ORG_USER_CREDENTIALS_MANAGE);
+        // 改管理员的登录方式等于管理员的账号安全，委派的凭据管理员不能碰。
+        if (rolesOf(userId).contains("admin")) {
+            authorizationService.requireAdmin();
+        }
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -533,7 +624,12 @@ public class UserService {
 
     @Transactional(rollbackFor = Exception.class)
     public void resetPassword(Long userId, String rawPassword) {
-        authorizationService.requireAdmin();
+        authorizationService.requirePermission(
+            com.antflow.authz.PermissionCodes.ORG_USER_CREDENTIALS_MANAGE);
+        // 重置管理员的密码＝直接接管管理员账号，委派的凭据管理员不能碰。
+        if (rolesOf(userId).contains("admin")) {
+            authorizationService.requireAdmin();
+        }
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
@@ -542,6 +638,26 @@ public class UserService {
         user.setPasswordHash(encoder.encode(rawPassword));
         userMapper.updateById(user);
         authSessionService.revokeAll(userId);
+    }
+
+    /**
+     * 自助修改密码：校验原密码 → 复用同一条长度策略 → 下线除当前会话之外的其它设备。
+     * 管理员重置他人密码走 {@link #resetPassword}，那条路会踢掉全部会话。
+     */
+    @Transactional
+    public void changeOwnPassword(long userId, UUID currentSessionId,
+                                  String currentPassword, String nextPassword) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("NOT_FOUND", "用户不存在");
+        }
+        if (currentPassword == null || !encoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new BizException("PASSWORD_INCORRECT", "原密码不正确");
+        }
+        validatePassword(nextPassword);
+        user.setPasswordHash(encoder.encode(nextPassword));
+        userMapper.updateById(user);
+        authSessionService.revokeAllExcept(userId, currentSessionId);
     }
 
     private void validatePassword(String rawPassword) {
@@ -595,6 +711,7 @@ public class UserService {
 
     private boolean hasWorkflowReferences(Long userId) {
         return countUserReferences("SELECT COUNT(*) FROM t_form_definition WHERE created_by = ?", userId) > 0
+            || countUserReferences("SELECT COUNT(*) FROM t_form_maintainer WHERE user_id = ?", userId) > 0
             || countUserReferences("SELECT COUNT(*) FROM t_form_data WHERE created_by = ?", userId) > 0
             || countUserReferences("SELECT COUNT(*) FROM t_process_definition WHERE created_by = ?", userId) > 0
             || countUserReferences("SELECT COUNT(*) FROM t_process_instance WHERE started_by = ?", userId) > 0

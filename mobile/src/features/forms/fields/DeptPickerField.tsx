@@ -60,7 +60,8 @@ export function DeptPickerField(props: MobileFieldProps) {
   useEffect(() => {
     if (!state.open) return;
     let active = true;
-    setState((current) => ({ ...current, loading: true }));
+    // 飞行期先清空：旧候选留在列表里仍可点选（同 UserPickerField）。
+    setState((current) => ({ ...current, loading: true, results: [] }));
     searchMobileDepartments(endpoint, state.keyword)
       .then((results) => {
         if (active) setState((current) => ({ ...current, loading: false, results }));

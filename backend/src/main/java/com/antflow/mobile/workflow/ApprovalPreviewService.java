@@ -97,7 +97,7 @@ public class ApprovalPreviewService {
         if (form == null || !PUBLISHED.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
-        authorizationService.requireFormAction(form.getId(), PermissionCodes.FORM_RUNTIME_READ);
+        authorizationService.requireFormUse(form.getId());
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         if (process == null) return null;
         processDefinitionService.requireNodeFallbackPolicy(process.getProcess());

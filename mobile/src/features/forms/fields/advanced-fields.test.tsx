@@ -190,6 +190,42 @@ describe('advanced mobile fields', () => {
     expect(screen.getByText('研发部 · 工号 000101')).toBeInTheDocument();
   });
 
+  it('候选查询飞行期间先清空旧结果（否则会点中上一个关键字的人）', async () => {
+    const user = userEvent.setup();
+    // 用对象属性而不是 let 变量存 resolve：TS 的控制流分析看不到 Promise executor 里的赋值，
+    // 直接写 `let f: (() => void) | null = null` 会让调用点被收窄成 null（tsc -b 报 TS2349）。
+    const gateControl: { release?: () => void } = {};
+    const gate = new Promise<void>((resolve) => { gateControl.release = resolve; });
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = decodeURIComponent(String(input));
+      if (url.includes('keyword=李四')) {
+        await gate;
+        return jsonResponse([{ id: 1002, displayName: '李四', department: '财务部',
+          employeeNo: '000102' }]);
+      }
+      return jsonResponse([{ id: 1001, displayName: '张三', department: '研发部',
+        employeeNo: '000101' }]);
+    });
+
+    render(
+      <UserPickerField
+        {...baseProps({ id: 'approver', type: 'user_picker', label: '审批人', props: {} },
+          null, vi.fn())}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '选择审批人' }));
+    expect(await screen.findByRole('option', { name: /张三/ })).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('搜索姓名或工号'), '李四');
+    // 旧候选不能还挂在列表里等着被点
+    await waitFor(() => expect(screen.queryByRole('option', { name: /张三/ }))
+      .not.toBeInTheDocument());
+
+    gateControl.release?.();
+    expect(await screen.findByRole('option', { name: /李四/ })).toBeInTheDocument();
+  });
+
   it('keeps multi-user selections across searches and enforces maxCount on confirm', async () => {
     const onValueChange = vi.fn();
     const users = {

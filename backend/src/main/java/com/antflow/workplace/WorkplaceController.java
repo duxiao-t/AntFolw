@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 /** The small, permission-aware read model used by the desktop operations home. */
 @RestController
@@ -42,13 +43,13 @@ public class WorkplaceController {
     private final UserMapper userMapper;
 
     @GetMapping("/overview")
+    @PreAuthorize("@authz.console('" + PermissionCodes.CONSOLE_ACCESS + "')")
     public Overview overview(
             @RequestParam(defaultValue = "1") int pendingPage,
             @RequestParam(defaultValue = "8") int pendingSize,
             @RequestParam(defaultValue = "1") int recentPage,
             @RequestParam(defaultValue = "8") int recentSize) {
-        authorizationService.requirePermission(PermissionCodes.PAGE_WORKPLACE);
-        authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_READ);
+        authorizationService.requirePermission(PermissionCodes.CONSOLE_ACCESS);
         long userId = PrincipalHolder.current().orElseThrow().userId();
         boolean canReadInstances = authorizationService.hasPermission(
             PermissionCodes.WORKFLOW_INSTANCE_READ);
@@ -71,7 +72,7 @@ public class WorkplaceController {
         boolean admin = authorizationService.isAdmin();
         List<ProcessInstance> recentInstances = instanceMapper.selectInstancePage(
             userId, admin, canSeeTasks, canReadInstances, "authorized", null, null, null,
-            safeRecentSize, pageOffset(safeRecentPage, safeRecentSize));
+            null, null, safeRecentSize, pageOffset(safeRecentPage, safeRecentSize));
         Set<Long> pendingInstanceIds = pendingTasks.stream().map(TaskEntity::getProcInstId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         List<ProcessInstance> pendingInstances = pendingInstanceIds.isEmpty() ? List.of()

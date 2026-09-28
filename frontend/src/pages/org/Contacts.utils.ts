@@ -201,9 +201,25 @@ export function parseMembersCsv(content: string, deptId: number): MemberCsvParse
   return { rows: errors.length ? [] : rows, errors };
 }
 
+/** 会被 Excel 当公式执行的起始字符（前导空白也算）。 */
+const FORMULA_PREFIX = /^\s*[=+\-@]/;
+
 function escapeCsvCell(value: string): string {
-  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
+  // 前导空白/控制字符 + `=+-@` 会被 Excel 当公式执行。\s 已覆盖真正会被当触发器的 \t \r，
+  // 原来还写了 \u0000-\u001f 的区段，Biome 的 noControlCharactersInRegex 不接受，去掉不影响防护。
+  const safe = FORMULA_PREFIX.test(value) ? `'${value}` : value;
+  if (/[",\r\n]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
+  return safe;
+}
+
+/**
+ * 与 escapeCsvCell 对称：把我们自己加的那个前导撇号去掉。
+ * 不这么做的话「导出 → 导入」回来值就变了（`=a` 变成 `'=a`），导出的文件不能原样导回。
+ */
+function unescapeCsvCell(value: string): string {
+  return value.startsWith("'") && FORMULA_PREFIX.test(value.slice(1))
+    ? value.slice(1)
+    : value;
 }
 
 export function formatGender(value?: string): string {
@@ -256,5 +272,5 @@ function parseCsv(content: string): string[][] {
 
   row.push(cell);
   rows.push(row);
-  return rows;
+  return rows.map((cells) => cells.map(unescapeCsvCell));
 }

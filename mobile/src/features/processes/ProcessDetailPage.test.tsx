@@ -219,11 +219,8 @@ describe('ProcessDetailPage', () => {
   });
 
   it('renders media previews inside the readonly form', async () => {
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: vi.fn(() => 'blob:media'),
-      revokeObjectURL: vi.fn(),
-    });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:media');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     setupFetch({
       detail: {
         ...INSTANCE_DETAIL,

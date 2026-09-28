@@ -2,8 +2,46 @@ import { RightOutline, UserOutline } from 'antd-mobile-icons';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { MobileFieldProps } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
-import { fetchMobileUser, searchMobileUsers, type MobilePickerUser } from '../files.api';
+import {
+  fetchMobileUser,
+  searchMobileUsers,
+  type MobilePickerUser,
+  type MobileUserScope,
+} from '../files.api';
 import { MobileSelectionPopup } from './MobileSelectionPopup';
+
+/**
+ * 设计器给这个字段配的候选范围 → 查询参数。映射与桌面 `form-fields/UserPickerField.tsx`
+ * 里那段一一对应——两端参数名相同，改一边就要改另一边。
+ *
+ * 只收原始值（不收 node 对象）是为了能直接进 useEffect 的依赖数组：
+ * 每次都新建的对象会让下拉反复重新请求。
+ */
+function userScope(
+  scopeType: unknown,
+  scopeDeptId: unknown,
+  scopePosition: unknown,
+  scopeUserIds: string,
+): MobileUserScope {
+  if (scopeType === 'department' && scopeDeptId) {
+    return { deptId: Number(scopeDeptId), includeDescendants: true };
+  }
+  if (scopeType === 'position' && String(scopePosition ?? '').trim()) {
+    return { position: String(scopePosition).trim() };
+  }
+  if (scopeType === 'leader') {
+    return { leaderOnly: true };
+  }
+  if (scopeType === 'user' && scopeUserIds) {
+    return { scopeType: 'user', userIds: scopeUserIds.split(',').map(Number) };
+  }
+  // 指定人员但名单是空的：必须让服务端知道「这是零候选」，不能什么都不发——那会被当成
+  // "没配范围"，候选退化成全员。
+  if (scopeType === 'user') {
+    return { scopeType: 'user' };
+  }
+  return {};
+}
 
 type PickerState = {
   open: boolean;
@@ -53,11 +91,19 @@ export function UserPickerField(props: MobileFieldProps) {
     return () => { active = false; };
   }, [endpoint, state.selectedIds]);
 
+  const scopeType = props.node.props?.scopeType;
+  const scopeDeptId = props.node.props?.scopeDeptId;
+  const scopePosition = props.node.props?.scopePosition;
+  const scopeUserIds = Array.isArray(props.node.props?.scopeUserIds)
+    ? (props.node.props.scopeUserIds as number[]).join(',')
+    : '';
   useEffect(() => {
     if (!state.open) return;
     let active = true;
-    setState((current) => ({ ...current, loading: true }));
-    searchMobileUsers(endpoint, state.keyword)
+    // 飞行期先清空：旧的候选还留在列表里就能点中一个"上一个关键字"的人。
+    setState((current) => ({ ...current, loading: true, results: [] }));
+    searchMobileUsers(endpoint, state.keyword,
+      userScope(scopeType, scopeDeptId, scopePosition, scopeUserIds))
       .then((results) => {
         if (active) setState((current) => ({ ...current, loading: false, results }));
       })
@@ -65,7 +111,7 @@ export function UserPickerField(props: MobileFieldProps) {
         if (active) setState((current) => ({ ...current, loading: false, results: [] }));
       });
     return () => { active = false; };
-  }, [endpoint, state.keyword, state.open]);
+  }, [endpoint, state.keyword, state.open, scopeType, scopeDeptId, scopePosition, scopeUserIds]);
 
   const selectedUsers = state.selectedIds.map((id) => state.users[id] ?? fallbackUser(id));
   const readonly = props.mode === 'readonly';
@@ -257,8 +303,10 @@ function fallbackUser(id: number): MobilePickerUser {
 
 function identityMeta(user: MobilePickerUser | null | undefined, id: number | null) {
   const department = user?.department || '未设置部门';
-  const employeeNo = user?.employeeNo || user?.username || (id == null ? '未设置' : String(id));
-  return `${department} · 工号 ${employeeNo}`;
+  // 有工号才写「工号」。此前缺工号时拿账号冒充，既误导又很长（账号往往是一长串），
+  // 现在退回用户 ID，语义正确也不会撑破这一行。
+  const label = user?.employeeNo ? `工号 ${user.employeeNo}` : id == null ? null : `#${id}`;
+  return label ? `${department} · ${label}` : department;
 }
 
 function identityText(user: MobilePickerUser | null | undefined, id: number | null) {

@@ -21,6 +21,7 @@
         <springdoc.version>2.6.0</springdoc.version>
         <bucket4j.version>8.10.0</bucket4j.version>
         <minio.version>9.0.3</minio.version>
+        <poi.version>5.4.1</poi.version>
         <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
     <dependencies>
@@ -48,6 +49,7 @@
         <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId><version>${springdoc.version}</version></dependency>
         <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j-core</artifactId><version>${bucket4j.version}</version></dependency>
         <dependency><groupId>io.minio</groupId><artifactId>minio</artifactId><version>${minio.version}</version></dependency>
+        <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><version>${poi.version}</version></dependency>
         <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><scope>provided</scope></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
         <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
@@ -56,7 +58,34 @@
         <dependency><groupId>org.testcontainers</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
     </dependencies>
     <build>
+        <resources>
+            <resource><directory>src/main/resources</directory></resource>
+            <resource>
+                <directory>../frontend/config</directory>
+                <targetPath>antflow</targetPath>
+                <includes><include>page-capabilities.json</include></includes>
+            </resource>
+        </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <spring.datasource.password>antflow-test</spring.datasource.password>
+                        <antflow.jwt.secret>antflow-test-jwt-secret-0123456789abcdef</antflow.jwt.secret>
+                        <!-- 引导口令刻意不在这里设：surefire 的系统属性会盖掉调用方用环境变量传进来的值，
+                             连外部测试库（ANTFLOW_TEST_POSTGRES_URL）的种子账号都会被改成这个公开口令。
+                             需要它的测试自己在 @SpringBootTest(properties=...) 里给。 -->
+                        <antflow.audit.archive-access-key>antflow-test</antflow.audit.archive-access-key>
+                        <antflow.audit.archive-secret-key>antflow-test-secret</antflow.audit.archive-secret-key>
+                        <antflow.audit.archive-encryption-secret>antflow-test-audit-encryption-secret</antflow.audit.archive-encryption-secret>
+                        <antflow.mobile.files.minio.access-key>antflow-test</antflow.mobile.files.minio.access-key>
+                        <antflow.mobile.files.minio.secret-key>antflow-test-secret</antflow.mobile.files.minio.secret-key>
+                        <antflow.wecom.encryption-key>antflow-test-integration-encryption-key</antflow.wecom.encryption-key>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

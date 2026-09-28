@@ -122,6 +122,17 @@ beforeEach(() => {
 });
 
 describe('FormFillPage', () => {
+  it('explains when the current account no longer has form usage access', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      code: 'NOT_FOUND', message: 'form not found',
+    }), { status: 404, headers: { 'content-type': 'application/json' } }));
+
+    renderForm();
+
+    expect(await screen.findByRole('heading', { name: '表单不可用' })).toBeInTheDocument();
+    expect(screen.getByText(/当前没有此表单的使用权限/)).toBeInTheDocument();
+  });
+
   it('loads a form, validates required fields and creates a server draft', async () => {
     const { queryClient, router } = renderForm();
     queryClient.setQueryData(queryKeys.drafts, []);
@@ -145,6 +156,12 @@ describe('FormFillPage', () => {
         && String((init as RequestInit).body).includes('回家探亲'),
       )).toBe(true);
     });
+    // 保存草稿必须带幂等键，否则双击会落两份草稿。
+    const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const draftPost = calls.find(([url, init]) =>
+      String(url).includes('/api/mobile/drafts') && (init as RequestInit).method === 'POST');
+    const draftInit = (draftPost?.[1] ?? {}) as RequestInit;
+    expect(new Headers(draftInit.headers).get('Idempotency-Key')).toBeTruthy();
     expect(await screen.findByText((text) => text.includes('草稿已保存'))).toBeInTheDocument();
     await waitFor(() => expect(router.state.location.search).toBe('?draftId=102'));
     expect(queryClient.getQueryState(queryKeys.drafts)?.isInvalidated).toBe(true);

@@ -25,6 +25,7 @@ if (args.compare) {
 }
 
 const base = String(args.base ?? 'http://127.0.0.1:18080');
+const adminPassword = process.env.ANTFLOW_WRITE_LOAD_ADMIN_PASSWORD ?? 'write-load-admin-only';
 const poolSize = numberArg('pool', 10);
 const quick = Boolean(args.quick);
 const levels = quick ? [1, 4] : [1, 5, 10, 20, 40];
@@ -60,9 +61,9 @@ console.log(JSON.stringify({ poolSize, mode: report.mode, acceptance,
   output: args.output ?? null }));
 
 async function setupFixture() {
-  const admin = await login('admin', 'ant.design');
+  const admin = await login('admin', adminPassword);
   const roles = await expectOk(await request('/api/roles', { token: admin }), 'list roles');
-  const userRole = roles.json.find((role) => role.code === 'user');
+  const userRole = roles.json.find((role) => role.code === 'employee');
   assert(userRole?.id, 'seed user role not found');
   const password = 'LoadTest1!';
   const users = {};

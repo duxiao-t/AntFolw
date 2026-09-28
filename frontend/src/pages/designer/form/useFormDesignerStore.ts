@@ -11,10 +11,16 @@ export type DisplayRuleUpdate = {
 
 type State = {
   schema: SchemaNode[];
+  /**
+   * 当前这份 schema 属于哪张表单（服务端加载进来的，或被保存过）。
+   * 用来判断"store 里是这张表单的内容"还是"上一张表单留下的"——
+   * 向导和设计器都靠它决定要不要重新从服务端回填。
+   */
+  loadedFormId: string | null;
   selectedId: string | null;
   history: { past: SchemaNode[][]; future: SchemaNode[][] };
   // SILENT — loading from server must NOT pollute the undo stack.
-  loadSchema(next: SchemaNode[]): void;
+  loadSchema(next: SchemaNode[], formId?: string | null): void;
   resetSchema(next: SchemaNode[]): void;
   addNode(parentId: string | null, type: string, defaultProps: any): string;
   insertNode(
@@ -68,13 +74,15 @@ function isSameSchema(a: SchemaNode[], b: SchemaNode[]): boolean {
 
 export const useFormDesignerStore = create<State>((set) => ({
   schema: [],
+  loadedFormId: null,
   selectedId: null,
   history: { past: [], future: [] },
 
-  loadSchema: (next) =>
+  loadSchema: (next, formId) =>
     set((s) => ({
       ...s,
       schema: next,
+      loadedFormId: formId === undefined ? s.loadedFormId : formId,
       history: { past: [], future: [] },
       selectedId: null,
     })),

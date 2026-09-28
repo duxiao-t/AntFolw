@@ -50,6 +50,13 @@ public class SecurityConfig {
     }
 
     @Bean
+    public FilterRegistrationBean<IdempotencyFilter> idempotencyFilterRegistration() {
+        FilterRegistrationBean<IdempotencyFilter> registration = new FilterRegistrationBean<>(idempotencyFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
     public SecurityFilterChain filter(HttpSecurity http) throws Exception {
         return http
             .csrf(AbstractHttpConfigurer::disable)

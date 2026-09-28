@@ -77,7 +77,7 @@ public class WecomAppService implements NotificationListener {
     }
 
     public AccessInfo accessInfo() {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         return accessInfo(authProperties.publicBaseUri());
     }
 
@@ -144,7 +144,7 @@ public class WecomAppService implements NotificationListener {
     }
 
     public MobileFileDto importMedia(String mediaId, String mediaType) {
-        authorization.requirePermission(PermissionCodes.FILE_UPLOAD);
+        authorization.requirePermission(PermissionCodes.FILE_ATTACHMENT_UPLOAD);
         if (mediaId == null || mediaId.isBlank() || mediaId.length() > 512) {
             throw new BizException("WECOM_MEDIA_INVALID", "企业微信临时素材 ID 无效");
         }
@@ -160,7 +160,7 @@ public class WecomAppService implements NotificationListener {
     }
 
     public void sendTestMessage(long companyId) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         long userId = authorization.currentUserId();
         Recipient recipient = recipient(userId, companyId);
         if (recipient == null) throw new BizException("WECOM_USER_NOT_MAPPED", "当前管理员尚未同步到该企业微信通讯录");
@@ -170,7 +170,7 @@ public class WecomAppService implements NotificationListener {
     }
 
     public DeliveryStatus deliveryStatus(long companyId) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         return jdbc.query("""
             SELECT count(*) FILTER (WHERE delivery.status IN ('PENDING', 'RUNNING')),
                    count(*) FILTER (WHERE delivery.status = 'DEAD'),
@@ -183,7 +183,7 @@ public class WecomAppService implements NotificationListener {
     }
 
     public void retryDead(long companyId) {
-        authorization.requirePermission(PermissionCodes.ORG_COMPANY_MANAGE);
+        authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         jdbc.update("""
             UPDATE t_wecom_message_delivery delivery SET status = 'PENDING', attempts = 0,
                 next_attempt_at = now(), last_error = NULL

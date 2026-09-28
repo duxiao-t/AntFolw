@@ -39,6 +39,7 @@ export default function UserPage() {
               username: vals.username,
               displayName: vals.displayName,
               email: vals.email,
+              password: vals.password,
               deptId: vals.deptId,
               roleIds: vals.roleIds,
             });
@@ -48,9 +49,10 @@ export default function UserPage() {
           <ProFormText name="username" label="用户名" rules={[{ required: true }]} />
           <ProFormText name="displayName" label="显示名" rules={[{ required: true }]} />
           <ProFormText name="email" label="邮箱" />
+          <ProFormText.Password name="password" label="初始密码"
+            rules={[{ required: true }, { min: 8, max: 64 }]} />
           <ProFormSelect name="roleIds" label="角色" mode="multiple"
             options={(roles.data ?? []).map((r: any) => ({ value: r.id, label: r.name }))} />
-          <p style={{ color: '#888' }}>注：默认密码为 ant.design，仅用于 MVP 演示。</p>
         </ModalForm>,
       ]}
     />

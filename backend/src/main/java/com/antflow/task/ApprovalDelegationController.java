@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 /** Own-user leave delegation settings; new tasks resolve the agent at node activation. */
 @RestController
@@ -31,6 +32,7 @@ public class ApprovalDelegationController {
     private final AuditService audit;
 
     @GetMapping
+    @PreAuthorize("@authz.consoleEntry()")
     public List<Delegation> list() {
         long userId = principal();
         return jdbc.query("""
@@ -44,6 +46,7 @@ public class ApprovalDelegationController {
     }
 
     @PostMapping
+    @PreAuthorize("@authz.consoleEntry()")
     @Transactional
     public Map<String, Long> create(@RequestBody CreateRequest request) {
         long userId = principal();
@@ -93,6 +96,7 @@ public class ApprovalDelegationController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_TASK_DELEGATE + "')")
     @Transactional
     public void disable(@PathVariable long id) {
         long userId = principal();

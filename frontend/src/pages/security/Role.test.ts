@@ -1,53 +1,63 @@
 import { describe, expect, it } from 'vitest';
 import {
-  mergePermissionTreeSelection,
-  resolvePermissionSelection,
-} from './permissionDependencies';
+  CONSOLE_ENTRY,
+  PAGES,
+  accessKey,
+  firstAccessiblePath,
+  navToMenuData,
+  pageAllowed,
+} from '../registry';
 
-const permissions = [
-  { code: 'page.workplace', requiredPermissionCodes: ['workflow.task.read'] },
-  { code: 'workflow.task.read', requiredPermissionCodes: ['page.workplace'] },
-  {
-    code: 'workflow.task.approve',
-    requiredPermissionCodes: ['page.workplace', 'workflow.task.read'],
-  },
-];
+const readCodes = (key: string) =>
+  PAGES.find((page) => page.key === key)?.readCapabilities ?? [];
 
-describe('role permission dependencies', () => {
-  it('adds task prerequisites and cleans them after the last dependent action is removed', () => {
-    const selected = resolvePermissionSelection(
-      ['workflow.task.approve'], new Set(), new Set(), permissions,
-    );
-    expect([...selected.selected]).toEqual(expect.arrayContaining([
-      'workflow.task.approve', 'page.workplace', 'workflow.task.read',
-    ]));
-
-    const removed = resolvePermissionSelection(
-      ['page.workplace', 'workflow.task.read'], selected.selected,
-      selected.autoAdded, permissions,
-    );
-    expect([...removed.selected]).toEqual([]);
+describe('page registry', () => {
+  it('gates 通讯录 on all three read capabilities', () => {
+    expect(readCodes('org.contacts')).toEqual([
+      'org:company:read', 'org:department:read', 'org:user:read',
+    ]);
+    const page = PAGES.find((item) => item.key === 'org.contacts');
+    if (!page) throw new Error('org.contacts page is missing');
+    expect(pageAllowed(page, ['user'], ['org:company:read', 'org:user:read'])).toBe(false);
+    expect(pageAllowed(page, ['user'], [CONSOLE_ENTRY, ...readCodes('org.contacts')])).toBe(true);
   });
 
-  it('keeps valid pre-existing page and read permissions', () => {
-    const selected = resolvePermissionSelection(
-      ['page.workplace', 'workflow.task.read'],
-      new Set(['page.workplace', 'workflow.task.read']), new Set(), permissions,
-    );
-    expect([...selected.selected]).toEqual(expect.arrayContaining([
-      'page.workplace', 'workflow.task.read',
-    ]));
+  it('keeps 工作台 open for anyone who can enter the console', () => {
+    const workplace = PAGES.find((page) => page.key === 'workplace');
+    if (!workplace) throw new Error('workplace page is missing');
+    expect(workplace.readCapabilities).toEqual([]);
+    expect(pageAllowed(workplace, ['employee'], [CONSOLE_ENTRY])).toBe(true);
   });
 
-  it('preserves the other permission tree while checking several pages', () => {
-    const merged = mergePermissionTreeSelection(
-      ['page.workplace', 'page.approval.forms'],
-      new Set(['page.workplace', 'workflow.task.read', 'workflow.task.approve']),
-      new Set(['page.workplace', 'page.approval.forms']),
-    );
-    expect(merged).toEqual(expect.arrayContaining([
-      'page.workplace', 'page.approval.forms',
-      'workflow.task.read', 'workflow.task.approve',
-    ]));
+  it('grants every registered page to admin and derives stable access keys', () => {
+    PAGES.forEach((page) => {
+      expect(pageAllowed(page, ['admin'], [])).toBe(true);
+    });
+    expect(accessKey('security.user-permissions')).toBe('can_security_user_permissions');
+  });
+
+  it('returns the first accessible path in registry order', () => {
+    expect(firstAccessiblePath(['employee'], [CONSOLE_ENTRY])).toBe('/workplace');
+    // 工作台没有额外只读能力要求，因此只要能进管理端就排在第一位
+    expect(firstAccessiblePath(['auditor'], [CONSOLE_ENTRY, 'audit:event:read']))
+      .toBe('/workplace');
+  });
+
+  it('skips menu entries whose pageKey is unknown to this frontend build', () => {
+    const menu = navToMenuData([
+      {
+        pageKey: null, type: 'DIR', name: '权限与安全', icon: null,
+        requiredPermissions: null, sortOrder: 10,
+        children: [
+          { pageKey: 'security.roles', type: 'PAGE', name: '角色管理', icon: null,
+            requiredPermissions: null, sortOrder: 10, children: [] },
+          { pageKey: 'ghost.page', type: 'PAGE', name: '幽灵页', icon: null,
+            requiredPermissions: null, sortOrder: 20, children: [] },
+        ],
+      },
+    ]);
+
+    expect(menu).toHaveLength(1);
+    expect(menu[0].children?.map((item) => item.path)).toEqual(['/security/roles']);
   });
 });

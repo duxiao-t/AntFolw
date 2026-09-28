@@ -220,7 +220,7 @@ function setupFetch(formResponse: unknown = FORM_WITHOUT_SELF_SELECT, options: {
       if (url.includes('/api/mobile/tasks?')) {
         return jsonResponse({ items: [], hasMore: false });
       }
-      if (url.includes('/api/forms/data') && init?.method === 'POST') {
+      if (url.includes('/api/mobile/submissions') && init?.method === 'POST') {
         return jsonResponse({ dataId: 6001, businessNo: 'DIRECT-20260902-0001' });
       }
       return jsonResponse({});
@@ -700,7 +700,7 @@ describe('mobile form submit flow', () => {
     await waitFor(() => {
       const fetchMock = fetch as unknown as { mock: { calls: unknown[][] } };
       const directCalls = fetchMock.mock.calls.filter(([url, init]) =>
-        String(url).includes('/api/forms/data') && (init as RequestInit).method === 'POST');
+        String(url).includes('/api/mobile/submissions') && (init as RequestInit).method === 'POST');
       expect(directCalls).toHaveLength(1);
       const directCall = directCalls[0];
       if (!directCall) throw new Error('direct submit call missing');

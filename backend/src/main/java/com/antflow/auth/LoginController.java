@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import com.antflow.authz.AuthenticatedOnly;
+import com.antflow.authz.PublicEndpoint;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -27,6 +29,7 @@ public class LoginController {
     private final MobileBootstrapService mobileBootstrapService;
 
     @PostMapping("/login")
+    @PublicEndpoint
     public Map<String, Object> login(@RequestBody LoginReq body,
                                      @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
                                      HttpServletRequest request,
@@ -47,6 +50,7 @@ public class LoginController {
     }
 
     @PostMapping("/refresh")
+    @PublicEndpoint
     public Map<String, Object> refresh(
             @RequestHeader(name = "X-CSRF-Token", required = false) String csrfHeader,
             @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
@@ -61,6 +65,7 @@ public class LoginController {
     }
 
     @PostMapping("/logout")
+    @PublicEndpoint
     public ResponseEntity<Void> logout(
             @RequestHeader(name = "X-CSRF-Token", required = false) String csrfHeader,
             HttpServletRequest request, HttpServletResponse response) {
@@ -74,12 +79,14 @@ public class LoginController {
     }
 
     @GetMapping("/sessions")
+    @AuthenticatedOnly
     public List<AuthSessionService.DeviceSessionDto> sessions(HttpServletRequest request) {
         return sessionService.list(principal().userId(),
             cookie(request, sessionService.refreshCookieName()));
     }
 
     @DeleteMapping("/sessions/{id}")
+    @AuthenticatedOnly
     public ResponseEntity<Void> revokeSession(@PathVariable UUID id) {
         long userId = principal().userId();
         auditService.execute(() -> sessionService.revoke(userId, id),
@@ -125,6 +132,7 @@ public class LoginController {
     }
 
     @GetMapping("/me")
+    @AuthenticatedOnly
     public Map<String, Object> me() {
         var p = principal();
         return Map.of(

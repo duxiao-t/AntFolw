@@ -47,14 +47,12 @@ beforeEach(() => {
       return new Response(new Blob(['blob']), { status: 200 });
     }),
   );
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:preview'),
-    revokeObjectURL: vi.fn(),
-  });
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 

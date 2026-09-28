@@ -24,14 +24,11 @@ beforeEach(() => {
     }
     return jsonResponse({ message: 'not found' }, 404);
   }));
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:summary-media'),
-    revokeObjectURL: vi.fn(),
-  });
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:summary-media');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

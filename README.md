@@ -34,19 +34,15 @@ AntFlow 是一套自研审批平台，包含可视化表单设计、流程设计
 
 ### 1. 配置本地密钥
 
-`.env.docker.local` 包含密钥且不能提交。首次使用时先将它加入当前仓库的本地 Git 排除文件：
-
-```powershell
-Add-Content .git/info/exclude '.env.docker.local'
-```
-
-在仓库根目录创建 `.env.docker.local`，并把所有 `replace-with-*` 替换为独立的高强度随机值：
+`.env.docker.local` 已由仓库 `.gitignore` 排除。请在仓库根目录创建它，
+并把所有 `replace-with-*` 替换为独立的高强度随机值：
 
 ```dotenv
 POSTGRES_PASSWORD=replace-with-postgres-password
 MINIO_ROOT_USER=antflow-local
 MINIO_ROOT_PASSWORD=replace-with-minio-password
 JWT_SECRET=replace-with-at-least-32-random-characters
+ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD=replace-with-initial-admin-password
 AUDIT_ARCHIVE_ENCRYPTION_SECRET=replace-with-audit-encryption-secret
 ANTFLOW_INTEGRATION_ENCRYPTION_KEY=replace-with-integration-encryption-key
 ANTFLOW_PUBLIC_BASE_URL=https://approval.example.com
@@ -80,7 +76,7 @@ docker compose --env-file .env.docker.local ps
 - 桌面管理端：<http://127.0.0.1:7070/>
 - 移动端：<http://127.0.0.1:7070/mobile/login>
 - 后端健康检查：<http://127.0.0.1:7070/actuator/health>
-- 初始开发账号：`admin / ant.design`、`bob / ant.design`
+- 首次 Docker 启动：管理员为 `admin / ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD`；该变量只初始化待设置凭据，不会覆盖后续改密。
 
 首次启动会自动执行 Flyway 迁移。PostgreSQL 和 MinIO 分别使用 `antflow-local_postgres_data`、`antflow-local_minio_data` 持久卷。
 
@@ -120,8 +116,9 @@ bash scripts/test-docker.sh up
 ```
 
 脚本会对正式 PostgreSQL 做只读逻辑导出、复制 MinIO 对象到 `antflow-test_*` 卷，
-并在副本中禁用外部登录、企业微信、消息队列、备份和所有调度任务。测试入口为
-<http://10.0.0.250:17070>，不会占用正式环境的端口或卷。测试环境默认保留；仅在不再需要时执行：
+并在副本中禁用外部登录、企业微信、消息队列、备份和所有调度任务。测试入口默认是
+<http://127.0.0.1:17070>（需要别的对外地址就设 `ANTFLOW_TEST_HOST`），不会占用正式环境的
+端口或卷。测试环境默认保留；仅在不再需要时执行：
 
 ```bash
 bash scripts/test-docker.sh destroy
@@ -142,6 +139,7 @@ BACKUP_ENCRYPTION_SECRET='与备份时相同的密钥' backend/backup/restore-ba
 
 ```powershell
 Set-Location backend
+$env:SPRING_PROFILES_ACTIVE='local'
 $env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/antflow?stringtype=unspecified'
 $env:SPRING_DATASOURCE_USERNAME='postgres'
 $env:SPRING_DATASOURCE_PASSWORD='your-password'
@@ -150,6 +148,8 @@ $env:MINIO_ACCESS_KEY='minioadmin'
 $env:MINIO_SECRET_KEY='your-minio-password'
 mvn -B spring-boot:run
 ```
+
+`local` profile 会为待初始化的 `admin`、`bob` 开发账号设置 `ant.design`；非 `local` 环境不会启用该默认值。
 
 后端默认监听 `8080`，健康检查为 <http://localhost:8080/actuator/health>。
 
@@ -203,7 +203,7 @@ npm run test:e2e
 
 `check:enterprise` 依次执行 lint、单元测试、类型检查、生产构建和 bundle 预算检查。
 
-当前 CI 行为：后端测试和桌面端构建为阻断门禁；桌面端 Biome/TypeScript 检查暂为非阻断；移动端 lint、测试、构建和 bundle 预算均为阻断门禁。
+当前 CI 行为：后端测试、桌面端 TypeScript/测试/构建为阻断门禁；桌面端 Biome 暂为非阻断；移动端 lint、测试、构建和 bundle 预算均为阻断门禁。
 
 ## 写路径压测
 
