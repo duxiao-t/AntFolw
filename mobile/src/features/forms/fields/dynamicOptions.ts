@@ -158,6 +158,7 @@ export function useLinkedValue(props: MobileFieldProps) {
   const callback = useRef(props.onValueChange);
   callback.current = props.onValueChange;
   const contextKey = JSON.stringify(props.optionContext ?? {});
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 同 useDynamicOptions：用 contextKey 这类稳定键，不把 props.optionContext / props.values 的对象身份放进依赖，否则每次渲染都会重算联动值。
   useEffect(() => {
     if (!link?.fieldId || props.mode !== 'fill' || !props.optionContext) return;
     if (!loaded.current) {
