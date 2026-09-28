@@ -59,6 +59,13 @@
 
 ## 已知遗留
 
+- **前端测试环境关掉了"未处理错误"这层安全网**：`frontend/vitest.config.ts` 里开了
+  `dangerouslyIgnoreUnhandledErrors: true`，用来压掉 `MobileFormPreview` 那个真 iframe 在
+  happy-dom 下的 `DOMException`（详见配置里的注释与已排除的窄口径修法）。断言失败与测试内抛错
+  照旧会红，但异步未处理错误以后不会再让 Test 步骤失败；要换回窄口径只能给组件加 `live` 开关、
+  代价是 postMessage 握手的 DOM 级覆盖降级为纯函数级。`testTimeout` 同时从 15s 提到 30s
+  （`app.test.tsx` 在全量里跑到 18s+ 会超时，表现成"每轮红的文件都不一样"）。
+
 - 台账的 `table_list` 明细**没按列展开**（会改变视图粒度：从"一行 = 一个字段值"变成"一行 = 明细一格"）。当前折中是把明细原始 JSON 放进值白名单。
 - 存量角色权限三条（V40 丢 `data_scope`、create/design 合并、rename 无冲突保护）只记录不改；要修只能前滚一条对账迁移并配权限对账。
 - 陈旧候选只修了排查出的 4 处真问题（`OptionSources` 表单搜索、移动 `UserPickerField`/`DeptPickerField`/`dynamicOptions`）；桌面其余走 react-query 或已用 loading 禁用，属理论风险。
