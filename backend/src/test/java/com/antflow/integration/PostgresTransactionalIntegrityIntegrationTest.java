@@ -1046,6 +1046,93 @@ class PostgresTransactionalIntegrityIntegrationTest {
             "SELECT id FROM t_option_data_source_version WHERE source_id = ?", Long.class, sourceId);
     }
 
+    @Test
+    void importStoresTheNoteAndBumpsTheOptimisticVersion() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("note_" + UUID.randomUUID().toString().replace("-", ""));
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            int before = optionSourceService.detail(sourceId).source().version();
+
+            OptionSourceService.VersionView draft =
+                optionSourceService.importDraft(sourceId, null, "a\nb", null, "  新增 b  ");
+            assertThat(draft.note()).isEqualTo("新增 b");
+            // 导入把草稿整个换掉了（连 versionId 都换），必须递增 source.version：
+            // 否则导入前打开的旧页面还能拿旧 version 通过 replaceGrants/replaceForms 的乐观锁。
+            assertThat(optionSourceService.detail(sourceId).source().version()).isEqualTo(before + 1);
+
+            // 空白说明按没填处理（列上不存空串）。
+            assertThat(optionSourceService.importDraft(sourceId, null, "a", null, "   ").note()).isNull();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void republishingAPreviouslyDisabledVersionMakesItAvailableAgain() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("redis_" + UUID.randomUUID().toString().replace("-", ""));
+        long v2 = jdbcTemplate.queryForObject("INSERT INTO t_option_data_source_version("
+            + "source_id, version_no, status, columns_json, row_count, sha256) "
+            + "VALUES (?, 2, 'PUBLISHED', '[\"col\"]'::jsonb, 1, 'deadbeef') RETURNING id",
+            Long.class, sourceId);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            // 停用 → 取消发布 → 再发布：取消发布必须把停用标记一起清掉。不清就会留下
+            // status=PUBLISHED 但 disabled_at 非空的版本（界面显示"已停用"、list() 认不出「最新」、
+            // bindable() 也不给新绑定），用户会以为"我重新发布了却没生效"。
+            optionSourceService.disableVersion(sourceId, v2);
+            optionSourceService.unpublish(sourceId, v2);
+            optionSourceService.publish(sourceId, v2);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT disabled_at FROM t_option_data_source_version WHERE id = ?",
+                OffsetDateTime.class, v2)).isNull();
+            assertThat(optionSourceService.detail(sourceId).source().publishedVersionId()).isEqualTo(v2);
+            assertThat(optionSourceService.detail(sourceId).versions().stream()
+                .filter(version -> version.id() == v2).findFirst().orElseThrow().publishedByName())
+                .isNotBlank();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void versionDiffReportsAddedRemovedRowsAndColumnChanges() {
+        long adminId = userId("admin");
+        long sourceId = insertOptionSource("diff_" + UUID.randomUUID().toString().replace("-", ""));
+        long v1 = optionSourceVersionId(sourceId);
+        // v1 有三行、两列——「备注」这一列在 v2 里没了，用来验证列变化也会被报出来。
+        jdbcTemplate.update("UPDATE t_option_data_source_version SET columns_json = "
+            + "'[\"选项\",\"备注\"]'::jsonb WHERE id = ?", v1);
+        jdbcTemplate.update("INSERT INTO t_option_data_source_row(version_id, row_no, data) VALUES "
+            + "(?, 1, '{\"选项\":\"a\"}'::jsonb), (?, 2, '{\"选项\":\"b\"}'::jsonb), "
+            + "(?, 3, '{\"选项\":\"c\"}'::jsonb)", v1, v1, v1);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            long v2 = optionSourceService.importDraft(sourceId, null, "b\nc\nd", null, "加 d、去 a").id();
+
+            OptionSourceService.VersionDiff diff = optionSourceService.diffVersions(sourceId, v2);
+            assertThat(diff.previousVersionNo()).isEqualTo(1);
+            assertThat(diff.added()).containsExactly(Map.of("选项", "d"));
+            assertThat(diff.removed()).containsExactly(Map.of("选项", "a"));
+            assertThat(diff.addedTotal()).isEqualTo(1);
+            assertThat(diff.removedTotal()).isEqualTo(1);
+            assertThat(diff.columnChanges()).containsExactly("删除列：备注");
+            assertThat(diff.truncated()).isFalse();
+
+            // 第一版没有上一版：回空 diff，不是错误（界面据此把「对比」按钮藏掉）。
+            OptionSourceService.VersionDiff first = optionSourceService.diffVersions(sourceId, v1);
+            assertThat(first.previousVersionNo()).isNull();
+            assertThat(first.added()).isEmpty();
+            assertThat(first.removed()).isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
     /**
      * 「可引用表单」清单只拦**新增**绑定：撤销引用不该让已经绑着它的表单失去保存能力，
      * 否则表单 1/14 那种状态（引用被撤销、字段仍绑着）会直接卡死。

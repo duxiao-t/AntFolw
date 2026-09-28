@@ -26,7 +26,7 @@ export function OptionSourceRowsDrawer({ sourceId, version, onClose }: {
       title={version ? `v${version.versionNo} 的数据` : ''}
       open={Boolean(version)}
       onClose={onClose}
-      width={760}
+      size={760}
     >
       {rows.isPending && <Typography.Text type="secondary">加载中…</Typography.Text>}
       {rows.error && <Alert type="error" showIcon message={`无法加载数据：${(rows.error as Error).message}`} />}
