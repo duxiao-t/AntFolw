@@ -34,6 +34,8 @@ export default defineConfig({
       ],
     },
     passWithNoTests: true,
-    testTimeout: 15000,
+    // 15s 在负载下不够：app.test.tsx 这类重挂载的用例单跑 7/7 全过、在全量里跑到 18s+ 就超时，
+    // 表现成"每次红的文件都不一样"的 flake。
+    testTimeout: 30000,
   },
 });
