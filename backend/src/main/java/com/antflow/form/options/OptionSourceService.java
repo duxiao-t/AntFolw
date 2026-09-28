@@ -37,6 +37,10 @@ public class OptionSourceService {
     private static final int MAX_ROWS = 20_000;
     private static final int MAX_COLUMNS = 50;
     private static final int MAX_CELL_LENGTH = 500;
+    /** 版本对比每侧最多读多少行（2 万行的极端表也只在内存里比 5000 行，超出标记 truncated）。 */
+    private static final int DIFF_SCAN_LIMIT = 5_000;
+    /** 版本对比最多回多少行明细（界面两列并排，再多也没人看）。 */
+    private static final int DIFF_ROW_LIMIT = 200;
     private static final Pattern CODE = Pattern.compile("[a-z][a-z0-9_]{1,63}");
 
     private final JdbcTemplate jdbc;
@@ -265,7 +269,8 @@ public class OptionSourceService {
     }
 
     @Transactional
-    public VersionView importDraft(long sourceId, MultipartFile file, String text, String sheetName) {
+    public VersionView importDraft(long sourceId, MultipartFile file, String text, String sheetName,
+                                   String note) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         lockSource(sourceId);
         try {
@@ -282,10 +287,11 @@ public class OptionSourceService {
             Long versionId = jdbc.queryForObject("""
                 INSERT INTO t_option_data_source_version(
                     source_id, version_no, status, columns_json, row_count,
-                    original_name, sha256, created_by)
-                VALUES (?, ?, 'DRAFT', ?::jsonb, ?, ?, ?, ?) RETURNING id
+                    original_name, sha256, created_by, note)
+                VALUES (?, ?, 'DRAFT', ?::jsonb, ?, ?, ?, ?, ?) RETURNING id
                 """, Long.class, sourceId, nextVersion, json.writeValueAsString(table.columns()),
-                table.rows().size(), name, sha256(bytes), authorization.currentUserId());
+                table.rows().size(), name, sha256(bytes), authorization.currentUserId(),
+                normalizeNote(note));
             List<Object[]> batch = new ArrayList<>();
             for (int index = 0; index < table.rows().size(); index++) {
                 batch.add(new Object[] {versionId, index + 1,
@@ -295,11 +301,16 @@ public class OptionSourceService {
                 INSERT INTO t_option_data_source_row(version_id, row_no, data)
                 VALUES (?, ?, ?::jsonb)
                 """, batch);
-            jdbc.update("UPDATE t_option_data_source SET updated_at = now() WHERE id = ?", sourceId);
+            // version 是给 replaceGrants/replaceForms 用的乐观锁：导入把草稿整个换掉了（连 versionId 都换），
+            // 不递增的话，导入前打开的旧页面还能拿旧 version 提交授权/引用，把刚改的配置盖回去。
+            // 其余写操作（publish/unpublish/disable/enable/停用版本/丢弃/两份 replace）都递增，这里不能例外。
+            jdbc.update("UPDATE t_option_data_source SET version = version + 1, updated_at = now() WHERE id = ?",
+                sourceId);
             audit.success("form.option_source.import", "OPTION_SOURCE", sourceId,
                 AuditService.RiskLevel.HIGH,
                 Map.of("changedFields", List.of("draftVersion")),
-                Map.of("rowCount", table.rows().size(), "columnCount", table.columns().size()));
+                Map.of("rowCount", table.rows().size(), "columnCount", table.columns().size(),
+                    "noteLength", normalizeNote(note) == null ? 0 : normalizeNote(note).length()));
             return version(versionId);
         } catch (BizException error) {
             throw error;
@@ -346,6 +357,14 @@ public class OptionSourceService {
             : parsePastedText(stripBom(text));
         validateTable(table);
         return table;
+    }
+
+    /** 变更说明：去掉首尾空白、超长截断、空串当没填（列上不存 ""）。 */
+    private static String normalizeNote(String note) {
+        if (note == null) return null;
+        String trimmed = note.trim();
+        if (trimmed.isEmpty()) return null;
+        return trimmed.length() > 200 ? trimmed.substring(0, 200) : trimmed;
     }
 
     private String lockSourceRow(long sourceId) {
@@ -440,9 +459,14 @@ public class OptionSourceService {
         if (drafts != null && drafts > 0) {
             throw new BizException("OPTION_SOURCE_DRAFT_EXISTS", "已有待发布版本，请先发布或丢弃它");
         }
+        // 一起清 disabled_at：退回待发布 = 回到"全新草稿"，而"草稿 + 已停用"是个自相矛盾的中间态
+        // （停用/启用只允许作用在已发布版本上，见 setVersionDisabled）。不清的话，
+        // 「停用 → 取消发布 → 再发布」会得到一个 status='PUBLISHED' 但 disabled_at 非空的版本——
+        // 版本列表显示"已停用"、list() 认不出「最新」（它要求 disabled_at IS NULL）、
+        // bindable() 也不给新绑定，用户会以为发布没生效。
         int updated = jdbc.update("""
             UPDATE t_option_data_source_version
-            SET status = 'DRAFT', published_by = NULL, published_at = NULL
+            SET status = 'DRAFT', published_by = NULL, published_at = NULL, disabled_at = NULL
             WHERE id = ? AND source_id = ? AND status = 'PUBLISHED'
             """, versionId, sourceId);
         if (updated != 1) throw new BizException("OPTION_SOURCE_VERSION_NOT_PUBLISHED", "该版本不是已发布状态");
@@ -647,6 +671,75 @@ public class OptionSourceService {
             }, versionId, Math.min(Math.max(limit, 1), 100));
     }
 
+    /**
+     * 版本对比：拿这一版跟它的**上一版**（version_no 次大）比。
+     *
+     * <p>为什么在服务端比：行数上限是 2 万，而 {@code previewRows} 只给 100 行——把两边整包丢给
+     * 浏览器既慢又只看到开头。这里各读最多 {@link #DIFF_SCAN_LIMIT} 行做集合差，只回前
+     * {@link #DIFF_ROW_LIMIT} 行明细 + 总数 + 是否被截断。
+     *
+     * <p>为什么按**整行**比：选项的"值列"是每个绑定各自选的（`props.optionSource.valueColumn`），
+     * 数据源本身没有主键列，所以不假装按某一列比——整行内容变了就算一条差异（改标签会表现为
+     * 一删一增，这是诚实的代价，换个列名就不成立）。
+     */
+    public VersionDiff diffVersions(long sourceId, long versionId) {
+        authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
+        requireSource(sourceId);
+        VersionView target = version(versionId);
+        if (target.sourceId() != sourceId) {
+            throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
+        }
+        VersionView previous = jdbc.query("""
+            SELECT v.id, v.source_id, v.version_no, v.status, v.columns_json::text, v.row_count,
+                   v.original_name, v.sha256, v.created_at, v.published_at, v.disabled_at,
+                   v.note, publisher.display_name AS published_by_name
+            FROM t_option_data_source_version v
+            LEFT JOIN t_user publisher ON publisher.id = v.published_by
+            WHERE v.source_id = ? AND v.version_no < ?
+            ORDER BY v.version_no DESC LIMIT 1
+            """, rs -> rs.next() ? versionView(rs) : null, sourceId, target.versionNo());
+        // 第一版没有上一版——不是错误，回一份空 diff 让界面把按钮藏掉就行。
+        if (previous == null) {
+            return new VersionDiff(target.versionNo(), null, List.of(), List.of(), List.of(), 0, 0, false);
+        }
+        List<String> beforeRows = rowKeys(previous.id());
+        List<String> afterRows = rowKeys(target.id());
+        Set<String> before = new LinkedHashSet<>(beforeRows), after = new LinkedHashSet<>(afterRows);
+        // 集合差把重复行压成一条——刻意的：差异关心"这个选项还在不在"，不是"它出现了几次"。
+        List<String> added = afterRows.stream().filter(row -> !before.contains(row)).toList();
+        List<String> removed = beforeRows.stream().filter(row -> !after.contains(row)).toList();
+        boolean truncated = beforeRows.size() >= DIFF_SCAN_LIMIT || afterRows.size() >= DIFF_SCAN_LIMIT;
+        return new VersionDiff(target.versionNo(), previous.versionNo(),
+            diffColumns(previous.columns(), target.columns()),
+            added.stream().limit(DIFF_ROW_LIMIT).map(this::readRow).toList(),
+            removed.stream().limit(DIFF_ROW_LIMIT).map(this::readRow).toList(),
+            added.size(), removed.size(), truncated);
+    }
+
+    private List<String> rowKeys(long versionId) {
+        return jdbc.query("SELECT data::text FROM t_option_data_source_row WHERE version_id = ? "
+            + "ORDER BY row_no LIMIT " + DIFF_SCAN_LIMIT, (rs, row) -> rs.getString(1), versionId);
+    }
+
+    private Map<String, Object> readRow(String raw) {
+        try {
+            return json.readValue(raw, Map.class);
+        } catch (Exception error) {
+            throw new IllegalStateException("invalid option row", error);
+        }
+    }
+
+    /** 列变化按"新增/删除/顺序"三件事说，顺序变化也算（分步列的顺序决定级联层级）。 */
+    private static List<String> diffColumns(List<String> before, List<String> after) {
+        List<String> notes = new ArrayList<>();
+        for (String column : after) if (!before.contains(column)) notes.add("新增列：" + column);
+        for (String column : before) if (!after.contains(column)) notes.add("删除列：" + column);
+        if (new LinkedHashSet<>(before).equals(new LinkedHashSet<>(after)) && !before.equals(after)) {
+            notes.add("列顺序变化：" + String.join(", ", before) + " → " + String.join(", ", after));
+        }
+        return notes;
+    }
+
     private SourceSummary requireSource(long sourceId) {
         return list().stream().filter(source -> source.id() == sourceId).findFirst()
             .orElseThrow(() -> new BizException("OPTION_SOURCE_NOT_FOUND", "数据源不存在"));
@@ -715,9 +808,12 @@ public class OptionSourceService {
 
     private VersionView version(long versionId) {
         VersionView version = jdbc.query("""
-            SELECT id, source_id, version_no, status, columns_json::text, row_count,
-                   original_name, sha256, created_at, published_at, disabled_at
-            FROM t_option_data_source_version WHERE id = ?
+            SELECT v.id, v.source_id, v.version_no, v.status, v.columns_json::text, v.row_count,
+                   v.original_name, v.sha256, v.created_at, v.published_at, v.disabled_at,
+                   v.note, publisher.display_name AS published_by_name
+            FROM t_option_data_source_version v
+            LEFT JOIN t_user publisher ON publisher.id = v.published_by
+            WHERE v.id = ?
             """, rs -> rs.next() ? versionView(rs) : null, versionId);
         if (version == null) throw new BizException("OPTION_SOURCE_VERSION_NOT_FOUND", "数据版本不存在");
         return version;
@@ -725,11 +821,14 @@ public class OptionSourceService {
 
     private List<VersionView> versions(long sourceId, boolean publishedOnly) {
         return jdbc.query("""
-            SELECT id, source_id, version_no, status, columns_json::text, row_count,
-                   original_name, sha256, created_at, published_at, disabled_at
-            FROM t_option_data_source_version
-            WHERE source_id = ? AND (? = false OR status = 'PUBLISHED')
-            ORDER BY version_no DESC
+            SELECT v.id, v.source_id, v.version_no, v.status, v.columns_json::text, v.row_count,
+                   v.original_name, v.sha256, v.created_at, v.published_at, v.disabled_at,
+                   v.note, publisher.display_name AS published_by_name
+            FROM t_option_data_source_version v
+            -- 发布人只给显示名：这页是管理端，但登录账号没必要下发（同 D-20260924 的窄 DTO 口径）。
+            LEFT JOIN t_user publisher ON publisher.id = v.published_by
+            WHERE v.source_id = ? AND (? = false OR v.status = 'PUBLISHED')
+            ORDER BY v.version_no DESC
             """, (rs, row) -> versionView(rs), sourceId, publishedOnly);
     }
 
@@ -739,7 +838,8 @@ public class OptionSourceService {
             rs.getInt("row_count"), rs.getString("original_name"), rs.getString("sha256"),
             rs.getObject("created_at", OffsetDateTime.class),
             rs.getObject("published_at", OffsetDateTime.class),
-            rs.getObject("disabled_at", OffsetDateTime.class));
+            rs.getObject("disabled_at", OffsetDateTime.class), rs.getString("note"),
+            rs.getString("published_by_name"));
     }
 
     private List<String> readColumns(String value) {
@@ -927,8 +1027,18 @@ public class OptionSourceService {
     public record VersionView(long id, long sourceId, int versionNo, String status,
                               List<String> columns, int rowCount, String originalName,
                               String sha256, OffsetDateTime createdAt, OffsetDateTime publishedAt,
-                              OffsetDateTime disabledAt) { }
+                              OffsetDateTime disabledAt, String note, String publishedByName) { }
     public record BindableSource(long id, String code, String name, long versionId,
                                  int versionNo, List<String> columns, int rowCount,
                                  int latestVersionNo) { }
+
+    /**
+     * 一个版本相对它**上一版**的差异。{@code added}/{@code removed} 只给前
+     * {@link #DIFF_ROW_LIMIT} 行，总数在 {@code addedTotal}/{@code removedTotal}，
+     * 被 {@link #DIFF_SCAN_LIMIT} 截断时 {@code truncated} 为真。
+     */
+    public record VersionDiff(int versionNo, Integer previousVersionNo,
+                              List<String> columnChanges,
+                              List<Map<String, Object>> added, List<Map<String, Object>> removed,
+                              int addedTotal, int removedTotal, boolean truncated) { }
 }

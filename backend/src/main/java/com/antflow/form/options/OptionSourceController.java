@@ -71,8 +71,9 @@ public class OptionSourceController {
             @PathVariable long id,
             @RequestParam(required = false) MultipartFile file,
             @RequestParam(required = false) String text,
-            @RequestParam(required = false) String sheetName) {
-        return service.importDraft(id, file, text, sheetName);
+            @RequestParam(required = false) String sheetName,
+            @RequestParam(required = false) String note) {
+        return service.importDraft(id, file, text, sheetName, note);
     }
 
     @PostMapping("/api/option-sources/{id}/versions/{versionId}/publish")
@@ -121,6 +122,13 @@ public class OptionSourceController {
     public List<Map<String, Object>> rows(@PathVariable long id, @PathVariable long versionId,
                                           @RequestParam(defaultValue = "20") int limit) {
         return service.previewRows(id, versionId, limit);
+    }
+
+    /** 这一版相对上一版的差异（第一版回空 diff，不是错误）。 */
+    @GetMapping("/api/option-sources/{id}/versions/{versionId}/diff")
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_OPTION_SOURCE_MANAGE + "')")
+    public OptionSourceService.VersionDiff diff(@PathVariable long id, @PathVariable long versionId) {
+        return service.diffVersions(id, versionId);
     }
 
     @GetMapping("/api/forms/{formId}/option-sources")
