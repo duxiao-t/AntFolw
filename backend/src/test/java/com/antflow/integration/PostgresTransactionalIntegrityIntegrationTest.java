@@ -350,7 +350,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             setPrincipal(userId);
 
             Page<com.antflow.form.runtime.FormData> visible = formDataService.authorizedPage(
-                1, 20, null, null, null, userId, false);
+                1, 20, null, null, null, null, userId, false);
             assertThat(visible.getRecords()).extracting(com.antflow.form.runtime.FormData::getId)
                 .contains(dataId);
         } finally {
@@ -2030,6 +2030,31 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(formDefinitionMapper.selectSummaryPage(Page.of(1, 20), null, null,
                 adminId, true).getRecords())
                 .extracting(FormDefinitionMapper.Summary::id).contains(formId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void submitterKeywordFiltersByPersonAndNeverWidensToEverything() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long mine = insertSubmittedData(formId, adminId);
+        setPrincipal(adminId);
+        try {
+            // 姓名命中（种子里 admin 的 display_name 是 "AntFlow Admin"）
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "AntFlow").getRecords())
+                .extracting(com.antflow.form.runtime.FormData::getId).contains(mine);
+            // 工号也命中
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "000001").getRecords())
+                .extracting(com.antflow.form.runtime.FormData::getId).contains(mine);
+            // 查不到人 → **零条**。这条是安全语义：若实现改成"先查 id 集合、集合空就省略条件"，
+            // 这里会退化成"返回范围内的全部记录"，等于把关键字筛选变成越权放大镜。
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "查无此人").getRecords())
+                .isEmpty();
+            // LIKE 通配符被转义：敲一个 % 不该匹配到所有人。
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "%").getRecords())
+                .isEmpty();
         } finally {
             PrincipalHolder.clear();
         }

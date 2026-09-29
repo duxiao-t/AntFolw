@@ -21,7 +21,10 @@ type FormDataRecord = {
   data?: unknown;
   status: 'DRAFT' | 'SUBMITTED';
   createdBy?: number;
-  createdByUsername?: string;
+  /** 姓名（后端已按 display_name→username 回落）。 */
+  createdByName?: string;
+  createdByEmployeeNo?: string;
+  createdByDeptName?: string;
   fieldValues?: FormDataFieldValue[];
   createdAt?: string;
 };
@@ -47,12 +50,14 @@ export default function AdminFormDataPage() {
   const [formDefId, setFormDefId] = useState<string | undefined>(initialFormDefId);
 
   // 字段类型与选项只能从表单定义里拿（数据接口不给）。取不到就退化：只有 form:data:read
-  // 的账号取定义会 404，那不该让整页报错——只是下拉显示原始值、检查项显示条目数。
+  // 的账号取定义会被拒（前置权限不足时是 403，不是 404），那不该让整页弹错误——
+  // 只是下拉显示原始值、检查项显示条目数。skipErrorHandler 把这条可选请求从全局错误处理里摘出来。
   const definition = useQuery<{ schema?: string }>({
     queryKey: ['form-definition-for-ledger', formDefId],
-    queryFn: () => request(`/api/forms/definitions/${formDefId}`),
+    queryFn: () => request(`/api/forms/definitions/${formDefId}`, { skipErrorHandler: true }),
     enabled: Boolean(formDefId),
     retry: false,
+    throwOnError: false,
   });
   const metas = useMemo<Map<string, FieldMeta>>(() => {
     if (!definition.data?.schema) return new Map();
@@ -73,12 +78,31 @@ export default function AdminFormDataPage() {
         render: (_, record) => record.businessNo || '—',
       },
       {
+        // 显示姓名（不是登录账号），并且筛选也改成按姓名/工号搜——列上写着人名、
+        // 筛选框却要输入数字 id，那种割裂比不显示还难用。
         title: '提交人',
-        dataIndex: 'createdBy',
-        valueType: 'digit',
-        width: 120,
+        dataIndex: 'createdByName',
+        width: 140,
+        // 搜索框发出去的参数名要与接口一致（列名是给人看的，参数名是给后端看的）。
+        search: { transform: (value: string) => ({ submitterKeyword: value }) },
         render: (_, record) =>
-          record.createdByUsername ?? (record.createdBy ? `用户 #${record.createdBy}` : '—'),
+          record.createdByName ?? (record.createdBy ? `用户 #${record.createdBy}` : '—'),
+      },
+      {
+        title: '工号',
+        dataIndex: 'createdByEmployeeNo',
+        width: 110,
+        search: false,
+        render: (_, record) => record.createdByEmployeeNo || '—',
+      },
+      {
+        title: '部门',
+        dataIndex: 'createdByDeptName',
+        width: 150,
+        ellipsis: true,
+        search: false,
+        render: (_, record) => record.createdByDeptName
+          || <span style={{ color: 'var(--af-color-muted)' }}>未设置部门</span>,
       },
       {
         title: '提交时间',
@@ -128,6 +152,7 @@ export default function AdminFormDataPage() {
         formDefId: params.formDefId,
         status: params.status,
         createdBy: params.createdBy,
+        submitterKeyword: params.submitterKeyword,
       },
     });
     const records = result.records ?? [];

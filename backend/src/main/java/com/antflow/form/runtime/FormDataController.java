@@ -50,10 +50,12 @@ public class FormDataController {
                                     @RequestParam(defaultValue = "20") long size,
                                     @RequestParam(required = false) Long formDefId,
                                     @RequestParam(required = false) String status,
-                                    @RequestParam(required = false) Long createdBy) {
+                                    @RequestParam(required = false) Long createdBy,
+                                    // 按姓名/工号筛提交人：列表上显示的是姓名，筛选就不该再收数字 id。
+                                    @RequestParam(required = false) String submitterKeyword) {
         authorizationService.requirePermission(PermissionCodes.FORM_DATA_READ);
         var principal = PrincipalHolder.current().orElseThrow();
-        return service.authorizedPage(page, size, formDefId, status, createdBy,
+        return service.authorizedPage(page, size, formDefId, status, createdBy, submitterKeyword,
             principal.userId(), principal.isAdmin());
     }
 

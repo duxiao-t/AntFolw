@@ -24,6 +24,7 @@ import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -38,6 +39,7 @@ public class FormDataService {
     private BusinessNumberService businessNumbers;
     private final AuthorizationService authorizationService;
     private final UserMapper userMapper;
+    private final com.antflow.org.DepartmentMapper departmentMapper;
     private final FormDefinitionMapper formDefinitionMapper;
     private final MobileFileLinkService fileLinkService;
     private final MobileDraftService draftService;
@@ -116,22 +118,48 @@ public class FormDataService {
 
     public Page<FormData> adminPage(long page, long size, Long formDefId,
                                     String status, Long createdBy) {
+        return adminPage(page, size, formDefId, status, createdBy, null);
+    }
+
+    /**
+     * 台账分页。{@code submitterKeyword} 按**姓名或工号**筛提交人（列上显示的是姓名，
+     * 筛选就不该再收数字 id）。
+     *
+     * <p>用子查询而不是"先查 id 集合再 IN"：一是避免无界参数列表，二是**天然保住"查不到人 = 零条"**——
+     * 若改成先查集合、集合为空就省略这个条件，关键字无匹配会退化成"返回范围内的全部记录"。
+     */
+    public Page<FormData> adminPage(long page, long size, Long formDefId,
+                                    String status, Long createdBy, String submitterKeyword) {
         long safePage = Math.max(page, 1);
         long safeSize = Math.min(Math.max(size, 1), 100);
         var q = new QueryWrapper<FormData>();
         if (formDefId != null) q.eq("form_def_id", formDefId);
         if (status != null && !status.isBlank()) q.eq("status", status);
         if (createdBy != null) q.eq("created_by", createdBy);
+        if (submitterKeyword != null && !submitterKeyword.isBlank()) {
+            // {0} 是参数占位符（会被换成 #{} 绑定），不是字符串拼接。
+            // LIKE 的通配符单独转义：否则用户敲一个 `%` 就变成"匹配所有提交人"。
+            String like = "%" + escapeLike(submitterKeyword.trim()) + "%";
+            q.apply("EXISTS (SELECT 1 FROM t_user submitter"
+                + " WHERE submitter.id = t_form_data.created_by"
+                + " AND (submitter.display_name LIKE {0} ESCAPE '\\'"
+                + " OR submitter.employee_no LIKE {0} ESCAPE '\\'))", like);
+        }
         q.orderByDesc("created_at").orderByDesc("id");
         return enrichAdminPage(mapper.selectPage(Page.of(safePage, safeSize), q));
     }
 
     public Page<FormData> authorizedPage(long page, long size, Long formDefId,
-                                         String status, Long createdBy,
+                                         String status, Long createdBy, String submitterKeyword,
                                          long userId, boolean admin) {
         // 非 admin 的能力数据范围由 DataPermissionPolicyHandler 在 SQL 层注入，
         // 这里统一走 SQL 分页，避免把整表读进内存再过滤。
-        return adminPage(page, size, formDefId, status, createdBy);
+        return adminPage(page, size, formDefId, status, createdBy, submitterKeyword);
+    }
+
+    /** LIKE 的通配符转义（配合 SQL 里的 `ESCAPE '\'`）。 */
+    private static String escapeLike(String keyword) {
+        return keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     public FormData getById(Long id) {
@@ -152,15 +180,39 @@ public class FormDataService {
     private Page<FormData> enrichAdminPage(Page<FormData> page) {
         var records = page.getRecords();
         if (records.isEmpty()) return page;
-        var users = userMapper.selectBatchIds(records.stream().map(FormData::getCreatedBy)
-                .filter(java.util.Objects::nonNull).collect(Collectors.toSet())).stream()
-            .collect(Collectors.toMap(com.antflow.org.User::getId, Function.identity()));
+        // created_by 在库里可为空（历史数据），一页可能全是无提交人的记录：空集合不能进
+        // selectBatchIds（会拼出 IN ()），也不能进下面的部门批查。
+        Set<Long> submitterIds = records.stream().map(FormData::getCreatedBy)
+            .filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, com.antflow.org.User> users = submitterIds.isEmpty() ? Map.of()
+            : userMapper.selectBatchIds(submitterIds).stream()
+                .collect(Collectors.toMap(com.antflow.org.User::getId, Function.identity()));
+        Set<Long> deptIds = users.values().stream().map(com.antflow.org.User::getDeptId)
+            .filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> departmentNames = deptIds.isEmpty() ? Map.of()
+            : departmentMapper.selectBatchIds(deptIds).stream()
+                .collect(Collectors.toMap(com.antflow.org.Department::getId,
+                    com.antflow.org.Department::getName));
         Map<Long, FormDefinition> definitions = formDefinitionMapper.selectBatchIds(records.stream()
                 .map(FormData::getFormDefId).collect(Collectors.toSet())).stream()
             .collect(Collectors.toMap(FormDefinition::getId, Function.identity()));
         records.forEach(record -> {
-            var user = users.get(record.getCreatedBy());
-            record.setCreatedByUsername(user == null ? null : user.getUsername());
+            // 显式挡 null 再查表：Map.of() 是 ImmutableCollections，`get(null)` 会抛 NPE。
+            var user = record.getCreatedBy() == null ? null : users.get(record.getCreatedBy());
+            if (user == null) {
+                // 没有提交人（或人已被删）：三个字段都留空，由前端显示占位符。
+                record.setCreatedByName(null);
+                record.setCreatedByEmployeeNo(null);
+                record.setCreatedByDeptName(null);
+            } else {
+                // 姓名优先显示名，为空回落账号——口径同 ProcessInstanceMapper 的 applicant_name。
+                String displayName = user.getDisplayName();
+                record.setCreatedByName(displayName == null || displayName.isBlank()
+                    ? user.getUsername() : displayName);
+                record.setCreatedByEmployeeNo(user.getEmployeeNo());
+                record.setCreatedByDeptName(user.getDeptId() == null
+                    ? null : departmentNames.get(user.getDeptId()));
+            }
             record.setFieldValues(fieldValues(record.getData(), definitions.get(record.getFormDefId())));
         });
         return page;

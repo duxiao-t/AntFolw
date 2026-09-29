@@ -1,0 +1,78 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import AdminFormDataPage from './index';
+
+const { request } = vi.hoisted(() => ({ request: vi.fn() }));
+vi.mock('@umijs/max', () => ({
+  request,
+  useLocation: () => ({ search: '' }),
+  Link: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+// 捕获 ProTable 拿到的 props：列定义与 request 映射都在里面，是这一页最容易悄悄写错的两处。
+let tableProps: any;
+vi.mock('@ant-design/pro-components', () => ({
+  PageContainer: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  ProTable: (props: any) => {
+    tableProps = props;
+    return <table />;
+  },
+}));
+
+const row = {
+  id: 1, formDefId: 5, formDefVersion: 1, businessNo: '000000000040', status: 'SUBMITTED',
+  createdBy: 3, createdByName: '张三', createdByEmployeeNo: '000003',
+  createdByDeptName: '技术部', fieldValues: [], createdAt: '2026-09-29T02:00:00Z',
+};
+
+async function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><AdminFormDataPage /></QueryClientProvider>);
+  await Promise.resolve();
+  return tableProps;
+}
+
+describe('台账列表的列与筛选', () => {
+  beforeEach(() => {
+    tableProps = undefined;
+    request.mockReset();
+    request.mockImplementation(() => Promise.resolve({ records: [row], total: 1 }));
+  });
+
+  it('提交人显示姓名，另有两列工号与部门', async () => {
+    const props = await renderPage();
+    const byTitle = (title: string) => props.columns.find((column: any) => column.title === title);
+
+    expect(byTitle('提交人').dataIndex).toBe('createdByName');
+    expect(byTitle('工号').dataIndex).toBe('createdByEmployeeNo');
+    expect(byTitle('部门').dataIndex).toBe('createdByDeptName');
+
+    // 渲染函数：姓名直接出，没有部门的人给一句人话而不是空单元格。
+    expect(byTitle('提交人').render(null, row)).toBe('张三');
+    expect(byTitle('工号').render(null, row)).toBe('000003');
+    expect(byTitle('部门').render(null, { ...row, createdByDeptName: undefined }))
+      .toHaveProperty('type', 'span');
+  });
+
+  it('提交人筛选发的是姓名关键字（不是数字 id）', async () => {
+    const props = await renderPage();
+    // ProTable 应用列的 search.transform 之后再进 request。
+    const search = props.columns.find((column: any) => column.title === '提交人').search;
+    expect(search.transform('张三')).toEqual({ submitterKeyword: '张三' });
+
+    await props.request({ current: 1, pageSize: 20, submitterKeyword: '张三' });
+    expect(request).toHaveBeenCalledWith('/api/forms/data/admin', {
+      params: expect.objectContaining({ submitterKeyword: '张三', page: 1, size: 20 }),
+    });
+  });
+
+  it('表单字典是可选增强：取不到不该把整页顶掉', async () => {
+    request.mockImplementation((url: string) => (url.startsWith('/api/forms/definitions/')
+      ? Promise.reject(new Error('forbidden'))
+      : Promise.resolve({ records: [row], total: 1 })));
+    await renderPage();
+
+    expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+});
