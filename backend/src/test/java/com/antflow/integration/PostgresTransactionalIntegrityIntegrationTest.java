@@ -2162,6 +2162,70 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void exportRowsAndCountAreNarrowedByTheCallersScope() {
+        // 导出必须与列表吃同一层行级范围（DataPermissionPolicyHandler 是按 mapper 语句 id
+        // 显式开启的，count 走 selectPage → 同样被覆盖）。这里就把"会不会导出得比看得到更多"钉住。
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long scopedUser = insertUser("export-scoped");
+        long scopedRole = insertRole("export_scoped");
+        long mine = insertSubmittedData(formId, scopedUser);
+        long theirs = insertSubmittedData(formId, bobId);
+        try {
+            // 行级范围跟着**读**能力走，所以受限角色两个能力都要有（只有导出权限会被挡在 403，
+            // 见下面那条断言）。
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'SELF'), (?, 'form:data:export', 'SELF')",
+                scopedRole, scopedRole);
+            assignRole(scopedUser, scopedRole);
+
+            setPrincipal(adminId);
+            assertThat(formDataService.exportRows(formId, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .contains(mine, theirs);
+            assertThat(formDataService.countForExport(formId, null, null)).isEqualTo(2);
+
+            // 受限（本人）：只拿得到自己那条，预览的行数也必须是 1——提示的数字与实际导出必须一致
+            setPrincipal(scopedUser);
+            assertThat(formDataService.exportRows(formId, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .containsExactly(mine);
+            assertThat(formDataService.countForExport(formId, null, null)).isEqualTo(1);
+
+            // 提交人关键字同样不能把范围放大：查不到人 → 一条都不导
+            assertThat(formDataService.exportRows(formId, null, "查无此人", null, null)).isEmpty();
+            assertThat(formDataService.countForExport(formId, null, "查无此人")).isZero();
+
+            // 只有导出权限（没有读）：控制器会直接 403，而不是给一个空文件
+            long exportOnly = insertUser("export-only");
+            long exportOnlyRole = insertRole("export_only");
+            try {
+                jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, "
+                    + "scope_override) VALUES (?, 'form:data:export', 'SELF')", exportOnlyRole);
+                assignRole(exportOnly, exportOnlyRole);
+                setPrincipal(exportOnly);
+                assertThatThrownBy(() -> authorizationService.requirePermission(
+                    PermissionCodes.FORM_DATA_READ))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            } finally {
+                jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", exportOnly);
+                jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", exportOnlyRole);
+                jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", exportOnly);
+                authorizationService.evict(exportOnly);
+            }
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id IN (?, ?)", mine, theirs);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", scopedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", scopedRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", scopedUser);
+            authorizationService.evict(scopedUser);
+        }
+    }
+
+    @Test
     void allScopeUserSearchAlsoReturnsMembersWithoutADepartment() {
         // ALL 范围不能被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
         // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里 admin/bob 就是）挡在外面，
