@@ -2036,6 +2036,30 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void allScopeUserSearchAlsoReturnsMembersWithoutADepartment() {
+        // ALL 范围不能被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
+        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里 admin/bob 就是）挡在外面，
+        // 而单条的 inCurrentDataScope 对 ALL 是放行的——两条路径口径不一致，通讯录搜人时会直接看出来。
+        long userId = insertUser("all-scope-people-" + UUID.randomUUID());
+        long roleId = insertRole("all_scope_people_" + UUID.randomUUID().toString().replace("-", ""));
+        long deptless = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_user WHERE dept_id IS NULL ORDER BY id LIMIT 1", Long.class);
+        assertThat(deptless).as("库里得有一个没有部门的账号，否则这条用例测不到东西").isNotNull();
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'org:user:read', 'ALL')", roleId);
+            setPrincipal(userId);
+
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100).getRecords())
+                .extracting(User::getId)
+                .contains(deptless);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
     void wecomLoginOverrideAndDepartmentLeaderOrderingExecuteAgainstPostgres() {
         long adminId = userId("admin");
         long companyId = jdbcTemplate.queryForObject(

@@ -347,7 +347,13 @@ public class UserService {
             query.in("dept_id", requested);
         }
         AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
-        if (!snapshot.admin()) {
+        // ALL 范围的人不该被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
+        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里的 admin/bob 就是）挡在外面，
+        // 而单条的 inCurrentDataScope 对 ALL 返回 true——两条路径口径不一致，搜人时会直接看出来。
+        var effectiveScope = authorizationService.currentDataScope(permission);
+        boolean unrestricted = effectiveScope.map(AuthorizationService.DataScopeFilter::unrestricted)
+            .orElse(false);
+        if (!snapshot.admin() && !unrestricted) {
             Set<Long> departments = authorizationService.manageableDepartments(snapshot, permission);
             boolean self = snapshot.permissionRoles().getOrDefault(permission, List.of()).stream()
                 .anyMatch(grant -> grant.dataScope() == com.antflow.authz.DataScope.SELF);

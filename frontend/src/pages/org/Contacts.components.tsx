@@ -7,7 +7,71 @@ import { Button, Form, Grid, Input, Modal, Popconfirm, Select, Space, Tag, Toolt
 import type { FormInstance } from 'antd';
 import type { ChangeEvent, Key, RefObject } from 'react';
 import { useMemo, useState } from 'react';
-import { formatGender, normalizeGender } from './Contacts.utils';
+import { formatGender, normalizeGender, PAGE_SIZE } from './Contacts.utils';
+
+/**
+ * 搜索结果（跨部门找人）：和成员表同一套排版，但**不带勾选框与批量操作**——
+ * 这是"找人"，不是"在这一页里维护成员"，别把两件事的控件混在一起。
+ *
+ * 点了「定位」会跳到 TA 所在部门（左树随之选中）。**没有部门的成员定位不了**
+ * （左侧树里本来就没有他们的位置）——那种行把按钮置灰并说明原因，而不是给个点了没反应的死路。
+ */
+export function MemberSearchResults({ keyword, loading, members, total, currentPage, onPageChange,
+  deptNameById, onLocate }: {
+  keyword: string;
+  loading?: boolean;
+  members: MemberListItem[];
+  total: number;
+  currentPage: number;
+  onPageChange(page: number): void;
+  deptNameById: Record<number, string>;
+  onLocate(member: MemberListItem): void;
+}) {
+  return (
+    <>
+      <div className="ct-right-header">
+        <h2>{keyword} · {total}人</h2>
+        <span className="ct-right-header__hint">跨部门搜索，点「定位」跳到 TA 所在的部门</span>
+      </div>
+      <ProTable<MemberListItem>
+        rowKey="id"
+        loading={loading}
+        search={false}
+        options={false}
+        // 搜索也要能翻页：只给前 15 个候选，第 16 个同名的人就永远找不到。
+        pagination={{
+          current: currentPage, pageSize: PAGE_SIZE, total,
+          showSizeChanger: false, size: 'small',
+          onChange: (page: number) => onPageChange(page),
+        }}
+        dataSource={members}
+        locale={{ emptyText: '没有匹配的人员' }}
+        columns={[
+          { title: '姓名', dataIndex: 'displayName', width: 180,
+            render: (_, member) => (
+              <span className="ct-member-name">
+                <span className="ct-member-name__text" title={member.displayName}>{member.displayName}</span>
+                {member.departmentLeader && <Tag className="ct-leader-tag">负责人</Tag>}
+              </span>
+            ) },
+          { title: '工号', dataIndex: 'employeeNo', width: 100, ellipsis: true },
+          { title: '部门', dataIndex: 'deptId', width: 160, ellipsis: true,
+            render: (_, member) => deptNameById[member.deptId]
+              ?? <span className="ct-muted">未设置部门</span> },
+          { title: '职务', dataIndex: 'position', width: 180, ellipsis: true },
+          { title: '操作', key: 'op', width: 110,
+            render: (_, member) => (member.deptId ? (
+              <Button type="link" size="small" onClick={() => onLocate(member)}>定位</Button>
+            ) : (
+              <Tooltip title="该成员没有部门，左侧树里没有 TA 的位置">
+                <span><Button type="link" size="small" disabled>定位</Button></span>
+              </Tooltip>
+            )) },
+        ]}
+      />
+    </>
+  );
+}
 
 export interface MemberListItem {
   id: number;

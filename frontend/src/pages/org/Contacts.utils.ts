@@ -50,6 +50,47 @@ export interface DeptTreeItem {
   parentId: number | null;
 }
 
+/** 成员列表与人员搜索共用的分页大小：两处请求必须一致，否则表格页数和数据边界对不上。 */
+export const PAGE_SIZE = 15;
+
+export type ContactsPaneMode = 'search' | 'members' | 'empty';
+
+/**
+ * 右栏该显示什么。有关键词就显示**跨部门的人员搜索结果**（左树的过滤同时生效），
+ * 没有关键词才回到"当前部门的成员"。抽成纯函数是为了让三态可测、也不散在 JSX 里。
+ */
+export function contactsPaneMode(keyword: string, selDeptId: number | null): ContactsPaneMode {
+  if (keyword.trim()) return 'search';
+  return selDeptId === null ? 'empty' : 'members';
+}
+
+/**
+ * 从**已授权**的部门列表推导祖先链（面包屑用）。
+ *
+ * 不用 `/api/departments/{id}/path`：那条只认 `org:department:read`，而左树的可见范围是它与
+ * `org:user:read` 的并集——于是会出现"树里点得到、面包屑却 403 卡住"（跨部门搜索跳转更容易撞上）。
+ * 祖先本来就带着 `contextOnly` 在树里，直接推导既准又不发请求。
+ */
+export interface DeptPathItem {
+  id: number;
+  parentId?: number | null;
+  name: string;
+}
+
+export function departmentPathNames(list: DeptPathItem[], deptId: number | null): string[] {
+  if (deptId === null) return [];
+  const byId = new Map(list.map((item) => [item.id, item]));
+  const names: string[] = [];
+  const guard = new Set<number>();
+  let current = byId.get(deptId);
+  while (current && !guard.has(current.id)) {
+    guard.add(current.id);
+    names.unshift(current.name);
+    current = current.parentId == null ? undefined : byId.get(current.parentId);
+  }
+  return names;
+}
+
 const exportHeaders = ['姓名', '工号', '账号', '手机', '邮箱', '职务', '性别'];
 
 const headerMap: Record<string, keyof Omit<MemberCsvItem, 'id' | 'deptId'>> = {

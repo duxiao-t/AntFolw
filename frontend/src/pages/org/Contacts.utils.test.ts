@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMembersCsv,
   collectDepartmentIds,
+  contactsPaneMode,
+  departmentPathNames,
   formatGender,
   normalizeGender,
   parseMembersCsv,
@@ -10,6 +12,45 @@ import {
   resolveDepartmentDropTarget,
   summarizeSettledResults,
 } from './Contacts.utils';
+
+describe('Contacts pane state', () => {
+  it('shows cross-department search results as soon as there is a keyword', () => {
+    expect(contactsPaneMode('张三', null)).toBe('search');
+    expect(contactsPaneMode('张三', 4)).toBe('search');
+    // 只有空白字符不算关键词：不加这层判断，敲个空格右栏就会跳成搜索结果。
+    expect(contactsPaneMode('   ', 4)).toBe('members');
+  });
+
+  it('falls back to members or the hint when the keyword is cleared', () => {
+    expect(contactsPaneMode('', 4)).toBe('members');
+    expect(contactsPaneMode('', null)).toBe('empty');
+  });
+});
+
+describe('Contacts breadcrumb from the authorized tree', () => {
+  const departments = [
+    { id: 1, parentId: null, name: '总公司' },
+    { id: 2, parentId: 1, name: '技术部' },
+    { id: 3, parentId: 2, name: '后端组' },
+  ];
+
+  it('walks parents up to the root', () => {
+    expect(departmentPathNames(departments, 3)).toEqual(['总公司', '技术部', '后端组']);
+  });
+
+  it('returns nothing for an unselected or unknown department', () => {
+    expect(departmentPathNames(departments, null)).toEqual([]);
+    // 搜到的部门可能不在授权树里（人员权限可见、部门权限不可见）——回空而不是崩。
+    expect(departmentPathNames(departments, 999)).toEqual([]);
+  });
+
+  it('does not loop forever on a corrupted parent cycle', () => {
+    expect(departmentPathNames([
+      { id: 1, parentId: 2, name: 'A' },
+      { id: 2, parentId: 1, name: 'B' },
+    ], 1)).toEqual(['B', 'A']);
+  });
+});
 
 describe('Contacts department tree helpers', () => {
   it('collects the selected department and all descendants', () => {

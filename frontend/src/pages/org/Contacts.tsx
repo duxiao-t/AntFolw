@@ -15,13 +15,16 @@ import './Contacts.less';
 import {
   buildMembersCsv,
   collectTreeKeys,
+  contactsPaneMode,
+  departmentPathNames,
   normalizeGender,
+  PAGE_SIZE,
   parseMembersCsv,
   retainVisibleKeys,
   resolveDepartmentDropAction,
   summarizeSettledResults,
 } from './Contacts.utils';
-import { LeaderPicker, MemberFormModal, MembersSection } from './Contacts.components';
+import { LeaderPicker, MemberFormModal, MemberSearchResults, MembersSection } from './Contacts.components';
 
 interface Dept {
   id: number; companyId: number; parentId: number | null;
@@ -75,19 +78,27 @@ export default function ContactsPage() {
     enabled: !!companyId,
   });
 
-  const { data: selPath = [] } = useQuery({
-    queryKey: ['dept-path', selDeptId],
-    queryFn: () => request(`/api/departments/${selDeptId}/path`),
-    enabled: !!selDeptId,
-  });
-
   const { data: memberResult } = useQuery<UserPage>({
     queryKey: ['users-page', selDeptId, memberPage],
     queryFn: () => request('/api/users/page', { params: {
-      page: memberPage, size: 15, deptId: selDeptId, includeDescendants: true,
+      page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
     } }),
     enabled: !!selDeptId,
   });
+
+  // 搜索框双用：同一个词既过滤左树，也去后端搜人（跨部门；后端按姓名/账号/工号 LIKE，
+  // 非 admin 仍会被收窄到"可管部门 ∪ 本人"）。不传 deptId 才是全范围。
+  const trimmedSearch = search.trim();
+  const [searchPage, setSearchPage] = useState(1);
+  useEffect(() => setSearchPage(1), [trimmedSearch]);
+  const { data: searchResult, isFetching: searchLoading } = useQuery<UserPage>({
+    queryKey: ['users-search', trimmedSearch, searchPage],
+    queryFn: () => request('/api/users/page', { params: {
+      page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
+    } }),
+    enabled: !!trimmedSearch,
+  });
+  const paneMode = contactsPaneMode(search, selDeptId);
 
   const { data: leaderResult } = useQuery<UserPage>({
     queryKey: ['leader-users'],
@@ -328,10 +339,13 @@ export default function ContactsPage() {
   };
 
   // --- breadcrumb ---
+  // 从**已授权的部门列表**推导，不再请求 /api/departments/{id}/path：那条只认
+  // org:department:read，而左树是它与 org:user:read 的并集——树里点得到、面包屑却 403
+  // （点跨部门搜索结果跳过去时最容易撞上）。祖先本来就带 contextOnly 在树里。
   const breadcrumb = useMemo(() => {
-    const parts = (selPath as Dept[]).map(d => d.name);
+    const parts = departmentPathNames(deptList as Dept[], selDeptId);
     return parts.join(' / ') || '请选择部门';
-  }, [selPath]);
+  }, [deptList, selDeptId]);
 
   // ---- dept form handlers ----
   const handleDeptAdd = async () => {
@@ -472,7 +486,7 @@ export default function ContactsPage() {
         {/* ===== LEFT ===== */}
         <aside className="ct-left">
           <div className="ct-left-top">
-            <Input prefix={<SearchOutlined />} placeholder="搜索部门" allowClear
+            <Input prefix={<SearchOutlined />} placeholder="搜索部门或人员" allowClear
               value={search} onChange={e => setSearch(e.target.value)} />
             {/* 这里只是"够不够格看到按钮"的近似：建一级部门后端还要求该能力具 ALL 数据范围
                 （DepartmentController 的 requireAllDataScope），而前端看不到范围，越范围时由后端返回 403。 */}
@@ -506,7 +520,23 @@ export default function ContactsPage() {
 
         {/* ===== RIGHT ===== */}
         <main className="ct-right">
-          {selDeptId ? (
+          {paneMode === 'search' ? (
+            <MemberSearchResults
+              keyword={trimmedSearch}
+              loading={searchLoading}
+              members={searchResult?.records ?? []}
+              total={searchResult?.total ?? 0}
+              currentPage={searchPage}
+              onPageChange={setSearchPage}
+              deptNameById={deptNameById}
+              onLocate={(member) => {
+                // 定位 = 清掉关键词、选中他的部门：回到"那个部门的成员列表"。
+                setSearch('');
+                setMemberPage(1);
+                setSelDeptId(member.deptId);
+              }}
+            />
+          ) : paneMode === 'members' ? (
             <MembersSection
               breadcrumb={breadcrumb}
               members={members}
@@ -532,7 +562,7 @@ export default function ContactsPage() {
               loginAccessLoadingId={memberLoginAccess.isPending ? memberLoginAccess.variables?.id : undefined}
             />
           ) : (
-            <div className="ct-empty">请从左侧选择部门</div>
+            <div className="ct-empty">请从左侧选择部门，或在上方搜索部门与人员</div>
           )}
         </main>
       </div>
