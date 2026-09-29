@@ -1,12 +1,10 @@
 package com.antflow.task;
 
 import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.InstanceScopeSql;
 import com.antflow.authz.PermissionCodes;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,8 +35,10 @@ public class WorkflowMonitoringController {
         authorization.requirePermission(PermissionCodes.WORKFLOW_MONITOR_READ);
         int safeLimit = Math.min(100, Math.max(1, limit));
         // 监控口径 = 流程实例的可见范围：发起人 / 发起部门。
-        ScopeSql scope = instanceScope("instance");
-        ScopeSql outboxScope = instanceScope("instance");
+        InstanceScopeSql.Scope scope = InstanceScopeSql.forPermission(
+            authorization, PermissionCodes.WORKFLOW_MONITOR_READ, "instance");
+        InstanceScopeSql.Scope outboxScope = InstanceScopeSql.forPermission(
+            authorization, PermissionCodes.WORKFLOW_MONITOR_READ, "instance");
 
         List<Map<String, Object>> stuck = jdbc.queryForList("""
             SELECT instance.id, instance.current_node_id, instance.started_at,
@@ -53,7 +53,7 @@ public class WorkflowMonitoringController {
                                 AND job.status IN ('SCHEDULED', 'RUNNING'))
               AND /*scope*/
             ORDER BY instance.started_at LIMIT ?
-            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), InstanceScopeSql.withLimit(scope.args(), safeLimit));
 
         // 超时任务按所属**实例**的发起人/发起部门收窄（不是 assignee——否则会漏掉跨部门代办）。
         List<Map<String, Object>> overdue = jdbc.queryForList("""
@@ -65,7 +65,7 @@ public class WorkflowMonitoringController {
             WHERE task.status = 'PENDING' AND task.timeout_at < now()
               AND /*scope*/
             ORDER BY task.timeout_at LIMIT ?
-            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), InstanceScopeSql.withLimit(scope.args(), safeLimit));
 
         // 驳回率：过滤必须在 GROUP BY / 聚合之前，否则被排除的部门会算进分母。
         List<Map<String, Object>> rejectionRates = jdbc.queryForList("""
@@ -82,7 +82,7 @@ public class WorkflowMonitoringController {
             GROUP BY task.node_id
             HAVING COUNT(*) FILTER (WHERE task.status IN ('APPROVED', 'REJECTED')) > 0
             ORDER BY reject_rate DESC NULLS LAST, decided DESC LIMIT ?
-            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), InstanceScopeSql.withLimit(scope.args(), safeLimit));
 
         List<Map<String, Object>> fallbackBacklogs = jdbc.queryForList("""
             SELECT task.assignee_id,
@@ -104,7 +104,7 @@ public class WorkflowMonitoringController {
               AND /*scope*/
             GROUP BY task.assignee_id, user_row.display_name, user_row.username
             ORDER BY pending_count DESC, oldest_pending_at LIMIT ?
-            """.replace("/*scope*/", scope.sql()), withLimit(scope.args(), safeLimit));
+            """.replace("/*scope*/", scope.sql()), InstanceScopeSql.withLimit(scope.args(), safeLimit));
 
         // 事务消息只有 aggregate_type / aggregate_id，按「PROCESS_INSTANCE」关联到实例再收窄；
         // 其它聚合类型在受限范围下**显式排除**，免得将来新的写入方静默绕过范围。
@@ -132,9 +132,6 @@ public class WorkflowMonitoringController {
             "outbox", outbox);
     }
 
-    /** 一段可直接拼进 WHERE 的谓词 + 它绑定的参数（参数顺序与占位符一致）。 */
-    private record ScopeSql(String sql, List<Object> args) { }
-
     /**
      * 把每行里的节点 id 解析成展示名写进另一个 key。行是裸 SQL 的结果（`queryForList` 给的是
      * 可变 Map），所以直接原地改；解析用的快照用完就删，不进响应体。
@@ -147,47 +144,5 @@ public class WorkflowMonitoringController {
             row.put(nameKey, com.antflow.engine.tree.ProcessTreeNav.displayNameFromSnapshot(
                 String.valueOf(snapshot), String.valueOf(nodeId)));
         }
-    }
-
-    /**
-     * 调用者在 {@code workflow:monitor:read} 上的行级谓词，作用在流程实例上。
-     * 既不允许本人、也没有任何部门范围时返回恒假条件（fail-closed），不能退化成不过滤。
-     */
-    private ScopeSql instanceScope(String alias) {
-        Optional<AuthorizationService.DataScopeFilter> current =
-            authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ);
-        // 空 = 没有请求主体（系统内部调用）。本端点是管理端接口、正常不会走到这里，
-        // 但"取不到范围"绝不能等于"范围是全部"——和下面空范围一样 fail-closed。
-        if (current.isEmpty()) {
-            return new ScopeSql("1 = 0", List.of());
-        }
-        if (current.get().admin() || current.get().unrestricted()) {
-            return new ScopeSql("1 = 1", List.of());
-        }
-        AuthorizationService.DataScopeFilter scope = current.get();
-        List<String> parts = new ArrayList<>();
-        List<Object> args = new ArrayList<>();
-        if (scope.selfAllowed()) {
-            parts.add(alias + ".started_by = ?");
-            args.add(scope.userId());
-        }
-        if (!scope.departmentIds().isEmpty()) {
-            parts.add(alias + ".started_dept_id IN ("
-                + String.join(",", Collections.nCopies(scope.departmentIds().size(), "?")) + ")");
-            args.addAll(scope.departmentIds());
-        }
-        if (parts.isEmpty()) {
-            return new ScopeSql("1 = 0", List.of());
-        }
-        return new ScopeSql("(" + String.join(" OR ", parts) + ")", List.copyOf(args));
-    }
-
-    private static Object[] withLimit(List<Object> args, int limit) {
-        Object[] all = new Object[args.size() + 1];
-        for (int i = 0; i < args.size(); i++) {
-            all[i] = args.get(i);
-        }
-        all[args.size()] = limit;
-        return all;
     }
 }

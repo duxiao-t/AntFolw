@@ -23,6 +23,7 @@ import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.mobile.workflow.MobileDraftService;
 import com.antflow.mobile.workflow.MobileAppService;
 import com.antflow.navigation.MenuService;
+import com.antflow.report.ReportService;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.User;
@@ -173,6 +174,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
     @Autowired private AuthorizationService authorizationService;
     @Autowired private RoleAdminService roleAdminService;
+    @Autowired private com.antflow.report.ReportService reportService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
     @Autowired private FormDataService formDataService;
     @Autowired private FormDataMapper formDataMapper;
@@ -2033,6 +2035,105 @@ class PostgresTransactionalIntegrityIntegrationTest {
         } finally {
             PrincipalHolder.clear();
         }
+    }
+
+    @Test
+    void approvalSummaryCountsByFormAndNarrowsToTheCallersScope() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", twoApprovalFlow(bobId, adminId));
+        long scopedUser = insertUser("report-scoped");
+        long scopedRole = insertRole("report_scoped");
+        long emptyUser = insertUser("report-empty");
+        long emptyRole = insertRole("report_empty");
+        OffsetDateTime started = OffsetDateTime.now().minusDays(2).withNano(0);
+        java.util.List<Long> dataIds = new java.util.ArrayList<>();
+        try {
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'SELF')", scopedRole);
+            assignRole(scopedUser, scopedRole);
+            // DEPARTMENT 但这个用户没有部门 → 谓词集合为空 → 必须恒假（fail-closed）
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'DEPARTMENT')", emptyRole);
+            assignRole(emptyUser, emptyRole);
+
+            // admin 两单（一通过一进行中）、bob 一单（驳回）、受限账号自己一单（通过，用来验收窄）
+            dataIds.add(insertSubmittedData(formId, adminId));
+            dataIds.add(insertSubmittedData(formId, adminId));
+            dataIds.add(insertSubmittedData(formId, bobId));
+            dataIds.add(insertSubmittedData(formId, scopedUser));
+            insertInstance(processId, dataIds.get(0), "APPROVED", adminId, started, started.plusHours(2));
+            insertInstance(processId, dataIds.get(1), "RUNNING", adminId, started, null);
+            insertInstance(processId, dataIds.get(2), "REJECTED", bobId, started, started.plusHours(4));
+            insertInstance(processId, dataIds.get(3), "APPROVED", scopedUser, started,
+                started.plusHours(2));
+
+            LocalDate from = started.toLocalDate();
+            LocalDate to = LocalDate.now();
+            // 一律按这张表单收窄：同一个容器里还留着别的用例造的数据，不筛就等着顺序一变换个数字。
+            java.util.List<Long> onlyThisForm = java.util.List.of(formId);
+            setPrincipal(adminId);
+            ReportService.ApprovalSummary all = reportService.summary(from, to, onlyThisForm, null, 0);
+
+            assertThat(all.totals().started()).isEqualTo(4);
+            assertThat(all.totals().approved()).isEqualTo(2);
+            assertThat(all.totals().rejected()).isEqualTo(1);
+            assertThat(all.totals().running()).isEqualTo(1);
+            // 通过率分母只算已决：2 / (2 + 1)
+            assertThat(all.totals().approvalRate()).isEqualTo(66.7);
+            // 平均耗时只算已终态且有完成时间的：2h、4h、2h → 2.666…→ 2.7（进行中那条不算）
+            assertThat(all.totals().avgDurationHours()).isEqualTo(2.7);
+            assertThat(all.byForm()).hasSize(1);
+            assertThat(all.byForm().get(0).formName()).isEqualTo("Integration form");
+            assertThat(all.byForm().get(0).started()).isEqualTo(4);
+            // 每一条日期都有值：缺数据的日期补 0，否则折线断成几截
+            assertThat(all.byDay()).hasSize((int) java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1);
+            assertThat(all.byDay().get(0).date()).isEqualTo(from.toString());
+            assertThat(all.byDay().stream().filter(day -> day.started() > 0).findFirst().orElseThrow()
+                .started()).isEqualTo(4);
+
+            // 受限（本人）：只看得到自己那一单——范围必须真的收窄，不能等于全量
+            setPrincipal(scopedUser);
+            ReportService.ApprovalSummary own = reportService.summary(from, to, onlyThisForm, null, 0);
+            assertThat(own.totals().started()).isEqualTo(1);
+            assertThat(own.totals().approved()).isEqualTo(1);
+            assertThat(own.totals().approvalRate()).isEqualTo(100.0);
+            assertThat(own.byForm()).hasSize(1);
+            assertThat(own.byForm().get(0).started()).isEqualTo(1);
+            assertThat(own.byDay().stream().mapToLong(ReportService.DayRow::started).sum()).isEqualTo(1);
+
+            // 空范围：恒假，一条都不该漏出来
+            setPrincipal(emptyUser);
+            ReportService.ApprovalSummary none = reportService.summary(from, to, onlyThisForm, null, 0);
+            assertThat(none.totals().started()).isZero();
+            assertThat(none.byForm()).isEmpty();
+            assertThat(none.byDepartment()).isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+            // 顺序要紧：实例 → 表单数据 → 表单定义 → 角色与用户（created_by 有外键）。
+            jdbcTemplate.update("DELETE FROM t_process_instance WHERE proc_def_id = ?", processId);
+            for (Long dataId : dataIds) {
+                jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            }
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id IN (?, ?)", scopedUser, emptyUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id IN (?, ?)", scopedRole, emptyRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", scopedUser, emptyUser);
+            authorizationService.evict(scopedUser);
+            authorizationService.evict(emptyUser);
+        }
+    }
+
+    /** 报表只看实例的状态/时间/发起人/发起部门，直接插一行比走引擎快也更可控。 */
+    private long insertInstance(long processDefId, long formDataId, String status, long startedBy,
+                                OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                                           started_at, finished_at)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+            """, Long.class, processDefId, formDataId, status, startedBy, startedAt, finishedAt);
     }
 
     @Test
