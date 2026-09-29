@@ -7,7 +7,10 @@
 set -e
 mkdir -p /www/antflow/.m2
 
-RUN_ARGS=(-v /www/antflow/backend:/app -w /app -v /www/antflow/.m2:/root/.m2)
+# pom 的 resources 里有 ../frontend/config/page-capabilities.json；只挂 backend 时该目录不存在，
+# maven-resources-plugin 会静默跳过，打出的 jar 缺这个资源、启动即失败。
+RUN_ARGS=(-v /www/antflow/backend:/app -w /app -v /www/antflow/.m2:/root/.m2
+          -v /www/antflow/frontend/config:/frontend/config:ro)
 # 外部测试库要显式传进去——只在宿主机 export 的话，容器里的 System.getenv 读到的是空值，
 # 照样会去起 Testcontainers。
 if [ -n "${ANTFLOW_TEST_POSTGRES_URL:-}" ]; then
