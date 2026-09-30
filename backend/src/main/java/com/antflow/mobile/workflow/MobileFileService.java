@@ -6,6 +6,7 @@ import com.antflow.engine.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -301,7 +302,8 @@ public class MobileFileService {
      */
     private void validateImageContent(String submittedContentType, byte[] content) {
         if (detectImageContentType(content) == null) {
-            throw new BizException("BAD_FILE", "文件内容不是支持的图片格式（只支持 jpeg/png/gif/webp/bmp）");
+            throw new BizException("BAD_FILE",
+                "文件内容不是支持的图片格式（jpeg/png/gif/webp/bmp/tiff/heic/avif/svg）");
         }
     }
 
@@ -316,20 +318,51 @@ public class MobileFileService {
             && (content[2] & 0xFF) == 0xFF) {
             return "image/jpeg";
         }
-        if (startsWith(content, "GIF87a".getBytes(java.nio.charset.StandardCharsets.US_ASCII))
-            || startsWith(content, "GIF89a".getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
+        if (startsWith(content, ascii("GIF87a")) || startsWith(content, ascii("GIF89a"))) {
             return "image/gif";
         }
         // RIFF....WEBP
-        if (startsWith(content, "RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII))
-            && content.length >= 12
+        if (startsWith(content, ascii("RIFF")) && content.length >= 12
             && content[8] == 'W' && content[9] == 'E' && content[10] == 'B' && content[11] == 'P') {
             return "image/webp";
         }
-        if (startsWith(content, new byte[] {'B', 'M'})) {
+        if (startsWith(content, ascii("BM"))) {
             return "image/bmp";
         }
+        // TIFF：II*\0（小端）或 MM\0*（大端）
+        if (content.length >= 4
+            && ((content[0] == 'I' && content[1] == 'I' && content[2] == 0x2A && content[3] == 0x00)
+            || (content[0] == 'M' && content[1] == 'M' && content[2] == 0x00 && content[3] == 0x2A))) {
+            return "image/tiff";
+        }
+        // ISO-BMFF：``????ftyp<brand>``。**iPhone 的 HEIC 必须认**：`convertHeic` 没开的字段（默认没开）
+        // 是原样上传的，漏了它选张照片就被判成"不是图片"。AVIF 同理。
+        if (content.length >= 12 && content[4] == 'f' && content[5] == 't' && content[6] == 'y'
+            && content[7] == 'p') {
+            String brand = new String(content, 8, 4, StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT);
+            if (brand.startsWith("hei") || brand.startsWith("mif") || brand.startsWith("msf")) {
+                return "image/heic";
+            }
+            if (brand.startsWith("avif") || brand.startsWith("avis")) {
+                return "image/avif";
+            }
+        }
+        // SVG 是文本（`<svg` / `<?xml`），可能带 BOM 或前导空白。
+        String head = new String(content, 0, Math.min(content.length, 64), StandardCharsets.UTF_8)
+            .replace("\uFEFF", "");
+        while (head.startsWith(" ") || head.startsWith("\n") || head.startsWith("\r")
+            || head.startsWith("\t")) {
+            head = head.substring(1);
+        }
+        head = head.toLowerCase(Locale.ROOT);
+        if (head.startsWith("<svg") || head.startsWith("<?xml") || head.startsWith("<!doctype svg")) {
+            return "image/svg+xml";
+        }
         return null;
+    }
+
+    private static byte[] ascii(String text) {
+        return text.getBytes(StandardCharsets.US_ASCII);
     }
 
 

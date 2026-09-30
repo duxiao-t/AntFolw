@@ -318,6 +318,47 @@ class MobileFileServiceTest {
         assertThat(storage.putCount).isZero();
     }
 
+    /**
+     * 但**真图片都得放行**：iPhone 的 HEIC（`convertHeic` 默认没开，是原样上传的）、安卓的 AVIF、
+     * 扫描件的 TIFF、以及 SVG。漏一个就是"用户选张照片被判成不是图片"。
+     */
+    @Test
+    void imageUploadAcceptsEveryCommonImageSignature() throws Exception {
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+        byte[][] contents = {
+            jpegBytes(),
+            pngBytes(),
+            "GIF89a".getBytes(StandardCharsets.US_ASCII),
+            concat(ascii("RIFF"), new byte[] {0, 0, 0, 0}, ascii("WEBP")),
+            ascii("BM00000000"),
+            new byte[] {'I', 'I', 0x2A, 0x00, 1, 2, 3},
+            concat(new byte[] {0, 0, 0, 0x18}, ascii("ftypheic"), new byte[] {0, 0, 0, 0}),
+            concat(new byte[] {0, 0, 0, 0x18}, ascii("ftypavif"), new byte[] {0, 0, 0, 0}),
+            ascii("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"),
+        };
+        for (byte[] content : contents) {
+            assertThat(service.upload(new MockMultipartFile("file", "photo.jpg", "image/jpeg", content), 7L))
+                .as("内容应以图片通过校验")
+                .isNotNull();
+        }
+    }
+
+    private static byte[] ascii(String text) {
+        return text.getBytes(StandardCharsets.US_ASCII);
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        int length = 0;
+        for (byte[] part : parts) length += part.length;
+        byte[] result = new byte[length];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, result, offset, part.length);
+            offset += part.length;
+        }
+        return result;
+    }
+
     @Test
     void deleteRejectsSubmittedLinkedFile() {
         UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
