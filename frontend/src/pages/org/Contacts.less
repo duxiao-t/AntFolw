@@ -8,6 +8,7 @@
   .ct-tree-wrap { flex: 1; overflow: auto; padding: 8px 4px;
     .ant-tree-node-content-wrapper { padding: 4px 8px; }
     .ant-tree-treenode { padding: 3px 0; }
+    .ct-tree-empty { padding: 8px; color: #8c8c8c; font-size: 12px; }
   }
 }
 .ct-tree-node {
@@ -20,11 +21,15 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 20px; border-bottom: 1px solid #f0f0f0;
     h2 { margin: 0; font-size: 16px; }
+    // 搜索结果那一栏不带按钮，用一行浅字说明"这是跨部门找人、点定位跳过去"。
+    .ct-right-header__hint { color: #8c8c8c; font-size: 12px; }
   }
   .ct-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #bbb; font-size: 14px; }
 }
 .ct-user-row:hover { background: #f5f5f5; }
 .ct-user-row--sel { background: #e6f4ff; }
+// 次要信息（未设置部门这类）退成灰字，别和姓名抢注意力。
+.ct-muted { color: #8c8c8c; }
 
 .ct-member-name {
   display: flex;

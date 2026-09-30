@@ -23,6 +23,7 @@ import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.mobile.workflow.MobileDraftService;
 import com.antflow.mobile.workflow.MobileAppService;
 import com.antflow.navigation.MenuService;
+import com.antflow.report.ReportService;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.User;
@@ -173,6 +174,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
     @Autowired private AuthorizationService authorizationService;
     @Autowired private RoleAdminService roleAdminService;
+    @Autowired private com.antflow.report.ReportService reportService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
     @Autowired private FormDataService formDataService;
     @Autowired private FormDataMapper formDataMapper;
@@ -350,7 +352,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             setPrincipal(userId);
 
             Page<com.antflow.form.runtime.FormData> visible = formDataService.authorizedPage(
-                1, 20, null, null, null, userId, false);
+                1, 20, null, null, null, null, userId, false);
             assertThat(visible.getRecords()).extracting(com.antflow.form.runtime.FormData::getId)
                 .contains(dataId);
         } finally {
@@ -2030,6 +2032,218 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(formDefinitionMapper.selectSummaryPage(Page.of(1, 20), null, null,
                 adminId, true).getRecords())
                 .extracting(FormDefinitionMapper.Summary::id).contains(formId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void approvalSummaryCountsByFormAndNarrowsToTheCallersScope() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", twoApprovalFlow(bobId, adminId));
+        long scopedUser = insertUser("report-scoped");
+        long scopedRole = insertRole("report_scoped");
+        long emptyUser = insertUser("report-empty");
+        long emptyRole = insertRole("report_empty");
+        OffsetDateTime started = OffsetDateTime.now().minusDays(2).withNano(0);
+        java.util.List<Long> dataIds = new java.util.ArrayList<>();
+        try {
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'SELF')", scopedRole);
+            assignRole(scopedUser, scopedRole);
+            // DEPARTMENT 但这个用户没有部门 → 谓词集合为空 → 必须恒假（fail-closed）
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'DEPARTMENT')", emptyRole);
+            assignRole(emptyUser, emptyRole);
+
+            // admin 两单（一通过一进行中）、bob 一单（驳回）、受限账号自己一单（通过，用来验收窄）
+            dataIds.add(insertSubmittedData(formId, adminId));
+            dataIds.add(insertSubmittedData(formId, adminId));
+            dataIds.add(insertSubmittedData(formId, bobId));
+            dataIds.add(insertSubmittedData(formId, scopedUser));
+            insertInstance(processId, dataIds.get(0), "APPROVED", adminId, started, started.plusHours(2));
+            insertInstance(processId, dataIds.get(1), "RUNNING", adminId, started, null);
+            insertInstance(processId, dataIds.get(2), "REJECTED", bobId, started, started.plusHours(4));
+            insertInstance(processId, dataIds.get(3), "APPROVED", scopedUser, started,
+                started.plusHours(2));
+
+            LocalDate from = started.toLocalDate();
+            LocalDate to = LocalDate.now();
+            // 一律按这张表单收窄：同一个容器里还留着别的用例造的数据，不筛就等着顺序一变换个数字。
+            java.util.List<Long> onlyThisForm = java.util.List.of(formId);
+            setPrincipal(adminId);
+            ReportService.ApprovalSummary all = reportService.summary(from, to, onlyThisForm, null, 0);
+
+            assertThat(all.totals().started()).isEqualTo(4);
+            assertThat(all.totals().approved()).isEqualTo(2);
+            assertThat(all.totals().rejected()).isEqualTo(1);
+            assertThat(all.totals().running()).isEqualTo(1);
+            // 通过率分母只算已决：2 / (2 + 1)
+            assertThat(all.totals().approvalRate()).isEqualTo(66.7);
+            // 平均耗时只算已终态且有完成时间的：2h、4h、2h → 2.666…→ 2.7（进行中那条不算）
+            assertThat(all.totals().avgDurationHours()).isEqualTo(2.7);
+            assertThat(all.byForm()).hasSize(1);
+            assertThat(all.byForm().get(0).formName()).isEqualTo("Integration form");
+            assertThat(all.byForm().get(0).started()).isEqualTo(4);
+            // 每一条日期都有值：缺数据的日期补 0，否则折线断成几截
+            assertThat(all.byDay()).hasSize((int) java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1);
+            assertThat(all.byDay().get(0).date()).isEqualTo(from.toString());
+            assertThat(all.byDay().stream().filter(day -> day.started() > 0).findFirst().orElseThrow()
+                .started()).isEqualTo(4);
+
+            // 受限（本人）：只看得到自己那一单——范围必须真的收窄，不能等于全量
+            setPrincipal(scopedUser);
+            ReportService.ApprovalSummary own = reportService.summary(from, to, onlyThisForm, null, 0);
+            assertThat(own.totals().started()).isEqualTo(1);
+            assertThat(own.totals().approved()).isEqualTo(1);
+            assertThat(own.totals().approvalRate()).isEqualTo(100.0);
+            assertThat(own.byForm()).hasSize(1);
+            assertThat(own.byForm().get(0).started()).isEqualTo(1);
+            assertThat(own.byDay().stream().mapToLong(ReportService.DayRow::started).sum()).isEqualTo(1);
+
+            // 空范围：恒假，一条都不该漏出来
+            setPrincipal(emptyUser);
+            ReportService.ApprovalSummary none = reportService.summary(from, to, onlyThisForm, null, 0);
+            assertThat(none.totals().started()).isZero();
+            assertThat(none.byForm()).isEmpty();
+            assertThat(none.byDepartment()).isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+            // 顺序要紧：实例 → 表单数据 → 表单定义 → 角色与用户（created_by 有外键）。
+            jdbcTemplate.update("DELETE FROM t_process_instance WHERE proc_def_id = ?", processId);
+            for (Long dataId : dataIds) {
+                jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            }
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id IN (?, ?)", scopedUser, emptyUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id IN (?, ?)", scopedRole, emptyRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", scopedUser, emptyUser);
+            authorizationService.evict(scopedUser);
+            authorizationService.evict(emptyUser);
+        }
+    }
+
+    /** 报表只看实例的状态/时间/发起人/发起部门，直接插一行比走引擎快也更可控。 */
+    private long insertInstance(long processDefId, long formDataId, String status, long startedBy,
+                                OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                                           started_at, finished_at)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+            """, Long.class, processDefId, formDataId, status, startedBy, startedAt, finishedAt);
+    }
+
+    @Test
+    void submitterKeywordFiltersByPersonAndNeverWidensToEverything() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long mine = insertSubmittedData(formId, adminId);
+        setPrincipal(adminId);
+        try {
+            // 姓名命中（种子里 admin 的 display_name 是 "AntFlow Admin"）
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "AntFlow").getRecords())
+                .extracting(com.antflow.form.runtime.FormData::getId).contains(mine);
+            // 工号也命中
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "000001").getRecords())
+                .extracting(com.antflow.form.runtime.FormData::getId).contains(mine);
+            // 查不到人 → **零条**。这条是安全语义：若实现改成"先查 id 集合、集合空就省略条件"，
+            // 这里会退化成"返回范围内的全部记录"，等于把关键字筛选变成越权放大镜。
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "查无此人").getRecords())
+                .isEmpty();
+            // LIKE 通配符被转义：敲一个 % 不该匹配到所有人。
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "%").getRecords())
+                .isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void exportRowsAndCountAreNarrowedByTheCallersScope() {
+        // 导出必须与列表吃同一层行级范围（DataPermissionPolicyHandler 是按 mapper 语句 id
+        // 显式开启的，count 走 selectPage → 同样被覆盖）。这里就把"会不会导出得比看得到更多"钉住。
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long scopedUser = insertUser("export-scoped");
+        long scopedRole = insertRole("export_scoped");
+        long mine = insertSubmittedData(formId, scopedUser);
+        long theirs = insertSubmittedData(formId, bobId);
+        try {
+            // 行级范围跟着**读**能力走，所以受限角色两个能力都要有（只有导出权限会被挡在 403，
+            // 见下面那条断言）。
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'SELF'), (?, 'form:data:export', 'SELF')",
+                scopedRole, scopedRole);
+            assignRole(scopedUser, scopedRole);
+
+            setPrincipal(adminId);
+            assertThat(formDataService.exportRows(formId, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .contains(mine, theirs);
+            assertThat(formDataService.countForExport(formId, null, null)).isEqualTo(2);
+
+            // 受限（本人）：只拿得到自己那条，预览的行数也必须是 1——提示的数字与实际导出必须一致
+            setPrincipal(scopedUser);
+            assertThat(formDataService.exportRows(formId, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .containsExactly(mine);
+            assertThat(formDataService.countForExport(formId, null, null)).isEqualTo(1);
+
+            // 提交人关键字同样不能把范围放大：查不到人 → 一条都不导
+            assertThat(formDataService.exportRows(formId, null, "查无此人", null, null)).isEmpty();
+            assertThat(formDataService.countForExport(formId, null, "查无此人")).isZero();
+
+            // 只有导出权限（没有读）：控制器会直接 403，而不是给一个空文件
+            long exportOnly = insertUser("export-only");
+            long exportOnlyRole = insertRole("export_only");
+            try {
+                jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, "
+                    + "scope_override) VALUES (?, 'form:data:export', 'SELF')", exportOnlyRole);
+                assignRole(exportOnly, exportOnlyRole);
+                setPrincipal(exportOnly);
+                assertThatThrownBy(() -> authorizationService.requirePermission(
+                    PermissionCodes.FORM_DATA_READ))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            } finally {
+                jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", exportOnly);
+                jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", exportOnlyRole);
+                jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", exportOnly);
+                authorizationService.evict(exportOnly);
+            }
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id IN (?, ?)", mine, theirs);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", scopedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", scopedRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", scopedUser);
+            authorizationService.evict(scopedUser);
+        }
+    }
+
+    @Test
+    void allScopeUserSearchAlsoReturnsMembersWithoutADepartment() {
+        // ALL 范围不能被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
+        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里 admin/bob 就是）挡在外面，
+        // 而单条的 inCurrentDataScope 对 ALL 是放行的——两条路径口径不一致，通讯录搜人时会直接看出来。
+        long userId = insertUser("all-scope-people-" + UUID.randomUUID());
+        long roleId = insertRole("all_scope_people_" + UUID.randomUUID().toString().replace("-", ""));
+        long deptless = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_user WHERE dept_id IS NULL ORDER BY id LIMIT 1", Long.class);
+        assertThat(deptless).as("库里得有一个没有部门的账号，否则这条用例测不到东西").isNotNull();
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'org:user:read', 'ALL')", roleId);
+            setPrincipal(userId);
+
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100).getRecords())
+                .extracting(User::getId)
+                .contains(deptless);
         } finally {
             PrincipalHolder.clear();
         }
