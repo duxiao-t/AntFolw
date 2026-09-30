@@ -154,21 +154,23 @@ export function collectTreeKeys(nodes: { key: Key; children?: { key: Key; childr
   return nodes.flatMap((n) => [n.key, ...(n.children ? collectTreeKeys(n.children) : [])]);
 }
 
+export interface DeptTreeNode {
+  title?: unknown;
+  children?: DeptTreeNode[];
+}
+
 /**
  * 关键字过滤部门树：命中的节点保留**整棵子树**。
  *
  * 以前命中后只留也命中的子节点，搜"研发中心"会把研发一组/二组全滤掉——用户看到部门在，
  * 点进去却一个下级都没有。命中的就是"这个部门及其下面全部"。
  */
-export function filterDepartmentTree<T extends { title?: unknown; children?: T[] }>(
-  nodes: T[],
-  keyword: string,
-): T[] {
+export function filterDepartmentTree<T extends DeptTreeNode>(nodes: T[], keyword: string): T[] {
   const lower = keyword.trim().toLowerCase();
   if (!lower) return nodes;
   return nodes.flatMap((node) => {
     if (String(node.title ?? '').toLowerCase().includes(lower)) return [{ ...node }];
-    const children = node.children ? filterDepartmentTree(node.children, lower) : [];
+    const children = node.children ? filterDepartmentTree(node.children as T[], lower) : [];
     return children.length ? [{ ...node, children }] : [];
   });
 }
