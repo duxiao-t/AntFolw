@@ -1,13 +1,148 @@
 import { request } from '@umijs/max';
 
+/** 服务端的状态：带水印的视频是异步处理的，只有 READY 的文件才允许被提交关联。 */
+export type NativeFileStatus = 'READY' | 'PROCESSING' | 'FAILED';
+
 export type NativeFile = {
   id: string;
   name: string;
   contentUrl: string;
   contentType: string;
   size: number;
+  status?: NativeFileStatus;
+  /** 只在 FAILED 时给（服务端已脱敏），客户端拿它当可展示的失败原因。 */
+  failureReason?: string;
   durationSeconds?: number;
 };
+
+export const MEDIA_UPLOAD_ENDPOINT = '/api/mobile/files';
+/** 与服务端 `hasPendingAudioUpload` 共用的标记：数组上带它 = 还有文件没传完。 */
+export const PENDING_UPLOAD = Symbol.for('antflowPendingUpload');
+
+export type MediaFileLike = {
+  id?: string;
+  name?: string;
+  fileName?: string;
+  contentType?: string;
+  contentUrl?: string;
+  url?: string;
+  size?: number;
+  status?: NativeFileStatus;
+  failureReason?: string;
+};
+
+export function hasPendingUpload(value: unknown): boolean {
+  return Array.isArray(value)
+    && (value as unknown as Record<symbol, unknown>)[PENDING_UPLOAD] === true;
+}
+
+/** 标记/取消标记"还有文件在传"，提交校验靠它挡住半途提交（Symbol 不会被 JSON 序列化，只用于前端校验）。 */
+export function withPendingUpload<T>(files: T, pending: boolean): T {
+  if (!Array.isArray(files)) return files;
+  if (pending) {
+    Object.defineProperty(files, PENDING_UPLOAD, { value: true, enumerable: false, configurable: true });
+  } else {
+    delete (files as unknown as Record<symbol, unknown>)[PENDING_UPLOAD];
+  }
+  return files;
+}
+
+export type MediaUploadEvent = { percent: number; phase: 'uploading' | 'processing' | 'done' };
+export type MediaUploadOptions = {
+  endpoint?: string;
+  watermark?: boolean;
+  watermarkText?: string;
+  onProgress?: (event: MediaUploadEvent) => void;
+};
+
+/**
+ * 上传一个媒体文件到服务端（图片/视频/音频/普通附件都走这一个入口），需要水印时把字段配置里的
+ * 文案一起带上——服务端在「要水印但没文案」时会直接拒绝，而不是悄悄存原图。
+ *
+ * <p>返回值是**服务端 DTO**（带 id / contentType / status）：表单值必须是这个形状，
+ * `Fill.tsx` 的 `collectFileRefs` 只认带 `id` + `contentType` 的项，别的形状会被静默丢掉。
+ */
+export async function uploadMediaFile(
+  file: File,
+  options: MediaUploadOptions = {},
+): Promise<NativeFile> {
+  const data = new FormData();
+  data.set('file', file);
+  if (options.watermark) {
+    data.set('watermark', 'true');
+    data.set('watermarkText', (options.watermarkText ?? '').trim() || 'AntFlow');
+  }
+  const uploaded = await request<NativeFile>(options.endpoint ?? MEDIA_UPLOAD_ENDPOINT, {
+    method: 'POST',
+    data,
+    onUploadProgress: (event: { loaded?: number; total?: number }) => {
+      const total = event.total ?? 0;
+      options.onProgress?.({
+        percent: total > 0 ? Math.min(99, Math.round(((event.loaded ?? 0) / total) * 100)) : 0,
+        phase: 'uploading',
+      });
+    },
+  });
+  return waitForNativeFileReady(uploaded, options);
+}
+
+/** 删掉还没提交的文件（服务端对已提交关联的文件会拒绝，正好只在填单期可删）。 */
+export async function deleteNativeFile(id: string): Promise<void> {
+  await request<void>(`${MEDIA_UPLOAD_ENDPOINT}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** 视频加水印是异步的：轮询到 READY 才允许进表单值。文案与移动端保持一致。 */
+export async function waitForNativeFileReady(
+  file: NativeFile,
+  options: MediaUploadOptions = {},
+): Promise<NativeFile> {
+  if (file.status !== 'PROCESSING') {
+    options.onProgress?.({ percent: 100, phase: 'done' });
+    return file;
+  }
+  options.onProgress?.({ percent: 97, phase: 'processing' });
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    const current = await request<NativeFile>(
+      `${MEDIA_UPLOAD_ENDPOINT}/${encodeURIComponent(file.id)}`,
+    );
+    if (current.status === 'FAILED') {
+      throw new Error(current.failureReason || '视频处理失败，请重新上传');
+    }
+    if (current.status !== 'PROCESSING') {
+      options.onProgress?.({ percent: 100, phase: 'done' });
+      return current;
+    }
+  }
+  throw new Error('视频处理超时，请稍后重试');
+}
+
+/**
+ * 把表单值里可能出现的三种形状统一成可渲染的列表：
+ * 服务端 DTO（正常）、antd 的 UploadFile 垃圾值（本次修复之前桌面端写进去的，没有 id、字节从来没上传过）、
+ * `file_upload` 单文件时期的名字字符串。后两种只显示名字，不给预览也不给删除。
+ */
+export function toMediaFiles(value: unknown): MediaFileLike[] {
+  const items = Array.isArray(value) ? value : value == null || value === '' ? [] : [value];
+  return items.flatMap((item): MediaFileLike[] => {
+    if (typeof item === 'string') return [{ name: item }];
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name
+      : typeof record.fileName === 'string' ? record.fileName : '文件';
+    return [{
+      id: typeof record.id === 'string' ? record.id : undefined,
+      name,
+      fileName: typeof record.fileName === 'string' ? record.fileName : undefined,
+      contentType: typeof record.contentType === 'string' ? record.contentType : undefined,
+      contentUrl: typeof record.contentUrl === 'string' ? record.contentUrl
+        : typeof record.url === 'string' ? record.url : undefined,
+      size: typeof record.size === 'number' ? record.size : undefined,
+      status: record.status as NativeFileStatus | undefined,
+      failureReason: typeof record.failureReason === 'string' ? record.failureReason : undefined,
+    }];
+  });
+}
 
 export type NativeLocation = {
   latitude: number;

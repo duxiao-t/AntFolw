@@ -1,5 +1,6 @@
 import { UploadOutlined } from '@ant-design/icons';
-import { Upload, Button, message } from 'antd';
+import { MediaUploadControl } from './MediaUploadControl';
+import { ReadonlyMediaList, mediaSummary } from './MediaPreview';
 import type { FieldType } from '../../registry/types';
 
 export const FileUploadField: FieldType = {
@@ -19,35 +20,31 @@ export const FileUploadField: FieldType = {
         </div>
       </div>;
     }
+    if (mode === 'readonly') {
+      return <div data-field-id={node.id}>
+        <div style={{ display: 'block', marginBottom: 4 }}>
+          {node.label}{node.props?.required ? ' *' : ''}
+        </div>
+        <div>{mediaSummary(value, 'file')}</div>
+        <ReadonlyMediaList value={value} />
+      </div>;
+    }
     return <div data-field-id={node.id}>
       <div style={{ display: 'block', marginBottom: 4 }}>
         {node.label}{node.props?.required ? ' *' : ''}
       </div>
-      <Upload
-        disabled={mode !== 'runtime-fill'}
+      <MediaUploadControl
+        node={node}
+        mode={mode}
+        value={value}
+        onChange={onChange}
+        kind="file"
         multiple={!!node.props?.multiple}
-        accept={node.props?.accept || undefined}
         maxCount={node.props?.maxCount ?? (node.props?.multiple ? undefined : 1)}
-        fileList={Array.isArray(value) ? value : value ? [{ uid: '0', name: String(value), status: 'done' }] : []}
-        beforeUpload={(file) => {
-          const maxSizeMB = node.props?.maxSizeMB;
-          if (maxSizeMB && file.size / 1024 / 1024 > maxSizeMB) {
-            message.error(`单文件不能超过 ${maxSizeMB}MB`);
-            return Upload.LIST_IGNORE;
-          }
-          return false;
-        }}
-        onChange={(info) => {
-          if (node.props?.multiple) {
-            onChange?.(info.fileList as any);
-          } else {
-            const last = info.fileList[info.fileList.length - 1];
-            onChange?.(last ? (last as any).name : undefined);
-          }
-        }}
-      >
-        <Button>{node.props?.buttonText || '选择文件'}</Button>
-      </Upload>
+        maxSizeMB={node.props?.maxSizeMB}
+        accept={node.props?.accept || undefined}
+        buttonText={node.props?.buttonText}
+      />
     </div>;
   },
   ConfigPanel: ({ node, onChange }) => (

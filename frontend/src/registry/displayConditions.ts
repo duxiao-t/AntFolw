@@ -1,5 +1,68 @@
 import type { DisplayCondition, SchemaNode } from './types';
 
+/** 上传类字段：提交前要确认没有"还在传"或"服务端还没处理完"的文件。 */
+const MEDIA_FIELD_TYPES = new Set(['image_upload', 'video_upload', 'file_upload', 'audio_upload']);
+
+function hasPendingUpload(value: unknown) {
+  return Array.isArray(value)
+    && (value as unknown as Record<symbol, unknown>)[Symbol.for('antflowPendingUpload')] === true;
+}
+
+/** 一个文件项是不是"还没就绪"（服务端 READY 才允许被关联进提交）。 */
+function notReady(file: unknown): string | null {
+  if (!file || typeof file !== 'object') return null;
+  const record = file as Record<string, unknown>;
+  if (typeof record.id !== 'string') return null;
+  if (record.status === 'FAILED') return '有文件处理失败，请移除后重新上传';
+  if (record.status && record.status !== 'READY') return '有文件还在处理中（如视频加水印），请稍候';
+  return null;
+}
+
+/**
+ * 媒体字段的提交前检查。
+ *
+ * <p>要覆盖三层：字段自己的数组、**检查项每项的照片**（值在 `items[].images` 里，不是 children）、
+ * 以及明细表行内的媒体。少一层就能在"照片还在传"时提交，附件被静默丢掉。
+ */
+function pendingMediaReason(nodeType: string, value: unknown): string | null {
+  if (hasPendingUpload(value)) return '仍有文件未完成上传';
+  if (!Array.isArray(value)) return null;
+  if (nodeType === 'checklist') {
+    for (const entry of value) {
+      const images = (entry as Record<string, unknown> | null)?.images
+        ?? (entry as Record<string, unknown> | null)?.photos;
+      if (hasPendingUpload(images)) return '仍有检查项照片未完成上传';
+      if (Array.isArray(images)) {
+        for (const file of images) {
+          const reason = notReady(file);
+          if (reason) return reason;
+        }
+      }
+    }
+    return null;
+  }
+  if (nodeType === 'table_list') {
+    for (const row of value) {
+      if (!row || typeof row !== 'object') continue;
+      for (const nested of Object.values(row as Record<string, unknown>)) {
+        if (hasPendingUpload(nested)) return '表格里仍有文件未完成上传';
+        if (Array.isArray(nested)) {
+          for (const file of nested) {
+            const reason = notReady(file);
+            if (reason) return reason;
+          }
+        }
+      }
+    }
+    return null;
+  }
+  for (const file of value) {
+    const reason = notReady(file);
+    if (reason) return reason;
+  }
+  return null;
+}
+
 export function matchesDisplayCondition(
   condition: DisplayCondition | undefined,
   values: Record<string, any>,
@@ -106,11 +169,17 @@ function firstVisibleValidationErrorIn(
     }
     const value = values[node.id] ?? node.props?.defaultValue;
     if (node.type === 'audio_upload') {
-      if (Array.isArray(value) && (value as unknown as Record<symbol, unknown>)[Symbol.for('antflowPendingUpload')] === true) {
+      if (hasPendingUpload(value)) {
         return '仍有录音未完成上传';
       }
       const maxCount = typeof node.props?.maxCount === 'number' ? node.props.maxCount : 3;
       if (Array.isArray(value) && value.length > maxCount) return `最多录制 ${maxCount} 段`;
+    }
+    // 图片/视频/附件/检查项照片：还在上传、或服务端还在处理（视频加水印）时不许提交——
+    // 服务端的附件关联只接受 READY 文件，硬提交会被整单拒，或者干脆把附件丢掉。
+    if (MEDIA_FIELD_TYPES.has(node.type) || node.type === 'checklist' || node.type === 'table_list') {
+      const pending = pendingMediaReason(node.type, value);
+      if (pending) return pending;
     }
     if ((node.type === 'number' || node.type === 'money') && !isEmptyValue(value)) {
       const number = Number(value);

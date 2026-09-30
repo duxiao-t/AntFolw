@@ -1,7 +1,8 @@
 import { CheckCircleOutlined } from '@ant-design/icons';
-import { request } from '@umijs/max';
-import { Button, Checkbox, Image, Input, Radio, Typography, Upload } from 'antd';
-import { useEffect, useState } from 'react';
+import { Button, Checkbox, Input, Radio, Typography } from 'antd';
+import { useEffect, useRef } from 'react';
+import { AuthenticatedMedia } from './MediaPreview';
+import { MediaUploadControl } from './MediaUploadControl';
 import type { FieldType } from '../../registry/types';
 
 function itemsOf(node: any) {
@@ -30,51 +31,30 @@ function resultsOf(node: any) {
   }));
 }
 
+/**
+ * 把表单值规范成检查项数组。**编辑态与只读态共用一份**：以前编辑态直接拿原始数组，只认 `id`/`images`，
+ * 于是老数据（移动端或更早版本写的 `itemId`/`photos`/`remark`）一存回去就被抹掉。
+ * 配置里已经没有的检查项也原样留着——不静默丢用户填过的东西。
+ */
 function entriesOf(value: unknown, items: ReturnType<typeof itemsOf>) {
   const source = Array.isArray(value) ? value : [];
-  return items.map((item) => {
-    const raw = source.find((entry: any) => (entry?.id ?? entry?.itemId) === item.id) as any;
-    return {
-      id: item.id,
-      name: raw?.name || item.label,
-      status: raw?.status ?? raw?.result ?? '',
-      description: raw?.description ?? raw?.remark ?? '',
-      images: Array.isArray(raw?.images) ? raw.images : Array.isArray(raw?.photos) ? raw.photos : [],
-    };
+  const normalize = (raw: any, fallbackId: string, fallbackName: string) => ({
+    id: String(raw?.id ?? raw?.itemId ?? fallbackId),
+    name: raw?.name || fallbackName,
+    status: raw?.status ?? raw?.result ?? '',
+    description: raw?.description ?? raw?.remark ?? '',
+    images: Array.isArray(raw?.images) ? raw.images : Array.isArray(raw?.photos) ? raw.photos : [],
   });
-}
-
-function AuthenticatedChecklistMedia({ file }: { file: any }) {
-  const contentUrl = file?.contentUrl ?? file?.url;
-  const [url, setUrl] = useState('');
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (!contentUrl) return;
-    let alive = true;
-    let objectUrl = '';
-    request<Blob>(contentUrl, { responseType: 'blob' }).then((blob) => {
-      if (!alive) return;
-      objectUrl = URL.createObjectURL(blob);
-      setUrl(objectUrl);
-    }).catch(() => { if (alive) setFailed(true); });
-    return () => {
-      alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [contentUrl]);
-  const name = file?.name ?? file?.fileName ?? '媒体';
-  const video = String(file?.contentType ?? '').startsWith('video/')
-    || /\.(mp4|mov|3gp|3gpp|webm|m4v)$/i.test(name);
-  return (
-    <div style={{ display: 'grid', gap: 4 }}>
-      {url && video ? (
-        // biome-ignore lint/a11y/useMediaCaption: uploaded inspection videos do not provide caption tracks.
-        <video controls preload="metadata" src={url} style={{ width: 220, maxWidth: '100%', borderRadius: 8 }} />
-      ) : url ? <Image width={96} height={96} src={url} alt={name} style={{ objectFit: 'cover', borderRadius: 8 }} />
-        : <Typography.Text type="secondary">{failed ? '媒体加载失败' : '媒体加载中…'}</Typography.Text>}
-      <Typography.Text type="secondary">{name}</Typography.Text>
-    </div>
-  );
+  const configured = items.map((item) => normalize(
+    source.find((entry: any) => (entry?.id ?? entry?.itemId) === item.id),
+    item.id,
+    item.label,
+  ));
+  const known = new Set(items.map((item) => item.id));
+  const extras = source
+    .filter((entry: any) => entry && !known.has(String(entry.id ?? entry.itemId)))
+    .map((entry: any) => normalize(entry, String(entry.id ?? entry.itemId ?? ''), '检查项'));
+  return [...configured, ...extras];
 }
 
 export const ChecklistField: FieldType = {
@@ -101,9 +81,15 @@ export const ChecklistField: FieldType = {
     const items = itemsOf(node);
     const results = resultsOf(node);
     const allowDescription = node.props?.allowDescription !== false;
-    const entries = mode === 'readonly'
-      ? entriesOf(value, items)
-      : Array.isArray(value) ? value : [];
+    const entries = entriesOf(value, items);
+    // 异步上传完成时用的可能是较早那次渲染的 `value`：以 ref 为准，否则并发上传会互相覆盖
+    // （先回的那张照片被后回的写没了）。
+    const valueRef = useRef<unknown>(value);
+    useEffect(() => { valueRef.current = value; }, [value]);
+    const setEntries = (next: unknown[]) => {
+      valueRef.current = next;
+      onChange?.(next);
+    };
 
     if (mode === 'designer-preview') {
       return (
@@ -146,7 +132,7 @@ export const ChecklistField: FieldType = {
                   {entry.images.length > 0 ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                       {entry.images.map((file: any, index: number) => (
-                        <AuthenticatedChecklistMedia key={file?.id ?? index} file={file} />
+                        <AuthenticatedMedia key={file?.id ?? index} file={file} />
                       ))}
                     </div>
                   ) : null}
@@ -160,14 +146,12 @@ export const ChecklistField: FieldType = {
     }
 
     const updateEntry = (itemId: string, patch: Record<string, any>) => {
-      const next = entries.map((entry: any) =>
-        entry?.id === itemId ? { ...entry, ...patch } : entry,
-      );
-      const hasEntry = entries.some((entry: any) => entry?.id === itemId);
-      const final = hasEntry
-        ? next
-        : [...next, { id: itemId, name: '', status: '', description: '', images: [], ...patch }];
-      onChange?.(final);
+      const current = entriesOf(valueRef.current, items);
+      const hasEntry = current.some((entry: any) => entry?.id === itemId);
+      const next = hasEntry
+        ? current.map((entry: any) => (entry?.id === itemId ? { ...entry, ...patch } : entry))
+        : [...current, { id: itemId, name: '', status: '', description: '', images: [], ...patch }];
+      setEntries(next);
     };
 
     return (
@@ -185,14 +169,10 @@ export const ChecklistField: FieldType = {
                   key={result.id}
                   size="small"
                   onClick={() => {
-                    const next = items.map((item) => ({
-                      id: item.id,
-                      name: item.label,
-                      status: result.id,
-                      description: '',
-                      images: [],
-                    }));
-                    onChange?.(next);
+                    // 只覆盖状态：以前连 description/images 一起清空——接上真上传之后那等于静默丢附件
+                    // （服务端文件还会变成孤儿）。
+                    const current = entriesOf(valueRef.current, items);
+                    setEntries(current.map((entry: any) => ({ ...entry, status: result.id })));
                   }}
                 >
                   {result.label}
@@ -226,20 +206,17 @@ export const ChecklistField: FieldType = {
                       value={entry?.description}
                       onChange={(event) => updateEntry(item.id, { description: event.target.value })}
                     />
-                    <Upload
+                    <MediaUploadControl
+                      node={node}
+                      mode={mode}
+                      value={entry?.images ?? []}
+                      onChange={(files) => updateEntry(item.id, { images: files })}
+                      kind="image"
                       multiple
+                      maxCount={node.props?.photoMaxCount ?? 9}
                       accept="image/*"
-                      listType="picture"
-                      fileList={(entry?.images ?? []).map((photo: any, index: number) => ({
-                        uid: photo.id ?? String(index),
-                        name: photo.name ?? '照片',
-                        status: 'done',
-                        url: photo.contentUrl ?? photo.url,
-                      }))}
-                      beforeUpload={() => false}
-                    >
-                      <Button size="small">添加照片</Button>
-                    </Upload>
+                      buttonText="添加照片"
+                    />
                   </>
                 ) : null}
               </div>

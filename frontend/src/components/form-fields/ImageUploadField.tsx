@@ -1,5 +1,6 @@
-import { Upload, Button, message } from 'antd';
 import { PictureOutlined } from '@ant-design/icons';
+import { MediaUploadControl } from './MediaUploadControl';
+import { ReadonlyMediaList, mediaSummary } from './MediaPreview';
 import type { FieldType } from '../../registry/types';
 
 const DEFAULT_ACCEPT = 'image/*';
@@ -44,11 +45,8 @@ export const ImageUploadField: FieldType = {
             {node.label}
             {node.props?.required ? ' *' : ''}
           </div>
-          <div>
-            {Array.isArray(value) && value.length > 0
-              ? `已上传 ${value.length} 张图片`
-              : '未上传图片'}
-          </div>
+          <div>{mediaSummary(value, 'image')}</div>
+          <ReadonlyMediaList value={value} />
         </div>
       );
     }
@@ -58,38 +56,21 @@ export const ImageUploadField: FieldType = {
           {node.label}
           {node.props?.required ? ' *' : ''}
         </div>
-        <Upload
-          disabled={mode !== 'runtime-fill'}
-          multiple
-          accept="image/*"
+        <MediaUploadControl
+          node={node}
+          mode={mode}
+          value={value}
+          onChange={onChange}
+          kind="image"
+          multiple={node.props?.multiple !== false}
           maxCount={maxCount}
-          listType="picture"
-          fileList={
-            Array.isArray(value)
-              ? (value as any[]).map((item, index) => ({
-                  uid: item.id ?? String(index),
-                  name: item.name ?? item.fileName ?? '图片',
-                  status: 'done',
-                  url: item.contentUrl ?? item.url,
-                }))
-              : []
-          }
-          beforeUpload={(file) => {
-            const maxSizeMB = node.props?.maxSizeMB;
-            if (maxSizeMB && file.size / 1024 / 1024 > maxSizeMB) {
-              message.error(`单张图片不能超过 ${maxSizeMB}MB`);
-              return Upload.LIST_IGNORE;
-            }
-            return false;
-          }}
-          onChange={(info) => {
-            onChange?.(info.fileList as any);
-          }}
-        >
-          <Button>
-            {node.props?.buttonText || '添加图片'}
-          </Button>
-        </Upload>
+          maxSizeMB={node.props?.maxSizeMB}
+          accept={node.props?.accept ?? DEFAULT_ACCEPT}
+          watermark={!!node.props?.watermark}
+          watermarkText={node.props?.watermarkText}
+          buttonText={node.props?.buttonText}
+          hint={node.props?.watermark ? '上传时会自动加水印' : undefined}
+        />
       </div>
     );
   },
