@@ -190,15 +190,18 @@ class MobileFileServiceTest {
         assertThat(storage.contentType).isEqualTo("video/mp4");
     }
 
+    /**
+     * 要水印却把文案丢了：以前静默存原图（调用方以为加了水印），现在明说——不然开了水印的字段
+     * 能悄悄产出没有水印的"证据照片"。
+     */
     @Test
-    void uploadSkipsWatermarkWhenTextIsBlank() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+    void uploadRejectsWatermarkWithoutText() {
         Mockito.when(processor.supports("image/png")).thenReturn(true);
 
-        byte[] content = pngBytes();
-        MobileFileDto dto = service.upload(pngFile("logo.png", content), 7L, true, "  ");
-
-        assertThat(storage.contentBytes).isEqualTo(content);
+        assertThatThrownBy(() -> service.upload(pngFile("logo.png", pngBytes()), 7L, true, "  "))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("水印文案");
+        assertThat(storage.putCount).isZero();
         Mockito.verify(processor, Mockito.never()).apply(Mockito.any(), Mockito.any(), Mockito.any());
     }
 
@@ -281,6 +284,38 @@ class MobileFileServiceTest {
         MobileFileDto dto = service.getMetadata(id, 99L, List.of("admin"));
 
         assertThat(dto.id()).isEqualTo(id);
+    }
+
+    /**
+     * 镜像里没装 ffmpeg 时（本地 docker 栈曾经就是这样）**图片**上传会同步失败——这里用真 processor
+     * 走一遍，钉住"用户看到的是能照着做的话"，而不是 `Cannot run program "ffmpeg"`。
+     */
+    @Test
+    void imageWatermarkWithMissingBinaryFailsWithAnActionableMessage() throws Exception {
+        MobileMediaProperties mediaProperties = new MobileMediaProperties();
+        mediaProperties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
+        service = new MobileFileService(fileMapper, accessMapper, storage,
+            new MobileFileProperties(), new MediaWatermarkProcessor(mediaProperties),
+            authorizationService, backgroundTasks::add);
+
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "photo.jpg", "image/jpeg", jpegBytes()),
+            7L, true, "AntFlow"))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("ffmpeg")
+            .hasMessageNotContaining("Cannot run program");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /** 声明成 image/png 的非图片字节：以前直接放行、还会走进 ffmpeg；现在按内容拒绝。 */
+    @Test
+    void imageUploadRejectsBytesThatAreNotAnImage() {
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "fake.png", "image/png",
+                "%PDF-1.7 not really an image".getBytes(StandardCharsets.US_ASCII)), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不是支持的图片格式");
+        assertThat(storage.putCount).isZero();
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.antflow.mobile.workflow;
 
 import com.antflow.engine.BizException;
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,18 +15,28 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Applies a text watermark (configured text + upload time) to images and videos
  * with a local ffmpeg binary. Images are re-encoded in their original format,
  * videos are normalized to MP4 (H.264 + AAC).
+ *
+ * <p>图片是**在请求内同步**跑 ffmpeg 的：二进制缺失会让整个上传失败（422），所以启动时先探一次
+ * （见 {@link #probeOnStartup()}），缺什么就写日志——总比让用户看到
+ * {@code Cannot run program "ffmpeg"} 强。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MediaWatermarkProcessor {
     private static final int PROCESS_TIMEOUT_MINUTES = 10;
+    private static final int PROBE_TIMEOUT_SECONDS = 3;
+    /** 从 ffmpeg 日志文件末尾取多少字节当诊断。 */
     private static final int OUTPUT_CAPTURE_LIMIT = 8 * 1024;
+    /** 报给用户的失败原因里最多留多少字（ffmpeg 的报错经常很长）。 */
+    private static final int USER_MESSAGE_LIMIT = 200;
     private static final List<String> CJK_FONT_CANDIDATES = List.of(
         "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/simhei.ttf",
@@ -35,6 +46,58 @@ public class MediaWatermarkProcessor {
     );
 
     private final MobileMediaProperties properties;
+
+    /**
+     * 启动探测：ffmpeg 能不能跑、中文水印有没有字体。**只写日志**，不拦启动——没装 ffmpeg 时其它
+     * 功能都正常，只是"加水印的上传"会失败。
+     *
+     * <p>用 {@code @PostConstruct} 而不是 {@code ApplicationReadyEvent}：它不依赖数据库/对象存储，
+     * 启动早期就能查到（那个事件已经被视频恢复占用了）。
+     */
+    @PostConstruct
+    void probeOnStartup() {
+        Capabilities capabilities = probe();
+        if (!capabilities.ffmpegAvailable()) {
+            log.warn("ffmpeg 不可用（antflow.media.ffmpeg-bin='{}'）：开了水印的图片/视频上传会失败。"
+                + "镜像里装 ffmpeg（Dockerfile 已装）或把 FFMPEG_BIN 指到可执行的路径。",
+                properties.getFfmpegBin());
+        } else if (capabilities.fontPath() == null) {
+            log.warn("没有可用的中文字体（antflow.media.watermark-font 为空且候选路径都不存在）："
+                + "中文水印会显示成方框或被 ffmpeg 拒绝。装 fonts-wqy-microhei 或设置 WATERMARK_FONT。");
+        } else {
+            log.info("媒体水印就绪：ffmpeg='{}'，字体='{}'",
+                properties.getFfmpegBin(), capabilities.fontPath());
+        }
+    }
+
+    record Capabilities(boolean ffmpegAvailable, String fontPath) { }
+
+    Capabilities probe() {
+        return new Capabilities(ffmpegRuns(), resolveFont());
+    }
+
+    /**
+     * 探测必须**不读管道**：{@code -version} 的输出直接丢掉，否则子进程输出一多、我们不读就会把管道
+     * 填满，本该几毫秒的探测能把启动挂住（{@link #run} 曾经就是这个毛病）。
+     */
+    private boolean ffmpegRuns() {
+        try {
+            Process process = new ProcessBuilder(properties.getFfmpegBin(), "-version")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start();
+            if (!process.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (IOException exception) {
+            return false;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
 
     public boolean supports(String contentType) {
         String type = normalize(contentType);
@@ -65,14 +128,21 @@ public class MediaWatermarkProcessor {
             Files.write(filterScript, drawTextFilter(watermarkFile).getBytes(StandardCharsets.UTF_8));
 
             Path output = workDir.resolve(sourceType.startsWith("video/") ? "output.mp4" : "output" + sourceExtension);
-            ProcessResult result = run(command(input, output, filterScript, sourceType));
+            ProcessResult result = run(command(input, output, filterScript, sourceType),
+                workDir.resolve("ffmpeg.log"));
             if (result.exitCode != 0) {
+                log.error("ffmpeg 退出码 {}：{}", result.exitCode, result.errorTail);
+                String detail = firstLine(result.errorTail);
                 throw new BizException("WATERMARK_PROCESSING_FAILED",
-                    "watermark processing failed: " + result.errorTail);
+                    (detail.isEmpty() ? "图片/视频水印处理失败。" : "水印处理失败：" + detail + "。")
+                        + "详情见服务端日志。");
             }
             return Files.readAllBytes(output);
         } catch (IOException exception) {
-            throw new BizException("WATERMARK_PROCESSING_FAILED", exception.getMessage());
+            // 这里是临时文件读写的失败（不是 ffmpeg 本身）：技术细节进日志，用户看到的是"服务端故障"。
+            log.error("水印处理的临时文件操作失败", exception);
+            throw new BizException("WATERMARK_PROCESSING_FAILED",
+                "图片/视频水印处理失败（服务端临时文件异常），详情见服务端日志。");
         } finally {
             if (workDir != null) {
                 deleteRecursively(workDir);
@@ -129,7 +199,9 @@ public class MediaWatermarkProcessor {
     private String resolveFont() {
         String configured = properties.getWatermarkFont();
         if (configured != null && !configured.isBlank()) {
-            return configured;
+            // 配了但文件不在（打错路径/没挂进容器）：当成"没有字体"处理——把不存在的 fontfile 交给
+            // ffmpeg 会直接报错，而启动探测也需要能看出这件事。
+            return Files.exists(Path.of(configured)) ? configured : null;
         }
         for (String candidate : CJK_FONT_CANDIDATES) {
             if (Files.exists(Path.of(candidate))) {
@@ -143,26 +215,69 @@ public class MediaWatermarkProcessor {
         return path.replace(":", "\\:");
     }
 
-    private ProcessResult run(List<String> command) {
+    /**
+     * 跑 ffmpeg。
+     *
+     * <p>输出**重定向到文件**再等进程：原来先 {@code readNBytes} 再 {@code waitFor}，ffmpeg 输出一多
+     * （超过 8KB）管道就会填满、进程卡住不退出，最后被误判成超时——本来能完成的转码白等 10 分钟。
+     * 失败时读日志文件末尾当诊断，用户那边只看到一个短句。
+     */
+    private ProcessResult run(List<String> command, Path logFile) {
+        Process process = null;
         try {
-            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            byte[] output = process.getInputStream().readNBytes(OUTPUT_CAPTURE_LIMIT + 1);
-            boolean finished = process.waitFor(PROCESS_TIMEOUT_MINUTES, TimeUnit.MINUTES);
-            if (!finished) {
-                process.destroyForcibly();
-                throw new BizException("WATERMARK_PROCESSING_FAILED", "ffmpeg timed out");
-            }
-            return new ProcessResult(
-                process.exitValue(),
-                new String(output, 0, Math.min(output.length, OUTPUT_CAPTURE_LIMIT), StandardCharsets.UTF_8)
-            );
+            process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .redirectOutput(logFile.toFile())
+                .start();
         } catch (IOException exception) {
+            log.error("启动 ffmpeg 失败（antflow.media.ffmpeg-bin='{}'）",
+                properties.getFfmpegBin(), exception);
             throw new BizException("WATERMARK_PROCESSING_FAILED",
-                "cannot start ffmpeg: " + exception.getMessage());
+                "服务器缺少 ffmpeg，无法为图片/视频添加水印。请联系管理员安装 ffmpeg"
+                    + "（或配置 antflow.media.ffmpeg-bin）后重试。");
+        }
+        try {
+            if (!process.waitFor(PROCESS_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
+                process.destroyForcibly();
+                process.waitFor(10, TimeUnit.SECONDS);
+                log.error("ffmpeg 超时（{} 分钟）", PROCESS_TIMEOUT_MINUTES);
+                throw new BizException("WATERMARK_PROCESSING_FAILED",
+                    "图片/视频水印处理超时，请换更小的文件重试；详情见服务端日志。");
+            }
+            return new ProcessResult(process.exitValue(), tailOf(logFile));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BizException("WATERMARK_PROCESSING_FAILED", "ffmpeg interrupted");
+            // 中断了就一定要把子进程收掉：原来只重新打断自己，ffmpeg 继续占着 CPU 与磁盘编码，
+            // 而调用方的 finally 已经把临时目录删了。
+            process.destroyForcibly();
+            try {
+                process.waitFor(10, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            throw new BizException("WATERMARK_PROCESSING_FAILED", "水印处理被中断，请重试。");
         }
+    }
+
+    /** 读 ffmpeg 日志的末尾（最多 8KB）当诊断信息。 */
+    private static String tailOf(Path logFile) {
+        try {
+            byte[] bytes = Files.readAllBytes(logFile);
+            int from = Math.max(0, bytes.length - OUTPUT_CAPTURE_LIMIT);
+            return new String(bytes, from, bytes.length - from, StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return "";
+        }
+    }
+
+    /** ffmpeg 的报错动不动几百行：给用户留第一行、截断，完整的进日志。 */
+    private static String firstLine(String text) {
+        String trimmed = text == null ? "" : text.strip();
+        if (trimmed.isEmpty()) return "";
+        int newline = trimmed.indexOf('\n');
+        String first = newline < 0 ? trimmed : trimmed.substring(0, newline);
+        return first.length() > USER_MESSAGE_LIMIT
+            ? first.substring(0, USER_MESSAGE_LIMIT) + "…" : first;
     }
 
     private static String extensionFor(String contentType) {

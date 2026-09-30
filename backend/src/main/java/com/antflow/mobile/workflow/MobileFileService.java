@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.security.access.AccessDeniedException;
@@ -32,12 +33,15 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MobileFileService {
     private static final String READY_STATUS = "READY";
     private static final String PROCESSING_STATUS = "PROCESSING";
     private static final String FAILED_STATUS = "FAILED";
     private static final String DELETED_STATUS = "DELETED";
     private static final int JPEG_SIGNATURE_SIZE = 3;
+    /** 给客户端的失败原因最多多少字（客户端要保持可读，不搬整段 ffmpeg 报错）。 */
+    private static final int USER_REASON_CHARS = 200;
 
     private final MobileFileMapper fileMapper;
     private final MobileFileAccessMapper accessMapper;
@@ -60,8 +64,13 @@ public class MobileFileService {
             String submittedContentType = normalize(file.getContentType());
             validateContent(submittedContentType, readHeader(staged.path()));
             String watermarkLabel = watermarkText == null ? "" : watermarkText.trim();
-            boolean applyWatermark = watermark && watermarkProcessor.supports(submittedContentType)
-                && !watermarkLabel.isEmpty();
+            boolean supportedForWatermark = watermark && watermarkProcessor.supports(submittedContentType);
+            // 「要水印但没给文案」以前是静默存原图：调用方以为加了水印，实际什么都没加。明说。
+            if (supportedForWatermark && watermarkLabel.isEmpty()) {
+                throw new BizException("WATERMARK_TEXT_REQUIRED",
+                    "该字段要求加水印，但未提供水印文案（watermarkText）");
+            }
+            boolean applyWatermark = supportedForWatermark && !watermarkLabel.isEmpty();
             boolean asyncVideo = applyWatermark && submittedContentType.startsWith("video/");
 
             if (applyWatermark && !asyncVideo) {
@@ -100,7 +109,9 @@ public class MobileFileService {
             if (asyncVideo) scheduleVideoProcessing(id);
             return toDto(row);
         } catch (IOException exception) {
-            throw new BizException("BAD_FILE", exception.getMessage());
+            // 暂存/写入本地磁盘的失败：技术细节进日志，别把带路径的英文异常甩给用户。
+            log.error("上传暂存失败", exception);
+            throw new BizException("BAD_FILE", "文件上传失败（服务端暂存异常），请重试");
         } finally {
             deleteTemp(staged.path());
         }
@@ -110,7 +121,8 @@ public class MobileFileService {
         try (InputStream content = Files.newInputStream(staged.path())) {
             storage.put(storageKey, content, staged.size(), contentType);
         } catch (IOException exception) {
-            throw new BizException("FILE_STORAGE_FAILED", exception.getMessage());
+            log.error("写入对象存储失败：{}", storageKey, exception);
+            throw new BizException("FILE_STORAGE_FAILED", "文件存储失败，请稍后重试");
         }
     }
 
@@ -208,7 +220,8 @@ public class MobileFileService {
         try {
             storage.delete(file.getStorageKey());
         } catch (IOException exception) {
-            throw new BizException("FILE_STORAGE_FAILED", exception.getMessage());
+            log.error("删除对象存储失败：{}", file.getStorageKey(), exception);
+            throw new BizException("FILE_STORAGE_FAILED", "文件删除失败，请稍后重试");
         }
     }
 
@@ -236,7 +249,8 @@ public class MobileFileService {
             return new StagedFile(path, size, HexFormat.of().formatHex(digest.digest()));
         } catch (IOException | NoSuchAlgorithmException exception) {
             deleteTemp(path);
-            throw new BizException("BAD_FILE", exception.getMessage());
+            log.error("暂存上传文件失败", exception);
+            throw new BizException("BAD_FILE", "文件上传失败（服务端暂存异常），请重试");
         }
     }
 
@@ -250,7 +264,7 @@ public class MobileFileService {
         try {
             return Files.readAllBytes(path);
         } catch (IOException exception) {
-            throw new BizException("BAD_FILE", exception.getMessage());
+            throw new BizException("BAD_FILE", "文件上传失败（服务端读取异常），请重试");
         }
     }
 
@@ -278,10 +292,44 @@ public class MobileFileService {
         // Other content types (attachments) are accepted as-is.
     }
 
+    /**
+     * 图片只做一件事：确认它**真的是图片**。
+     *
+     * <p>不校验"声明的子类型与字节一致"——安卓/微信的图库经常把 jpeg 标成 png，那种一律放行；
+     * 但声明的 `image/*` 后面如果是任意字节（以前就是这么放过去的），它会一路走进同步的 ffmpeg 水印
+     * 链路，最后甩给用户一个看不懂的 ffmpeg 报错。
+     */
     private void validateImageContent(String submittedContentType, byte[] content) {
-        // Android file pickers often report image MIME types inconsistently
-        // (e.g. JPEG bytes labeled image/png, webp labeled image/jpeg). Accept
-        // any image/* payload; the executable-signature check already ran.
+        if (detectImageContentType(content) == null) {
+            throw new BizException("BAD_FILE", "文件内容不是支持的图片格式（只支持 jpeg/png/gif/webp/bmp）");
+        }
+    }
+
+    private static String detectImageContentType(byte[] content) {
+        if (startsWith(content, new byte[] {
+            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
+        })) {
+            return "image/png";
+        }
+        if (content.length >= JPEG_SIGNATURE_SIZE
+            && (content[0] & 0xFF) == 0xFF && (content[1] & 0xFF) == 0xD8
+            && (content[2] & 0xFF) == 0xFF) {
+            return "image/jpeg";
+        }
+        if (startsWith(content, "GIF87a".getBytes(java.nio.charset.StandardCharsets.US_ASCII))
+            || startsWith(content, "GIF89a".getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
+            return "image/gif";
+        }
+        // RIFF....WEBP
+        if (startsWith(content, "RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII))
+            && content.length >= 12
+            && content[8] == 'W' && content[9] == 'E' && content[10] == 'B' && content[11] == 'P') {
+            return "image/webp";
+        }
+        if (startsWith(content, new byte[] {'B', 'M'})) {
+            return "image/bmp";
+        }
+        return null;
     }
 
 
@@ -428,7 +476,10 @@ public class MobileFileService {
             file.getContentType(),
             file.getSizeBytes(),
             "/api/mobile/files/" + file.getId() + "/content",
-            file.getStatus()
+            file.getStatus(),
+            // 失败原因只在 FAILED 时给（已在写入时就脱敏过），客户端轮询到 FAILED 才有的可展示。
+            FAILED_STATUS.equals(file.getStatus())
+                ? truncate(file.getProcessingError(), USER_REASON_CHARS) : null
         );
     }
 

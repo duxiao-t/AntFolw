@@ -6,11 +6,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class MediaWatermarkProcessorTest {
@@ -63,6 +67,44 @@ class MediaWatermarkProcessorTest {
         } catch (Exception exception) {
             return false;
         }
+    }
+
+    // ---- 缺二进制这条路：镜像里没装 ffmpeg 时，用户看到的必须是"能照着做"的话，
+    //      而不是 Cannot run program "ffmpeg"。下面三条都不需要真 ffmpeg。
+
+    @Test
+    void probeReportsMissingFfmpegBinary() {
+        MobileMediaProperties properties = new MobileMediaProperties();
+        properties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
+        MediaWatermarkProcessor missing = new MediaWatermarkProcessor(properties);
+
+        assertThat(missing.probe().ffmpegAvailable()).isFalse();
+    }
+
+    @Test
+    void missingBinaryFailsWithAnActionableMessage() throws Exception {
+        MobileMediaProperties properties = new MobileMediaProperties();
+        properties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
+        MediaWatermarkProcessor missing = new MediaWatermarkProcessor(properties);
+
+        assertThatThrownBy(() -> missing.apply(jpegBytes(), "image/jpeg", "AntFlow"))
+            .isInstanceOf(com.antflow.engine.BizException.class)
+            .hasMessageContaining("ffmpeg")
+            .hasMessageNotContaining("Cannot run program");
+    }
+
+    @Test
+    void probeReportsTheConfiguredFontAndIgnoresAMissingOne(@TempDir Path tempDir) throws Exception {
+        Path font = Files.createFile(tempDir.resolve("font.ttf"));
+        MobileMediaProperties properties = new MobileMediaProperties();
+        properties.setWatermarkFont(font.toString());
+        assertThat(new MediaWatermarkProcessor(properties).probe().fontPath())
+            .isEqualTo(font.toString());
+
+        // 配了但文件不在：当成"没有字体"，启动探测才能把它 WARN 出来（把不存在的 fontfile 交给
+        // ffmpeg 是直接报错）。
+        properties.setWatermarkFont(tempDir.resolve("nope.ttf").toString());
+        assertThat(new MediaWatermarkProcessor(properties).probe().fontPath()).isNull();
     }
 
     private static byte[] jpegBytes() throws IOException {
