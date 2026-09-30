@@ -1,12 +1,56 @@
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-09-30T13:00:00+08:00`
+- **更新时间：** `2026-09-30T16:00:00+08:00`
 - **分支：** `feat/contacts-report-export`（从 `master` = `4328845` 拉出，未推）。前两轮都已合并进 master：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排。
 
 ---
 
-## 最新一轮：水印缺 ffmpeg 的 422 + 桌面端媒体组件从来没上传
+## 最新一轮：媒体链路后端健壮性（堆里不再有整份视频 / 真租约 / 删除与关联竞态）
+
+上一轮把"缺 ffmpeg 的 422"和"桌面端四个控件从不上传"修了，并在留档里列了四条后端并发/事务问题。这一轮**只做那四条里会真的伤人的部分**（你圈的范围），先把方案交给 OCR 复核，它把我草稿里的三处硬伤改掉了（下面「OCR 改掉的做法」）。
+
+| 提交 | 内容 |
+| --- | --- |
+| `8110b85` | **流式化**：`MediaWatermarkProcessor.apply(byte[])` → `applyTo(Path input, Path workDir, …)`（workDir 由调用方建删），`tailOf` 只读日志末尾 8KB（原来 `readAllBytes` 整份日志）；`MobileFileService` 视频改成"源对象流式落盘 → ffmpeg 读文件写文件 → 流式传回存储"，图片分支也不再先把 staged 读进堆（`synchronized` 只串行 ffmpeg，不拦内存——等待者原来各持整份 byte[]）；加 `sha256(Path)`；转码后成品超过 `maxVideoBytes`（默认 100MB）直接失败并写明"转码后的视频超过大小上限"，别把超大对象塞进存储；图片同步链路加并发闸门（默认 2）护住请求线程与磁盘 |
+| `6a65b1b` | **租约 + 独立 key 发布 + 有界恢复**：`V51` 给 `t_mobile_file` 加 `processing_claim_token` / `processing_claimed_at`（实体**不加**这两个字段，`updateById` 就不会回写它们）；`claimProcessing/renewProcessingClaim/releaseProcessingClaim/claimStaleProcessing/publishProcessed/failProcessing` 全是**按 token 条件**的手写 SQL；发布写**本次尝试独有的 key**（`原 key + ".wm-" + token`）再用条件 UPDATE 把行的 `storage_key` 指过去（原地覆盖会在"put 成功但 DB 没更新"时变成二次水印、原片还没了）；租约在下载后/ffmpeg 前/ffmpeg 后各续一次；`catch (Throwable)` 不再让 `OutOfMemoryError` 把行永远卡在 PROCESSING（写 FAILED 后**重抛 Error**）；`recoverPendingVideoProcessing` 改成 `@Scheduled` 的 `reapStaleProcessing()`：有界（`processingReapLimit`，默认 20）、先 claim 拿 token、只领"未领取或已过期"（`processing_claimed_at IS NULL OR < staleBefore`——只写 `<` 会永远捞不到迁移前的遗留行），队列满时**上传路径标 FAILED / 恢复路径只还租约**（前者客户端在轮询要立刻有答案，后者下一轮还能再捞） |
+| `6f0e8a3` | **关联**：`normalized` 先按 `fileId` 去重（`t_form_data_file` 主键是 `(form_data_id, file_id)`，上传端 SHA 去重会让两个字段的同一张照片落到同一个 id——按 `fileId+fieldId` 去重就两次插同一主键、整单 500），再用**一条按 id 升序的批量 `FOR UPDATE`** 加锁并在锁内复核 READY/`deleted_at`/owner；`insertFileLink` 冲突改 `ON CONFLICT DO UPDATE SET field_id = EXCLUDED.field_id`（`DO NOTHING` 会把 `reconcileEditable` 的"受限→可编辑"迁移静默吞掉）；`requireReadable` 给 admin/owner 提前 return（一页 20 张图原来无条件逐关联实例判权） |
+| `169d2d3` | **删除**：先按 id 加 `FOR UPDATE`（否则"检查有没有被提交"与提交方"检查是否 READY"交错 → 提交成功但附件指向已删文件）；`PROCESSING` 拒绝删除（「视频正在加水印，处理完再删」）；对象删除挪到 `afterCommit`（提交前删一旦回滚就是"READY 行 + 对象已丢"，反过来最多是个没人引用的孤儿对象） |
+| `6fad747` | **自测发现的洞**：`MobileFileLinkService` 自己没有事务，`FOR UPDATE` 在自动提交下等于没锁——现有调用方（`start`/`FormDataService.submit`）都在事务里所以线上没炸，但这是"靠调用方记得开事务"的隐形契约。类上加 `@Transactional(REQUIRED)` |
+| `0dae42a` | **真库守护**（这些 SQL 是手写的，mock 掉 mapper 只能断言"调了哪个方法"）：遗留 NULL 行必须能领到 / 已认领不重复领 / 续租后不被抢走 / 真过期能重新领；`publishProcessed` token 不对影响 0 行；删除×关联竞态的终态；同一文件两个字段只 1 行且 `field_id` 是后插的权威分类；处理中不给删 |
+
+**OCR 改掉的做法（草稿 → 现在）**：① 转码结果**不能**原地覆盖原 key（崩溃窗口下会二次水印 + 丢原片）→ 独立 attempt key + 条件发布，失去租约的那次只清理自己那份；② 只有 `processing_claimed_at` + "任务开头续一次"不是有效租约（排队 + ffmpeg 最长 10 分钟 + MinIO 上下行都能超过 stale 窗口）→ claim token + 处理期间续租 + 终态/释放都按 token 条件更新，丢租约的 worker 不许发布结果；③ 我原打算把 `Cache-Control` 从 `no-store` 改成 `private, max-age=3600` —— **撤掉**，只做 admin/owner 短路；④ `catch (Throwable)` 不能吞 Error。
+
+### 真机 + 用例矩阵验证
+
+- **`mvn -B test` 535 全绿**（基线 520，只碰后端；真库类 86 条）。
+- **多个大视频并发不再 OOM**（本轮最有说服力的一条）：容器 `-Xmx768m` 里同时传 2 个带水印视频（67MB + 61MB，`video/mp4`）→ 两个都 `PROCESSING` → `READY`（67MB→33MB、61MB→8.9MB，ffmpeg 真重编码了）；采样内存**全程 ~449MB / 上限 768MB 堆**，日志无 `OutOfMemoryError`，`0` 行 FAILED。抽帧看到的右下角水印是「现场检查 2026-09-30 07:48」——**中文渲染正常**。
+- **发布后旧对象真的清了**：MinIO `mobile` 桶 `video/` 前缀里只有 3 个 `.wm-<token>` 新对象，本轮上传的 3 个原 key **都不在了**（没有孤儿）。
+- **workDir 清干净**：转码完成后容器里 `ls /tmp | grep -c antflow-` = `0`。
+- **处理中删除被拒**：`DELETE /api/mobile/files/{id}` → **422 `BAD_FILE_STATE`「视频正在加水印，处理完再删」**，且该文件随后正常跑完 `READY`（没被删坏）。
+- **移动端 5S 那种照片仍 200 + 带水印**：JPEG（模拟手机拍的照片，`image/jpeg`）上传 → 200、`READY`、6.6KB→11.9KB，水印文字与中文都正常。
+- **`V51` 在真库上迁移成功**：启动日志 `Migrating schema "public" to version "51 – mobile file processing claim"` → `Successfully applied 1 migration`，无报错。
+
+**两件要说清楚的代价/结果**：
+
+1. **磁盘成了新的约束**（替代原来的堆约束）：一次视频转码峰值同时有 staged + input + output 三份文件，2 并发就是 6 份。这个容器没撑爆，但如果将来放开并发数或视频更大，得先看可写层容量。`finally` 保证 workDir 一定清（成功/失败/超时三条路径）。
+2. **图片水印仍占着请求线程与 Hikari 连接**（内存问题已由流式化解决，但同步语义没动）。真要做得挪出事务，本轮没做。
+
+### 本轮留档不改（新发现，都不属于"会真的伤人"那条线）
+
+- **视频水印丢用户文案**：`t_mobile_file.watermark_text` **一直是 NULL** —— 图片同步路径用的是请求内存里的文案（所以桌面/移动的图片水印文案是对的），异步视频路径读行的 `watermark_text` → 拿到 null → 落到默认标签 `AntFlow` + 时间戳。想修就是 `upload()` 里加一行 `row.setWatermarkText(watermarkText)`（顺手要个用例）。**没动它是因为它不在本轮范围**。
+- 上一轮列的前端既有问题（`displayConditions` 可见性依赖遍历顺序、`table_list` 不逐行校验、检查项无 `validate`、`maxDuration` 运行时不校验）都还在。
+- 移动端检查项照片仍不传水印参数（检查项节点没有水印开关）。
+
+### 验证踩坑（省下一轮的时间）
+
+- **本机 docker 的"点了没反应"**：`docker start/inspect/run` 卡住（>25s 无输出）不是慢，是那个 **probe 容器对象把 daemon 卡住了**；先把挂着的 `docker.exe` CLI 进程 `taskkill`、`docker rm -f` 掉那个容器就好了。纯 `docker run alpine` 能跑说明 daemon 本身没问题。
+- **集成库不必再走 docker 探针**：本机 5432 就有活的 PostgreSQL（`postgres/Tao@1234`，见 `application.yml` 注释），直接 `CREATE DATABASE antflow_probe` + `ANTFLOW_TEST_POSTGRES_URL=jdbc:postgresql://127.0.0.1:5432/antflow_probe` 就行，比之前那套 nginx stream 转发省事（`mongodb`/`psql` 都没有，用 JDBC 建库最简单）。
+- **MSYS/Windows 上 curl 上传大文件**：`-F "file=@/tmp/x.mp4;type=video/mp4"` 会被 MSYS 的路径转换搞坏（`curl: (26) Failed to open/read local data`）→ 用**相对路径**（先 `cd` 到文件目录）或 `MSYS_NO_PATHCONV=1`；`-F "watermarkText=中文"` 会被转成 ANSI 码页（渲染出来是豆腐块，**不是**应用 bug）→ 用 `-F "watermarkText=<文案.txt"` 从 UTF-8 文件读。
+
+---
+
+## 上一轮：水印缺 ffmpeg 的 422 + 桌面端媒体组件从来没上传
 
 你报「5S检查表里上传图片报 422」并让我顺手查其它多媒体组件，查出**两个独立问题**：
 
@@ -108,7 +152,7 @@
 - **PR #3 = 选项数据源按 demo 的信息结构重排**：列表改表格 + 详情抽屉 + 版本 Timeline 卡片 + 版本对比 + 生命周期弹窗；V50 版本「变更说明」；修 `importDraft` 漏递增 `source.version`（乐观锁洞）与 `unpublish` 不清 `disabled_at`（版本状态机洞）。同轮 OCR 30 条 → 采纳 8 / 驳回 3 / 留档 1（行表 GIN 索引确实没被任何查询用到，删它要单独一条迁移 + EXPLAIN）。
 - **PR #2 = 实测反馈 17 条**：监控页回归（Java 文本块吞行尾空格 → `AND1 = 1`）、登录 401 不整页刷新、节点名显示中文、指定人员 400、发起人按 ROOT 判隐藏、条件值读外部数据源、**CC 抄送永不投递**（`Map.of` 撞 null）。验证基线见下。
 
-## 已知遗留（四轮累计）
+## 已知遗留（五轮累计）
 
 - **`npx antd lint ./src` 从来不是干净的**：现在 61 deprecated + 42 usage（`Alert` 的 `message`、`Space direction`、模板页里的静态 `message.xxx` 等）。`frontend/CLAUDE.md` 把它列为提交前必过项，实际不是门槛——新代码与既有写法保持一致，别单独给新文件换风格（否则同一个页面两种写法）。要做就整仓一次性刷。
 - 本人提交列表无分页；`status` 无白名单校验（能写进 `APPROVED` 等非法值，报表里落进 `other` 桶）。
@@ -119,8 +163,8 @@
 
 ## 验证基线
 
-后端 `mvn -B test` **520**、前端 `npm test` **280**、移动 `npm test` **348**（本轮未动移动端）；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交）。
+后端 `mvn -B test` **535**、前端 `npm test` **280**、移动 `npm test` **348**（本轮未动前端/移动端）；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；**本轮**：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂）。
 
-> **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法是：容器里建 `antflow_probe`，宿主经一个临时 TCP 转发（`nginx:1.28-alpine` 的 stream 模块，因为 docker 拉不到 socat 镜像）连 `127.0.0.1:15432`，`ANTFLOW_TEST_POSTGRES_URL` 指过去 + `sslmode=disable`（不加会被 SSL 协商噎住）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建。
+> **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法（比之前简单）：本机 5432 的 PostgreSQL 里 `CREATE DATABASE antflow_probe`（宿主没有 `psql`，用 postgres JDBC 驱动跑几行 Java 最省事），`ANTFLOW_TEST_POSTGRES_URL='jdbc:postgresql://127.0.0.1:5432/antflow_probe'` + `ANTFLOW_TEST_POSTGRES_USERNAME=postgres` + `ANTFLOW_TEST_POSTGRES_PASSWORD=Tao@1234`（`sslmode`/`stringtype` 不用加，测试自己补 `stringtype`）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建——**一次失败留下的行会让下一轮出现假回归**（本次就撞了 `employee_no`/`option_data_source.code` 唯一键）。
 
-> 更早：`63582d5` = S1–S4 整改 + 收尾（决策见 `docs/DECISIONS.md` 的 `D-20260921` ~ `D-20260924-*`）。本轮新增 `D-20260929-export-follows-read-scope`。
+> 更早：`63582d5` = S1–S4 整改 + 收尾（决策见 `docs/DECISIONS.md` 的 `D-20260921` ~ `D-20260924-*`）。`D-20260929-export-follows-read-scope`、`D-20260930-media-watermark-needs-ffmpeg-and-says-so`、`D-20260930-desktop-media-uploads-go-through-the-mobile-file-api` 之后，本轮新增 `D-20260930-video-watermark-independent-key-and-token-lease`、`D-20260930-delete-keeps-the-row-lock-and-deletes-the-object-after-commit`、`D-20260930-form-data-file-is-keyed-by-file-id-not-field`。

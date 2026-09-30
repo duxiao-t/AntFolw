@@ -187,3 +187,36 @@
   - 「要水印但没文案」在服务端已经会拒绝，桌面端因此必须把 `props.watermarkText`（默认 `AntFlow`）随请求带上。
   - 处理中的视频**不给删**：服务端后台任务正在往同一个 key 写结果，删除会留下读不出来的孤儿对象（服务端那层协调要单独修，见 HANDOFF 已知遗留）。
   - 老数据（修复前写进表单的本地 File 记录、更早的单文件名字串）没有服务端 id，只显示名字并标注"历史记录，未上传"——它们的字节从来没上传过，没有任何东西可迁移。
+
+## D-20260930-video-watermark-independent-key-and-token-lease
+
+- **状态：** accepted
+- **背景：** 视频水印是异步的（有界队列 + 行状态 PROCESSING→READY），原实现把转码结果**写回原 storage_key**，且只靠 `processing_claimed_at` 一个时间戳防重入。两个坑都能真的炸：① put 成功但 DB 更新失败/进程崩溃时，行还是 PROCESSING 而对象已是成品 mp4，reaper 再捞一次就是**二次水印**，出错时连原视频都没了；② 排队等待 + ffmpeg 最长 10 分钟 + MinIO 上下行都可能超过 stale 窗口，reaper 会重复领取同一行，两个任务同时写、旧任务的 `updateById` 还会覆盖新任务的 READY/FAILED。
+- **决策：** ①**结果写本次尝试独有的 key**（原 key + `.wm-` + token），成功后用**带 token 的条件 UPDATE** 把行的 `storage_key`/`content_type`/`size_bytes`/`sha256`/`original_name` 一起改掉并置 READY，再清理旧对象；条件更新影响 0 行（租约过期/被抢/行已删）就删掉自己刚写的 attempt 对象、**绝不碰那一行**。②**真租约**：`processing_claim_token`（V51）+ `processing_claimed_at`，处理期间在下载后/ffmpeg 前/ffmpeg 后各续一次，`renew`/`release`/终态都按 token 条件更新——丢租约的 worker 不许发布结果。③`reapStaleProcessing()` 有界（默认 20），只领"未领取或已过期"（`processing_claimed_at IS NULL OR < staleBefore`），且**队列满时上传路径标 FAILED / 恢复路径只还租约**。
+- **影响：**
+  - `contentUrl` 按 id 生成，所以 key 变化对客户端**不可见**（前端不用动）。
+  - **`processing_claim_token`/`processing_claimed_at` 不加进 `MobileFile` 实体**：实体带上它们，任何一次 `updateById`（比如 `delete`）都会把 token 回写/覆盖。这是"字段存在但实体不知道"的刻意设计，别顺手补上。
+  - `claimStaleProcessing` 的条件必须是 `IS NULL OR < staleBefore`：迁移前遗留的行 `processing_claimed_at` 是 NULL，只写 `<` 会永远捞不到——那正是最该被恢复的一批。
+  - 队列满时两条路语义不同：上传路径要立刻给客户端答案（客户端在轮询），恢复路径只还租约保持 PROCESSING（下一轮再捞，避免"领了就被拒、拒了就释放、下轮再领同一条"的活锁）。
+  - `catch (Throwable)` 里写 FAILED 之后**把 Error 重抛**：`OutOfMemoryError` 不能吞（吞了线程池还会带着坏状态继续跑），但行也不能永远停在 PROCESSING。
+
+## D-20260930-delete-keeps-the-row-lock-and-deletes-the-object-after-commit
+
+- **状态：** accepted
+- **背景：** `delete` 原来是"`selectById` 查一下 → `countLinks` → 标 DELETED → 在事务里删 MinIO 对象"。三个问题：① 不加锁，"检查有没有被提交"会和提交方"检查文件是否 READY"交错，结果是**提交成功但附件指向已删文件、对象也没了**（永久坏引用）；② 对象的删除在事务提交前，一旦回滚就变成"READY 行 + 对象已丢"；③ 存储 IO 期间一直占着行。
+- **决策：** ①先按 id 加 `FOR UPDATE`；②`PROCESSING` 直接拒绝（「视频正在加水印，处理完再删」）；③对象的删除挪到 `TransactionSynchronization.afterCommit`，删失败只记日志。
+- **影响：**
+  - 反过来（提交成功、删对象失败）最多是个**没人引用的孤儿对象**，不会让用户读到坏数据——这是刻意选的方向。
+  - 行锁现在只覆盖 DB 那几步，不再被存储 IO 长时间占住。
+  - 桌面端 UI 上轮已经挡了"处理中不给删"，服务端现在补齐（不信任客户端）。
+
+## D-20260930-form-data-file-is-keyed-by-file-id-not-field
+
+- **状态：** accepted
+- **背景：** `t_form_data_file` 主键是 `(form_data_id, file_id)`，但 `normalized` 原来按 `fileId + fieldId` 去重，并且每条 ref 单独 `selectById` 一次（无锁）。上传端的 SHA 去重会把两个字段里的同一张照片收敛成同一个 file_id —— 于是两次插入落到同一主键，**整单 500**，而且查文件是否 READY 与并发删除之间没有任何保护。
+- **决策：** ①按 `fileId` 去重（`LinkedHashMap` 保首见 fieldId），②对去重后的 id **升序批量** `FOR UPDATE` 一次（一条 SQL，固定锁序避免与并发 delete 形成 ABBA 死锁），锁内复核 READY/`deleted_at`/owner；③`insertFileLink` 冲突改 `ON CONFLICT DO UPDATE SET field_id = EXCLUDED.field_id, sort_order = EXCLUDED.sort_order`；④`MobileFileLinkService` 类上加 `@Transactional`；⑤`requireReadable` 给 admin/owner 提前 return。
+- **影响：**
+  - **`DO NOTHING` 是错的**：`reconcileEditable` 先插"受限字段"的旧链接、再插"可编辑字段"的新链接，后者才是权威分类；`DO NOTHING` 会把这次字段迁移静默吞掉（用户以为改了分类，实际没改）。
+  - **`@Transactional(REQUIRED)` 不能省**：`FOR UPDATE` 只有在同一个事务里才有效，自动提交下语句结束就放锁。现有调用方（`MobileWorkflowService.start`、`FormDataService.submit/resubmit`）都在事务里所以线上没炸，但这是"靠调用方记得开事务"的隐形契约——写这条守护用例时就当场抓到了这个洞。
+  - `admin/owner` 提前 return 不影响鉴权口径（本来也要放行），但一页 20 张图会少掉几十次"逐关联实例判权"的查询。
+  - `Cache-Control` **保持 `no-store`**：草稿里曾想改成 `private, max-age=3600, immutable` 换性能，撤回——附件 URL 受登录态与**可变**授权保护，权限撤销/取消关联/删除后浏览器不该还能直接复用响应。剩下的 N+1 当已知成本记账。

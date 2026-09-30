@@ -245,6 +245,29 @@ class MobileFileServiceTest {
             Mockito.anyLong(), any(), any());
     }
 
+    /** 转码后的成品超过上限 → 失败且原因可读，**绝不**把超大对象塞进存储（输入上限只管源文件）。 */
+    @Test
+    void overlyLargeTranscodedOutputFailsWithAReadableReason() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxVideoBytes(4);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenReturn(writeProcessed(new byte[] {1, 2, 3, 4, 5}));
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        row.setContentType("video/mp4");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        service.processVideoWatermark(row.getId(), UUID.randomUUID());
+
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(fileMapper).failProcessing(Mockito.eq(row.getId()), any(), error.capture());
+        assertThat(error.getValue()).contains("大小上限");
+        assertThat(storage.putCount).isZero();
+    }
+
     /**
      * OOM 之类 Error 也要把行写成人话状态，**并且不能被吞掉**——原来 `catch (Exception)` 接不住
      * Error，行会永远停在 PROCESSING，连重启都有可能再炸一次。
