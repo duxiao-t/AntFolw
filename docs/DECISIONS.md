@@ -220,3 +220,15 @@
   - **`@Transactional(REQUIRED)` 不能省**：`FOR UPDATE` 只有在同一个事务里才有效，自动提交下语句结束就放锁。现有调用方（`MobileWorkflowService.start`、`FormDataService.submit/resubmit`）都在事务里所以线上没炸，但这是"靠调用方记得开事务"的隐形契约——写这条守护用例时就当场抓到了这个洞。
   - `admin/owner` 提前 return 不影响鉴权口径（本来也要放行），但一页 20 张图会少掉几十次"逐关联实例判权"的查询。
   - `Cache-Control` **保持 `no-store`**：草稿里曾想改成 `private, max-age=3600, immutable` 换性能，撤回——附件 URL 受登录态与**可变**授权保护，权限撤销/取消关联/删除后浏览器不该还能直接复用响应。剩下的 N+1 当已知成本记账。
+
+## D-20260930-upload-dedupe-locks-the-row-and-the-size-cap-counts-real-bytes
+
+- **状态：** accepted
+- **背景：** 上传去重分支先 `selectOne`（owner + sha256 + READY + 未删，**不加锁**）拿到已有行，然后**重写那个 key 上的对象**并把旧行返回给客户端。而 `delete` 自上一轮起是"先 `FOR UPDATE` 拿行锁 → 标 DELETED → `afterCommit` 删对象"。两者交错时：客户端拿到一个已删文件的 DTO（之后提交会被 `append` 以 `FILE_NOT_FOUND` 拒掉整单），对象还会被重新写回去变成孤儿。另一处：大小上限只看 `MultipartFile.getSize()`（客户端声明），`stage()` 数出的真实字节数只流向 `row.setSizeBytes` 与 `storage.put` 的 size，没有人再比一次 —— 声明小、实际大就能绕过去，代价落在磁盘。
+- **决策：** ①`findReadyDuplicate` 加 `FOR UPDATE`；②`FileStorage` 新增 `exists(String)`，**对象在就只返回旧行、不再重写**，不在才补写；③落盘后按同一口径（抽出的 `sizeLimit`）再比一次真实字节数。
+- **影响：**
+  - **不需要"锁后复核"分支**：PG 在 READ COMMITTED 下锁等待结束会重新求值谓词，并发删除已提交的行不再满足 `status='READY'` → 查询直接返回 null → 走已有的"新建一行（新 id + 新 key）"路径。写这条守护用例时也是靠"判最终结果"而不是"判有没有被挡住"（子表外键会把 insert 也挡住，只看阻塞区分不出修复前后）。
+  - **`exists` 故意不抛受检异常**：调用方必须能把"对象不在"（补写）和"存储查不动"（整个请求失败）分开。如果让它抛 `IOException`，会被 `upload` 外层的 `catch (IOException) → BAD_FILE` 吞掉，把存储问题甩锅成"用户的文件有问题"。
+  - **判错方向的代价不对称**：`statObject` 是 HEAD 请求、错误码各家不统一（`NoSuchKey` / `NotFound`），所以 `NoSuchKey`/`NoSuchBucket`/`NotFound`/HTTP 404 都算"缺失"，其余（权限、签名、网络抖动）抛 `FILE_STORAGE_FAILED`。把"缺失"误判成"查不动"会让**每次重复上传都失败**；把"查不动"误判成"缺失"只是白写一份同样的字节。
+  - **"对象在就不重写"也让这条路径成了唯一的自愈兜底**（对象被误删时补写）：现在还没有孤儿对象清扫器，所以这个 `exists` 不能省成"直接返回旧行"。
+  - 保留 `validateBasic` 基于声明大小的早退：诚实客户端不必落盘、也不必造临时文件就被拒；真实大小检查是补上撒谎那条路。
