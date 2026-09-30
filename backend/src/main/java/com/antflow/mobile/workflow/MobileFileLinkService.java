@@ -10,9 +10,19 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 附件关联（提交/重提时把表单里的文件挂到 {@code t_form_data_file}）。
+ *
+ * <p>`@Transactional` 不能省：`normalized` 里的 `FOR UPDATE` 只有在**同一个事务**里才有效——自动
+ * 提交下语句一结束锁就放了，等于没锁，并发删除仍能插出"提交成功但附件指向已删文件"。默认
+ * REQUIRED：真实调用方（`MobileWorkflowService.start`、`FormDataService.submit`）本来就在事务里，
+ * 这里只是加入它们；万一谁没在事务里调，这里兜住（去掉重放的竞态用例就会踩到）。
+ */
 @Service
 @RequiredArgsConstructor
+@Transactional(rollbackFor = Exception.class)
 public class MobileFileLinkService {
     private final MobileWorkflowMapper workflowMapper;
     private final MobileFileMapper fileMapper;
