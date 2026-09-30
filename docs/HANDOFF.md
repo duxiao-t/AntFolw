@@ -1,12 +1,53 @@
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-09-30T18:00:00+08:00`
+- **更新时间：** `2026-09-30T18:30:00+08:00`
 - **分支：** `feat/contacts-report-export`（从 `master` = `4328845` 拉出，未推）。前两轮都已合并进 master：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排。
 
 ---
 
-## 最新一轮：附件上传的去重竞态 + 大小上限可绕过
+## 最新一轮：媒体并发（图片不再占着连接等信号量 / 闸门可配 / 移动端失败可见）
+
+你让压一遍并发，于是有了 `docs/capacity-tuning-2026-09-30.md`。压测把"两个上限"分开了：视频的 22 个
+（`processing-concurrency + queue`）和图片的"2 路闸门"**都是配置**，换更大的机器也是在同一个地方失败，
+只是更快；**硬件决定的是速率与内存**（每路 720p 转码 ≈ 1 核 + 200MB，2 路时容器 anon 峰值 1.16GB）。
+压测同时暴露了**唯一一个真缺陷**：图片上传在**等信号量**时占着 Hikari 连接（10 个连接被排队者占满），
+别的接口一起被拖 —— 48 并发时 GET 元数据 p95/最大 **1.97s**。
+
+| 提交 | 内容 |
+| --- | --- |
+| `5d24fcf` | ① `upload` 去掉 `@Transactional`，只把"去重（含行锁）→ 写对象 → 插行 → 视频登记 afterCommit 入队"放进 `TransactionTemplate`（ffmpeg 与信号量等待落在事务外）；显式构造替代 Lombok（信号量要从配置建，Lombok 的字段初始化早于构造体）。**①b** 去重读改走显式 `@Select`：`FOR UPDATE` 锁不住不存在的行，并发首次上传同一份字节会留重复行、`selectOne` 命中多行抛 `TooManyResultsException` → 下一次上传 500，现在 `ORDER BY created_at, id LIMIT 1` 固定取最早那行。**②** 图片闸门从写死改成 `image-watermark-concurrency`（默认 2）；图片水印**成品**覆盖回来后再核一次大小上限（视频那条有、图片这条漏了）；`compose.yaml` 列 Hikari 池变量名；顺手清两个未用 import 与一处失效的 `{@value}` |
+| `2272518` | ③ 移动端把 `failureReason` 透出来（原来统一成一句"视频处理失败"）+ 检查项照片失败后保留文件并给"重试"（桌面端早就有，移动端这条路没有） |
+| `docs/capacity-tuning-2026-09-30.md` | 容量报告；压测脚本是**本地** `_perf/media-load.mjs`（`_perf/` 在 `.gitignore` 里，和 8-24 那轮一样没进仓 —— 要收进仓得 `git add -f`）。报告里用到的侧信道指标（压测期间量 GET 元数据的延迟）是这轮唯一暴露真缺陷的量 |
+
+**验证**：后端 `mvn -B test` **544 绿**（基线 540）、移动端 `npx vitest run` **350 绿**（基线 348）。
+四条新守护都验过"去掉修复即失败"：ffmpeg 不在事务里而 insert 在事务里（`isActualTransactionActive`，
+配一个 ~12 行的假事务管理器）；闸门=1 时两个并发上传串行；成品超限 `BAD_FILE` 且不写存储；
+真库两行同 `(owner_id, sha256)` 时上传返回最早那行而不是 500。
+
+**真机复压（镜像重建后）**：48 并发带水印大图 **48/48 成功**、侧信道 GET 元数据 **p95 190ms**
+（修复前 1972ms，↓10×）；24 个重型视频仍然 **22 READY + 2 FAILED("queue is full")**、22 个在 17.1s 排空、
+anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确认）。
+
+**两个坑记下来**：① MP 的 `QueryWrapper` 会把 `last()` 拼在 `ORDER BY` **之前**、再自己追加 `LIMIT 1`，
+所以 `orderByAsc(...).last("LIMIT 1 FOR UPDATE")` 生成的是 `FOR UPDATE ORDER BY ... LIMIT 1`（非法 SQL），
+真库用例当场 `BadSqlGrammar` —— 要精确控制 SQL 就写显式 `@Select`（和 `selectByIdsForUpdate` 一致）。
+② compose 与 Spring 的默认值语法不同：compose 要 `${VAR:-default}`，`${VAR:default}` 会让 `docker compose build` 只打个
+"escape any $" 的警告就停住。
+
+**OCR 复核（这轮 `scan` 恢复了，7 条 / 3m40s）**：4 条核实为真并已折进上面（成品大小、去重重复行、
+两个未用 import、失效 `{@value}`）；1 条**核实后已被现有缓解**：`detectImageContentType` 把任何 `<?xml`
+开头的文本判成 `image/svg+xml`，但 `/content` 无条件带 `Content-Disposition: attachment`（`MobileFileController:61-64`），
+直接打开那个 URL 只会下载、不会在本站源里渲染 → `<svg onload>` 跑不起来，所以**没加**那行 CSP
+（真要做是加固，不是修洞）。1 条**留档不改**：`ftyp` 品牌回退把 `heic/mif1/avif` 判成 `video/mp4`
+（要客户端谎报 mime 才踩到，后果是 FAILED 行 + 可读原因）。
+
+**不在本轮**：把视频的"硬失败"产品化（23 个以上在途时的退避/重试策略）、自适应限流/背压、图片水印异步化、
+把 MinIO `put` 移出事务（回滚会留孤儿对象，而且行锁必须覆盖 put）。
+
+---
+
+## 上一轮：附件上传的去重竞态 + 大小上限可绕过
 
 上一轮修完"删除 × 关联"和水印链路后，留档里剩的两条**同族**问题（都是"检查与改动之间没有保护"）本轮做掉，另外把自己 review 出来的一个假设加固了。
 
@@ -171,7 +212,7 @@
 - **PR #3 = 选项数据源按 demo 的信息结构重排**：列表改表格 + 详情抽屉 + 版本 Timeline 卡片 + 版本对比 + 生命周期弹窗；V50 版本「变更说明」；修 `importDraft` 漏递增 `source.version`（乐观锁洞）与 `unpublish` 不清 `disabled_at`（版本状态机洞）。同轮 OCR 30 条 → 采纳 8 / 驳回 3 / 留档 1（行表 GIN 索引确实没被任何查询用到，删它要单独一条迁移 + EXPLAIN）。
 - **PR #2 = 实测反馈 17 条**：监控页回归（Java 文本块吞行尾空格 → `AND1 = 1`）、登录 401 不整页刷新、节点名显示中文、指定人员 400、发起人按 ROOT 判隐藏、条件值读外部数据源、**CC 抄送永不投递**（`Map.of` 撞 null）。验证基线见下。
 
-## 已知遗留（六轮累计）
+## 已知遗留（七轮累计）
 
 - **`npx antd lint ./src` 从来不是干净的**：现在 61 deprecated + 42 usage（`Alert` 的 `message`、`Space direction`、模板页里的静态 `message.xxx` 等）。`frontend/CLAUDE.md` 把它列为提交前必过项，实际不是门槛——新代码与既有写法保持一致，别单独给新文件换风格（否则同一个页面两种写法）。要做就整仓一次性刷。
 - 本人提交列表无分页；`status` 无白名单校验（能写进 `APPROVED` 等非法值，报表里落进 `other` 桶）。
@@ -182,8 +223,10 @@
 
 ## 验证基线
 
-后端 `mvn -B test` **540**、前端 `npm test` **280**、移动 `npm test` **348**（这两轮都未动前端/移动端）；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新一轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂，去掉 `exists` 判断/真实大小检查 → 3 个单测挂）。
+后端 `mvn -B test` **544**、前端 `npm test` **280**（未动）、移动 `npx vitest run` **350**；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
+
+> **移动端 `npx vitest run` 会带出一条 unhandled error**（`unmountComponentAtNode is not a function`，来自 antd-mobile 的 Popup/rc-util 与 React 19 的卸载路径）。单独跑 `fields.test.tsx` 或 `files.api.test.ts` 都没有 —— 是既有测试之间的干扰，与本轮改动无关，别误判成回归。
 
 > **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法（比之前简单）：本机 5432 的 PostgreSQL 里 `CREATE DATABASE antflow_probe`（宿主没有 `psql`，用 postgres JDBC 驱动跑几行 Java 最省事），`ANTFLOW_TEST_POSTGRES_URL='jdbc:postgresql://127.0.0.1:5432/antflow_probe'` + `ANTFLOW_TEST_POSTGRES_USERNAME=postgres` + `ANTFLOW_TEST_POSTGRES_PASSWORD=Tao@1234`（`sslmode`/`stringtype` 不用加，测试自己补 `stringtype`）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建——**一次失败留下的行会让下一轮出现假回归**（本次就撞了 `employee_no`/`option_data_source.code` 唯一键）。
 
-> 更早：`63582d5` = S1–S4 整改 + 收尾（决策见 `docs/DECISIONS.md` 的 `D-20260921` ~ `D-20260924-*`）。`D-20260929-export-follows-read-scope` 起，媒体链路累计新增：`D-20260930-media-watermark-needs-ffmpeg-and-says-so`、`D-20260930-desktop-media-uploads-go-through-the-mobile-file-api`、`D-20260930-video-watermark-independent-key-and-token-lease`、`D-20260930-delete-keeps-the-row-lock-and-deletes-the-object-after-commit`、`D-20260930-form-data-file-is-keyed-by-file-id-not-field`、`D-20260930-upload-dedupe-locks-the-row-and-the-size-cap-counts-real-bytes`。
+> 更早：`63582d5` = S1–S4 整改 + 收尾（决策见 `docs/DECISIONS.md` 的 `D-20260921` ~ `D-20260924-*`）。`D-20260929-export-follows-read-scope` 起，媒体链路累计新增：`D-20260930-media-watermark-needs-ffmpeg-and-says-so`、`D-20260930-desktop-media-uploads-go-through-the-mobile-file-api`、`D-20260930-video-watermark-independent-key-and-token-lease`、`D-20260930-delete-keeps-the-row-lock-and-deletes-the-object-after-commit`、`D-20260930-form-data-file-is-keyed-by-file-id-not-field`、`D-20260930-upload-dedupe-locks-the-row-and-the-size-cap-counts-real-bytes`、`D-20260930-media-watermark-outside-the-transaction-and-configurable-gates`。

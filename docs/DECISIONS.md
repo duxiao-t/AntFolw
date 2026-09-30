@@ -232,3 +232,17 @@
   - **判错方向的代价不对称**：`statObject` 是 HEAD 请求、错误码各家不统一（`NoSuchKey` / `NotFound`），所以 `NoSuchKey`/`NoSuchBucket`/`NotFound`/HTTP 404 都算"缺失"，其余（权限、签名、网络抖动）抛 `FILE_STORAGE_FAILED`。把"缺失"误判成"查不动"会让**每次重复上传都失败**；把"查不动"误判成"缺失"只是白写一份同样的字节。
   - **"对象在就不重写"也让这条路径成了唯一的自愈兜底**（对象被误删时补写）：现在还没有孤儿对象清扫器，所以这个 `exists` 不能省成"直接返回旧行"。
   - 保留 `validateBasic` 基于声明大小的早退：诚实客户端不必落盘、也不必造临时文件就被拒；真实大小检查是补上撒谎那条路。
+
+## D-20260930-media-watermark-outside-the-transaction-and-configurable-gates
+
+- **状态：** accepted
+- **背景：** 压测（`docs/capacity-tuning-2026-09-30.md`）发现图片上传把**其它接口**拖垮：`upload` 是 `@Transactional`，`DataSourceTransactionManager` 在**方法入口**就取一个 Hikari 连接；而图片水印要等一个只有 2 个许可的信号量、跑几秒 ffmpeg。48 并发时 10 个连接全被"排队等 ffmpeg"的请求占住，GET 元数据 p95/最大 1.97s。顺带两个小洞：去重读对新文件锁不住（并发首次上传同一份字节会留重复行 → `selectOne` 抛 `TooManyResultsException` → 下一次上传 500）；图片水印**成品**没有再核一次大小上限（视频那条有）。
+- **决策：** ①`upload` 去掉 `@Transactional`，只把"去重（含 `FOR UPDATE`）→ 写对象 → 插行 → 视频登记 afterCommit 入队"放进注入的 `TransactionTemplate`（本仓 `AuditArchiveService`/`OidcService`/`WecomService` 已有先例）；ffmpeg 与信号量等待在事务外。②去重读改走显式 `@Select` + `ORDER BY created_at, id LIMIT 1 FOR UPDATE`，固定取最早那行、容忍重复。③图片闸门从写死 2 改成 `image-watermark-concurrency`（默认不变），并给图片成品补一次大小检查。
+- **影响：**
+  - **不能把"关键段"再拆小**：行锁必须覆盖到 MinIO 的 `put`（d95a746），否则并发 `delete` 会插进"查到重复行"和"写回去"之间。
+  - **回滚语义靠"异常都是 unchecked"**：`writeStorageObject` 把 IOException 包成 `BizException`、`FileStorage.exists` 故意不抛受检、mapper 抛 `DataAccessException`、入队吞掉 `RejectedExecutionException` —— 所以 `TransactionTemplate` 的默认回滚等价于原来的 `rollbackFor = Exception.class`。**别加自定义回滚规则**（加了反而和现在不一致）。
+  - **别用"抽一个带 `@Transactional` 的 public 方法再自我调用"**：本类已有这个坑（2 参重载自己调 3 参重载，3 参上的注解对这条路失效）。
+  - **显式构造替代 Lombok**：信号量要从配置建，而 Lombok 生成的字段初始化器早于构造体执行 —— 在字段初始化器里读 `properties` 会 NPE。
+  - **MP 的 wrapper 不合适做这条 SQL**：它把 `last()` 拼在 `ORDER BY` 之前、再自己追加 `LIMIT 1`，`orderByAsc(...).last("LIMIT 1 FOR UPDATE")` 生成非法 SQL（真库用例当场 `BadSqlGrammar`）。要精确控制就写显式 `@Select`。
+  - 两个上限都是**配置**而不是硬件：视频 = `processing-concurrency + processing-queue-capacity`（默认 22，超出直接 FAILED）；图片 = 信号量（默认 2，不拒收只排队）。硬件决定速率与内存（每路 720p ≈ 1 核 + 200MB）。生产按规格调，见容量文档的表。
+  - `compose.yaml` 的 Hikari 变量用 `${DB_POOL_MAX_SIZE:-10}`：compose 的默认值语法是 `:-`，写成 Spring 那种 `${VAR:10}` 只会打个警告然后停住。
