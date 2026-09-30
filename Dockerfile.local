@@ -6,7 +6,9 @@ FROM postgres:17-bookworm AS backend
 # wqy-microhei 的路径已经在 MediaWatermarkProcessor 的候选列表里，装完无需配置。
 # 镜像因此大约 +150MB：水印是「写进 MinIO 之前」的一步，缺了它开了水印的上传会直接 422。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-wqy-microhei \
+    && apt-get install -y --no-install-recommends \
+       -o Acquire::Retries=5 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=60 \
+       ffmpeg fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

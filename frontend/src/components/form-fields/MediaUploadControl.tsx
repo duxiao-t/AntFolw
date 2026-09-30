@@ -71,10 +71,12 @@ export function MediaUploadControl({
   const pendingFlagRef = useRef(false);
   /** 已提交的文件以 ref 为准：并发上传时用渲染期捕获的 `value` 会互相覆盖。 */
   const filesRef = useRef<NativeFile[]>([]);
+  /** 在传的个数也要用 ref：一次选多个文件时 antd 会把 beforeUpload 连着跑完，state 那时还是旧的。 */
+  const inFlightRef = useRef(0);
 
   const uploaded = toMediaFiles(value).filter((file) => file.id);
   const limit = maxCount ?? (multiple ? undefined : 1);
-  const remaining = limit == null ? undefined : Math.max(0, limit - uploaded.length);
+  const remaining = limit == null ? undefined : Math.max(0, limit - uploaded.length - inFlightRef.current);
 
   useEffect(() => {
     filesRef.current = (Array.isArray(value) ? value : [])
@@ -100,6 +102,7 @@ export function MediaUploadControl({
   const startUpload = async (item: PendingItem) => {
     const patch = (changes: Partial<PendingItem>) => setPending((entries) =>
       entries.map((entry) => (entry.uid === item.uid ? { ...entry, ...changes } : entry)));
+    const settle = () => { inFlightRef.current = Math.max(0, inFlightRef.current - 1); };
     try {
       const file = await uploadMediaFile(item.file, {
         watermark,
@@ -117,20 +120,29 @@ export function MediaUploadControl({
       }
       setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
       writeFiles([...filesRef.current.filter((entry) => entry.id !== file.id), file]);
+      settle();
     } catch (error) {
       if (removedRef.current.has(item.uid)) {
         setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
+        settle();
         return;
       }
       patch({ status: 'error', percent: 0, error: errorMessage(error) });
+      settle();
     }
   };
 
   const enqueue = (file: File) => {
+    // 再挡一次数量：`beforeUpload` 里读到的 state 是这一批开始时的，一次选多个文件时靠它拦不住。
+    if (limit != null && filesRef.current.length + inFlightRef.current >= limit) {
+      message.error(`最多上传 ${limit} 个`);
+      return;
+    }
     const item: PendingItem = {
       uid: nextUid(), name: file.name, status: 'uploading', percent: 0, file,
     };
     removedRef.current.delete(item.uid);
+    inFlightRef.current += 1;
     setPending((entries) => [...entries, item]);
     void startUpload(item);
   };
