@@ -65,6 +65,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertySource;
@@ -3471,6 +3472,66 @@ class PostgresTransactionalIntegrityIntegrationTest {
             jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", fileId);
             jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
             jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    /**
+     * 去重也要拿行锁：并发删除插在"查到重复行"和"返回那一行/补写对象"之间时，绝不能把已删文件
+     * 还给客户端（提交时会被 `append` 以 `FILE_NOT_FOUND` 拒掉整单），也不该把对象重新写回去变孤儿。
+     *
+     * <p>判据是**结果**：锁生效 → 重查时那一行已不满足 `status='READY'` → 新建一行（新 id）；
+     * 去掉 `FOR UPDATE` → 读到提交前的 READY 直接返回旧行（id 相同）。
+     */
+    @Test
+    void uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked() throws Exception {
+        long ownerId = userId("admin");
+        // 真实 PNG 头就够：不带 watermark 的图片上传只校验魔数，不跑 ffmpeg。
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R'};
+        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+            new MockMultipartFile("file", "dup.png", "image/png", png), ownerId);
+        assertThat(first.status()).isEqualTo("READY");
+        UUID freshId = null;
+        TransactionTemplate transactions = new TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            executor.submit(() -> transactions.executeWithoutResult(status -> {
+                mobileFileMapper.selectByIdsForUpdate(List.of(first.id()));
+                locked.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+                jdbcTemplate.update(
+                    "UPDATE t_mobile_file SET status = 'DELETED', deleted_at = now() WHERE id = ?",
+                    first.id());
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<com.antflow.mobile.workflow.MobileFileDto> reupload = executor.submit(
+                () -> mobileFileService.upload(
+                    new MockMultipartFile("file", "dup.png", "image/png", png), ownerId));
+            // 让它走到加锁点，再放行 t1 提交。
+            Thread.sleep(300);
+            release.countDown();
+            com.antflow.mobile.workflow.MobileFileDto again = reupload.get(20, TimeUnit.SECONDS);
+            freshId = again.id();
+            assertThat(again.id()).as("去重把已删文件还给了客户端（没走行锁）").isNotEqualTo(first.id());
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_mobile_file WHERE id = ?", String.class, again.id()))
+                .isEqualTo("READY");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_mobile_file WHERE id = ?", String.class, first.id()))
+                .isEqualTo("DELETED");
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", first.id());
+            if (freshId != null) {
+                jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", freshId);
+            }
         }
     }
 

@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -364,6 +365,62 @@ class MobileFileServiceTest {
         assertThat(storage.putCount).isEqualTo(1);
         assertThat(storage.storageKey).isEqualTo(existing.getStorageKey());
         assertThat(storage.contentBytes).isEqualTo(originalBytes);
+        Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
+    }
+
+    /** 对象已经在存储里了：重复上传只返回旧行，不再把同一份字节往 MinIO 重写一遍。 */
+    @Test
+    void uploadDeduplicatesWithoutRewritingWhenObjectExists() throws Exception {
+        MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
+        storage.existsResult = true;
+
+        MobileFileDto dto = service.upload(pngFile("logo.png", pngBytes()), 7L);
+
+        assertThat(dto.id()).isEqualTo(existing.getId());
+        assertThat(storage.putCount).isZero();
+        Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
+    }
+
+    /**
+     * 存储探针失败 ≠ 对象缺失 ≠ 文件有问题：网络抖动时整个请求必须失败在"存储"这一步。
+     * 被当成"缺失"就会每次抖动都白重传一份；被当成 BAD_FILE 会把锅甩给用户的文件。
+     */
+    @Test
+    void uploadFailsWithStorageErrorWhenProbeCannotReachStorage() throws Exception {
+        MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
+        storage.failExists = true;
+
+        assertThatThrownBy(() -> service.upload(pngFile("logo.png", pngBytes()), 7L))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode())
+                .isEqualTo("FILE_STORAGE_FAILED"));
+        assertThat(storage.putCount).isZero();
+    }
+
+    /**
+     * 上限不能只看声明的大小：声明 3 字节、实际给 5 字节，客户端就能把 `maxBytes` 绕过去
+     * （代价落在磁盘）。真实字节数只有 stage 数完才知道，所以落盘后必须再比一次。
+     */
+    @Test
+    void uploadRejectsRealBytesOverLimitWhenDeclaredSizeIsLiedAbout() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxBytes(4);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add);
+        MultipartFile lying = Mockito.mock(MultipartFile.class);
+        Mockito.when(lying.isEmpty()).thenReturn(false);
+        Mockito.when(lying.getSize()).thenReturn(3L);
+        Mockito.when(lying.getContentType()).thenReturn("image/png");
+        Mockito.when(lying.getOriginalFilename()).thenReturn("photo.png");
+        Mockito.when(lying.getInputStream())
+            .thenAnswer(invocation -> new ByteArrayInputStream(pngBytes()));
+
+        assertThatThrownBy(() -> service.upload(lying, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("file is too large");
+        assertThat(storage.putCount).isZero();
         Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
     }
 
