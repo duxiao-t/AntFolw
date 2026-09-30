@@ -36,6 +36,11 @@ const iconProps = {
   stroke: 'currentColor',
 } as const;
 
+/** 上传失败时给用户看的话：服务端的原因优先，取不到才退回通用文案。 */
+function uploadFailureMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : '图片上传失败';
+}
+
 function IconCamera() {
   return (
     <svg {...iconProps} role="img" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -382,6 +387,7 @@ function ChecklistPhotoUpload({
   const previewUrlsRef = useRef(new Map<string, string>());
   const photosRef = useRef<MobileFileDto[]>(photos);
   const [uploading, setUploading] = useState(false);
+  const [failedFiles, setFailedFiles] = useState<File[]>([]);
   photosRef.current = photos;
 
   useEffect(() => {
@@ -422,6 +428,8 @@ function ChecklistPhotoUpload({
     if (remaining <= 0) return;
     const batch = files.slice(0, remaining);
     setUploading(true);
+    setFailedFiles([]);
+    const failed: File[] = [];
     for (const file of batch) {
       try {
         const dto = await uploadMobileFile('/api/mobile/files', file);
@@ -437,10 +445,14 @@ function ChecklistPhotoUpload({
         setPreviews(Object.fromEntries(previewUrlsRef.current));
         photosRef.current = [...photosRef.current, dto];
         onChange(photosRef.current);
-      } catch {
-        Toast.show({ icon: 'fail', content: '图片上传失败' });
+      } catch (error) {
+        // 失败原因（"转码队列忙"…）要透出来，并留着文件让用户能重试——原来只弹一句
+        // "图片上传失败"，用户既不知道原因也没有下一步。
+        failed.push(file);
+        Toast.show({ icon: 'fail', content: uploadFailureMessage(error) });
       }
     }
+    if (failed.length > 0) setFailedFiles(failed);
     setUploading(false);
   };
 
@@ -528,6 +540,19 @@ function ChecklistPhotoUpload({
           }}
         />
       </div>
+      {failedFiles.length > 0 ? (
+        <div className="af-check__upload-row">
+          <span>{failedFiles.length} 张上传失败</span>
+          <button
+            type="button"
+            className="af-check__upload-btn"
+            disabled={uploading}
+            onClick={() => void uploadFiles(failedFiles)}
+          >
+            重试
+          </button>
+        </div>
+      ) : null}
       {photos.length > 0 ? (
         <div className="af-check__thumbs">
           {photos.map((photo) => {

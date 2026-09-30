@@ -101,6 +101,7 @@ describe('mobile file api', () => {
     MockXMLHttpRequest.completionMode = 'load';
     MockXMLHttpRequest.loaded = 50;
     MockXMLHttpRequest.statuses = [200];
+    MockXMLHttpRequest.bodies = [];
     MockXMLHttpRequest.autoRespond = true;
     vi.useRealTimers();
   });
@@ -161,6 +162,37 @@ describe('mobile file api', () => {
     ]);
     MockXMLHttpRequest.latest?.respond(200);
     await expect(upload).resolves.toMatchObject({ id: 'file-1' });
+  });
+
+  it('surfaces the server failure reason when video processing fails', async () => {
+    vi.useFakeTimers();
+    setAuthController({
+      authorizationHeader: () => ({}),
+      refresh: noop,
+      isAuthEndpoint: () => false,
+    });
+    // 不带 onProgress 走 apiRequest：第 1 次是上传（PROCESSING），第 2 次是轮询（FAILED + 原因）。
+    let call = 0;
+    const dto = (extra: Record<string, unknown>) => JSON.stringify({
+      id: 'file-1', name: 'clip.mp4', contentUrl: '/api/mobile/files/file-1/content',
+      contentType: 'video/mp4', size: 10, ...extra,
+    });
+    vi.stubGlobal('fetch', async () => {
+      call += 1;
+      return new Response(
+        call === 1 ? dto({ status: 'PROCESSING' })
+          : dto({ status: 'FAILED', failureReason: '转码队列忙，请稍后重试' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const upload = uploadMobileFile(
+      '/api/mobile/files',
+      new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+    );
+    const rejection = expect(upload).rejects.toThrow('转码队列忙，请稍后重试');
+    await vi.advanceTimersByTimeAsync(1200);
+    await rejection;
   });
 
   it('settles uploads that only report completion through readyState changes', async () => {

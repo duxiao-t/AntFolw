@@ -225,7 +225,11 @@ async function waitForProcessedFile(file: MobileFileDto, onProgress?: UploadProg
     const current = await apiRequest<MobileFileDto>(
       `/api/mobile/files/${encodeURIComponent(file.id)}`,
     );
-    if (current.status === 'FAILED') throw new Error('视频处理失败，请重新上传');
+    // 服务端会给出可读原因（"转码队列忙"/"存储失败"…），别吞掉换成一句通用文案——
+    // 用户看到的提示要能指导下一步（重试 / 换更小更短的视频）。
+    if (current.status === 'FAILED') {
+      throw new Error(current.failureReason || '视频处理失败，请重新上传');
+    }
     if (current.status !== 'PROCESSING') {
       onProgress?.({ phase: 'done', progress: 100 });
       return current;
