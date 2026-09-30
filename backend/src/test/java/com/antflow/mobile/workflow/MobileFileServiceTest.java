@@ -488,13 +488,58 @@ class MobileFileServiceTest {
     @Test
     void deleteRejectsSubmittedLinkedFile() {
         UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
-        Mockito.when(fileMapper.selectById(id)).thenReturn(existingFile(id, 7L));
+        lockFile(existingFile(id, 7L));
         Mockito.when(accessMapper.countLinks(id)).thenReturn(1L);
 
         assertThatThrownBy(() -> service.delete(id, 7L))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("file already submitted");
         Mockito.verify(fileMapper, Mockito.never()).updateById(any(MobileFile.class));
+    }
+
+    /** 处理中的视频不给删：后台正往同一个 key 写结果，删了会留下读不出来的孤儿对象。 */
+    @Test
+    void deleteRejectsFileStillBeingProcessed() {
+        UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
+        MobileFile row = existingFile(id, 7L);
+        row.setStatus("PROCESSING");
+        lockFile(row);
+
+        assertThatThrownBy(() -> service.delete(id, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("处理完再删");
+        Mockito.verify(fileMapper, Mockito.never()).updateById(any(MobileFile.class));
+        assertThat(storage.deletedKeys).isEmpty();
+    }
+
+    /**
+     * 对象删除在事务提交后执行：否则"删了对象、事务却回滚"会留下 READY 行指向不存在的对象；
+     * 反过来（提交成功、删对象失败）最多是个没人引用的孤儿。
+     */
+    @Test
+    void deleteRemovesTheObjectOnlyAfterCommit() {
+        UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
+        MobileFile row = existingFile(id, 7L);
+        lockFile(row);
+        org.springframework.transaction.support.TransactionSynchronizationManager
+            .initSynchronization();
+        try {
+            service.delete(id, 7L);
+            // 事务还没提交 → 对象还没删
+            assertThat(storage.deletedKeys).isEmpty();
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .getSynchronizations().forEach(
+                    org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+            assertThat(storage.deletedKeys).contains(row.getStorageKey());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .clearSynchronization();
+        }
+    }
+
+    /** delete 现在拿的是行锁（FOR UPDATE），测试里让批量加锁返回那一行。 */
+    private void lockFile(MobileFile row) {
+        Mockito.when(fileMapper.selectByIdsForUpdate(any())).thenReturn(java.util.List.of(row));
     }
 
     private static MockMultipartFile pngFile(String name, byte[] content) {

@@ -342,11 +342,30 @@ public class MobileFileService {
         return new MobileFileContent(toDto(file), storage.get(file.getStorageKey()));
     }
 
+    /**
+     * 删除还没提交的附件。
+     *
+     * <p>三件事按顺序都重要：
+     * <ol>
+     *   <li>**先加行锁**（{@code FOR UPDATE}）：否则"检查有没有被提交"与提交方"检查文件是否 READY"
+     *       会交错——提交成功了，附件却指向一个已删文件、对象也没了（永久坏引用）；
+     *   <li>**处理中的视频不给删**：后台正往同一个 key 写结果，删了会留下读不出来的孤儿对象；
+     *   <li>**对象在事务提交后删**：提交前删的话，事务一旦回滚就变成"READY 行 + 对象已丢"，
+     *       而反过来（提交成功、删除失败）最多是个孤儿对象，没人会读到它。
+     * </ol>
+     */
     @Transactional(rollbackFor = Exception.class)
     public void delete(UUID id, long userId) {
-        MobileFile file = requireExisting(id);
+        List<MobileFile> locked = fileMapper.selectByIdsForUpdate(List.of(id));
+        MobileFile file = locked.isEmpty() ? null : locked.get(0);
+        if (file == null || DELETED_STATUS.equals(file.getStatus()) || file.getDeletedAt() != null) {
+            throw new BizException("FILE_NOT_FOUND", "file not found");
+        }
         if (!Objects.equals(file.getOwnerId(), userId)) {
             throw new AccessDeniedException("file belongs to another user");
+        }
+        if (PROCESSING_STATUS.equals(file.getStatus())) {
+            throw new BizException("BAD_FILE_STATE", "视频正在加水印，处理完再删");
         }
         if (accessMapper.countLinks(id) > 0) {
             throw new BizException("BAD_FILE_STATE", "file already submitted");
@@ -354,11 +373,20 @@ public class MobileFileService {
         file.setStatus(DELETED_STATUS);
         file.setDeletedAt(OffsetDateTime.now());
         fileMapper.updateById(file);
-        try {
-            storage.delete(file.getStorageKey());
-        } catch (IOException exception) {
-            log.error("删除对象存储失败：{}", file.getStorageKey(), exception);
-            throw new BizException("FILE_STORAGE_FAILED", "文件删除失败，请稍后重试");
+        deleteObjectAfterCommit(file.getStorageKey());
+    }
+
+    /** 事务提交后再删对象；删失败只记日志（行已经 DELETED，最坏是个没人引用的孤儿对象）。 */
+    private void deleteObjectAfterCommit(String storageKey) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deleteObjectQuietly(storageKey);
+                }
+            });
+        } else {
+            deleteObjectQuietly(storageKey);
         }
     }
 
