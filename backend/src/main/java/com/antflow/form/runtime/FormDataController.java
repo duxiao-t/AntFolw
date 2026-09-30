@@ -21,7 +21,8 @@ public class FormDataController {
     private final com.antflow.audit.AuditService auditService;
 
     /**
-     * 把台账导成 CSV（带 UTF-8 BOM，Excel 直接打开不乱码）。
+     * 把台账导成 Excel（默认）或 CSV。两种格式同一份「列 + 值」模型：列按字段 id、表头取字段标签、
+     * 值取后端解析好的显示文本——所以导出的内容与页面、与另一种格式完全一致。
      *
      * <p>走的是与列表一致的过滤与**行级数据范围**（同一个 mapper 语句），所以"你导出的绝不会
      * 比你看到的更多"；上限 {@link FormDataService#EXPORT_LIMIT} 行，截断会在审计里记一笔。
@@ -42,9 +43,14 @@ public class FormDataController {
             @RequestParam(required = false)
             @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
             java.time.LocalDate to,
-            @RequestParam(defaultValue = "0") int tzOffsetMinutes) {
+            @RequestParam(defaultValue = "0") int tzOffsetMinutes,
+            @RequestParam(defaultValue = "xlsx") String format) {
         authorizationService.requirePermission(PermissionCodes.FORM_DATA_EXPORT);
         authorizationService.requirePermission(PermissionCodes.FORM_DATA_READ);
+        if (!java.util.Set.of("csv", "xlsx").contains(format)) {
+            throw new com.antflow.engine.BizException("EXPORT_FORMAT_UNSUPPORTED",
+                "只支持 csv 或 xlsx");
+        }
         // 与报表同一套时区换算：库里按 UTC 存，不换算导出里会比用户看到的早 8 小时。
         java.time.ZoneOffset offset = java.time.ZoneOffset.ofTotalSeconds(
             Math.max(-18 * 60, Math.min(18 * 60, tzOffsetMinutes)) * 60);
@@ -55,17 +61,24 @@ public class FormDataController {
 
         java.util.List<FormData> rows = service.exportRows(formDefId, status, submitterKeyword,
             start, end);
-        long total = service.countForExport(formDefId, status, submitterKeyword);
-        byte[] body = com.antflow.report.FormDataCsv.export(rows, offset);
+        // 计数必须带同一组时间范围，否则"预览 N 行"和实际导出的行数对不上，truncated 还会误报。
+        long total = service.countForExport(formDefId, status, submitterKeyword, start, end);
+        var model = com.antflow.report.FormDataExport.model(rows, offset);
+        byte[] body = "csv".equals(format)
+            ? com.antflow.report.FormDataExport.csv(model)
+            : com.antflow.report.FormDataExport.xlsx(model);
         auditService.success("form.data.export", "FORM_DATA", null,
             com.antflow.audit.AuditService.RiskLevel.HIGH, Map.of(),
             Map.of("formDefId", formDefId == null ? 0 : formDefId, "rowCount", rows.size(),
-                "truncated", rows.size() < total, "limit", FormDataService.EXPORT_LIMIT));
+                "truncated", rows.size() < total, "limit", FormDataService.EXPORT_LIMIT,
+                "format", format));
         return org.springframework.http.ResponseEntity.ok()
-            .contentType(org.springframework.http.MediaType.parseMediaType("text/csv;charset=UTF-8"))
+            .contentType(org.springframework.http.MediaType.parseMediaType("csv".equals(format)
+                ? "text/csv;charset=UTF-8"
+                : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
             .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
                 org.springframework.http.ContentDisposition.attachment()
-                    .filename("antflow-form-data.csv").build().toString())
+                    .filename("antflow-form-data." + format).build().toString())
             .body(body);
     }
 

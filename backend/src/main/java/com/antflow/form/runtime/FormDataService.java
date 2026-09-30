@@ -155,14 +155,18 @@ public class FormDataService {
     public static final int EXPORT_LIMIT = 10_000;
 
     /**
-     * 导出预览：先告诉用户"这次会导出多少行"。
+     * 导出预览：先告诉用户"这次会导出多少行"。**参数必须与 {@link #exportRows} 完全一致**——
+     * 少了时间范围，"预览 300 行"和实际下载的 30 行就对不上，`truncated` 还会误报。
      *
-     * <p>刻意复用 {@link #adminPage} 的同一个过滤链——它走的是 `FormDataMapper.selectList`，
-     * 行级数据范围由 `DataPermissionPolicyHandler` 注入。自己写一条 count 查询的话，
-     * 那条规则不认（它是按语句 id 显式开启的），"提示 30 行"就会变成实际的越权放大镜。
+     * <p>刻意复用同一条过滤链（{@link #exportFilter} + {@code selectPage}）：它走的是
+     * `FormDataMapper.selectList`，行级数据范围由 `DataPermissionPolicyHandler` 注入。
+     * 自己写一条 count 查询的话那条规则不认（它是按语句 id 显式开启的），
+     * "提示 30 行"就会变成实际的越权放大镜。
      */
-    public long countForExport(Long formDefId, String status, String submitterKeyword) {
-        return adminPage(1, 1, formDefId, status, null, submitterKeyword).getTotal();
+    public long countForExport(Long formDefId, String status, String submitterKeyword,
+                               java.time.OffsetDateTime from, java.time.OffsetDateTime to) {
+        var q = exportFilter(formDefId, status, submitterKeyword, from, to);
+        return mapper.selectPage(Page.of(1, 1), q).getTotal();
     }
 
     /** 导出的行（上限 {@link #EXPORT_LIMIT}）——过滤与范围同台账列表。 */

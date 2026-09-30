@@ -2237,18 +2237,21 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(formDataService.exportRows(formId, null, null, null, null))
                 .extracting(com.antflow.form.runtime.FormData::getId)
                 .contains(mine, theirs);
-            assertThat(formDataService.countForExport(formId, null, null)).isEqualTo(2);
+            assertThat(formDataService.countForExport(formId, null, null, null, null)).isEqualTo(2);
+            // 预览计数必须跟着**时间范围**走：少了它，"预览 2 行、实际导出 0 行"就出现了。
+            assertThat(formDataService.countForExport(formId, null, null,
+                java.time.OffsetDateTime.now().plusDays(1), null)).isZero();
 
             // 受限（本人）：只拿得到自己那条，预览的行数也必须是 1——提示的数字与实际导出必须一致
             setPrincipal(scopedUser);
             assertThat(formDataService.exportRows(formId, null, null, null, null))
                 .extracting(com.antflow.form.runtime.FormData::getId)
                 .containsExactly(mine);
-            assertThat(formDataService.countForExport(formId, null, null)).isEqualTo(1);
+            assertThat(formDataService.countForExport(formId, null, null, null, null)).isEqualTo(1);
 
             // 提交人关键字同样不能把范围放大：查不到人 → 一条都不导
             assertThat(formDataService.exportRows(formId, null, "查无此人", null, null)).isEmpty();
-            assertThat(formDataService.countForExport(formId, null, "查无此人")).isZero();
+            assertThat(formDataService.countForExport(formId, null, "查无此人", null, null)).isZero();
 
             // 只有导出权限（没有读）：控制器会直接 403，而不是给一个空文件
             long exportOnly = insertUser("export-only");

@@ -27,6 +27,14 @@ const STATUS_OPTIONS = [
   { value: 'DRAFT', label: '草稿' },
 ];
 
+/** Excel 放第一：多数人要的是能直接打开、能筛选的表；CSV 是给"喂给别的系统"用的。 */
+const FORMAT_OPTIONS = [
+  { value: 'xlsx', label: 'Excel（.xlsx）' },
+  { value: 'csv', label: 'CSV（.csv）' },
+] as const;
+
+type ExportFormat = (typeof FORMAT_OPTIONS)[number]['value'];
+
 /** 出错时后端返回的是 JSON 而不是文件，axios 把整个响应体当 Blob 收下来了——读出来才有话说。 */
 async function blobErrorMessage(error: any): Promise<string> {
   const data = error?.response?.data;
@@ -48,6 +56,7 @@ export default function ExportPage() {
   const [status, setStatus] = useState('');
   const [submitterKeyword, setSubmitterKeyword] = useState('');
   const [days, setDays] = useState(30);
+  const [format, setFormat] = useState<ExportFormat>('xlsx');
   const [formOptions, setFormOptions] = useState<Array<{ value: number; label: string }>>([]);
   const [count, setCount] = useState<{ total: number; limit: number }>();
   const [counting, setCounting] = useState(true);
@@ -78,29 +87,30 @@ export default function ExportPage() {
   useEffect(() => {
     let cancelled = false;
     setCounting(true);
+    // 参数必须与下载一致（含时间范围与 tzOffsetMinutes）：少了时间范围，改了区间之后
+    // 预览的仍是旧数字，还会把 truncated 报歪。
     request<{ total: number; limit: number }>('/api/reports/form-data-count', {
-      params: { formDefId: params.formDefId, status: params.status,
-        submitterKeyword: params.submitterKeyword },
+      params: { ...params, tzOffsetMinutes: tzOffsetMinutes() },
       skipErrorHandler: true,
     })
       .then((result) => { if (!cancelled) { setCount(result); setError(undefined); } })
       .catch((reason) => { if (!cancelled) setError(reason?.message ?? '无法预估导出范围'); })
       .finally(() => { if (!cancelled) setCounting(false); });
     return () => { cancelled = true; };
-  }, [params.formDefId, params.status, params.submitterKeyword]);
+  }, [params]);
 
   const download = async () => {
     setBusy(true);
     try {
       const blob = await request('/api/forms/data/admin/export', {
-        params: { ...params, tzOffsetMinutes: tzOffsetMinutes() },
+        params: { ...params, tzOffsetMinutes: tzOffsetMinutes(), format },
         responseType: 'blob',
         skipErrorHandler: true,
       });
       const url = URL.createObjectURL(blob as Blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = 'antflow-form-data.csv';
+      anchor.download = `antflow-form-data.${format}`;
       anchor.click();
       URL.revokeObjectURL(url);
       message.success('已开始下载');
@@ -114,8 +124,13 @@ export default function ExportPage() {
   const truncated = count != null && count.total > count.limit;
 
   return (
-    <PageContainer subTitle="把表单台账导成 CSV（Excel 可直接打开）">
+    <PageContainer subTitle="把表单台账导成 Excel 或 CSV，内容与「表单管理 → 数据」里看到的一致">
       <div className={styles.form}>
+        <div className={styles.row}>
+          <span className={styles.label}>格式</span>
+          <Select value={format} onChange={(value) => setFormat(value)} options={[...FORMAT_OPTIONS]}
+            aria-label="格式" style={{ maxWidth: 200 }} />
+        </div>
         <div className={styles.row}>
           <span className={styles.label}>表单</span>
           <Select allowClear showSearch placeholder="全部表单" aria-label="表单"
@@ -172,7 +187,7 @@ export default function ExportPage() {
 
         <Button type="primary" icon={<DownloadOutlined />} loading={busy}
           disabled={counting || !count || count.total === 0} onClick={() => void download()}>
-          导出 CSV
+          {format === 'csv' ? '导出 CSV' : '导出 Excel'}
         </Button>
       </div>
 
@@ -181,7 +196,7 @@ export default function ExportPage() {
         showIcon
         style={{ marginTop: 16, maxWidth: 560 }}
         message="导出范围与你在「表单管理 → 数据」里看到的完全一致"
-        description="列表显示的提交人 / 工号 / 部门 + 该表单的字段列会一起导出；范围外（以及你没有权限看的）数据不会出现。导出动作会记一条审计。"
+        description="列表显示的提交人 / 工号 / 部门 + 该表单的字段列会一起导出，取值也是页面显示的那份文本（下拉给选项名、检查项给逐条结果）；范围外（以及你没有权限看的）数据不会出现。导出动作会记一条审计。"
       />
     </PageContainer>
   );

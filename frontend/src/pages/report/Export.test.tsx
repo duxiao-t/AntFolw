@@ -32,7 +32,8 @@ describe('数据导出', () => {
 
     expect(await screen.findByText('42')).toBeInTheDocument();
     expect(screen.getByText(/上限 10000 行/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeEnabled();
+    // 默认 Excel：多数人要的是能直接双击打开的表。
+    expect(screen.getByRole('button', { name: /导出 Excel/ })).toBeEnabled();
   });
 
   it('超过上限时提前说清会截断，而不是让人以为导全了', async () => {
@@ -59,7 +60,7 @@ describe('数据导出', () => {
     renderPage();
 
     expect(await screen.findByText(/当前条件没有数据/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /导出 Excel/ })).toBeDisabled();
   });
 
   it('导出时把筛选（含时区）与 blob 响应类型一起发出去', async () => {
@@ -74,8 +75,8 @@ describe('数据导出', () => {
 
     fireEvent.change(screen.getByLabelText('提交人'), { target: { value: ' 张三 ' } });
     // 改筛选会重新估算行数，这期间按钮是禁用的——等它回来再点（这也是用户会遇到的节奏）。
-    await waitFor(() => expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /导出 Excel/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /导出 Excel/ }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/data/admin/export',
       expect.objectContaining({
@@ -85,7 +86,35 @@ describe('数据导出', () => {
           tzOffsetMinutes: expect.any(Number),
           from: expect.any(String),
           to: expect.any(String),
+          format: 'xlsx',
         }),
       })));
+  });
+
+  it('预览行数跟下载用同一组参数（含时间范围），选了 CSV 就发 csv', async () => {
+    request.mockImplementation((url: string) => {
+      if (url === '/api/reports/form-data-count') return Promise.resolve({ total: 3, limit: 10000 });
+      if (url === '/api/forms/definitions') return Promise.resolve({ records: [] });
+      return Promise.resolve(new Blob(['x']));
+    });
+
+    renderPage();
+    await screen.findByText('3');
+
+    // 计数请求必须带 from/to：少了它，改了时间范围预览数字也不变。
+    const countParams = request.mock.calls.find(([url]) => url === '/api/reports/form-data-count')?.[1]
+      ?.params;
+    expect(countParams).toEqual(expect.objectContaining({
+      from: expect.any(String), to: expect.any(String), tzOffsetMinutes: expect.any(Number),
+    }));
+
+    // antd 的 Select 不是原生 <select>，只能按用户的操作来：按下展开、点选项。
+    fireEvent.mouseDown(screen.getByLabelText('格式'));
+    fireEvent.click(await screen.findByTitle('CSV（.csv）'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/data/admin/export',
+      expect.objectContaining({ params: expect.objectContaining({ format: 'csv' }) })));
   });
 });

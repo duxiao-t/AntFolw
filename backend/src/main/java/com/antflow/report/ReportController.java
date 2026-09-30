@@ -45,17 +45,28 @@ public class ReportController {
     /**
      * 导出页用：先算"这次会导出多少行"，让用户在点下载之前就知道拿到什么。
      * 走的是与导出**同一个**过滤与范围收窄（同一个 mapper 语句），不会出现"提示 30 行、导出 300 行"。
+     * 参数也要与下载一致（含时间范围）——少了它，改了时间范围之后预览数就是旧的。
      *
      * <p>门禁与导出一致：`form:data:export` + `form:data:read`（行级范围跟着读权限走，
      * 只有导出权限会拿到恒假的空结果，那比明说缺权限更难排查）。
      */
     @GetMapping("/form-data-count")
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DATA_EXPORT + "')")
-    public Map<String, Object> formDataCount(@RequestParam(required = false) Long formDefId,
-                                            @RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String submitterKeyword) {
+    public Map<String, Object> formDataCount(
+            @RequestParam(required = false) Long formDefId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String submitterKeyword,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "0") int tzOffsetMinutes) {
         authorization.requirePermission(PermissionCodes.FORM_DATA_READ);
-        return Map.of("total", formDataService.countForExport(formDefId, status, submitterKeyword),
+        java.time.ZoneOffset offset = java.time.ZoneOffset.ofTotalSeconds(
+            Math.max(-18 * 60, Math.min(18 * 60, tzOffsetMinutes)) * 60);
+        java.time.OffsetDateTime start = from == null ? null : from.atStartOfDay().atOffset(offset);
+        java.time.OffsetDateTime end = to == null ? null
+            : to.plusDays(1).atStartOfDay().atOffset(offset);
+        return Map.of("total", formDataService.countForExport(formDefId, status,
+                submitterKeyword, start, end),
             "limit", FormDataService.EXPORT_LIMIT);
     }
 }
