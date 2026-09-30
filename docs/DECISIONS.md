@@ -128,3 +128,36 @@
   - 别为了"让只有导出权限的角色也能导"去放宽成只查导出权限——那会回到"空文件"或"越权导出"二选一。要么补读权限，要么给导出能力单独加一条范围规则（那需要新建一个专属 mapper 语句，不能复用列表那条）。
   - 导出必须走 `FormDataMapper.selectList`（`exportFilter` 与台账列表共用一份过滤）；自己写 count/裸 SQL 都吃不到这层收窄——预览行数会与实际导出行数不一致，那本身就是越权线索。
   - 导出动作写 HIGH 风险审计，带上 `rowCount` / `truncated` / `limit`；上限 10000 行。
+
+## D-20260930-contacts-dept-name-search-covers-subtree
+
+- **状态：** accepted
+- **背景：** 通讯录搜索框改成"双用"（同一个词既过滤左树、又跨部门搜人）之后，你报了一个现象：输入「技术部」时左树筛出了部门，**右栏却一个人都没有**。原因是后端关键字只匹配 `username/display_name/employee_no`，而"匹配部门名"这件事当时只存在于移动端选择器一条路径里（还是在 Java 里先查部门 id 再 `IN`，只命中同级、结果集还可能很大）。
+- **决策：** 「关键字命中部门名 → 该部门**及全部下级**的成员」统一成**一条 ltree 子查询谓词**（`DepartmentMapper.applyDeptNameMatch`），桌面台账搜索与移动选择器共用。谓词仍然 OR 在原有的 `and(...)` 分组**内部**，所以后面的数据范围收窄照旧 AND 在外面。
+- **影响：**
+  - 写在 `DepartmentMapper` 上是因为这是 ltree 查询知识（和 `subtreeIds` 同一族）；写成 **static** 而不是 default 方法，是因为 mapper 的 default 方法会被 mock 掉——单测就再也看不到拼出来的 SQL 了（本轮踩过：`MobileOrgServiceTest` 立刻变红）。
+  - 判定"含下级"靠 `child.path <@ hit.path`。**别退回"先查部门 id 列表再 IN"**：既要展开子树（N 次查询），又会拼出超长参数列表，而且两个入口会再次各写一份。
+  - 左树过滤同步改成"命中节点保留**整棵子树**"（`filterDepartmentTree`）：命中后只留也命中的子节点，会出现"搜到技术部、点进去看不到后端组"，与右栏的结果对不上。
+  - 关键词语义现在包含"部门名"，即搜「研发」会返回研发部及其下级的所有人。这是**有意的**：用户搜的就是"这个部门的人"。
+
+## D-20260930-ledger-explains-each-record-by-its-own-version
+
+- **状态：** accepted
+- **背景：** 台账（`/api/forms/data/admin`）的字段标签、下拉选项、检查项字典全部取**当前**表单定义，忽略每条记录的 `formDefVersion`：表单改过标签/删过选项之后，旧提交会显示新标签，外链下拉甚至显示成 `option_1`。显示规则当时也只活在前端（`fieldValues.ts`），于是同一个值在页面和导出里是两个样子，前端还要为一次可选的定义请求处理 403。
+- **决策：** 显示规则搬到后端（`form/runtime/FormValueDisplay`），并**按每条记录自己的版本**解析 schema，解析顺序与 `OptionRuntimeService.schema()` 一字不差：实例当前修订版 → `(form_def_id, form_def_version)` 快照 → 当前定义。`FieldValue` 增加 `displayText`/`detailText`，保留 `fieldId`/`fieldName`/`value`。
+- **影响：**
+  - **分辨率随记录走，不是随表单走**：同一页里混着两个版本时各按各的来。所以缓存/分组的键是**解析出来的 schema 文本**，不是 `formDefId`。
+  - **外链下拉的选项名要查库**：schema 里只有 `(sourceId, versionId, valueColumn, labelColumn)`，没有选项行。按 `(versionId, valueColumn, labelColumn)` 用**本批真的被选过的值**批量查（一组一条 SQL，最多 500 个值）——整版扫一遍在 2 万行的源上等于每次翻页都白读 2 万行。查不到的值回落**原始值**（表单删了选项，旧单据仍要看得见当时选的是什么）。
+  - **空值按原始 value 判断**，不能拿"未填写"这类摘要文案当哨兵：选项真叫「未填写」的字段会被抹成空白（前端老实现的洞，本轮修掉）。
+  - 前端删掉本地那套规则与那个可选的定义请求；页面只渲染 `displayText`/`detailText`。**页面与导出从此共用一份实现**——改显示口径只改 `FormValueDisplay` 一处。
+
+## D-20260930-export-format-and-column-identity
+
+- **状态：** accepted
+- **背景：** 导出第一版只吐原始值（`option_1`、`id=item-1; …`），列名在没有 label 时退化成字段 id；而且只有 CSV。你要求"字段名称用中文、字段内容是表单真实显示的内容"，并且能选 CSV 或 Excel。
+- **决策：** `FormDataCsv` → `FormDataExport`，产出统一的 `Model(headers, rows)`（CSV 与 Excel 共用），接口加 `format=csv|xlsx`（**默认 xlsx**）。三条硬规则：**列身份是 `fieldId`**（标签只作表头）、**值取 `detailText`**（换行压成 `；`）、**导出默认给 Excel**。
+- **影响：**
+  - **列不能按标签当身份**：两个不同字段可以叫同一个标签（表单改过版本就是），按标签建列会互相覆盖、同一字段跨版本还会拆成两列。同名时表头会出现两列相同的文字——这是**有意**的（值各归各位），不是 bug。
+  - **公式注入防护是必须的**：`=` `+` `-` `@`（含前导空白之后）开头的值会被 Excel 当公式执行，而字段值、姓名、部门名都能进 CSV。CSV 统一前置单引号当文本；xlsx 走全 STRING 单元格（顺带保住工号的前导零），单元格截断到 32767 字符。
+  - xlsx 用 **SXSSF** 流式写并 `dispose()`：1 万行的 XSSF 能把堆吃光（部署里后端只有 768M）。列宽按内容算，上限 60 字符。
+  - **预览计数必须与下载同参数**（含 `from`/`to`/`tzOffsetMinutes`）：少一个时间范围，"预览 300 行、实际 30 行"就出现了，`truncated` 还会误报。这条是上一轮发出去的 bug，本轮一并修掉。

@@ -2199,13 +2199,62 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
-    private long submittedSelectData(long formId, int formDefVersion, long creatorId) {
-        return jdbcTemplate.queryForObject("""
+    private long submittedSelectData(long formId, int formDefVersion, long creatorId) {        return jdbcTemplate.queryForObject("""
             INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status, created_by)
             VALUES (?, ?, lpad(nextval('seq_business_no')::text, 12, '0'),
                     '{"craft":"option_1"}'::jsonb, 'SUBMITTED', ?)
             RETURNING id
             """, Long.class, formId, formDefVersion, creatorId);
+    }
+
+    /**
+     * 外链下拉的选项名在**选项行**里（schema 只写着版本与列映射），所以台账要按钉死的版本回查
+     * 值→标签。这条 SQL 是新的，mock 掉 JdbcTemplate 只能断言"拼了什么"，所以用真库跑：
+     * 值列与标签列不同名时能不能换出中文、查不到的值有没有回落原始值。
+     */
+    @Test
+    void externalOptionLabelsComeFromThePinnedVersionRows() {
+        long adminId = userId("admin");
+        String token = UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+        long sourceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_option_data_source(code, name) VALUES (?, 'Integration source') RETURNING id
+            """, Long.class, "ios_" + token);
+        long versionId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_option_data_source_version(source_id, version_no, status, columns_json,
+                                                     row_count, sha256)
+            VALUES (?, 1, 'PUBLISHED', '["code","name"]'::jsonb, 2, 'x') RETURNING id
+            """, Long.class, sourceId);
+        jdbcTemplate.update("""
+            INSERT INTO t_option_data_source_row(version_id, row_no, data) VALUES
+            (?, 1, '{"code":"option_1","name":"车削"}'::jsonb),
+            (?, 2, '{"code":"option_2","name":"镗削"}'::jsonb)
+            """, versionId, versionId);
+        String schema = "[{\"id\":\"craft\",\"type\":\"multi_select\",\"label\":\"工艺\","
+            + "\"props\":{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId
+            + ",\"valueColumn\":\"code\",\"labelColumn\":\"name\"}}}]";
+        long formId = insertForm("PUBLISHED", schema);
+        long dataId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status, created_by)
+            VALUES (?, 1, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{"craft":["option_1","option_2","option_gone"]}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, adminId);
+        setPrincipal(adminId);
+        try {
+            var rows = formDataService.adminPage(1, 50, formId, null, null).getRecords();
+
+            assertThat(fieldValuesOf(rows, dataId)).containsExactly(
+                // 删掉的选项回落到原始值：旧单据仍要看得见"当时选的是什么"。
+                new com.antflow.form.runtime.FormData.FieldValue("craft", "工艺",
+                    List.of("option_1", "option_2", "option_gone"), "车削、镗削、option_gone",
+                    "车削、镗削、option_gone"));
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_option_data_source_version WHERE id = ?", versionId);
+            jdbcTemplate.update("DELETE FROM t_option_data_source WHERE id = ?", sourceId);
+        }
     }
 
     private static List<com.antflow.form.runtime.FormData.FieldValue> fieldValuesOf(
