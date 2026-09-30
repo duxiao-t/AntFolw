@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -173,6 +175,11 @@ class MobileFileServiceTest {
                 Mockito.eq("AntFlow")))
             .thenReturn(writeProcessed(new byte[] {1, 2, 3}));
         Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+        // 入队前必须认领；租约在 publish 时也要能对上（下面 publishProcessed 的 token 断言）。
+        Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.publishProcessed(any(), any(), any(), any(), Mockito.anyLong(),
+            any(), any())).thenReturn(1);
 
         MobileFileDto dto = service.upload(
             new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()), 7L, true, "AntFlow");
@@ -186,11 +193,115 @@ class MobileFileServiceTest {
 
         backgroundTasks.get(0).run();
 
-        assertThat(row.getStatus()).isEqualTo("READY");
-        assertThat(row.getContentType()).isEqualTo("video/mp4");
-        assertThat(row.getOriginalName()).isEqualTo("clip.mp4");
+        // 结果不再覆盖原 key：写到独立 key，再用带 token 的条件更新把行的指针指过去。
+        Mockito.verify(fileMapper).publishProcessed(Mockito.eq(row.getId()), any(),
+            Mockito.startsWith(row.getStorageKey() + ".wm-"), Mockito.eq("video/mp4"),
+            Mockito.eq(3L), any(), Mockito.eq("clip.mp4"));
+        // 旧对象在发布成功后清理（测试里没有事务同步，直接删）。
+        assertThat(storage.deletedKeys).contains(row.getStorageKey());
         assertThat(storage.contentBytes).isEqualTo(new byte[] {1, 2, 3});
         assertThat(storage.contentType).isEqualTo("video/mp4");
+    }
+
+    /** 租约被别人抢走（publish 条件更新影响 0 行）→ 自己的成品丢掉，绝不碰这一行。 */
+    @Test
+    void publishLosingTheLeaseDropsTheAttemptObject() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenReturn(writeProcessed(new byte[] {9}));
+        Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.publishProcessed(any(), any(), any(), any(), Mockito.anyLong(),
+            any(), any())).thenReturn(0);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        service.processVideoWatermark(row.getId(), UUID.randomUUID());
+
+        // 自己的那份 attempt 对象被删掉；行没有被 publish 改过（条件更新 0 行 = 不是我的行）。
+        assertThat(storage.deletedKeys).anyMatch(key -> key.startsWith(row.getStorageKey() + ".wm-"));
+        Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
+    }
+
+    /** 续租失败（租约已被别人拿走）→ 立刻收手，不浪费时间跑 ffmpeg。 */
+    @Test
+    void processingAbortsEarlyWhenTheLeaseWasLost() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add);
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(0);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        service.processVideoWatermark(row.getId(), UUID.randomUUID());
+
+        Mockito.verify(processor, Mockito.never()).applyTo(Mockito.any(), Mockito.any(), any(), any());
+        Mockito.verify(fileMapper, Mockito.never()).publishProcessed(any(), any(), any(), any(),
+            Mockito.anyLong(), any(), any());
+    }
+
+    /**
+     * OOM 之类 Error 也要把行写成人话状态，**并且不能被吞掉**——原来 `catch (Exception)` 接不住
+     * Error，行会永远停在 PROCESSING，连重启都有可能再炸一次。
+     */
+    @Test
+    void processingErrorMarksRowFailedAndIsRethrown() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenThrow(new OutOfMemoryError("Java heap space"));
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        assertThatThrownBy(() -> service.processVideoWatermark(row.getId(), UUID.randomUUID()))
+            .isInstanceOf(OutOfMemoryError.class);
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(fileMapper).failProcessing(Mockito.eq(row.getId()), any(), error.capture());
+        assertThat(error.getValue()).contains("OutOfMemoryError");
+    }
+
+    /** reaper：有界、先认领；队列满时只把租约还回去，**绝不**标 FAILED（那是上传路径的语义）。 */
+    @Test
+    void reaperLeavesRowProcessingWhenQueueIsFull() {
+        backgroundTasks.clear();
+        MobileFileProperties properties = new MobileFileProperties();
+        Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, rejecting);
+        UUID stale = UUID.randomUUID();
+        Mockito.when(fileMapper.claimStaleProcessing(any(), Mockito.eq(20), any()))
+            .thenReturn(java.util.List.of(stale));
+
+        service.reapStaleProcessing();
+
+        Mockito.verify(fileMapper).releaseProcessingClaim(Mockito.eq(stale), any());
+        Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
+    }
+
+    /** 对照：同一条路走上传，被拒就是 FAILED（客户端在轮询，得立刻知道）。 */
+    @Test
+    void uploadPathMarksFailedWhenQueueIsFull() throws Exception {
+        Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, rejecting);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+        Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
+
+        service.upload(new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()),
+            7L, true, "AntFlow");
+
+        Mockito.verify(fileMapper).failProcessing(any(), any(), Mockito.contains("queue"));
+        Mockito.verify(fileMapper, Mockito.never()).releaseProcessingClaim(any(), any());
     }
 
     /** 处理器现在只吃文件路径：给测试准备一个"成品文件"。 */
@@ -443,6 +554,8 @@ class MobileFileServiceTest {
         private String storageKey;
         private String contentType;
         private byte[] contentBytes = new byte[0];
+        /** 被删掉的 key：断言"旧对象在发布后清理""失效的 attempt 被丢弃"用。 */
+        private final java.util.List<String> deletedKeys = new java.util.ArrayList<>();
 
         @Override
         public StoredObject put(String storageKey, InputStream content, long size,
@@ -464,6 +577,7 @@ class MobileFileServiceTest {
 
         @Override
         public void delete(String storageKey) {
+            deletedKeys.add(storageKey);
         }
     }
 }

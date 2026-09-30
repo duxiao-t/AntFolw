@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -139,16 +140,42 @@ public class MobileFileService {
         }
     }
 
+    /**
+     * 恢复滞留的异步任务。启动时跑一次，之后由 {@link #reapStaleProcessing()} 定时接管——
+     * 以前只有启动这一次：进程里 OOM/被杀留下的 PROCESSING 行除了重启没人管。
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverPendingVideoProcessing() {
-        fileMapper.selectList(new QueryWrapper<MobileFile>().eq("status", PROCESSING_STATUS))
-            .forEach(file -> submitVideoProcessing(file.getId()));
+        reapStaleProcessing();
     }
 
-    void processVideoWatermark(UUID id) {
+    /**
+     * 定期把"没人认领或租约已过期"的 PROCESSING 行重新排进队列。**有界**（每轮最多
+     * {@code processing-reap-limit} 条）且**先认领**：认领不到的说明别人正在跑，直接跳过。
+     *
+     * <p>被队列拒绝时保持 PROCESSING（见 {@link RejectPolicy#LEAVE}）——原来在启动恢复里被拒就直接标
+     * FAILED，一次崩溃留下的积压会有一大半"永久失败"。
+     */
+    @Scheduled(fixedDelayString = "${antflow.mobile.files.processing-reap-interval-ms:60000}")
+    void reapStaleProcessing() {
+        OffsetDateTime staleBefore = OffsetDateTime.now()
+            .minusMinutes(properties.getProcessingStaleMinutes());
+        // 这一轮的租约 token：一批行共用一个（它们本来就属于同一轮调度），拒绝时按它整体归还。
+        UUID reapClaim = UUID.randomUUID();
+        java.util.List<UUID> claimed = fileMapper.claimStaleProcessing(staleBefore,
+            properties.getProcessingReapLimit(), reapClaim);
+        if (claimed.isEmpty()) return;
+        log.info("重新排入 {} 个滞留的视频水印任务", claimed.size());
+        // claimStaleProcessing 已经把同一批的租约写成一个 token 了，这里只负责入队；
+        // 被队列拒绝就 release 这个 token 等下一轮（不会误伤别人的租约）。
+        claimed.forEach(id -> enqueueVideoProcessing(id, reapClaim, RejectPolicy.LEAVE));
+    }
+
+    void processVideoWatermark(UUID id, UUID claim) {
         MobileFile file = fileMapper.selectById(id);
         if (file == null || !PROCESSING_STATUS.equals(file.getStatus())) return;
         Path workDir = null;
+        Path published = null;
         try {
             // 源对象流式落到临时文件，ffmpeg 读文件、把成品写文件，再流式传回对象存储：
             // 整个过程堆里只有拷贝缓冲（原来 readAllBytes + apply(byte[]) 是 2~3 份整视频）。
@@ -158,6 +185,7 @@ public class MobileFileService {
             try (InputStream source = storage.get(file.getStorageKey()).getInputStream()) {
                 Files.copy(source, input);
             }
+            renewClaim(id, claim);
             Path output = watermarkProcessor.applyTo(input, workDir, file.getContentType(),
                 file.getWatermarkText());
             long size = Files.size(output);
@@ -168,24 +196,73 @@ public class MobileFileService {
                     "转码后的视频超过大小上限（" + (size / 1024 / 1024) + "MB > "
                         + (limit / 1024 / 1024) + "MB），请换更小或更短的视频。");
             }
+            renewClaim(id, claim);
+            // 结果写**独立 key**，不覆盖原对象：原地覆盖的话，put 成功而 DB 没更新（崩溃/租约丢）
+            // 会留下"行还是 PROCESSING、对象已经是成品"的状态，重跑一次就是二次水印，出错时原片也没了。
             String resultContentType = watermarkProcessor.resultContentType(file.getContentType());
+            String attemptKey = file.getStorageKey() + ".wm-" + claim;
             try (InputStream processed = Files.newInputStream(output)) {
-                storage.put(file.getStorageKey(), processed, size, resultContentType);
+                storage.put(attemptKey, processed, size, resultContentType);
             }
-            file.setOriginalName(toMp4Name(file.getOriginalName()));
-            file.setContentType(resultContentType);
-            file.setSizeBytes(size);
-            file.setSha256(sha256(output));
-            file.setStatus(READY_STATUS);
-            file.setWatermarkText(null);
-            file.setProcessingError(null);
-            fileMapper.updateById(file);
-        } catch (Exception exception) {
-            file.setStatus(FAILED_STATUS);
-            file.setProcessingError(truncate(exception.getMessage(), 512));
-            fileMapper.updateById(file);
+            published = Path.of(attemptKey);
+            int updated = fileMapper.publishProcessed(id, claim, attemptKey, resultContentType, size,
+                sha256(output), toMp4Name(file.getOriginalName()));
+            if (updated == 0) {
+                // 租约已不在自己手上（被 reaper 抢走 / 行被删）：把自己的成品丢掉，绝不碰这一行。
+                log.warn("视频水印结果被丢弃：租约已失效（file={}）", id);
+                storage.delete(attemptKey);
+                published = null;
+                return;
+            }
+            cleanupOldObject(file.getStorageKey());
+        } catch (Throwable failure) {
+            // 这里连 Error 一起收：OOM 时原来没人接（catch(Exception) 接不住），行会永远停在 PROCESSING。
+            // 先尽量把状态写成人话，再把 Error 抛回去——**不吞**（吞掉 ThreadDeath/LinkageError 会更糟），
+            // 而且写库本身也可能失败，所以 reaper 才是兜底。
+            log.error("视频水印处理失败：{}", id, failure);
+            fileMapper.failProcessing(id, claim,
+                truncate(failure.getClass().getSimpleName()
+                    + (failure.getMessage() == null ? "" : ": " + failure.getMessage()), 512));
+            if (published != null) {
+                try {
+                    storage.delete(published.toString());
+                } catch (Exception ignored) {
+                    // 已经失败一次了，孤儿对象交给人工/后续清理
+                }
+            }
+            if (failure instanceof Error error) throw error;
         } finally {
             MediaWatermarkProcessor.deleteRecursively(workDir);
+        }
+    }
+
+    private void renewClaim(UUID id, UUID claim) {
+        if (fileMapper.renewProcessingClaim(id, claim) == 0) {
+            // 租约没了：继续跑只是浪费 CPU，最终 publish 也会被条件更新挡掉。提前抛出让上面收尾。
+            throw new BizException("WATERMARK_PROCESSING_FAILED",
+                "视频水印任务的租约已失效（可能已被重新调度），本次结果作废。");
+        }
+    }
+
+    /** 旧对象在结果发布成功后才删；删失败只是留个孤儿，绝不影响这一次成功。 */
+    private void cleanupOldObject(String oldKey) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deleteObjectQuietly(oldKey);
+                }
+            });
+        } else {
+            deleteObjectQuietly(oldKey);
+        }
+    }
+
+    private void deleteObjectQuietly(String key) {
+        try {
+            storage.delete(key);
+        } catch (Exception exception) {
+            log.warn("清理旧对象失败（不影响本次结果）：{}", key, exception);
         }
     }
 
@@ -209,28 +286,46 @@ public class MobileFileService {
         }
     }
 
+    /** 队列满时怎么办。**两处语义刻意不同**，所以让调用点明说，而不是一个布尔。 */
+    private enum RejectPolicy {
+        /** 刚上传完：客户端正在轮询，必须马上给个答案。 */
+        FAIL,
+        /** 恢复/reaper：没空位就保持 PROCESSING，下一轮再来（标 FAILED 就永久丢了）。 */
+        LEAVE
+    }
+
     private void scheduleVideoProcessing(UUID id) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    submitVideoProcessing(id);
+                    claimAndEnqueueVideo(id, RejectPolicy.FAIL);
                 }
             });
         } else {
-            submitVideoProcessing(id);
+            claimAndEnqueueVideo(id, RejectPolicy.FAIL);
         }
     }
 
-    private void submitVideoProcessing(UUID id) {
+    /**
+     * 认领后入队。**必须认领**：不认领的话，排在队列里的行 `claim_token` 仍是 NULL，
+     * 定时 reaper 会把"没人认领"当成滞留任务抢走 —— 同一行跑两遍。
+     */
+    private void claimAndEnqueueVideo(UUID id, RejectPolicy policy) {
+        UUID claim = UUID.randomUUID();
+        if (fileMapper.claimProcessing(id, claim) == 0) return; // 别人已经在跑
+        enqueueVideoProcessing(id, claim, policy);
+    }
+
+    private void enqueueVideoProcessing(UUID id, UUID claim, RejectPolicy policy) {
         try {
-            fileProcessingExecutor.execute(() -> processVideoWatermark(id));
+            fileProcessingExecutor.execute(() -> processVideoWatermark(id, claim));
         } catch (RejectedExecutionException exception) {
-            MobileFile file = fileMapper.selectById(id);
-            if (file != null && PROCESSING_STATUS.equals(file.getStatus())) {
-                file.setStatus(FAILED_STATUS);
-                file.setProcessingError("file processing queue is full");
-                fileMapper.updateById(file);
+            if (policy == RejectPolicy.FAIL) {
+                fileMapper.failProcessing(id, claim, "file processing queue is full");
+            } else {
+                // 保持 PROCESSING 并把租约还回去，让下一轮 reaper 再捞。
+                fileMapper.releaseProcessingClaim(id, claim);
             }
         }
     }
