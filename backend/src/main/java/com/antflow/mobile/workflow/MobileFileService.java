@@ -3,14 +3,12 @@ package com.antflow.mobile.workflow;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.engine.BizException;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -22,7 +20,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
-import lombok.RequiredArgsConstructor;
+import java.util.concurrent.Semaphore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -32,10 +30,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class MobileFileService {
     private static final String READY_STATUS = "READY";
@@ -53,15 +51,41 @@ public class MobileFileService {
     private final MediaWatermarkProcessor watermarkProcessor;
     private final AuthorizationService authorizationService;
     private final Executor fileProcessingExecutor;
+    private final TransactionTemplate transactions;
     /** 同时跑几个图片水印 ffmpeg：每个都要一份磁盘（输入+输出）与一个进程，不限并发会把可写层打满。 */
-    private final java.util.concurrent.Semaphore imageWatermarkPermits = new java.util.concurrent.Semaphore(2);
+    private final Semaphore imageWatermarkPermits;
 
-    @Transactional(rollbackFor = Exception.class)
+    /**
+     * 显式构造（原来靠 Lombok）：信号量要从配置建，而 Lombok 生成的字段初始化器**早于**构造体执行，
+     * 在字段初始化器里读 {@code properties} 会 NPE。
+     */
+    public MobileFileService(MobileFileMapper fileMapper, MobileFileAccessMapper accessMapper,
+                             FileStorage storage, MobileFileProperties properties,
+                             MediaWatermarkProcessor watermarkProcessor,
+                             AuthorizationService authorizationService,
+                             Executor fileProcessingExecutor, TransactionTemplate transactions) {
+        this.fileMapper = fileMapper;
+        this.accessMapper = accessMapper;
+        this.storage = storage;
+        this.properties = properties;
+        this.watermarkProcessor = watermarkProcessor;
+        this.authorizationService = authorizationService;
+        this.fileProcessingExecutor = fileProcessingExecutor;
+        this.transactions = transactions;
+        this.imageWatermarkPermits = new Semaphore(
+            Math.max(1, properties.getImageWatermarkConcurrency()));
+    }
+
     public MobileFileDto upload(MultipartFile file, long ownerId) {
         return upload(file, ownerId, false, null);
     }
 
-    @Transactional(rollbackFor = Exception.class)
+    /**
+     * 上传入口。**故意不是 {@code @Transactional}**：`@Transactional` 在方法入口就取一个连接，
+     * 而图片水印要等一个只有 N 个许可的信号量——并发一高，连接会被"排队等 ffmpeg"的请求占满，
+     * 其余接口全被拖慢（压测里元数据 GET 因此到过 1.97s）。所以 ffmpeg 放在事务外，只有
+     * DB+存储那一段走 {@link #persistUpload}（见那里的注释：行锁必须覆盖到 MinIO 的写入）。
+     */
     public MobileFileDto upload(MultipartFile file, long ownerId, boolean watermark, String watermarkText) {
         validateBasic(file);
         StagedFile staged = stage(file);
@@ -99,38 +123,18 @@ public class MobileFileService {
                 submittedContentType = watermarkProcessor.resultContentType(submittedContentType);
                 staged = new StagedFile(staged.path(), Files.size(staged.path()),
                     sha256(staged.path()));
-            }
-
-            if (!asyncVideo) {
-                MobileFile existing = findReadyDuplicate(ownerId, staged.sha256());
-                if (existing != null) {
-                    // 对象在就只返回旧行：同一份字节重复上传不必再往 MinIO 写一遍（也因此不必碰
-                    // 那些已被提交单据引用的对象）。不在才补写——那是现在唯一的自愈机会（没有孤儿清扫器）。
-                    if (!storage.exists(existing.getStorageKey())) {
-                        writeStorageObject(existing.getStorageKey(), staged, submittedContentType);
-                    }
-                    return toDto(existing);
+                // 成品可能比输入大（重编码：码率/封装变了），输入比过了不代表成品合规。
+                if (staged.size() > sizeLimit(submittedContentType)) {
+                    throw new BizException("BAD_FILE", "file is too large");
                 }
             }
 
-            UUID id = UUID.randomUUID();
+            // lambda 只能捕获有效 final 的局部变量，而 staged / submittedContentType 上面被重新赋值过。
+            StagedFile persisted = staged;
+            String persistedContentType = submittedContentType;
             String originalName = sanitizeName(file.getOriginalFilename());
-            String storageKey = kindPrefix(submittedContentType) + id + "-" + originalName;
-            writeStorageObject(storageKey, staged, submittedContentType);
-
-            MobileFile row = new MobileFile();
-            row.setId(id);
-            row.setOwnerId(ownerId);
-            row.setOriginalName(originalName);
-            row.setStorageKey(storageKey);
-            row.setContentType(submittedContentType);
-            row.setSizeBytes(staged.size());
-            row.setSha256(staged.sha256());
-            row.setStatus(asyncVideo ? PROCESSING_STATUS : READY_STATUS);
-            row.setWatermarkText(asyncVideo ? watermarkLabel : null);
-            fileMapper.insert(row);
-            if (asyncVideo) scheduleVideoProcessing(id);
-            return toDto(row);
+            return transactions.execute(status -> persistUpload(ownerId, persisted,
+                persistedContentType, asyncVideo, watermarkLabel, originalName));
         } catch (IOException exception) {
             // 暂存/写入本地磁盘的失败：技术细节进日志，别把带路径的英文异常甩给用户。
             log.error("上传暂存失败", exception);
@@ -138,6 +142,49 @@ public class MobileFileService {
         } finally {
             deleteTemp(staged.path());
         }
+    }
+
+    /**
+     * 上传的事务段：去重（含 {@code FOR UPDATE} 行锁）→ 写对象 → 插行 → 视频登记提交后入队。
+     *
+     * <p>**去重锁必须和 MinIO 的写入在同一个事务里**：否则并发 {@code delete} 会插进"查到重复行"和
+     * "写回去"之间（那正是 d95a746 修的东西）。能逃出这里的异常全是 unchecked（{@code writeStorageObject}
+     * 把 IOException 包成 BizException、mapper 抛 DataAccessException、入队吞掉 RejectedExecutionException），
+     * 所以 TransactionTemplate 的默认回滚 == 原来 {@code rollbackFor = Exception.class}。
+     */
+    private MobileFileDto persistUpload(long ownerId, StagedFile staged, String submittedContentType,
+                                        boolean asyncVideo, String watermarkLabel,
+                                        String originalName) {
+        if (!asyncVideo) {
+            MobileFile existing = fileMapper.selectReadyDuplicateForUpdate(
+                ownerId, staged.sha256());
+            if (existing != null) {
+                // 对象在就只返回旧行：同一份字节重复上传不必再往 MinIO 写一遍（也因此不必碰
+                // 那些已被提交单据引用的对象）。不在才补写——那是现在唯一的自愈机会（没有孤儿清扫器）。
+                if (!storage.exists(existing.getStorageKey())) {
+                    writeStorageObject(existing.getStorageKey(), staged, submittedContentType);
+                }
+                return toDto(existing);
+            }
+        }
+
+        UUID id = UUID.randomUUID();
+        String storageKey = kindPrefix(submittedContentType) + id + "-" + originalName;
+        writeStorageObject(storageKey, staged, submittedContentType);
+
+        MobileFile row = new MobileFile();
+        row.setId(id);
+        row.setOwnerId(ownerId);
+        row.setOriginalName(originalName);
+        row.setStorageKey(storageKey);
+        row.setContentType(submittedContentType);
+        row.setSizeBytes(staged.size());
+        row.setSha256(staged.sha256());
+        row.setStatus(asyncVideo ? PROCESSING_STATUS : READY_STATUS);
+        row.setWatermarkText(asyncVideo ? watermarkLabel : null);
+        fileMapper.insert(row);
+        if (asyncVideo) scheduleVideoProcessing(id);
+        return toDto(row);
     }
 
     private void writeStorageObject(String storageKey, StagedFile staged, String contentType) {
@@ -276,10 +323,10 @@ public class MobileFileService {
     }
 
     /**
-     * 图片水印：同一时刻最多 {@value #IMAGE_WATERMARK_PERMITS} 个 ffmpeg 在跑。
+     * 图片水印：同一时刻最多 `antflow.mobile.files.image-watermark-concurrency`（默认 2）个 ffmpeg 在跑。
      *
      * <p>缓存/磁盘/CPU 都按并发算账（内存问题已经由流式化解决）。等不到许可的请求会排队——
-     * 这也是这个同步链路的天然背压。
+     * 这也是这个同步链路的天然背压；排队时**不占数据库连接**（见 {@link #upload}）。
      */
     private Path applyImageWatermark(Path input, Path workDir, String contentType, String label) {
         try {
@@ -438,22 +485,14 @@ public class MobileFileService {
     }
 
     /**
-     * 找同一 owner 已存在的同内容文件。
+     * 找同一 owner 已存在的同内容文件（{@code FOR UPDATE} 行锁的语义见
+     * {@link MobileFileMapper#selectReadyDuplicateForUpdate}）。
      *
-     * <p>`FOR UPDATE` 不能省：拿到的行随后会被"补写对象"或直接返回给客户端，而并发
-     * {@code delete}（它也走行锁）会在这两步之间把行标 DELETED 并删掉对象——那会让客户端拿到一个
-     * 已删文件的 DTO（提交时被 append 以 FILE_NOT_FOUND 拒掉整单），对象还会被重新写回去变成孤儿。
-     * READ COMMITTED 下锁等待结束后谓词会重新求值：并发删除若已提交，这一行不再满足
-     * `status='READY'`（也就被跳过）→ 返回 null → 走"新建一行"。
-     * （`t_mobile_file` 没有行级数据权限规则，所以这里沿用 wrapper，不必另写 @Select + @InterceptorIgnore。）
+     * <p>READ COMMITTED 下锁等待结束后谓词会重新求值：并发删除若已提交，这一行不再满足
+     * `status='READY'`（被谓词跳过）→ 返回 null → 走"新建一行"。
      */
     private MobileFile findReadyDuplicate(long ownerId, String sha256) {
-        return fileMapper.selectOne(new QueryWrapper<MobileFile>()
-            .eq("owner_id", ownerId)
-            .eq("sha256", sha256)
-            .eq("status", READY_STATUS)
-            .isNull("deleted_at")
-            .last("FOR UPDATE"));
+        return fileMapper.selectReadyDuplicateForUpdate(ownerId, sha256);
     }
 
     private void validateContent(String submittedContentType, byte[] content) {

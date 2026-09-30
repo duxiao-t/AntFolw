@@ -14,7 +14,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +26,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,6 +45,8 @@ class MobileFileServiceTest {
     private MobileFileService service;
     private AuthorizationService authorizationService;
     private List<Runnable> backgroundTasks;
+    /** 真 Template + 假管理器：单测里要能断言"某段代码有没有在事务里跑"。 */
+    private final TransactionTemplate transactions = new TransactionTemplate(new FakeTransactionManager());
 
     @BeforeEach
     void setUp() {
@@ -48,7 +59,27 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
+    }
+
+    /** 只做"开/提/回 + 设同步标记"的最小事务管理器；没有它 `isActualTransactionActive()` 永远是 false。 */
+    private static final class FakeTransactionManager extends AbstractPlatformTransactionManager {
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+        }
     }
 
     @Test
@@ -65,7 +96,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4L);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         MockMultipartFile file = pngFile("large.png", new byte[] {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D
         });
@@ -79,7 +110,6 @@ class MobileFileServiceTest {
     @Test
     void uploadAcceptsExecutableAsAttachment() throws Exception {
         // .dll/.exe attachments are allowed; only the MZ header is required.
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = new byte[] {0x4D, 0x5A, 0x00, 0x00};
         MobileFileDto dto = service.upload(
@@ -93,7 +123,6 @@ class MobileFileServiceTest {
 
     @Test
     void uploadAcceptsArbitraryFileFormat() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = pdfBytes();
         MobileFileDto dto = service.upload(
@@ -106,7 +135,6 @@ class MobileFileServiceTest {
 
     @Test
     void uploadAcceptsArbitraryAttachmentFormat() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = "plain text attachment".getBytes(StandardCharsets.UTF_8);
         MobileFileDto dto = service.upload(
@@ -121,7 +149,6 @@ class MobileFileServiceTest {
     @Test
     void uploadAcceptsImageWithMismatchedMimeLabel() throws Exception {
         // Android file pickers often label JPEG bytes as image/png.
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         MobileFileDto dto = service.upload(
             new MockMultipartFile("file", "photo.png", "image/png", jpegBytes()), 7L);
@@ -137,7 +164,7 @@ class MobileFileServiceTest {
         properties.setMaxBytes(10L * 1024 * 1024);
         properties.setMaxVideoBytes(8L);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
 
         MockMultipartFile file = new MockMultipartFile("file", "clip.mp4", "video/mp4", new byte[9]);
 
@@ -151,8 +178,7 @@ class MobileFileServiceTest {
     void uploadAcceptsMp4Video() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+            authorizationService, backgroundTasks::add, transactions);
 
         byte[] content = mp4Bytes();
         MobileFileDto dto = service.upload(
@@ -169,8 +195,7 @@ class MobileFileServiceTest {
     void uploadAppliesWatermarkForVideoAndRenamesToMp4() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+            authorizationService, backgroundTasks::add, transactions);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
         Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), Mockito.eq("video/quicktime"),
                 Mockito.eq("AntFlow")))
@@ -209,7 +234,7 @@ class MobileFileServiceTest {
     void publishLosingTheLeaseDropsTheAttemptObject() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
         Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
             .thenReturn(writeProcessed(new byte[] {9}));
@@ -233,7 +258,7 @@ class MobileFileServiceTest {
     void processingAbortsEarlyWhenTheLeaseWasLost() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(0);
         MobileFile row = existingFile(UUID.randomUUID(), 7L);
         row.setStatus("PROCESSING");
@@ -252,7 +277,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxVideoBytes(4);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
             .thenReturn(writeProcessed(new byte[] {1, 2, 3, 4, 5}));
         Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
@@ -277,7 +302,7 @@ class MobileFileServiceTest {
     void processingErrorMarksRowFailedAndIsRethrown() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
             .thenThrow(new OutOfMemoryError("Java heap space"));
         Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
@@ -299,7 +324,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, rejecting);
+            authorizationService, rejecting, transactions);
         UUID stale = UUID.randomUUID();
         Mockito.when(fileMapper.claimStaleProcessing(any(), Mockito.eq(20), any()))
             .thenReturn(java.util.List.of(stale));
@@ -316,9 +341,8 @@ class MobileFileServiceTest {
         Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, rejecting);
+            authorizationService, rejecting, transactions);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
         Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
 
         service.upload(new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()),
@@ -326,6 +350,87 @@ class MobileFileServiceTest {
 
         Mockito.verify(fileMapper).failProcessing(any(), any(), Mockito.contains("queue"));
         Mockito.verify(fileMapper, Mockito.never()).releaseProcessingClaim(any(), any());
+    }
+
+    /**
+     * 图片水印必须跑在事务**外**（它要等信号量、跑几秒 ffmpeg；占着连接等会把别的接口一起拖垮），
+     * 而"去重 + 写对象 + 插行"必须在事务**内**（行锁要覆盖到 MinIO 的写入）。
+     */
+    @Test
+    void imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside() throws Exception {
+        List<Boolean> txDuringWatermark = new ArrayList<>();
+        List<Boolean> txDuringInsert = new ArrayList<>();
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+        Mockito.when(processor.resultContentType("image/png")).thenReturn("image/png");
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenAnswer(invocation -> {
+                txDuringWatermark.add(
+                    TransactionSynchronizationManager.isActualTransactionActive());
+                return writeProcessed(new byte[] {1, 2, 3});
+            });
+        Mockito.when(fileMapper.insert(any(MobileFile.class))).thenAnswer(invocation -> {
+            txDuringInsert.add(TransactionSynchronizationManager.isActualTransactionActive());
+            return 1;
+        });
+
+        service.upload(pngFile("logo.png", pngBytes()), 7L, true, "AntFlow");
+
+        assertThat(txDuringWatermark).containsExactly(false);
+        assertThat(txDuringInsert).containsExactly(true);
+    }
+
+    /** 图片闸门来自配置：设成 1 时第二个并发上传必须在信号量上等着。 */
+    @Test
+    void imageWatermarkPermitsFollowTheConfiguredConcurrency() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setImageWatermarkConcurrency(1);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+        Mockito.when(processor.resultContentType("image/png")).thenReturn("image/png");
+        CountDownLatch inWatermark = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenAnswer(invocation -> {
+                inWatermark.countDown();
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                return writeProcessed(new byte[] {1});
+            });
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = pool.submit(
+                () -> service.upload(pngFile("a.png", pngBytes()), 7L, true, "X"));
+            assertThat(inWatermark.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            Future<?> second = pool.submit(
+                () -> service.upload(pngFile("b.png", pngBytes()), 7L, true, "X"));
+            Thread.sleep(300);
+            assertThat(second.isDone()).as("闸门没生效：第二个也进了 ffmpeg").isFalse();
+            release.countDown();
+            first.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            second.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    /** 水印成品可能比输入大：覆盖回 staged 之后要再核一次上限，超了不许进存储。 */
+    @Test
+    void watermarkedImageOverTheLimitIsRejectedBeforeStorage() throws Exception {
+        byte[] input = pngBytes();
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxBytes(input.length + 1);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+        Mockito.when(processor.resultContentType("image/png")).thenReturn("image/png");
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenReturn(writeProcessed(new byte[input.length + 10]));
+
+        assertThatThrownBy(() -> service.upload(pngFile("logo.png", input), 7L, true, "X"))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("file is too large");
+        assertThat(storage.putCount).isZero();
     }
 
     /** 处理器现在只吃文件路径：给测试准备一个"成品文件"。 */
@@ -355,7 +460,8 @@ class MobileFileServiceTest {
     @Test
     void uploadDeduplicatesAndRepairsExistingStorageObject() throws Exception {
         MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
+        Mockito.when(fileMapper.selectReadyDuplicateForUpdate(Mockito.anyLong(), any()))
+            .thenReturn(existing);
 
         byte[] originalBytes = pngBytes();
         MobileFileDto dto = service.upload(pngFile("logo.png", originalBytes), 7L);
@@ -372,7 +478,8 @@ class MobileFileServiceTest {
     @Test
     void uploadDeduplicatesWithoutRewritingWhenObjectExists() throws Exception {
         MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
+        Mockito.when(fileMapper.selectReadyDuplicateForUpdate(Mockito.anyLong(), any()))
+            .thenReturn(existing);
         storage.existsResult = true;
 
         MobileFileDto dto = service.upload(pngFile("logo.png", pngBytes()), 7L);
@@ -389,7 +496,8 @@ class MobileFileServiceTest {
     @Test
     void uploadFailsWithStorageErrorWhenProbeCannotReachStorage() throws Exception {
         MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
+        Mockito.when(fileMapper.selectReadyDuplicateForUpdate(Mockito.anyLong(), any()))
+            .thenReturn(existing);
         storage.failExists = true;
 
         assertThatThrownBy(() -> service.upload(pngFile("logo.png", pngBytes()), 7L))
@@ -408,7 +516,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         MultipartFile lying = Mockito.mock(MultipartFile.class);
         Mockito.when(lying.isEmpty()).thenReturn(false);
         Mockito.when(lying.getSize()).thenReturn(3L);
@@ -426,7 +534,6 @@ class MobileFileServiceTest {
 
     @Test
     void uploadStoresValidatedFileMetadata() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] originalBytes = pngBytes();
         MobileFileDto dto = service.upload(pngFile("logo.png", originalBytes), 7L);
@@ -502,7 +609,7 @@ class MobileFileServiceTest {
         mediaProperties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
         service = new MobileFileService(fileMapper, accessMapper, storage,
             new MobileFileProperties(), new MediaWatermarkProcessor(mediaProperties),
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
 
         assertThatThrownBy(() -> service.upload(
             new MockMultipartFile("file", "photo.jpg", "image/jpeg", jpegBytes()),
@@ -530,7 +637,6 @@ class MobileFileServiceTest {
      */
     @Test
     void imageUploadAcceptsEveryCommonImageSignature() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
         byte[][] contents = {
             jpegBytes(),
             pngBytes(),

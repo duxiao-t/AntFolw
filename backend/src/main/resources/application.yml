@@ -71,6 +71,9 @@ antflow:
       max-video-bytes: ${MOBILE_FILE_MAX_VIDEO_BYTES:104857600}
       processing-concurrency: ${MOBILE_FILE_PROCESSING_CONCURRENCY:2}
       processing-queue-capacity: ${MOBILE_FILE_PROCESSING_QUEUE_CAPACITY:20}
+      # 图片水印是**同步**链路（在请求里跑 ffmpeg），这个值就是"同时有几个图片上传在转码"；
+      # 排队时不占数据库连接。容量换算见 docs/capacity-tuning-2026-09-30.md。
+      image-watermark-concurrency: ${MOBILE_FILE_IMAGE_WATERMARK_CONCURRENCY:2}
       # 租约过期时间、每轮 reaper 认领条数；interval 同时给 @Scheduled 用（测试里调大即等于关掉）。
       processing-stale-minutes: ${MOBILE_FILE_PROCESSING_STALE_MINUTES:30}
       processing-reap-limit: ${MOBILE_FILE_PROCESSING_REAP_LIMIT:20}

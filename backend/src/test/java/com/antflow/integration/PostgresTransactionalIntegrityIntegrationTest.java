@@ -3482,11 +3482,14 @@ class PostgresTransactionalIntegrityIntegrationTest {
      * <p>判据是**结果**：锁生效 → 重查时那一行已不满足 `status='READY'` → 新建一行（新 id）；
      * 去掉 `FOR UPDATE` → 读到提交前的 READY 直接返回旧行（id 相同）。
      */
+    /** 真实 PNG 头就够：不带 watermark 的图片上传只校验魔数，不跑 ffmpeg。 */
+    private static final byte[] TINY_PNG = {
+        (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R'};
+
     @Test
     void uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked() throws Exception {
         long ownerId = userId("admin");
-        // 真实 PNG 头就够：不带 watermark 的图片上传只校验魔数，不跑 ffmpeg。
-        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R'};
+        byte[] png = TINY_PNG;
         com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
             new MockMultipartFile("file", "dup.png", "image/png", png), ownerId);
         assertThat(first.status()).isEqualTo("READY");
@@ -3532,6 +3535,35 @@ class PostgresTransactionalIntegrityIntegrationTest {
             if (freshId != null) {
                 jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", freshId);
             }
+        }
+    }
+
+    /**
+     * 去重读必须**容忍重复行**：`FOR UPDATE` 锁不住还不存在的行，两个并发首次上传同一份字节会各插
+     * 一行（表上没有 (owner_id, sha256) 唯一约束），其后 `selectOne` 命中多行会抛
+     * `TooManyResultsException` → 下一次上传这份字节直接 500。
+     */
+    @Test
+    void uploadToleratesDuplicateReadyRowsForTheSameBytes() throws Exception {
+        long ownerId = userId("admin");
+        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+            new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
+        String sha = jdbcTemplate.queryForObject(
+            "SELECT sha256 FROM t_mobile_file WHERE id = ?", String.class, first.id());
+        // 造出"并发首次上传"留下的第二行：同 owner、同 sha、同 READY，但时间更晚。
+        UUID twin = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                                      size_bytes, sha256, status, created_at)
+            VALUES (?, ?, 'dup.png', ?, 'image/png', ?, ?, 'READY', now() + interval '1 minute')
+            """, twin, ownerId, "image/" + twin + "-dup.png", (long) TINY_PNG.length, sha);
+        try {
+            com.antflow.mobile.workflow.MobileFileDto again = mobileFileService.upload(
+                new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
+            // 固定取最早那行，而不是抛 TooManyResultsException
+            assertThat(again.id()).isEqualTo(first.id());
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id IN (?, ?)", first.id(), twin);
         }
     }
 

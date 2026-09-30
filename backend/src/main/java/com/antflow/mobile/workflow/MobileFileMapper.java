@@ -81,6 +81,29 @@ public interface MobileFileMapper extends BaseMapper<MobileFile> {
                                     @Param("limit") int limit,
                                     @Param("token") UUID token);
 
+    /**
+     * 找同一 owner 下已存在的同内容文件，**加行锁**（拿到它之后的补写/返回必须和它同一个事务，
+     * 否则并发 {@code delete} 会插进"查到"和"写回去"之间）。
+     *
+     * <p>`ORDER BY ... LIMIT 1` 不能省：`FOR UPDATE` 对**还不存在**的行锁不住任何东西，两个并发首次
+     * 上传同一份字节会各插一行（表上没有 (owner_id, sha256) 唯一约束），不限行的话读到的多行会让
+     * `selectOne` 抛 `TooManyResultsException` → 下一次上传这份字节直接 500。这里固定取最早那行。
+     *
+     * <p>用显式 SQL 而不是 QueryWrapper：MP 的 wrapper 会把 `last()` 拼在 `ORDER BY` **之前**、再自己
+     * 追加一个 `LIMIT 1`，组合出来是 `FOR UPDATE ORDER BY ... LIMIT 1`（非法）。
+     */
+    @Select("""
+        SELECT * FROM t_mobile_file
+        WHERE owner_id = #{ownerId} AND sha256 = #{sha256}
+          AND status = 'READY' AND deleted_at IS NULL
+        ORDER BY created_at, id
+        LIMIT 1
+        FOR UPDATE
+        """)
+    @InterceptorIgnore(dataPermission = "true")
+    MobileFile selectReadyDuplicateForUpdate(@Param("ownerId") long ownerId,
+                                             @Param("sha256") String sha256);
+
     /** 按 id 升序批量加行锁：删除与"提交时关联附件"靠它串行化（固定锁序，不产生 ABBA）。 */
     @Select("""
         <script>
