@@ -4,6 +4,7 @@ import {
   collectDepartmentIds,
   contactsPaneMode,
   departmentPathNames,
+  filterDepartmentTree,
   formatGender,
   normalizeGender,
   parseMembersCsv,
@@ -63,6 +64,46 @@ describe('Contacts department tree helpers', () => {
     ], 1);
 
     expect(ids.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('keeps the whole subtree of a matched node', () => {
+    const tree = [
+      { title: '总公司', key: 1, children: [
+        { title: '研发中心', key: 2, children: [
+          { title: '研发一组', key: 3 },
+          { title: '研发二组', key: 4 },
+        ] },
+        { title: '财务部', key: 5 },
+      ] },
+    ];
+
+    expect(filterDepartmentTree(tree, '研发')).toEqual([
+      { title: '总公司', key: 1, children: [
+        // 命中的节点连同它下面**没命中**的子节点一起留下——滤掉的话部门在、点进去却是空的。
+        { title: '研发中心', key: 2, children: [
+          { title: '研发一组', key: 3 },
+          { title: '研发二组', key: 4 },
+        ] },
+      ] },
+    ]);
+  });
+
+  it('keeps the ancestor chain leading to a match, and nothing when there is no match', () => {
+    const tree = [
+      { title: '总公司', key: 1, children: [
+        { title: '研发中心', key: 2, children: [{ title: '研发一组', key: 3 }] },
+        { title: '财务部', key: 5 },
+      ] },
+    ];
+
+    expect(filterDepartmentTree(tree, '一组')).toEqual([
+      { title: '总公司', key: 1, children: [
+        { title: '研发中心', key: 2, children: [{ title: '研发一组', key: 3 }] },
+      ] },
+    ]);
+    expect(filterDepartmentTree(tree, '不存在')).toEqual([]);
+    // 空关键词 = 不过滤，返回原树（不是空树）。
+    expect(filterDepartmentTree(tree, '  ')).toBe(tree);
   });
 });
 

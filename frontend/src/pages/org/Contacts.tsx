@@ -17,6 +17,7 @@ import {
   collectTreeKeys,
   contactsPaneMode,
   departmentPathNames,
+  filterDepartmentTree,
   normalizeGender,
   PAGE_SIZE,
   parseMembersCsv,
@@ -177,19 +178,7 @@ export default function ContactsPage() {
     setSelectedMemberIds((prev) => retainVisibleKeys(prev, visibleIds));
   }, [members]);
 
-  const filteredTree = useMemo(() => {
-    if (!search.trim()) return treeData;
-    const lower = search.toLowerCase();
-    const filterNode = (nodes: DataNode[]): DataNode[] =>
-      nodes.flatMap((n) => {
-        const match = String(n.title).toLowerCase().includes(lower);
-        const filteredChildren = n.children ? filterNode(n.children) : [];
-        if (match || filteredChildren.length) return [{ ...n, children: filteredChildren }];
-        return [];
-      });
-    const result = filterNode(treeData);
-    return result;
-  }, [treeData, search]);
+  const filteredTree = useMemo(() => filterDepartmentTree(treeData, search), [treeData, search]);
 
   useEffect(() => {
     if (search.trim()) setExpandedKeys(collectTreeKeys(filteredTree));

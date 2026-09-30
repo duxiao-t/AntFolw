@@ -2249,6 +2249,68 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
+    /**
+     * 搜部门名也要出人，且是**命中部门及其全部下级**的成员。用真库跑是因为整件事就是一条 ltree 子查询：
+     * mock 掉 JdbcTemplate 只能断言拼进去的字符串，`<@` 写错、path 没带上级这类错照样"通过"。
+     */
+    @Test
+    void userKeywordSearchMatchesDepartmentNameIncludingDescendants() {
+        long adminId = userId("admin");
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        String token = UUID.randomUUID().toString().replace("-", "");
+        String keyword = "zk" + token.substring(0, 8);
+        String otherTag = "zo" + token.substring(8, 16);
+        String rootPath = "ds" + token.substring(16, 26);
+        // 只让**父部门**的名字带上关键词：子部门的人能被搜出来，才说明走的是"含下级"而不是同名。
+        long parentDept = jdbcTemplate.queryForObject("""
+            INSERT INTO t_department(company_id, path, name) VALUES (?, CAST(? AS ltree), ?)
+            RETURNING id
+            """, Long.class, companyId, rootPath, "检索总部" + keyword);
+        long childDept = jdbcTemplate.queryForObject("""
+            INSERT INTO t_department(company_id, path, name) VALUES (?, CAST(? AS ltree), ?)
+            RETURNING id
+            """, Long.class, companyId, rootPath + ".a", "研发一组" + otherTag);
+        long unrelatedDept = insertDepartment(companyId, "财务部" + otherTag);
+
+        long childMember = insertUser("ds-child-" + token.substring(0, 6));
+        long unrelatedMember = insertUser("ds-unrelated-" + token.substring(0, 6));
+        long nameMember = insertUser("ds-by-name-" + token.substring(0, 6));
+        long scopedUser = insertUser("ds-scoped-" + token.substring(0, 6));
+        long scopedRole = insertRole("ds_scoped_" + token.substring(0, 8));
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", childDept, childMember);
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?",
+            unrelatedDept, unrelatedMember);
+        jdbcTemplate.update("UPDATE t_user SET display_name = ? WHERE id = ?",
+            "员工" + keyword, nameMember);
+        try {
+            PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords()
+                .stream().map(User::getId).collect(java.util.stream.Collectors.toSet());
+            assertThat(found).contains(childMember, nameMember);
+            assertThat(found).doesNotContain(unrelatedMember);
+
+            // 新增的 OR 分支不能把数据范围冲掉：受限账号搜同一个词，命中的部门成员一个都不该漏进来。
+            jdbcTemplate.update("UPDATE t_user SET display_name = ? WHERE id = ?",
+                "受限" + keyword, scopedUser);
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override)"
+                + " VALUES (?, 'org:user:read', 'SELF')", scopedRole);
+            assignRole(scopedUser, scopedRole);
+            setPrincipal(scopedUser);
+            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords())
+                .extracting(User::getId).containsExactly(scopedUser);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", scopedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", scopedRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?, ?, ?)",
+                childMember, unrelatedMember, nameMember, scopedUser);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id IN (?, ?, ?)",
+                childDept, parentDept, unrelatedDept);
+            authorizationService.evict(scopedUser);
+        }
+    }
+
     @Test
     void wecomLoginOverrideAndDepartmentLeaderOrderingExecuteAgainstPostgres() {
         long adminId = userId("admin");

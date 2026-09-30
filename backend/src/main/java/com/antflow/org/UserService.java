@@ -292,9 +292,12 @@ public class UserService {
         QueryWrapper<User> query = new QueryWrapper<>();
         if (request.keyword() != null && !request.keyword().isBlank()) {
             String keyword = request.keyword().trim();
-            query.and(wrapper -> wrapper.like("username", keyword)
-                .or().like("display_name", keyword)
-                .or().like("employee_no", keyword));
+            query.and(wrapper -> {
+                wrapper.like("username", keyword)
+                    .or().like("display_name", keyword)
+                    .or().like("employee_no", keyword);
+                DepartmentMapper.applyDeptNameMatch(wrapper, keyword);
+            });
         }
         // 显式名单：候选只限这些人。仍会被下面的数据范围再过滤一次。
         // 注意「给了名单但是空的」= 明确要求"零候选"，不能当成"没给过滤"——否则设计器把
@@ -336,9 +339,13 @@ public class UserService {
         QueryWrapper<User> query = new QueryWrapper<>();
         if (keyword != null && !keyword.isBlank()) {
             String normalized = keyword.trim();
-            query.and(wrapper -> wrapper.like("username", normalized)
-                .or().like("display_name", normalized)
-                .or().like("employee_no", normalized));
+            // 关键字也匹配部门名（含下级）：通讯录里搜"研发部"要出人，不能只过滤左树。
+            query.and(wrapper -> {
+                wrapper.like("username", normalized)
+                    .or().like("display_name", normalized)
+                    .or().like("employee_no", normalized);
+                DepartmentMapper.applyDeptNameMatch(wrapper, normalized);
+            });
         }
         if (departmentId != null) {
             List<Long> requested = includeDescendants
