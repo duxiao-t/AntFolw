@@ -72,12 +72,26 @@ public final class FormDataCsv {
     private static String text(Object value) {
         if (value == null) return "";
         if (value instanceof List<?> list) {
-            return list.stream().map(String::valueOf).reduce((a, b) -> a + "、" + b).orElse("");
+            return list.stream().map(FormDataCsv::text).filter(item -> !item.isEmpty())
+                .reduce((a, b) -> a + "、" + b).orElse("");
         }
         if (value instanceof Map<?, ?> map) {
-            return map.toString();
+            // 检查项/明细这类是结构化的：直接用 Java 的 map.toString() 会写出
+            // `{id=item-1, name=检查项1, images=[], status=na}` —— 又长又带着空值。
+            // 这里只保留有内容的键值，用 `key=value` 串起来。
+            return map.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && !emptyValue(entry.getValue()))
+                .map(entry -> entry.getKey() + "=" + text(entry.getValue()))
+                .reduce((a, b) -> a + "; " + b).orElse("");
         }
         return String.valueOf(value);
+    }
+
+    /** 空值（null / 空白串 / 空数组）不进导出，免得一格里全是 `images=[], description=`。 */
+    private static boolean emptyValue(Object value) {
+        if (value == null) return true;
+        if (value instanceof String text) return text.isBlank();
+        return value instanceof List<?> list && list.isEmpty();
     }
 
     private static String stamp(OffsetDateTime value, ZoneOffset offset) {

@@ -515,6 +515,11 @@ export default function ContactsPage() {
               blockNode
               onDrop={onDrop}
             />
+            {/* 一个词同时过滤部门与人员：部门没匹配上时左树会空着，说一句免得以为坏了
+                （右边的人员结果可能已经有了）。 */}
+            {search.trim() && filteredTree.length === 0 && (
+              <div className="ct-tree-empty">没有匹配的部门——右侧是人员搜索结果</div>
+            )}
           </div>
         </aside>
 

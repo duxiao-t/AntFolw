@@ -48,6 +48,28 @@ class FormDataCsvTest {
         assertThat(csv).contains("000000000002,,,,,已提交,,,100");
     }
 
+    @Test
+    void formatsStructuredValuesReadably() {
+        // 检查项这类值是"一串小对象"：别把 Java 的 map.toString() 原样塞进单元格，
+        // 也别把 images=[]、description= 这些空键一起带出来。
+        FormData data = row(1L, "000000000003", "张三", "000003", "技术部", null, List.of(
+            new FormData.FieldValue("c1", "检查项", List.of(
+                java.util.Map.of("id", "item-1", "name", "检查项1", "status", "na",
+                    "images", List.of(), "description", ""),
+                java.util.Map.of("id", "item-2", "name", "检查项2", "status", "pass")))));
+
+        String csv = new String(FormDataCsv.export(List.of(data), ZoneOffset.UTC),
+            StandardCharsets.UTF_8);
+
+        // 键的顺序由来源 map 决定（Map.of 不保证顺序），所以逐项断言而不是比整串。
+        assertThat(csv).contains("id=item-1", "name=检查项1", "status=na");
+        assertThat(csv).contains("id=item-2", "name=检查项2", "status=pass");
+        assertThat(csv).doesNotContain("images=");
+        assertThat(csv).doesNotContain("description=");
+        // 多项之间仍然是"、"分隔，别把两个检查项粘成一项
+        assertThat(csv).contains("、");
+    }
+
     private static FormData row(Long id, String businessNo, String name, String employeeNo,
                                 String deptName, OffsetDateTime createdAt,
                                 List<FormData.FieldValue> values) {

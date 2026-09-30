@@ -39,6 +39,16 @@ const summary = {
   ],
 };
 
+// happy-dom 没有布局（clientWidth 恒为 0）也没有 ResizeObserver —— 图表是"量到宽度才挂载"的，
+// 所以这里补个桩，让它报告一个确定的宽度。
+class ResizeObserverStub {
+  constructor(private readonly callback: (entries: Array<{ contentRect: { width: number } }>) => void) {}
+  observe() { this.callback([{ contentRect: { width: 800 } }]); }
+  disconnect() {}
+  unobserve() {}
+}
+(globalThis as any).ResizeObserver = ResizeObserverStub;
+
 describe('数据看板', () => {
   it('趋势图把每天拆成发起/完成两条，部门图跳过没有通过率的行', async () => {
     request.mockImplementation((url: string) => {

@@ -3,7 +3,7 @@ import { PageContainer } from '@ant-design/pro-components';
 import { request } from '@umijs/max';
 import { Alert, Empty, Select, Typography } from 'antd';
 import { createStyles } from 'antd-style';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApprovalSummary, RANGE_PRESETS, rangeParams, tzOffsetMinutes } from './Center';
 
 const useStyles = createStyles(({ token }) => ({
@@ -22,6 +22,11 @@ const useStyles = createStyles(({ token }) => ({
     borderRadius: token.borderRadius,
     background: 'var(--af-color-surface)',
     marginBottom: 12,
+    // overflow: hidden 是必要的，不只是美观：G2 画出来的 canvas 一开始比容器宽，
+    // 不裁的话它会反撑容器 → ResizeObserver 量到的是被撑大的宽度 → 永远缩不回来。
+    // 网格子项还要 min-width: 0，否则 min-content 同样把面板撑开。
+    minWidth: 0,
+    overflow: 'hidden',
   },
   pair: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 },
   panel: {
@@ -29,6 +34,8 @@ const useStyles = createStyles(({ token }) => ({
     border: '1px solid var(--af-color-line)',
     borderRadius: token.borderRadius,
     background: 'var(--af-color-surface)',
+    minWidth: 0,
+    overflow: 'hidden',
   },
   title: { fontWeight: 600, fontSize: 13, paddingTop: 8 },
   empty: { padding: '40px 0' },
@@ -37,6 +44,31 @@ const useStyles = createStyles(({ token }) => ({
 /** 配色只用仓库主色 + 一个固定小调色板，不引入新的视觉体系。 */
 const SERIES_COLORS = ['#0b57d0', '#0f8a5f'];
 const PALETTE = ['#0b57d0', '#0f8a5f', '#f0a020', '#5a6fa8', '#c0392b', '#8c8c8c'];
+
+/**
+ * 把容器的实际宽度喂给图表。
+ *
+ * <p>G2 只在挂载时量一次容器：布局后来又变窄（侧栏/滚动条出现），canvas 还按旧宽度画，
+ * 于是整页多出一条横向滚动条。这里用 ResizeObserver 跟着容器走。
+ */
+function useChartWidth<T extends HTMLElement>(mounted: boolean) {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    // mounted 是必要的：容器在"加载中"时还不存在，只跑一次的 effect 会拿到 null 的 ref，
+    // 之后就再也不量了（图表永远拿不到宽度）。
+    const element = ref.current;
+    if (!mounted || !element) return;
+    setWidth(element.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width ?? 0;
+      if (next > 0) setWidth(Math.floor(next));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [mounted]);
+  return [ref, width] as const;
+}
 
 export default function ReportDashboardPage() {
   const { styles } = useStyles();
@@ -101,6 +133,10 @@ export default function ReportDashboardPage() {
   [summary?.byForm]);
 
   const hasData = (summary?.totals.started ?? 0) > 0;
+  const chartsMounted = !loading && hasData;
+  const [heroRef, heroWidth] = useChartWidth<HTMLDivElement>(chartsMounted);
+  const [deptRef, deptWidth] = useChartWidth<HTMLDivElement>(chartsMounted);
+  const [formRef, formWidth] = useChartWidth<HTMLDivElement>(chartsMounted);
 
   return (
     <PageContainer subTitle="同一份统计的图形视图：一页看数，一页看形">
@@ -119,29 +155,39 @@ export default function ReportDashboardPage() {
         <Empty className={styles.empty} description="这段时间没有流程数据，换个时间范围再看看。" />
       ) : (
         <>
-          <div className={styles.hero}>
+          <div className={styles.hero} ref={heroRef}>
             <div className={styles.title}>发起 / 完成趋势</div>
-            <Line
-              height={260}
-              data={trend}
-              xField="date"
-              yField="value"
-              seriesField="type"
-              color={SERIES_COLORS}
-              animate={false}
-              legend={{ position: 'top' }}
-              axis={{ y: { title: false }, x: { title: false } }}
-            />
+            {/* 等量到宽度再挂载，并用 key 跟着宽度重建：plots 挂载后不再读 width 变化，
+                而挂载那一刻布局可能还没稳定（侧栏未渲染 → 量出偏宽的容器）。 */}
+            {heroWidth > 0 && (
+              <Line
+                key={`hero-${heroWidth}`}
+                height={260}
+                autoFit={false}
+                width={heroWidth}
+                data={trend}
+                xField="date"
+                yField="value"
+                seriesField="type"
+                color={SERIES_COLORS}
+                animate={false}
+                legend={{ position: 'top' }}
+                axis={{ y: { title: false }, x: { title: false } }}
+              />
+            )}
           </div>
           <div className={styles.pair}>
-            <div className={styles.panel}>
+            <div className={styles.panel} ref={deptRef}>
               <div className={styles.title}>部门通过率</div>
               {byDept.length === 0 ? (
                 <Empty className={styles.empty} image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description="这段时间还没有已决的流程" />
               ) : (
                 <Column
+                  key={`dept-${deptWidth}`}
                   height={220}
+                  autoFit={false}
+                  width={deptWidth || undefined}
                   data={byDept}
                   xField="name"
                   yField="rate"
@@ -151,14 +197,17 @@ export default function ReportDashboardPage() {
                 />
               )}
             </div>
-            <div className={styles.panel}>
+            <div className={styles.panel} ref={formRef}>
               <div className={styles.title}>表单提交占比</div>
               {byForm.length === 0 ? (
                 <Empty className={styles.empty} image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description="这段时间还没有提交" />
               ) : (
                 <Pie
+                  key={`form-${formWidth}`}
                   height={220}
+                  autoFit={false}
+                  width={formWidth || undefined}
                   data={byForm}
                   angleField="value"
                   colorField="type"
