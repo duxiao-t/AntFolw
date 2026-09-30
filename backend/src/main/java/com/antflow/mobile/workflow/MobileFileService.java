@@ -67,6 +67,11 @@ public class MobileFileService {
         StagedFile staged = stage(file);
         try {
             String submittedContentType = normalize(file.getContentType());
+            // validateBasic 比的是**声明**的大小，能被撒谎的客户端绕过（声明小、实际大）。
+            // 真实字节数只有落盘数完才知道，所以落盘之后必须用同一口径再比一次。
+            if (staged.size() > sizeLimit(submittedContentType)) {
+                throw new BizException("BAD_FILE", "file is too large");
+            }
             validateContent(submittedContentType, readHeader(staged.path()));
             String watermarkLabel = watermarkText == null ? "" : watermarkText.trim();
             boolean supportedForWatermark = watermark && watermarkProcessor.supports(submittedContentType);
@@ -99,7 +104,11 @@ public class MobileFileService {
             if (!asyncVideo) {
                 MobileFile existing = findReadyDuplicate(ownerId, staged.sha256());
                 if (existing != null) {
-                    writeStorageObject(existing.getStorageKey(), staged, submittedContentType);
+                    // 对象在就只返回旧行：同一份字节重复上传不必再往 MinIO 写一遍（也因此不必碰
+                    // 那些已被提交单据引用的对象）。不在才补写——那是现在唯一的自愈机会（没有孤儿清扫器）。
+                    if (!storage.exists(existing.getStorageKey())) {
+                        writeStorageObject(existing.getStorageKey(), staged, submittedContentType);
+                    }
                     return toDto(existing);
                 }
             }
@@ -394,11 +403,14 @@ public class MobileFileService {
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
             throw new BizException("BAD_FILE", "file is empty");
         }
-        String contentType = normalize(file.getContentType());
-        long limit = contentType.startsWith("video/") ? properties.getMaxVideoBytes() : properties.getMaxBytes();
-        if (file.getSize() > limit) {
+        if (file.getSize() > sizeLimit(normalize(file.getContentType()))) {
             throw new BizException("BAD_FILE", "file is too large");
         }
+    }
+
+    private long sizeLimit(String contentType) {
+        return contentType.startsWith("video/")
+            ? properties.getMaxVideoBytes() : properties.getMaxBytes();
     }
 
     private StagedFile stage(MultipartFile file) {
@@ -425,12 +437,23 @@ public class MobileFileService {
         }
     }
 
+    /**
+     * 找同一 owner 已存在的同内容文件。
+     *
+     * <p>`FOR UPDATE` 不能省：拿到的行随后会被"补写对象"或直接返回给客户端，而并发
+     * {@code delete}（它也走行锁）会在这两步之间把行标 DELETED 并删掉对象——那会让客户端拿到一个
+     * 已删文件的 DTO（提交时被 append 以 FILE_NOT_FOUND 拒掉整单），对象还会被重新写回去变成孤儿。
+     * READ COMMITTED 下锁等待结束后谓词会重新求值：并发删除若已提交，这一行不再满足
+     * `status='READY'`（也就被跳过）→ 返回 null → 走"新建一行"。
+     * （`t_mobile_file` 没有行级数据权限规则，所以这里沿用 wrapper，不必另写 @Select + @InterceptorIgnore。）
+     */
     private MobileFile findReadyDuplicate(long ownerId, String sha256) {
         return fileMapper.selectOne(new QueryWrapper<MobileFile>()
             .eq("owner_id", ownerId)
             .eq("sha256", sha256)
             .eq("status", READY_STATUS)
-            .isNull("deleted_at"));
+            .isNull("deleted_at")
+            .last("FOR UPDATE"));
     }
 
     private void validateContent(String submittedContentType, byte[] content) {

@@ -158,6 +158,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 }
 
                 @Override
+                public boolean exists(String storageKey) {
+                    return files.containsKey(storageKey);
+                }
+
+                @Override
                 public void delete(String storageKey) {
                     files.remove(storageKey);
                 }

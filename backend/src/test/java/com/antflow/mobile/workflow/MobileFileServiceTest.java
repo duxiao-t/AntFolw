@@ -625,6 +625,10 @@ class MobileFileServiceTest {
         private String storageKey;
         private String contentType;
         private byte[] contentBytes = new byte[0];
+        /** 对象在不在：默认 false，让"缺了就补写"的既有语义不变。 */
+        private boolean existsResult;
+        /** 模拟"存储查不动"（网络抖动/权限）：必须原样失败，不能退化成"缺失"或 BAD_FILE。 */
+        private boolean failExists;
         /** 被删掉的 key：断言"旧对象在发布后清理""失效的 attempt 被丢弃"用。 */
         private final java.util.List<String> deletedKeys = new java.util.ArrayList<>();
 
@@ -644,6 +648,14 @@ class MobileFileServiceTest {
         public org.springframework.core.io.Resource get(String storageKey) {
             return new org.springframework.core.io.InputStreamResource(
                 new ByteArrayInputStream(contentBytes));
+        }
+
+        @Override
+        public boolean exists(String storageKey) {
+            if (failExists) {
+                throw new BizException("FILE_STORAGE_FAILED", "could not check object in MinIO");
+            }
+            return existsResult;
         }
 
         @Override
