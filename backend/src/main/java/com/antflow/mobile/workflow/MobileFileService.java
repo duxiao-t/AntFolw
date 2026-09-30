@@ -619,11 +619,12 @@ public class MobileFileService {
         MobileFile file = requireExisting(id);
         boolean admin = roles != null && roles.contains("admin");
         boolean owner = Objects.equals(file.getOwnerId(), userId);
+        // admin/owner 直接放行：以前这里**无条件**去查关联实例再逐实例判权，于是打开一页 20 张图
+        // 就是几十次多余查询（而且每次渲染都重来）。
+        if (admin || owner) return file;
         boolean linkedInstanceReadable = accessMapper.selectLinkedInstanceIds(id).stream()
             .anyMatch(instanceId -> authorizationService.canReadFullInstance(instanceId, userId));
-        if (admin || owner || linkedInstanceReadable) {
-            return file;
-        }
+        if (linkedInstanceReadable) return file;
         throw new HiddenResourceException("file not found");
     }
 

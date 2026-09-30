@@ -377,6 +377,8 @@ class MobileFileServiceTest {
 
         assertThat(dto.id()).isEqualTo(id);
         assertThat(dto.name()).isEqualTo("logo.png");
+        // 自己的文件直接放行：不该再去查关联实例（一页 20 张图就是几十次多余查询）
+        Mockito.verify(accessMapper, Mockito.never()).selectLinkedInstanceIds(any());
     }
 
     @Test
@@ -407,6 +409,7 @@ class MobileFileServiceTest {
         MobileFileDto dto = service.getMetadata(id, 99L, List.of("admin"));
 
         assertThat(dto.id()).isEqualTo(id);
+        Mockito.verify(accessMapper, Mockito.never()).selectLinkedInstanceIds(any());
     }
 
     /**

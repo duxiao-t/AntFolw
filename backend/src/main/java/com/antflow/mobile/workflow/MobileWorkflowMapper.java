@@ -383,9 +383,16 @@ public interface MobileWorkflowMapper {
     List<RecentProcessDto> selectRecentProcesses(@Param("userId") long userId,
                                                  @Param("limit") int limit);
 
+    /**
+     * 关联一个附件。主键是 `(form_data_id, file_id)`——同一个文件在一条记录里只能挂一次，
+     * 所以冲突时**更新归属字段**而不是 DO NOTHING：`reconcileEditable` 会先插"受限字段"的旧链接、
+     * 再插"可编辑字段"的新链接，后者才是权威分类；DO NOTHING 会把这次字段迁移静默吞掉。
+     */
     @Insert("""
         INSERT INTO t_form_data_file(form_data_id, file_id, field_id, sort_order)
         VALUES (#{formDataId}, #{fileId}, #{fieldId}, #{sortOrder})
+        ON CONFLICT (form_data_id, file_id)
+        DO UPDATE SET field_id = EXCLUDED.field_id, sort_order = EXCLUDED.sort_order
         """)
     void insertFileLink(@Param("formDataId") Long formDataId,
                         @Param("fileId") UUID fileId,
