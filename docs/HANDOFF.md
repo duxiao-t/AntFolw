@@ -1,12 +1,47 @@
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-09-30T11:00:00+08:00`
+- **更新时间：** `2026-09-30T13:00:00+08:00`
 - **分支：** `feat/contacts-report-export`（从 `master` = `4328845` 拉出，未推）。前两轮都已合并进 master：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排。
 
 ---
 
-## 本轮：通讯录搜部门出人 / 台账按版本解释 / 导出支持 Excel
+## 最新一轮：水印缺 ffmpeg 的 422 + 桌面端媒体组件从来没上传
+
+你报「5S检查表里上传图片报 422」并让我顺手查其它多媒体组件，查出**两个独立问题**：
+
+| 提交 | 内容 |
+| --- | --- |
+| `f6d9b12` | **缺 ffmpeg**：镜像装 `ffmpeg` + `fonts-wqy-microhei`；`MediaWatermarkProcessor` 加启动探测（缺 ffmpeg / 缺中文字体分别 WARN）；报错换成可操作文案（缺 ffmpeg / 处理失败首行 / 超时三种）；`-version` 探测与 `run()` 都改成"重定向输出 + waitFor"（原来先读管道再等，输出一多就卡死误判超时）；`watermark=true` 但没文案从**静默存原图**改成显式 422；图片按魔数校验（非图片字节不再进 ffmpeg）；`MobileFileDto` 补 `failureReason`（客户端轮询到 FAILED 才知道为什么）；CI 也装 ffmpeg，否则那两条真机用例一直被 `assumeTrue` 跳过 |
+| `207e301` | **桌面端四个上传控件从来没发请求**：`beforeUpload={() => false}` + 值里写 antd `UploadFile`，`collectFileRefs` 只认 `id`+`contentType` → 选了文件、提交成功、**附件静默丢失**（检查项照片连 `onChange` 都没有）。改成共用 `MediaUploadControl`（`customRequest` 真上传，走移动端同一个 `/api/mobile/files`）→ 值写服务端 DTO → 只读态用新抽的 `MediaPreview`（鉴权 blob）显示缩略图/播放器/下载；检查项"全部设为"不再清空照片与描述；提交校验挡住"还在传/服务端还没处理完"的文件（含检查项照片与明细表行内媒体） |
+
+**根因分层**：422 是"水印要在写进 MinIO **之前**跑 ffmpeg，而镜像里没有 ffmpeg"；桌面端不上传是"控件只是把本地文件放在内存里，提交时收集不到"。存储本身没变——生产仍是 `MinioFileStorage`，桌面端接的是同一个桶。
+
+**OCR 复核（`ocr scan` 12 文件 91 条）改了四处做法**：值里**只放 READY 的 DTO**（服务端关联只接受 READY，否则整单被拒）；待上传检查要覆盖检查项照片（在 `items[].images` 里）与明细表行内媒体；`run()` 的等待方式本身有坑（管道填满 → 误判超时），探测不能照抄；`watermark=true` + 空文案的静默跳过要改成显式拒绝。
+
+### 真机验证（镜像 --no-cache 重建后，桌面 + 移动 + 容器三方）
+
+- **镜像里有 ffmpeg 了**：`docker exec ... command -v ffmpeg` → `/usr/bin/ffmpeg`，字体 `/usr/share/fonts/truetype/wqy/wqy-microhei.ttc`；启动日志 `媒体水印就绪：ffmpeg='ffmpeg'，字体='.../wqy-microhei.ttc'`。
+- **你报的那个 422 没了**：移动端 `5S检查表` 的「现场照片」（`watermark=true`）上传 → 200、`READY`，字节数从 1758 变 1745（ffmpeg 重编码 = 真加了水印）。用一张纯色图上传后把水印裁出来看，是「现场留证 2026-09-30 05:13」——中文渲染正常（截图 `.claude/shots/watermark-plain-demo.png` / `watermark-zoom.png`）。
+- **反例**：同一个镜像以 `FFMPEG_BIN=/nope/ffmpeg` 起一个探针实例 → 启动 WARN 写清原因，上传返回 **可读的 422**：「服务器缺少 ffmpeg，无法为图片/视频添加水印。请联系管理员安装 ffmpeg（或配置 antflow.media.ffmpeg-bin）后重试。」（不再是 `Cannot run program "ffmpeg"`）。
+- **桌面端四类媒体都真上传了**：`未命名表单0902` 填单上传 图片/视频/附件/检查项照片 → 提交后 `t_form_data_file` 出现 4 条关联（image 98696、`images`、video、text/plain），详情页能看到缩略图与视频播放器（截图 `desktop-media-all-kinds-uploaded.png`、`desktop-detail-new-submission-media.png`）。
+- **桌面图片字段带上了水印参数**：抓包确认 multipart 里有 `watermark=true` + `watermarkText=AntFlow`（字段配置），存储对象从 132KB 变 99KB（重编码）。
+- **只读预览**：老单据（实例 1）的详情页正常渲染检查项照片缩略图、图片缩略图与两个视频播放器（鉴权 blob 通道）。
+
+**自评截图**：`.claude/shots/` 的 `watermark-plain-demo.png`、`watermark-zoom.png`、`desktop-checklist-photo-uploaded.png`、`desktop-media-all-kinds-uploaded.png`、`desktop-detail-new-submission-media.png`、`mobile-5s-photo-uploaded.png`。
+
+**一个要记下的代价**：后端镜像 1.01GB → **1.57GB**（ffmpeg 在 Debian 上会拖进 mesa/llvm 等一大串，比预估的 +150MB 多得多）。如果生产在意体积，可以换成静态 ffmpeg 二进制或用独立的媒体处理服务；本轮先按"装全"走。
+
+### 本轮留档不改（OCR 标了 high 但属既有问题，你说了下一轮再开）
+
+- **服务端并发/事务**：SHA 去重会覆盖旧对象却返回旧行；先写 MinIO 后插行，回滚留孤儿对象；`delete` 在事务提交前删对象；`countLinks` 与删除不原子；`processVideoWatermark` 无独占认领、与 `delete` 竞态可把已删对象写回来（**桌面端只加了"处理中不给删"的挡板**）；`stage()` 只信 `MultipartFile` 声明的大小。
+- **性能**：视频走 `byte[]` 全量进出（100MB × 并发 2 可能 OOM，且 OOM 不在 `catch(Exception)` 里 → 行永远 PROCESSING）；启动恢复一次性把所有待处理视频入队、满队列直接标 FAILED。
+- **前端既有**：`displayConditions` 的可见性依赖遍历顺序（引用后面的字段会被误隐藏，与后端 `resolveDefinition` 口径不同）；`table_list` 不逐行校验、不校验 minRows/maxRows；检查项没有 `validate`（逐项 required / descriptionRequiredByResult / photoMaxCount 都没查）；`nativeMedia.ts` 的录音/扫码资源清理；`VideoUploadField` 的 `maxDuration` 只在设计器预览里显示、运行时不校验。
+- **移动端检查项照片**不传水印参数（检查项节点没有水印开关，等有开关时一行接上）。
+
+---
+
+## 上一轮：通讯录搜部门出人 / 台账按版本解释 / 导出支持 Excel
 
 你报了三件事，都先在本机 docker 栈的真数据上核对了现状再动手：
 
@@ -84,7 +119,7 @@
 
 ## 验证基线
 
-后端 `mvn -B test` **515**、前端 `npm test` **271**、移动 `npm test` **348**（本轮未动移动端）；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名）。
+后端 `mvn -B test` **520**、前端 `npm test` **280**、移动 `npm test` **348**（本轮未动移动端）；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交）。
 
 > **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法是：容器里建 `antflow_probe`，宿主经一个临时 TCP 转发（`nginx:1.28-alpine` 的 stream 模块，因为 docker 拉不到 socat 镜像）连 `127.0.0.1:15432`，`ANTFLOW_TEST_POSTGRES_URL` 指过去 + `sslmode=disable`（不加会被 SSL 协商噎住）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建。
 

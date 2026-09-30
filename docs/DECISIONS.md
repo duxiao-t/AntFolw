@@ -161,3 +161,29 @@
   - **公式注入防护是必须的**：`=` `+` `-` `@`（含前导空白之后）开头的值会被 Excel 当公式执行，而字段值、姓名、部门名都能进 CSV。CSV 统一前置单引号当文本；xlsx 走全 STRING 单元格（顺带保住工号的前导零），单元格截断到 32767 字符。
   - xlsx 用 **SXSSF** 流式写并 `dispose()`：1 万行的 XSSF 能把堆吃光（部署里后端只有 768M）。列宽按内容算，上限 60 字符。
   - **预览计数必须与下载同参数**（含 `from`/`to`/`tzOffsetMinutes`）：少一个时间范围，"预览 300 行、实际 30 行"就出现了，`truncated` 还会误报。这条是上一轮发出去的 bug，本轮一并修掉。
+
+## D-20260930-media-watermark-needs-ffmpeg-and-says-so
+
+- **状态：** accepted
+- **背景：** 「5S检查表」的 `image_upload` 字段开了水印，上传图片报 422，消息是 `cannot start ffmpeg: Cannot run program "ffmpeg": error=2, No such file or directory`。真因是**部署镜像从来没装 ffmpeg**（`postgres:17-bookworm` + 拷进去的 JRE，没有任何 apt 包，连 `/usr/share/fonts` 都没有）；而图片水印是在**请求内同步**跑 ffmpeg（`MobileFileService.upload` → `applyImageWatermark`），缺二进制就让整个上传失败，`GlobalExceptionHandler` 把 `BizException` 一律映射成 422。视频是异步的，只会把行标成 FAILED，所以症状只在图片上出现。
+- **决策：** ①Dockerfile 里装 `ffmpeg` + `fonts-wqy-microhei`（字体路径本来就在 `CJK_FONT_CANDIDATES` 里，装完不用配置）；②`MediaWatermarkProcessor` 加 `@PostConstruct` 启动探测，ffmpeg 不可用或没有中文字体时写 WARN，正常写 INFO；③用户可见的失败文案换成可操作的（缺 ffmpeg / 处理失败 / 超时 三种），原始报错只进日志与 `processingError`。**不做静默降级**：上传仍然会失败，但用户知道为什么、去找谁。
+- **影响：**
+  - 镜像是 +100~150MB（ffmpeg 那一层）。这是"开了水印的字段能真的加上水印"的价格，写进了 Dockerfile 注释与提交说明。
+  - `-version` 探测与 `run()` 都**不能先读管道再 waitFor**：ffmpeg 输出超过管道缓冲就填满卡住，本来能完成的转码被误判成超时（探测则会把启动挂住）。现在统一"输出重定向到文件/DISCARD，再 `waitFor(超时)`，失败时读文件末尾当诊断"。
+  - `watermark=true` 但 `watermarkText` 为空以前是**静默存原图**（调用方以为加了水印）——现在显式 422。客户端（桌面/移动）都必须同时带上非空文案，默认 `AntFlow`。
+  - 图片内容按**魔数**校验（jpeg/png/gif/webp/bmp）：声明成 `image/*` 的任意字节以前会一路走进 ffmpeg，最后甩给用户一句看不懂的 ffmpeg 报错。只校验"是不是图片"，不校验"声明的子类型与字节一致"——安卓/微信图库经常把 jpeg 标成 png。
+  - CI 也装了 ffmpeg：`MediaWatermarkProcessorTest` 里两条真机用例是 `assumeTrue(ffmpegAvailable())`，不装就永远静默跳过。
+  - 启动探测是**日志**不是健康检查：没装 ffmpeg 时其它功能都正常，不该让 `/actuator/health` 变 DOWN。
+
+## D-20260930-desktop-media-uploads-go-through-the-mobile-file-api
+
+- **状态：** accepted
+- **背景：** 桌面端（`frontend/src/components/form-fields/`）的图片、视频、附件、检查项照片四个上传控件**从来没发过请求**——`beforeUpload={() => false}` 让 antd 只把文件留在浏览器里，值里写的是 antd 的 `UploadFile`（没有 `id`/`contentType`）。而 `Fill.tsx` 的 `collectFileRefs` 只认带这两个字符串字段的服务端 DTO，于是用户选了文件、提交成功，**附件静默丢失**（检查项照片那次连 `onChange` 都没有）。只有桌面音频是真的在上传。
+- **决策：** 四个控件统一接 `MediaUploadControl`（`customRequest` 真上传）→ 走**移动端同一个** `POST /api/mobile/files`（同一个 `MinioFileStorage` 桶、同一套 `t_mobile_file` 行与授权），值写成服务端 DTO 数组。只读态用新抽出的 `MediaPreview`（鉴权 blob → objectURL）显示缩略图/播放器/下载。
+- **影响：**
+  - **值里只放 READY 的 DTO**：服务端 `MobileFileLinkService.normalized` 只接受 READY 文件，拿 PROCESSING 的 DTO 去提交会被整单拒（`FILE_NOT_FOUND`）。所以"上传中/视频加水印处理中"的项只留在组件本地状态，进表单值的必然 READY；提交前还会再查一次（草稿恢复的 DTO 可能是 PROCESSING/FAILED）。
+  - **值形状就是契约**：`collectFileRefs` 认 `字符串 id + 字符串 contentType`。测试里专门断言这一点——只要有人改了写值的形状，附件会被静默丢掉而页面毫无提示。
+  - `fileList` 全受控、**不接 `onChange`**：antd 在 uploading/done/error 每次流转都会触发它，接上就等于把 raw UploadFile 灌回表单（就是原来那个 bug）。数量与大小在 `beforeUpload` 挡，不靠 antd 的 `maxCount` trim（受控列表被 trim 会静默丢掉已上传的项）。
+  - 「要水印但没文案」在服务端已经会拒绝，桌面端因此必须把 `props.watermarkText`（默认 `AntFlow`）随请求带上。
+  - 处理中的视频**不给删**：服务端后台任务正在往同一个 key 写结果，删除会留下读不出来的孤儿对象（服务端那层协调要单独修，见 HANDOFF 已知遗留）。
+  - 老数据（修复前写进表单的本地 File 记录、更早的单文件名字串）没有服务端 id，只显示名字并标注"历史记录，未上传"——它们的字节从来没上传过，没有任何东西可迁移。
