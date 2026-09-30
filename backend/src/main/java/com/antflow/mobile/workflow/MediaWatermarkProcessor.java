@@ -3,9 +3,12 @@ package com.antflow.mobile.workflow;
 import com.antflow.engine.BizException;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -110,15 +113,20 @@ public class MediaWatermarkProcessor {
         return normalize(contentType).startsWith("video/") ? "video/mp4" : normalize(contentType);
     }
 
-    public byte[] apply(byte[] content, String contentType, String watermarkText) {
-        Path workDir = null;
+    /**
+     * 水印处理的**唯一入口**：输入是磁盘上的文件，输出也落在磁盘上（`workDir/output…`），
+     * 全过程不把整份媒体读进堆。
+     *
+     * <p>{@code workDir} 由**调用方**创建并负责清理（{@link #deleteRecursively}）——上一版这里是
+     * `apply(byte[])`，`readAllBytes` 进来、`Files.readAllBytes` 回去，一个 100MB 视频在 768MB 的堆里
+     * 峰值能到 300MB，两个并发就 OOM。
+     *
+     * @return ffmpeg 的输出文件（视频 `output.mp4`，图片 `output<ext>`）
+     */
+    public Path applyTo(Path input, Path workDir, String contentType, String watermarkText) {
+        String sourceType = normalize(contentType);
+        String sourceExtension = extensionFor(sourceType);
         try {
-            workDir = Files.createTempDirectory("antflow-watermark-");
-            String sourceType = normalize(contentType);
-            String sourceExtension = extensionFor(sourceType);
-            Path input = workDir.resolve("input" + sourceExtension);
-            Files.write(input, content);
-
             String watermark = watermarkText.trim() + " "
                 + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
             Path watermarkFile = workDir.resolve("watermark.txt");
@@ -127,7 +135,8 @@ public class MediaWatermarkProcessor {
             Path filterScript = workDir.resolve("filter.txt");
             Files.write(filterScript, drawTextFilter(watermarkFile).getBytes(StandardCharsets.UTF_8));
 
-            Path output = workDir.resolve(sourceType.startsWith("video/") ? "output.mp4" : "output" + sourceExtension);
+            Path output = workDir.resolve(sourceType.startsWith("video/") ? "output.mp4"
+                : "output" + sourceExtension);
             ProcessResult result = run(command(input, output, filterScript, sourceType),
                 workDir.resolve("ffmpeg.log"));
             if (result.exitCode != 0) {
@@ -137,16 +146,12 @@ public class MediaWatermarkProcessor {
                     (detail.isEmpty() ? "图片/视频水印处理失败。" : "水印处理失败：" + detail + "。")
                         + "详情见服务端日志。");
             }
-            return Files.readAllBytes(output);
+            return output;
         } catch (IOException exception) {
             // 这里是临时文件读写的失败（不是 ffmpeg 本身）：技术细节进日志，用户看到的是"服务端故障"。
             log.error("水印处理的临时文件操作失败", exception);
             throw new BizException("WATERMARK_PROCESSING_FAILED",
                 "图片/视频水印处理失败（服务端临时文件异常），详情见服务端日志。");
-        } finally {
-            if (workDir != null) {
-                deleteRecursively(workDir);
-            }
         }
     }
 
@@ -259,12 +264,23 @@ public class MediaWatermarkProcessor {
         }
     }
 
-    /** 读 ffmpeg 日志的末尾（最多 8KB）当诊断信息。 */
+    /**
+     * 读 ffmpeg 日志的末尾（最多 8KB）当诊断信息。
+     *
+     * <p>只 seek 到末尾读那一段：以前 `Files.readAllBytes(整个日志)` 再截尾——异常时 ffmpeg 能刷出
+     * 很大一段 stderr，每次失败都要把整份读进堆，正好发生在内存最紧张的时候。
+     */
     private static String tailOf(Path logFile) {
-        try {
-            byte[] bytes = Files.readAllBytes(logFile);
-            int from = Math.max(0, bytes.length - OUTPUT_CAPTURE_LIMIT);
-            return new String(bytes, from, bytes.length - from, StandardCharsets.UTF_8);
+        try (SeekableByteChannel channel = Files.newByteChannel(logFile, StandardOpenOption.READ)) {
+            long size = channel.size();
+            int length = (int) Math.min(size, OUTPUT_CAPTURE_LIMIT);
+            if (length <= 0) return "";
+            ByteBuffer buffer = ByteBuffer.allocate(length);
+            channel.position(size - length);
+            while (buffer.hasRemaining() && channel.read(buffer) >= 0) {
+                // keep reading until the tail segment is filled
+            }
+            return new String(buffer.array(), 0, buffer.position(), StandardCharsets.UTF_8);
         } catch (IOException ignored) {
             return "";
         }
@@ -280,7 +296,7 @@ public class MediaWatermarkProcessor {
             ? first.substring(0, USER_MESSAGE_LIMIT) + "…" : first;
     }
 
-    private static String extensionFor(String contentType) {
+    static String extensionFor(String contentType) {
         if (contentType.startsWith("image/png")) {
             return ".png";
         }
@@ -299,7 +315,7 @@ public class MediaWatermarkProcessor {
         return ".mp4";
     }
 
-    private static void deleteRecursively(Path root) {
+    static void deleteRecursively(Path root) {
         if (root == null) {
             return;
         }

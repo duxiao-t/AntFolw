@@ -8,6 +8,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.ArrayList;
@@ -167,8 +169,9 @@ class MobileFileServiceTest {
             authorizationService, backgroundTasks::add);
         Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
-        Mockito.when(processor.apply(Mockito.any(), Mockito.eq("video/quicktime"), Mockito.eq("AntFlow")))
-            .thenReturn(new byte[] {1, 2, 3});
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), Mockito.eq("video/quicktime"),
+                Mockito.eq("AntFlow")))
+            .thenReturn(writeProcessed(new byte[] {1, 2, 3}));
         Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
 
         MobileFileDto dto = service.upload(
@@ -190,6 +193,14 @@ class MobileFileServiceTest {
         assertThat(storage.contentType).isEqualTo("video/mp4");
     }
 
+    /** 处理器现在只吃文件路径：给测试准备一个"成品文件"。 */
+    private static Path writeProcessed(byte[] content) throws IOException {
+        Path dir = Files.createTempDirectory("antflow-test-wm-");
+        Path output = dir.resolve("output.mp4");
+        Files.write(output, content);
+        return output;
+    }
+
     /**
      * 要水印却把文案丢了：以前静默存原图（调用方以为加了水印），现在明说——不然开了水印的字段
      * 能悄悄产出没有水印的"证据照片"。
@@ -202,7 +213,8 @@ class MobileFileServiceTest {
             .isInstanceOf(BizException.class)
             .hasMessageContaining("水印文案");
         assertThat(storage.putCount).isZero();
-        Mockito.verify(processor, Mockito.never()).apply(Mockito.any(), Mockito.any(), Mockito.any());
+        Mockito.verify(processor, Mockito.never()).applyTo(Mockito.any(), Mockito.any(), Mockito.any(),
+            Mockito.any());
     }
 
     @Test

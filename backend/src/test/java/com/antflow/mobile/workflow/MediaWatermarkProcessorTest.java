@@ -39,24 +39,37 @@ class MediaWatermarkProcessorTest {
     }
 
     @Test
-    void watermarksJpegImageWithRealFfmpeg() throws Exception {
+    void watermarksJpegImageWithRealFfmpeg(@TempDir Path workDir) throws Exception {
         assumeTrue(ffmpegAvailable(), "ffmpeg is not installed");
-        byte[] original = jpegBytes();
-        byte[] processed = processor.apply(original, "image/jpeg", "AntFlow");
-        assertThat(processed).isNotEmpty();
-        BufferedImage image = ImageIO.read(new ByteArrayInputStream(processed));
+        Path input = writeTemp(workDir, "photo.jpg", jpegBytes());
+
+        Path output = processor.applyTo(input, workDir, "image/jpeg", "AntFlow");
+
+        assertThat(Files.size(output)).isPositive();
+        BufferedImage image = ImageIO.read(output.toFile());
         assertThat(image).isNotNull();
         assertThat(image.getWidth()).isEqualTo(64);
         assertThat(image.getHeight()).isEqualTo(48);
     }
 
     @Test
-    void watermarksMp4VideoWithRealFfmpeg() throws Exception {
+    void watermarksMp4VideoWithRealFfmpeg(@TempDir Path workDir) throws Exception {
         assumeTrue(ffmpegAvailable(), "ffmpeg is not installed");
         byte[] original = sampleMp4Bytes();
-        byte[] processed = processor.apply(original, "video/mp4", "AntFlow");
-        assertThat(processed).isNotEmpty();
-        assertThat(processed).isNotEqualTo(original);
+        Path input = writeTemp(workDir, "clip.mp4", original);
+
+        Path output = processor.applyTo(input, workDir, "video/mp4", "AntFlow");
+
+        assertThat(output.getFileName().toString()).isEqualTo("output.mp4");
+        assertThat(Files.size(output)).isPositive();
+        // 输入本身没被动过（成品是另一个文件）：这是"不原地覆盖"的最小守护。
+        assertThat(Files.readAllBytes(input)).isEqualTo(original);
+    }
+
+    private static Path writeTemp(Path workDir, String name, byte[] content) throws IOException {
+        Path path = workDir.resolve(name);
+        Files.write(path, content);
+        return path;
     }
 
     private static boolean ffmpegAvailable() {
@@ -82,12 +95,13 @@ class MediaWatermarkProcessorTest {
     }
 
     @Test
-    void missingBinaryFailsWithAnActionableMessage() throws Exception {
+    void missingBinaryFailsWithAnActionableMessage(@TempDir Path workDir) throws Exception {
         MobileMediaProperties properties = new MobileMediaProperties();
         properties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
         MediaWatermarkProcessor missing = new MediaWatermarkProcessor(properties);
+        Path input = writeTemp(workDir, "photo.jpg", jpegBytes());
 
-        assertThatThrownBy(() -> missing.apply(jpegBytes(), "image/jpeg", "AntFlow"))
+        assertThatThrownBy(() -> missing.applyTo(input, workDir, "image/jpeg", "AntFlow"))
             .isInstanceOf(com.antflow.engine.BizException.class)
             .hasMessageContaining("ffmpeg")
             .hasMessageNotContaining("Cannot run program");

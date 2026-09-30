@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
@@ -51,6 +52,8 @@ public class MobileFileService {
     private final MediaWatermarkProcessor watermarkProcessor;
     private final AuthorizationService authorizationService;
     private final Executor fileProcessingExecutor;
+    /** 同时跑几个图片水印 ffmpeg：每个都要一份磁盘（输入+输出）与一个进程，不限并发会把可写层打满。 */
+    private final java.util.concurrent.Semaphore imageWatermarkPermits = new java.util.concurrent.Semaphore(2);
 
     @Transactional(rollbackFor = Exception.class)
     public MobileFileDto upload(MultipartFile file, long ownerId) {
@@ -75,12 +78,21 @@ public class MobileFileService {
             boolean asyncVideo = applyWatermark && submittedContentType.startsWith("video/");
 
             if (applyWatermark && !asyncVideo) {
-                byte[] content = applyImageWatermark(readStagedBytes(staged.path()),
-                    submittedContentType, watermarkLabel);
+                // 全程走磁盘：staged 本来就是临时文件，ffmpeg 直接读它，成品再覆盖回去。
+                // 以前是 readStagedBytes + apply(byte[]) —— 整份图片进堆，而且是在抢锁**之前**读的，
+                // 等待者各自抱着一份内存谁也不松手。
+                Path workDir = null;
+                try {
+                    workDir = Files.createTempDirectory("antflow-image-watermark-");
+                    Path output = applyImageWatermark(staged.path(), workDir, submittedContentType,
+                        watermarkLabel);
+                    Files.copy(output, staged.path(), StandardCopyOption.REPLACE_EXISTING);
+                } finally {
+                    MediaWatermarkProcessor.deleteRecursively(workDir);
+                }
                 submittedContentType = watermarkProcessor.resultContentType(submittedContentType);
-                Files.write(staged.path(), content, StandardOpenOption.WRITE,
-                    StandardOpenOption.TRUNCATE_EXISTING);
-                staged = new StagedFile(staged.path(), content.length, sha256(content));
+                staged = new StagedFile(staged.path(), Files.size(staged.path()),
+                    sha256(staged.path()));
             }
 
             if (!asyncVideo) {
@@ -136,20 +148,34 @@ public class MobileFileService {
     void processVideoWatermark(UUID id) {
         MobileFile file = fileMapper.selectById(id);
         if (file == null || !PROCESSING_STATUS.equals(file.getStatus())) return;
+        Path workDir = null;
         try {
-            byte[] source;
-            try (InputStream input = storage.get(file.getStorageKey()).getInputStream()) {
-                source = input.readAllBytes();
+            // 源对象流式落到临时文件，ffmpeg 读文件、把成品写文件，再流式传回对象存储：
+            // 整个过程堆里只有拷贝缓冲（原来 readAllBytes + apply(byte[]) 是 2~3 份整视频）。
+            workDir = Files.createTempDirectory("antflow-video-watermark-");
+            Path input = workDir.resolve("input" + MediaWatermarkProcessor.extensionFor(
+                file.getContentType()));
+            try (InputStream source = storage.get(file.getStorageKey()).getInputStream()) {
+                Files.copy(source, input);
             }
-            byte[] processed = watermarkProcessor.apply(source, file.getContentType(),
+            Path output = watermarkProcessor.applyTo(input, workDir, file.getContentType(),
                 file.getWatermarkText());
+            long size = Files.size(output);
+            long limit = properties.getMaxVideoBytes();
+            if (size > limit) {
+                // 输入上限只管源文件：转码后的成品可能更大（码率/封装变了），别把超大对象塞进存储。
+                throw new BizException("WATERMARK_PROCESSING_FAILED",
+                    "转码后的视频超过大小上限（" + (size / 1024 / 1024) + "MB > "
+                        + (limit / 1024 / 1024) + "MB），请换更小或更短的视频。");
+            }
             String resultContentType = watermarkProcessor.resultContentType(file.getContentType());
-            storage.put(file.getStorageKey(), new java.io.ByteArrayInputStream(processed),
-                processed.length, resultContentType);
+            try (InputStream processed = Files.newInputStream(output)) {
+                storage.put(file.getStorageKey(), processed, size, resultContentType);
+            }
             file.setOriginalName(toMp4Name(file.getOriginalName()));
             file.setContentType(resultContentType);
-            file.setSizeBytes((long) processed.length);
-            file.setSha256(sha256(processed));
+            file.setSizeBytes(size);
+            file.setSha256(sha256(output));
             file.setStatus(READY_STATUS);
             file.setWatermarkText(null);
             file.setProcessingError(null);
@@ -158,13 +184,28 @@ public class MobileFileService {
             file.setStatus(FAILED_STATUS);
             file.setProcessingError(truncate(exception.getMessage(), 512));
             fileMapper.updateById(file);
+        } finally {
+            MediaWatermarkProcessor.deleteRecursively(workDir);
         }
     }
 
-    private byte[] applyImageWatermark(byte[] content, String contentType, String label) {
-        // ponytail: one image watermark at a time; use a dedicated image pool if throughput matters.
-        synchronized (watermarkProcessor) {
-            return watermarkProcessor.apply(content, contentType, label);
+    /**
+     * 图片水印：同一时刻最多 {@value #IMAGE_WATERMARK_PERMITS} 个 ffmpeg 在跑。
+     *
+     * <p>缓存/磁盘/CPU 都按并发算账（内存问题已经由流式化解决）。等不到许可的请求会排队——
+     * 这也是这个同步链路的天然背压。
+     */
+    private Path applyImageWatermark(Path input, Path workDir, String contentType, String label) {
+        try {
+            imageWatermarkPermits.acquire();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new BizException("WATERMARK_PROCESSING_FAILED", "水印处理被中断，请重试。");
+        }
+        try {
+            return watermarkProcessor.applyTo(input, workDir, contentType, label);
+        } finally {
+            imageWatermarkPermits.release();
         }
     }
 
@@ -258,14 +299,6 @@ public class MobileFileService {
     private static byte[] readHeader(Path path) throws IOException {
         try (InputStream input = Files.newInputStream(path)) {
             return input.readNBytes(16);
-        }
-    }
-
-    private static byte[] readStagedBytes(Path path) {
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException exception) {
-            throw new BizException("BAD_FILE", "文件上传失败（服务端读取异常），请重试");
         }
     }
 
@@ -426,11 +459,16 @@ public class MobileFileService {
         return true;
     }
 
-    private static String sha256(byte[] content) {
+    /** 流式算哈希：结果文件可能有 100MB，别为了算摘要再读进堆一份。 */
+    private static String sha256(Path path) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = new DigestInputStream(Files.newInputStream(path), digest)) {
+                input.transferTo(java.io.OutputStream.nullOutputStream());
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException | NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("could not hash " + path, exception);
         }
     }
 
