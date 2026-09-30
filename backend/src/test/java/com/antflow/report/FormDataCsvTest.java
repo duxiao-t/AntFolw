@@ -30,11 +30,11 @@ class FormDataCsvTest {
     void writesBomFixedColumnsAndFieldUnionWithoutColumnShift() {
         FormData first = row(1L, "000000000001", "张三", "000003", "技术部",
             OffsetDateTime.of(2026, 9, 29, 2, 30, 0, 0, ZoneOffset.UTC),
-            List.of(new FormData.FieldValue("f1", "申请人", "张三"),
-                new FormData.FieldValue("f2", "备注", "带,逗号")));
+            List.of(new FormData.FieldValue("f1", "申请人", "张三", null, null),
+                new FormData.FieldValue("f2", "备注", "带,逗号", null, null)));
         // 第二行的字段集合不同（表单改过版本）：按第一行定表头的话，这里的值会错位到别的列。
         FormData second = row(2L, "000000000002", null, null, null, null,
-            List.of(new FormData.FieldValue("f3", "金额", 100)));
+            List.of(new FormData.FieldValue("f3", "金额", 100, null, null)));
 
         String csv = new String(FormDataCsv.export(List.of(first, second), ZoneOffset.ofHours(8)),
             StandardCharsets.UTF_8);
@@ -56,7 +56,7 @@ class FormDataCsvTest {
             new FormData.FieldValue("c1", "检查项", List.of(
                 java.util.Map.of("id", "item-1", "name", "检查项1", "status", "na",
                     "images", List.of(), "description", ""),
-                java.util.Map.of("id", "item-2", "name", "检查项2", "status", "pass")))));
+                java.util.Map.of("id", "item-2", "name", "检查项2", "status", "pass")), null, null)));
 
         String csv = new String(FormDataCsv.export(List.of(data), ZoneOffset.UTC),
             StandardCharsets.UTF_8);

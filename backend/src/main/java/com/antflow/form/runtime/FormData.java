@@ -26,5 +26,10 @@ public class FormData {
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE) private java.time.OffsetDateTime updatedAt;
 
-    public record FieldValue(String fieldId, String fieldName, Object value) {}
+    /**
+     * 台账/导出的一个字段值。{@code displayText}/{@code detailText} 是后端按**该记录自己的版本**
+     * 解析出的显示文本（见 {@link FormValueDisplay}）；{@code value} 保留原始值，动态列等消费者还要用。
+     */
+    public record FieldValue(String fieldId, String fieldName, Object value,
+                             String displayText, String detailText) {}
 }

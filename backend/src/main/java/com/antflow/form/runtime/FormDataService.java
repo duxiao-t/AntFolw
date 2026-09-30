@@ -7,7 +7,6 @@ import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
 import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.form.FormDefinition;
-import com.antflow.form.FormDefinitionMapper;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.org.UserMapper;
 import com.antflow.mobile.workflow.MobileFileLinkService;
@@ -40,7 +39,8 @@ public class FormDataService {
     private final AuthorizationService authorizationService;
     private final UserMapper userMapper;
     private final com.antflow.org.DepartmentMapper departmentMapper;
-    private final FormDefinitionMapper formDefinitionMapper;
+    /** 台账里外链下拉的选项名要去选项行取（schema 里只有列映射与版本号）。 */
+    private final com.antflow.form.options.OptionRuntimeService optionRuntime;
     private final MobileFileLinkService fileLinkService;
     private final MobileDraftService draftService;
     /** 可选注入：老的单测直接 new 本类，不给它传这个依赖。 */
@@ -230,9 +230,7 @@ public class FormDataService {
             : departmentMapper.selectBatchIds(deptIds).stream()
                 .collect(Collectors.toMap(com.antflow.org.Department::getId,
                     com.antflow.org.Department::getName));
-        Map<Long, FormDefinition> definitions = formDefinitionMapper.selectBatchIds(records.stream()
-                .map(FormData::getFormDefId).collect(Collectors.toSet())).stream()
-            .collect(Collectors.toMap(FormDefinition::getId, Function.identity()));
+        Map<Long, List<FormData.FieldValue>> values = fieldValues(records);
         records.forEach(record -> {
             // 显式挡 null 再查表：Map.of() 是 ImmutableCollections，`get(null)` 会抛 NPE。
             var user = record.getCreatedBy() == null ? null : users.get(record.getCreatedBy());
@@ -250,32 +248,46 @@ public class FormDataService {
                 record.setCreatedByDeptName(user.getDeptId() == null
                     ? null : departmentNames.get(user.getDeptId()));
             }
-            record.setFieldValues(fieldValues(record.getData(), definitions.get(record.getFormDefId())));
+            record.setFieldValues(values.getOrDefault(record.getId(), List.of()));
         });
     }
 
-    private List<FormData.FieldValue> fieldValues(String data, FormDefinition definition) {
-        try {
-            var labels = new java.util.HashMap<String, String>();
-            if (definition != null) collectLabels(json.readTree(definition.getSchema()), labels);
-            var values = json.readTree(data);
-            if (values == null || !values.isObject()) return List.of();
-            var fields = new java.util.ArrayList<FormData.FieldValue>();
-            values.fields().forEachRemaining(entry -> fields.add(new FormData.FieldValue(
-                entry.getKey(), labels.getOrDefault(entry.getKey(), entry.getKey()),
-                json.convertValue(entry.getValue(), Object.class))));
-            return fields;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
-            return List.of();
-        }
-    }
-
-    private void collectLabels(com.fasterxml.jackson.databind.JsonNode nodes, Map<String, String> labels) {
-        if (nodes == null || !nodes.isArray()) return;
-        nodes.forEach(node -> {
-            String id = node.path("id").asText();
-            if (!id.isBlank()) labels.put(id, node.path("label").asText(id));
-            collectLabels(node.path("children"), labels);
+    /**
+     * 每条记录的字段值：**按记录自己的版本**取 schema，再交给 {@link FormValueDisplay} 出显示文本。
+     *
+     * <p>按解析出来的 schema 文本分组：同一版本的表单共用一份字典和外链标签，一页里混着多个版本的
+     * 记录也各按各的来（这就是为什么缓存键是 schema 而不是 formDefId）。
+     */
+    private Map<Long, List<FormData.FieldValue>> fieldValues(List<FormData> records) {
+        Map<Long, String> schemas = mapper.selectSchemas(
+                records.stream().map(FormData::getId).toList()).stream()
+            .collect(Collectors.toMap(FormDataMapper.SchemaRow::dataId,
+                row -> java.util.Objects.toString(row.schema(), "")));
+        Map<String, List<FormData>> groups = new java.util.LinkedHashMap<>();
+        records.forEach(record -> groups
+            .computeIfAbsent(schemas.getOrDefault(record.getId(), ""), key -> new java.util.ArrayList<>())
+            .add(record));
+        Map<Long, List<FormData.FieldValue>> values = new java.util.HashMap<>();
+        groups.forEach((schema, group) -> {
+            try {
+                var datas = new java.util.ArrayList<com.fasterxml.jackson.databind.JsonNode>();
+                Map<Long, com.fasterxml.jackson.databind.JsonNode> byId = new java.util.HashMap<>();
+                for (FormData record : group) {
+                    var data = json.readTree(record.getData());
+                    byId.put(record.getId(), data);
+                    datas.add(data);
+                }
+                var display = new FormValueDisplay(json, json.readTree(schema), datas);
+                for (var ref : display.pendingRefs()) {
+                    display.bindLabels(ref.fieldId(), optionRuntime.labelsForValues(
+                        ref.versionId(), ref.valueColumn(), ref.labelColumn(),
+                        display.pendingValues(ref.fieldId())));
+                }
+                byId.forEach((id, data) -> values.put(id, display.values(data)));
+            } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+                // schema/数据不是合法 JSON：这些记录退回"没有字段值"，整页不该因此 500。
+            }
         });
+        return values;
     }
 }

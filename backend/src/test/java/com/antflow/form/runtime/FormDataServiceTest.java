@@ -41,6 +41,7 @@ class FormDataServiceTest {
     private MobileFileLinkService fileLinkService;
     private MobileDraftService draftService;
     private AuthorizationService authorizationService;
+    private com.antflow.form.options.OptionRuntimeService optionRuntime;
 
     @BeforeEach
     void setUp() {
@@ -54,9 +55,10 @@ class FormDataServiceTest {
         fileLinkService = Mockito.mock(MobileFileLinkService.class);
         draftService = Mockito.mock(MobileDraftService.class);
         authorizationService = Mockito.mock(AuthorizationService.class);
+        optionRuntime = Mockito.mock(com.antflow.form.options.OptionRuntimeService.class);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
             formalNumberService, authorizationService, userMapper, departmentMapper,
-            formDefinitionMapper, fileLinkService, draftService);
+            optionRuntime, fileLinkService, draftService);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(authorizationService.currentUserId()).thenReturn(7L);
@@ -172,10 +174,10 @@ class FormDataServiceTest {
         department.setId(4L);
         department.setName("技术部");
         Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(page);
+        Mockito.when(formDataMapper.selectSchemas(any()))
+            .thenReturn(java.util.List.of(new FormDataMapper.SchemaRow(100L, publishedNoWorkflowForm().getSchema())));
         Mockito.when(userMapper.selectBatchIds(any())).thenReturn(java.util.List.of(user));
         Mockito.when(departmentMapper.selectBatchIds(any())).thenReturn(java.util.List.of(department));
-        Mockito.when(formDefinitionMapper.selectBatchIds(any()))
-            .thenReturn(java.util.List.of(publishedNoWorkflowForm()));
 
         FormData result = service.adminPage(1, 20, 10L, null, null).getRecords().get(0);
 
@@ -184,8 +186,41 @@ class FormDataServiceTest {
         assertThat(result.getCreatedByEmployeeNo()).isEqualTo("000007");
         assertThat(result.getCreatedByDeptName()).isEqualTo("技术部");
         assertThat(result.getFieldValues()).containsExactly(
-            new FormData.FieldValue("applicant", "申请人", "张三"),
-            new FormData.FieldValue("unknown", "unknown", 123));
+            new FormData.FieldValue("applicant", "申请人", "张三", "张三", "张三"),
+            new FormData.FieldValue("unknown", "unknown", 123, "123", "123"));
+    }
+
+    /** 同一页里混着两个版本的记录：各按**自己那版**的标签与选项显示，不能一张表一个字典。 */
+    @Test
+    void adminPageResolvesEachRecordsOwnFormVersion() {
+        FormData old = new FormData();
+        old.setId(100L);
+        old.setFormDefId(10L);
+        old.setFormDefVersion(1);
+        old.setData("{\"craft\":\"option_1\"}");
+        FormData current = new FormData();
+        current.setId(101L);
+        current.setFormDefId(10L);
+        current.setFormDefVersion(2);
+        current.setData("{\"craft\":\"option_1\"}");
+        Page<FormData> page = Page.of(1, 20, 2);
+        page.setRecords(java.util.List.of(old, current));
+        Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(page);
+        Mockito.when(formDataMapper.selectSchemas(any())).thenReturn(java.util.List.of(
+            new FormDataMapper.SchemaRow(100L, versionedSchema("工艺项", "车削")),
+            new FormDataMapper.SchemaRow(101L, versionedSchema("工艺", "镗削"))));
+
+        java.util.List<FormData> records = service.adminPage(1, 20, 10L, null, null).getRecords();
+
+        assertThat(records.get(0).getFieldValues()).containsExactly(
+            new FormData.FieldValue("craft", "工艺项", "option_1", "车削", "车削"));
+        assertThat(records.get(1).getFieldValues()).containsExactly(
+            new FormData.FieldValue("craft", "工艺", "option_1", "镗削", "镗削"));
+    }
+
+    private static String versionedSchema(String label, String optionLabel) {
+        return "[{\"id\":\"craft\",\"type\":\"select\",\"label\":\"" + label + "\",\"props\":"
+            + "{\"options\":[{\"value\":\"option_1\",\"label\":\"" + optionLabel + "\"}]}}]";
     }
 
     @Test
@@ -210,9 +245,10 @@ class FormDataServiceTest {
         user.setUsername("zhangsan");
         // display_name 为空 → 显示名回落账号；没有部门 → 部门名留空。
         Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(page);
+        Mockito.when(formDataMapper.selectSchemas(any()))
+            .thenReturn(java.util.List.of(new FormDataMapper.SchemaRow(100L, "[]"),
+                new FormDataMapper.SchemaRow(101L, "[]")));
         Mockito.when(userMapper.selectBatchIds(any())).thenReturn(java.util.List.of(user));
-        Mockito.when(formDefinitionMapper.selectBatchIds(any()))
-            .thenReturn(java.util.List.of(publishedNoWorkflowForm()));
 
         FormData onlyAnonymous = service.adminPage(1, 20, 10L, null, null).getRecords().get(0);
 

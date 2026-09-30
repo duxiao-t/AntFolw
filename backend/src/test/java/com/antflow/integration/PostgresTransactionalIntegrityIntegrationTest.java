@@ -2161,6 +2161,59 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
+    /**
+     * 台账按**每条记录自己的表单版本**解释：表单升版改了标签与选项之后，旧单据仍显示当时的标签与
+     * 当时的选项名，新单据显示新的。用真库跑是因为这件事整个就是那段 COALESCE 的 join 链——单测把
+     * mapper mock 掉只能断言"调用了 selectSchemas"。
+     */
+    @Test
+    void ledgerExplainsEachRecordByItsOwnFormVersion() {
+        long adminId = userId("admin");
+        String v1 = "[{\"id\":\"craft\",\"type\":\"select\",\"label\":\"工艺项\","
+            + "\"props\":{\"options\":[{\"value\":\"option_1\",\"label\":\"车削\"}]}}]";
+        String v2 = "[{\"id\":\"craft\",\"type\":\"select\",\"label\":\"工艺\","
+            + "\"props\":{\"options\":[{\"value\":\"option_1\",\"label\":\"镗削\"}]}}]";
+        long formId = insertForm("PUBLISHED", v1);
+        long oldData = submittedSelectData(formId, 1, adminId);
+        // 升版：当前定义改成 v2，同时把 v1 的 schema 快照留在版本表里（这正是 COALESCE 的第二栏）。
+        jdbcTemplate.update("""
+            INSERT INTO t_form_definition_version(form_definition_id, version_no, schema, checksum)
+            VALUES (?, 1, ?::jsonb, 'v1')
+            """, formId, v1);
+        jdbcTemplate.update("UPDATE t_form_definition SET schema = ?::jsonb, version = 2 WHERE id = ?",
+            v2, formId);
+        long newData = submittedSelectData(formId, 2, adminId);
+        setPrincipal(adminId);
+        try {
+            var rows = formDataService.adminPage(1, 50, formId, null, null).getRecords();
+
+            assertThat(fieldValuesOf(rows, oldData)).containsExactly(
+                new com.antflow.form.runtime.FormData.FieldValue("craft", "工艺项", "option_1", "车削", "车削"));
+            assertThat(fieldValuesOf(rows, newData)).containsExactly(
+                new com.antflow.form.runtime.FormData.FieldValue("craft", "工艺", "option_1", "镗削", "镗削"));
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id IN (?, ?)", oldData, newData);
+            jdbcTemplate.update("DELETE FROM t_form_definition_version WHERE form_definition_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    private long submittedSelectData(long formId, int formDefVersion, long creatorId) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status, created_by)
+            VALUES (?, ?, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{"craft":"option_1"}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, formDefVersion, creatorId);
+    }
+
+    private static List<com.antflow.form.runtime.FormData.FieldValue> fieldValuesOf(
+        List<com.antflow.form.runtime.FormData> rows, long dataId) {
+        return rows.stream().filter(row -> row.getId() == dataId).findFirst().orElseThrow()
+            .getFieldValues();
+    }
+
     @Test
     void exportRowsAndCountAreNarrowedByTheCallersScope() {
         // 导出必须与列表吃同一层行级范围（DataPermissionPolicyHandler 是按 mapper 语句 id

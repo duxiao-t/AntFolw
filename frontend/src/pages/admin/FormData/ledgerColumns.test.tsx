@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminFormDataPage from './index';
 
@@ -67,12 +67,28 @@ describe('台账列表的列与筛选', () => {
     });
   });
 
-  it('表单字典是可选增强：取不到不该把整页顶掉', async () => {
-    request.mockImplementation((url: string) => (url.startsWith('/api/forms/definitions/')
-      ? Promise.reject(new Error('forbidden'))
-      : Promise.resolve({ records: [row], total: 1 })));
-    await renderPage();
+  it('字段值直接渲染后端给的显示文本，不再自己取表单定义', async () => {
+    // 显示文本（下拉选项名、检查项汇总）由后端按**每条记录自己的版本**解析。前端以前要额外
+    // 请求一次表单定义，只有 form:data:read 的账号取定义会 403，只能把这条可选请求从全局错误
+    // 处理里摘出去；现在这条请求已经不存在了。
+    request.mockImplementation(() => Promise.resolve({
+      records: [{ ...row, fieldValues: [
+        { fieldId: 'f1', fieldName: '工艺', value: 'option_1', displayText: '车削', detailText: '车削' },
+      ] }],
+      total: 1,
+    }));
+    const props = await renderPage();
+    // 字段列是**拿到数据后**才推出来的（列来自 fieldValues 的并集），所以要在 state 落定后
+    // 重新读一次 ProTable 的 props，不能用手上那份旧的。
+    await act(async () => { await props.request({ current: 1, pageSize: 20 }); });
 
-    expect(screen.getByRole('table')).toBeInTheDocument();
+    const fieldColumn = tableProps.columns.find((column: any) => column.title === '工艺');
+    const withValue = { fieldValues: [
+      { fieldId: 'f1', fieldName: '工艺', value: 'option_1', displayText: '车削', detailText: '车削' },
+    ] };
+    expect(fieldColumn.render(null, withValue)).toBe('车削');
+    expect(fieldColumn.render(null, { fieldValues: [] })).toBe('—');
+    expect(request.mock.calls.some(([url]) => String(url).includes('/api/forms/definitions/')))
+      .toBe(false);
   });
 });
