@@ -151,7 +151,7 @@ const Login: React.FC = () => {
               className={styles.error}
               showIcon
               type="error"
-              message="账号或密码错误，请重试"
+              title="账号或密码错误，请重试"
             />
           )}
           <Form<API.LoginParams>

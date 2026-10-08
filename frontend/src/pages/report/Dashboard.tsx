@@ -149,7 +149,7 @@ export default function ReportDashboardPage() {
         <span className={styles.note}>数字口径与报表中心完全一致（同一个接口、同一组筛选）。</span>
       </div>
 
-      {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
 
       {loading ? null : !hasData ? (
         <Empty className={styles.empty} description="这段时间没有流程数据，换个时间范围再看看。" />

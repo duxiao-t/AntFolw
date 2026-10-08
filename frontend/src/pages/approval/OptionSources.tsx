@@ -112,7 +112,7 @@ export default function OptionSources() {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="版本化规则"
+          title="版本化规则"
           description="数据源每次导入并发布都会产生一个新版本，已发布的版本不会再变；表单在发布时钉死它绑定的版本，所以更新数据源不会影响已发布的表单与历史数据。"
         />
         <Input allowClear prefix={<SearchOutlined />} placeholder="搜索名称或编码"
@@ -129,7 +129,7 @@ export default function OptionSources() {
             ) : (
               <div className={styles.empty}>
                 <Typography.Title level={5} className={styles.emptyTitle}>三步开始用</Typography.Title>
-                <Steps direction="vertical" size="small" items={[
+                <Steps orientation="vertical" size="small" items={[
                   { title: '新建数据源', description: '给它起个名字，比如「设备台账」。编码是给表单内部用的英文名。' },
                   { title: '导入并发布版本', description: '粘贴文本，或上传 Excel / CSV。检查无误后导入，再发布成版本。' },
                   { title: '在表单里引用', description: '把数据源引用到表单，字段的「选项来源」就能挑到它。' },

@@ -105,7 +105,7 @@ export function OptionSourceImportModal({ sourceId, open, onClose, onImported }:
       open={open}
       // 提交中不许关：旧请求落地后会清掉新会话的输入并把它关掉。
       onCancel={() => { if (!busy) onClose(); }}
-      maskClosable={!busy}
+      mask={{ closable: !busy }}
       keyboard={!busy}
       width={760}
       footer={[
@@ -123,7 +123,7 @@ export function OptionSourceImportModal({ sourceId, open, onClose, onImported }:
         <Alert
           type="info"
           showIcon
-          message="导入只生成「待发布」版本"
+          title="导入只生成「待发布」版本"
           description="发布后，钉在这一版之前的表单不受影响；要让某张表单用上新数据，得重新发布那张表单。"
         />
         <Typography.Text type="secondary">

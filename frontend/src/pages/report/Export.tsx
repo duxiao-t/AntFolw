@@ -182,7 +182,7 @@ export default function ExportPage() {
         type="info"
         showIcon
         style={{ marginTop: 16, maxWidth: 560 }}
-        message="导出范围与你在「表单管理 → 数据」里看到的完全一致"
+        title="导出范围与你在「表单管理 → 数据」里看到的完全一致"
         description="列表显示的提交人 / 工号 / 部门 + 该表单的字段列会一起导出，取值也是页面显示的那份文本（下拉给选项名、检查项给逐条结果）；范围外（以及你没有权限看的）数据不会出现。导出动作会记一条审计。"
       />
     </PageContainer>

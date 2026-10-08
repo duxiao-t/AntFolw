@@ -29,7 +29,7 @@ export function OptionSourceRowsDrawer({ sourceId, version, onClose }: {
       size={760}
     >
       {rows.isPending && <Typography.Text type="secondary">加载中…</Typography.Text>}
-      {rows.error && <Alert type="error" showIcon message={`无法加载数据：${(rows.error as Error).message}`} />}
+      {rows.error && <Alert type="error" showIcon title={`无法加载数据：${(rows.error as Error).message}`} />}
       {rows.data && rows.data.length === 0 && <Empty description="这个版本没有数据" />}
       {rows.data && rows.data.length > 0 && <>
         <Table size="small" rowKey="row_no" pagination={false} scroll={{ x: 'max-content', y: 'calc(100vh - 220px)' }}

@@ -195,7 +195,7 @@ export default function ReportCenterPage() {
         </span>
       </div>
 
-      {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
 
       <div className={styles.totals}>
         {cells.map((item) => (

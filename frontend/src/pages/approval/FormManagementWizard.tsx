@@ -1154,7 +1154,7 @@ export default function FormManagementWizard() {
                 type="error"
                 showIcon
                 style={{ marginBottom: 12 }}
-                message="发布检查未通过"
+                title="发布检查未通过"
                 description={publishErrors[0].description}
               />
             )}

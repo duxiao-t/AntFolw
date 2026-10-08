@@ -1011,7 +1011,7 @@ function renderComponentSettings(
           direction="vertical"
           style={{ width: '100%' }}
           size={16}
-          split={<Divider style={{ margin: 0 }} />}
+          separator={<Divider style={{ margin: 0 }} />}
         >
           <div className="checklist-config__section">
             <div className="checklist-config__section-title">检查项</div>
@@ -1215,7 +1215,7 @@ function renderComponentSettings(
           direction="vertical"
           style={{ width: '100%' }}
           size={16}
-          split={<Divider style={{ margin: 0 }} />}
+          separator={<Divider style={{ margin: 0 }} />}
         >
           <div style={{ display: 'grid', gap: 10 }}>
             <Typography.Text strong>矩阵行</Typography.Text>

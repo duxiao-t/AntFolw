@@ -189,7 +189,7 @@ export function OptionSourceSettings({ formId, node, schema, update, updateNode 
           <Alert
             type="info"
             showIcon
-            message={`这个数据源已经有 v${selected.latestVersionNo}，当前钉的是 v${selected.versionNo}`}
+            title={`这个数据源已经有 v${selected.latestVersionNo}，当前钉的是 v${selected.versionNo}`}
             description="要用上新数据：在上面选新版本，再重新发布这张表单——已发布的表单固定它绑定的版本。"
           />
         )}

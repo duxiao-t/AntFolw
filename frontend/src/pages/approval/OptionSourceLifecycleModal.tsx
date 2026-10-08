@@ -68,7 +68,7 @@ export function OptionSourceLifecycleModal({ detail, action, busy, onCancel, onC
               type={detail.deletable ? 'warning' : 'error'}
               showIcon
               style={{ marginBottom: 12 }}
-              message={detail.deletable
+              title={detail.deletable
                 ? '它没有已发布版本、也没有表单在用它，可以删除'
                 : `不能删除：${detail.deleteBlockedReason ?? '仍被引用'}`}
               description={detail.deletable
@@ -80,7 +80,7 @@ export function OptionSourceLifecycleModal({ detail, action, busy, onCancel, onC
               type="warning"
               showIcon
               style={{ marginBottom: 12 }}
-              message="停用后不再出现在新绑定的候选里"
+              title="停用后不再出现在新绑定的候选里"
               description="已经绑着它的表单照常填报、历史记录照常回显；但那张表单**再次发布**会被拒（发布要求数据源处于启用状态），要先在这里启用。这与「停用某个版本」不同——版本停用只从新候选里移除，读路径完全不受影响。"
             />
           )}

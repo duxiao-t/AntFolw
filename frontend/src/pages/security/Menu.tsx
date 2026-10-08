@@ -294,7 +294,7 @@ export default function MenuPage() {
               type="error"
               showIcon
               style={{ marginBottom: 16 }}
-              message="菜单加载失败，为避免覆盖线上配置已锁定编辑"
+              title="菜单加载失败，为避免覆盖线上配置已锁定编辑"
               action={<Button size="small" onClick={load}>重试</Button>}
             />
           )}
