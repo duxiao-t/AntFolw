@@ -118,3 +118,233 @@
   - **「强制删除」与「版本快照只增不删」直接冲突**：历史记录的下拉回显全靠快照里的 `versionId` 还能解出选项；删掉源或版本，历史单据就变成一片空值。原型自己也提示"历史回显将丢失"——AntFlow 明确不接受。
   - **「迁移引用」是跨表单的批量改写**：它要修改别人表单的 schema（还有各自的授权与发布状态），远超一个数据源页面的职责。
   - 界面文案必须跟着这条口径走：说「固定版本」「重新发布才能用上新数据」，不要说「自动跟随最新」。
+
+## D-20260929-export-follows-read-scope
+
+- **状态：** accepted
+- **背景：** 新增「数据导出」时发现：行级数据范围是 `DataPermissionPolicyHandler` 按 **mapper 语句 id** 显式开启的，而 `t_form_data` 那条规则绑的是 `form:data:read` 的范围。于是"只有 `form:data:export` 权限"的角色会被注入恒假条件——**导出一个空文件**，看起来像"这段时间没数据"。
+- **决策：** 导出与导出预览（`/api/forms/data/admin/export`、`/api/reports/form-data-count`）**同时要求 `form:data:read`**，缺了就直接 403 说清缺什么。口径一句话：**导出的范围 = 你能看到的范围**。
+- **影响：**
+  - 别为了"让只有导出权限的角色也能导"去放宽成只查导出权限——那会回到"空文件"或"越权导出"二选一。要么补读权限，要么给导出能力单独加一条范围规则（那需要新建一个专属 mapper 语句，不能复用列表那条）。
+  - 导出必须走 `FormDataMapper.selectList`（`exportFilter` 与台账列表共用一份过滤）；自己写 count/裸 SQL 都吃不到这层收窄——预览行数会与实际导出行数不一致，那本身就是越权线索。
+  - 导出动作写 HIGH 风险审计，带上 `rowCount` / `truncated` / `limit`；上限 10000 行。
+
+## D-20260930-contacts-dept-name-search-covers-subtree
+
+- **状态：** accepted
+- **背景：** 通讯录搜索框改成"双用"（同一个词既过滤左树、又跨部门搜人）之后，你报了一个现象：输入「技术部」时左树筛出了部门，**右栏却一个人都没有**。原因是后端关键字只匹配 `username/display_name/employee_no`，而"匹配部门名"这件事当时只存在于移动端选择器一条路径里（还是在 Java 里先查部门 id 再 `IN`，只命中同级、结果集还可能很大）。
+- **决策：** 「关键字命中部门名 → 该部门**及全部下级**的成员」统一成**一条 ltree 子查询谓词**（`DepartmentMapper.applyDeptNameMatch`），桌面台账搜索与移动选择器共用。谓词仍然 OR 在原有的 `and(...)` 分组**内部**，所以后面的数据范围收窄照旧 AND 在外面。
+- **影响：**
+  - 写在 `DepartmentMapper` 上是因为这是 ltree 查询知识（和 `subtreeIds` 同一族）；写成 **static** 而不是 default 方法，是因为 mapper 的 default 方法会被 mock 掉——单测就再也看不到拼出来的 SQL 了（本轮踩过：`MobileOrgServiceTest` 立刻变红）。
+  - 判定"含下级"靠 `child.path <@ hit.path`。**别退回"先查部门 id 列表再 IN"**：既要展开子树（N 次查询），又会拼出超长参数列表，而且两个入口会再次各写一份。
+  - 左树过滤同步改成"命中节点保留**整棵子树**"（`filterDepartmentTree`）：命中后只留也命中的子节点，会出现"搜到技术部、点进去看不到后端组"，与右栏的结果对不上。
+  - 关键词语义现在包含"部门名"，即搜「研发」会返回研发部及其下级的所有人。这是**有意的**：用户搜的就是"这个部门的人"。
+
+## D-20260930-ledger-explains-each-record-by-its-own-version
+
+- **状态：** accepted
+- **背景：** 台账（`/api/forms/data/admin`）的字段标签、下拉选项、检查项字典全部取**当前**表单定义，忽略每条记录的 `formDefVersion`：表单改过标签/删过选项之后，旧提交会显示新标签，外链下拉甚至显示成 `option_1`。显示规则当时也只活在前端（`fieldValues.ts`），于是同一个值在页面和导出里是两个样子，前端还要为一次可选的定义请求处理 403。
+- **决策：** 显示规则搬到后端（`form/runtime/FormValueDisplay`），并**按每条记录自己的版本**解析 schema，解析顺序与 `OptionRuntimeService.schema()` 一字不差：实例当前修订版 → `(form_def_id, form_def_version)` 快照 → 当前定义。`FieldValue` 增加 `displayText`/`detailText`，保留 `fieldId`/`fieldName`/`value`。
+- **影响：**
+  - **分辨率随记录走，不是随表单走**：同一页里混着两个版本时各按各的来。所以缓存/分组的键是**解析出来的 schema 文本**，不是 `formDefId`。
+  - **外链下拉的选项名要查库**：schema 里只有 `(sourceId, versionId, valueColumn, labelColumn)`，没有选项行。按 `(versionId, valueColumn, labelColumn)` 用**本批真的被选过的值**批量查（一组一条 SQL，最多 500 个值）——整版扫一遍在 2 万行的源上等于每次翻页都白读 2 万行。查不到的值回落**原始值**（表单删了选项，旧单据仍要看得见当时选的是什么）。
+  - **空值按原始 value 判断**，不能拿"未填写"这类摘要文案当哨兵：选项真叫「未填写」的字段会被抹成空白（前端老实现的洞，本轮修掉）。
+  - 前端删掉本地那套规则与那个可选的定义请求；页面只渲染 `displayText`/`detailText`。**页面与导出从此共用一份实现**——改显示口径只改 `FormValueDisplay` 一处。
+
+## D-20260930-export-format-and-column-identity
+
+- **状态：** accepted
+- **背景：** 导出第一版只吐原始值（`option_1`、`id=item-1; …`），列名在没有 label 时退化成字段 id；而且只有 CSV。你要求"字段名称用中文、字段内容是表单真实显示的内容"，并且能选 CSV 或 Excel。
+- **决策：** `FormDataCsv` → `FormDataExport`，产出统一的 `Model(headers, rows)`（CSV 与 Excel 共用），接口加 `format=csv|xlsx`（**默认 xlsx**）。三条硬规则：**列身份是 `fieldId`**（标签只作表头）、**值取 `detailText`**（换行压成 `；`）、**导出默认给 Excel**。
+- **影响：**
+  - **列不能按标签当身份**：两个不同字段可以叫同一个标签（表单改过版本就是），按标签建列会互相覆盖、同一字段跨版本还会拆成两列。同名时表头会出现两列相同的文字——这是**有意**的（值各归各位），不是 bug。
+  - **公式注入防护是必须的**：`=` `+` `-` `@`（含前导空白之后）开头的值会被 Excel 当公式执行，而字段值、姓名、部门名都能进 CSV。CSV 统一前置单引号当文本；xlsx 走全 STRING 单元格（顺带保住工号的前导零），单元格截断到 32767 字符。
+  - xlsx 用 **SXSSF** 流式写并 `dispose()`：1 万行的 XSSF 能把堆吃光（部署里后端只有 768M）。列宽按内容算，上限 60 字符。
+  - **预览计数必须与下载同参数**（含 `from`/`to`/`tzOffsetMinutes`）：少一个时间范围，"预览 300 行、实际 30 行"就出现了，`truncated` 还会误报。这条是上一轮发出去的 bug，本轮一并修掉。
+
+## D-20260930-media-watermark-needs-ffmpeg-and-says-so
+
+- **状态：** accepted
+- **背景：** 「5S检查表」的 `image_upload` 字段开了水印，上传图片报 422，消息是 `cannot start ffmpeg: Cannot run program "ffmpeg": error=2, No such file or directory`。真因是**部署镜像从来没装 ffmpeg**（`postgres:17-bookworm` + 拷进去的 JRE，没有任何 apt 包，连 `/usr/share/fonts` 都没有）；而图片水印是在**请求内同步**跑 ffmpeg（`MobileFileService.upload` → `applyImageWatermark`），缺二进制就让整个上传失败，`GlobalExceptionHandler` 把 `BizException` 一律映射成 422。视频是异步的，只会把行标成 FAILED，所以症状只在图片上出现。
+- **决策：** ①Dockerfile 里装 `ffmpeg` + `fonts-wqy-microhei`（字体路径本来就在 `CJK_FONT_CANDIDATES` 里，装完不用配置）；②`MediaWatermarkProcessor` 加 `@PostConstruct` 启动探测，ffmpeg 不可用或没有中文字体时写 WARN，正常写 INFO；③用户可见的失败文案换成可操作的（缺 ffmpeg / 处理失败 / 超时 三种），原始报错只进日志与 `processingError`。**不做静默降级**：上传仍然会失败，但用户知道为什么、去找谁。
+- **影响：**
+  - 镜像是 +100~150MB（ffmpeg 那一层）。这是"开了水印的字段能真的加上水印"的价格，写进了 Dockerfile 注释与提交说明。
+  - `-version` 探测与 `run()` 都**不能先读管道再 waitFor**：ffmpeg 输出超过管道缓冲就填满卡住，本来能完成的转码被误判成超时（探测则会把启动挂住）。现在统一"输出重定向到文件/DISCARD，再 `waitFor(超时)`，失败时读文件末尾当诊断"。
+  - `watermark=true` 但 `watermarkText` 为空以前是**静默存原图**（调用方以为加了水印）——现在显式 422。客户端（桌面/移动）都必须同时带上非空文案，默认 `AntFlow`。
+  - 图片内容按**魔数**校验（jpeg/png/gif/webp/bmp）：声明成 `image/*` 的任意字节以前会一路走进 ffmpeg，最后甩给用户一句看不懂的 ffmpeg 报错。只校验"是不是图片"，不校验"声明的子类型与字节一致"——安卓/微信图库经常把 jpeg 标成 png。
+  - CI 也装了 ffmpeg：`MediaWatermarkProcessorTest` 里两条真机用例是 `assumeTrue(ffmpegAvailable())`，不装就永远静默跳过。
+  - 启动探测是**日志**不是健康检查：没装 ffmpeg 时其它功能都正常，不该让 `/actuator/health` 变 DOWN。
+
+## D-20260930-desktop-media-uploads-go-through-the-mobile-file-api
+
+- **状态：** accepted
+- **背景：** 桌面端（`frontend/src/components/form-fields/`）的图片、视频、附件、检查项照片四个上传控件**从来没发过请求**——`beforeUpload={() => false}` 让 antd 只把文件留在浏览器里，值里写的是 antd 的 `UploadFile`（没有 `id`/`contentType`）。而 `Fill.tsx` 的 `collectFileRefs` 只认带这两个字符串字段的服务端 DTO，于是用户选了文件、提交成功，**附件静默丢失**（检查项照片那次连 `onChange` 都没有）。只有桌面音频是真的在上传。
+- **决策：** 四个控件统一接 `MediaUploadControl`（`customRequest` 真上传）→ 走**移动端同一个** `POST /api/mobile/files`（同一个 `MinioFileStorage` 桶、同一套 `t_mobile_file` 行与授权），值写成服务端 DTO 数组。只读态用新抽出的 `MediaPreview`（鉴权 blob → objectURL）显示缩略图/播放器/下载。
+- **影响：**
+  - **值里只放 READY 的 DTO**：服务端 `MobileFileLinkService.normalized` 只接受 READY 文件，拿 PROCESSING 的 DTO 去提交会被整单拒（`FILE_NOT_FOUND`）。所以"上传中/视频加水印处理中"的项只留在组件本地状态，进表单值的必然 READY；提交前还会再查一次（草稿恢复的 DTO 可能是 PROCESSING/FAILED）。
+  - **值形状就是契约**：`collectFileRefs` 认 `字符串 id + 字符串 contentType`。测试里专门断言这一点——只要有人改了写值的形状，附件会被静默丢掉而页面毫无提示。
+  - `fileList` 全受控、**不接 `onChange`**：antd 在 uploading/done/error 每次流转都会触发它，接上就等于把 raw UploadFile 灌回表单（就是原来那个 bug）。数量与大小在 `beforeUpload` 挡，不靠 antd 的 `maxCount` trim（受控列表被 trim 会静默丢掉已上传的项）。
+  - 「要水印但没文案」在服务端已经会拒绝，桌面端因此必须把 `props.watermarkText`（默认 `AntFlow`）随请求带上。
+  - 处理中的视频**不给删**：服务端后台任务正在往同一个 key 写结果，删除会留下读不出来的孤儿对象（服务端那层协调要单独修，见 HANDOFF 已知遗留）。
+  - 老数据（修复前写进表单的本地 File 记录、更早的单文件名字串）没有服务端 id，只显示名字并标注"历史记录，未上传"——它们的字节从来没上传过，没有任何东西可迁移。
+
+## D-20260930-video-watermark-independent-key-and-token-lease
+
+- **状态：** accepted
+- **背景：** 视频水印是异步的（有界队列 + 行状态 PROCESSING→READY），原实现把转码结果**写回原 storage_key**，且只靠 `processing_claimed_at` 一个时间戳防重入。两个坑都能真的炸：① put 成功但 DB 更新失败/进程崩溃时，行还是 PROCESSING 而对象已是成品 mp4，reaper 再捞一次就是**二次水印**，出错时连原视频都没了；② 排队等待 + ffmpeg 最长 10 分钟 + MinIO 上下行都可能超过 stale 窗口，reaper 会重复领取同一行，两个任务同时写、旧任务的 `updateById` 还会覆盖新任务的 READY/FAILED。
+- **决策：** ①**结果写本次尝试独有的 key**（原 key + `.wm-` + token），成功后用**带 token 的条件 UPDATE** 把行的 `storage_key`/`content_type`/`size_bytes`/`sha256`/`original_name` 一起改掉并置 READY，再清理旧对象；条件更新影响 0 行（租约过期/被抢/行已删）就删掉自己刚写的 attempt 对象、**绝不碰那一行**。②**真租约**：`processing_claim_token`（V51）+ `processing_claimed_at`，处理期间在下载后/ffmpeg 前/ffmpeg 后各续一次，`renew`/`release`/终态都按 token 条件更新——丢租约的 worker 不许发布结果。③`reapStaleProcessing()` 有界（默认 20），只领"未领取或已过期"（`processing_claimed_at IS NULL OR < staleBefore`），且**队列满时上传路径标 FAILED / 恢复路径只还租约**。
+- **影响：**
+  - `contentUrl` 按 id 生成，所以 key 变化对客户端**不可见**（前端不用动）。
+  - **`processing_claim_token`/`processing_claimed_at` 不加进 `MobileFile` 实体**：实体带上它们，任何一次 `updateById`（比如 `delete`）都会把 token 回写/覆盖。这是"字段存在但实体不知道"的刻意设计，别顺手补上。
+  - `claimStaleProcessing` 的条件必须是 `IS NULL OR < staleBefore`：迁移前遗留的行 `processing_claimed_at` 是 NULL，只写 `<` 会永远捞不到——那正是最该被恢复的一批。
+  - 队列满时两条路语义不同：上传路径要立刻给客户端答案（客户端在轮询），恢复路径只还租约保持 PROCESSING（下一轮再捞，避免"领了就被拒、拒了就释放、下轮再领同一条"的活锁）。
+  - `catch (Throwable)` 里写 FAILED 之后**把 Error 重抛**：`OutOfMemoryError` 不能吞（吞了线程池还会带着坏状态继续跑），但行也不能永远停在 PROCESSING。
+
+## D-20260930-delete-keeps-the-row-lock-and-deletes-the-object-after-commit
+
+- **状态：** accepted
+- **背景：** `delete` 原来是"`selectById` 查一下 → `countLinks` → 标 DELETED → 在事务里删 MinIO 对象"。三个问题：① 不加锁，"检查有没有被提交"会和提交方"检查文件是否 READY"交错，结果是**提交成功但附件指向已删文件、对象也没了**（永久坏引用）；② 对象的删除在事务提交前，一旦回滚就变成"READY 行 + 对象已丢"；③ 存储 IO 期间一直占着行。
+- **决策：** ①先按 id 加 `FOR UPDATE`；②`PROCESSING` 直接拒绝（「视频正在加水印，处理完再删」）；③对象的删除挪到 `TransactionSynchronization.afterCommit`，删失败只记日志。
+- **影响：**
+  - 反过来（提交成功、删对象失败）最多是个**没人引用的孤儿对象**，不会让用户读到坏数据——这是刻意选的方向。
+  - 行锁现在只覆盖 DB 那几步，不再被存储 IO 长时间占住。
+  - 桌面端 UI 上轮已经挡了"处理中不给删"，服务端现在补齐（不信任客户端）。
+
+## D-20260930-form-data-file-is-keyed-by-file-id-not-field
+
+- **状态：** accepted
+- **背景：** `t_form_data_file` 主键是 `(form_data_id, file_id)`，但 `normalized` 原来按 `fileId + fieldId` 去重，并且每条 ref 单独 `selectById` 一次（无锁）。上传端的 SHA 去重会把两个字段里的同一张照片收敛成同一个 file_id —— 于是两次插入落到同一主键，**整单 500**，而且查文件是否 READY 与并发删除之间没有任何保护。
+- **决策：** ①按 `fileId` 去重（`LinkedHashMap` 保首见 fieldId），②对去重后的 id **升序批量** `FOR UPDATE` 一次（一条 SQL，固定锁序避免与并发 delete 形成 ABBA 死锁），锁内复核 READY/`deleted_at`/owner；③`insertFileLink` 冲突改 `ON CONFLICT DO UPDATE SET field_id = EXCLUDED.field_id, sort_order = EXCLUDED.sort_order`；④`MobileFileLinkService` 类上加 `@Transactional`；⑤`requireReadable` 给 admin/owner 提前 return。
+- **影响：**
+  - **`DO NOTHING` 是错的**：`reconcileEditable` 先插"受限字段"的旧链接、再插"可编辑字段"的新链接，后者才是权威分类；`DO NOTHING` 会把这次字段迁移静默吞掉（用户以为改了分类，实际没改）。
+  - **`@Transactional(REQUIRED)` 不能省**：`FOR UPDATE` 只有在同一个事务里才有效，自动提交下语句结束就放锁。现有调用方（`MobileWorkflowService.start`、`FormDataService.submit/resubmit`）都在事务里所以线上没炸，但这是"靠调用方记得开事务"的隐形契约——写这条守护用例时就当场抓到了这个洞。
+  - `admin/owner` 提前 return 不影响鉴权口径（本来也要放行），但一页 20 张图会少掉几十次"逐关联实例判权"的查询。
+  - `Cache-Control` **保持 `no-store`**：草稿里曾想改成 `private, max-age=3600, immutable` 换性能，撤回——附件 URL 受登录态与**可变**授权保护，权限撤销/取消关联/删除后浏览器不该还能直接复用响应。剩下的 N+1 当已知成本记账。
+
+## D-20260930-upload-dedupe-locks-the-row-and-the-size-cap-counts-real-bytes
+
+- **状态：** accepted
+- **背景：** 上传去重分支先 `selectOne`（owner + sha256 + READY + 未删，**不加锁**）拿到已有行，然后**重写那个 key 上的对象**并把旧行返回给客户端。而 `delete` 自上一轮起是"先 `FOR UPDATE` 拿行锁 → 标 DELETED → `afterCommit` 删对象"。两者交错时：客户端拿到一个已删文件的 DTO（之后提交会被 `append` 以 `FILE_NOT_FOUND` 拒掉整单），对象还会被重新写回去变成孤儿。另一处：大小上限只看 `MultipartFile.getSize()`（客户端声明），`stage()` 数出的真实字节数只流向 `row.setSizeBytes` 与 `storage.put` 的 size，没有人再比一次 —— 声明小、实际大就能绕过去，代价落在磁盘。
+- **决策：** ①`findReadyDuplicate` 加 `FOR UPDATE`；②`FileStorage` 新增 `exists(String)`，**对象在就只返回旧行、不再重写**，不在才补写；③落盘后按同一口径（抽出的 `sizeLimit`）再比一次真实字节数。
+- **影响：**
+  - **不需要"锁后复核"分支**：PG 在 READ COMMITTED 下锁等待结束会重新求值谓词，并发删除已提交的行不再满足 `status='READY'` → 查询直接返回 null → 走已有的"新建一行（新 id + 新 key）"路径。写这条守护用例时也是靠"判最终结果"而不是"判有没有被挡住"（子表外键会把 insert 也挡住，只看阻塞区分不出修复前后）。
+  - **`exists` 故意不抛受检异常**：调用方必须能把"对象不在"（补写）和"存储查不动"（整个请求失败）分开。如果让它抛 `IOException`，会被 `upload` 外层的 `catch (IOException) → BAD_FILE` 吞掉，把存储问题甩锅成"用户的文件有问题"。
+  - **判错方向的代价不对称**：`statObject` 是 HEAD 请求、错误码各家不统一（`NoSuchKey` / `NotFound`），所以 `NoSuchKey`/`NoSuchBucket`/`NotFound`/HTTP 404 都算"缺失"，其余（权限、签名、网络抖动）抛 `FILE_STORAGE_FAILED`。把"缺失"误判成"查不动"会让**每次重复上传都失败**；把"查不动"误判成"缺失"只是白写一份同样的字节。
+  - **"对象在就不重写"也让这条路径成了唯一的自愈兜底**（对象被误删时补写）：现在还没有孤儿对象清扫器，所以这个 `exists` 不能省成"直接返回旧行"。
+  - 保留 `validateBasic` 基于声明大小的早退：诚实客户端不必落盘、也不必造临时文件就被拒；真实大小检查是补上撒谎那条路。
+
+## D-20260930-media-watermark-outside-the-transaction-and-configurable-gates
+
+- **状态：** accepted
+- **背景：** 压测（`docs/capacity-tuning-2026-09-30.md`）发现图片上传把**其它接口**拖垮：`upload` 是 `@Transactional`，`DataSourceTransactionManager` 在**方法入口**就取一个 Hikari 连接；而图片水印要等一个只有 2 个许可的信号量、跑几秒 ffmpeg。48 并发时 10 个连接全被"排队等 ffmpeg"的请求占住，GET 元数据 p95/最大 1.97s。顺带两个小洞：去重读对新文件锁不住（并发首次上传同一份字节会留重复行 → `selectOne` 抛 `TooManyResultsException` → 下一次上传 500）；图片水印**成品**没有再核一次大小上限（视频那条有）。
+- **决策：** ①`upload` 去掉 `@Transactional`，只把"去重（含 `FOR UPDATE`）→ 写对象 → 插行 → 视频登记 afterCommit 入队"放进注入的 `TransactionTemplate`（本仓 `AuditArchiveService`/`OidcService`/`WecomService` 已有先例）；ffmpeg 与信号量等待在事务外。②去重读改走显式 `@Select` + `ORDER BY created_at, id LIMIT 1 FOR UPDATE`，固定取最早那行、容忍重复。③图片闸门从写死 2 改成 `image-watermark-concurrency`（默认不变），并给图片成品补一次大小检查。
+- **影响：**
+  - **不能把"关键段"再拆小**：行锁必须覆盖到 MinIO 的 `put`（d95a746），否则并发 `delete` 会插进"查到重复行"和"写回去"之间。
+  - **回滚语义靠"异常都是 unchecked"**：`writeStorageObject` 把 IOException 包成 `BizException`、`FileStorage.exists` 故意不抛受检、mapper 抛 `DataAccessException`、入队吞掉 `RejectedExecutionException` —— 所以 `TransactionTemplate` 的默认回滚等价于原来的 `rollbackFor = Exception.class`。**别加自定义回滚规则**（加了反而和现在不一致）。
+  - **别用"抽一个带 `@Transactional` 的 public 方法再自我调用"**：本类已有这个坑（2 参重载自己调 3 参重载，3 参上的注解对这条路失效）。
+  - **显式构造替代 Lombok**：信号量要从配置建，而 Lombok 生成的字段初始化器早于构造体执行 —— 在字段初始化器里读 `properties` 会 NPE。
+  - **MP 的 wrapper 不合适做这条 SQL**：它把 `last()` 拼在 `ORDER BY` 之前、再自己追加 `LIMIT 1`，`orderByAsc(...).last("LIMIT 1 FOR UPDATE")` 生成非法 SQL（真库用例当场 `BadSqlGrammar`）。要精确控制就写显式 `@Select`。
+  - 两个上限都是**配置**而不是硬件：视频 = `processing-concurrency + processing-queue-capacity`（默认 22，超出直接 FAILED）；图片 = 信号量（默认 2，不拒收只排队）。硬件决定速率与内存（每路 720p ≈ 1 核 + 200MB）。生产按规格调，见容量文档的表。
+  - `compose.yaml` 的 Hikari 变量用 `${DB_POOL_MAX_SIZE:-10}`：compose 的默认值语法是 `:-`，写成 Spring 那种 `${VAR:10}` 只会打个警告然后停住。
+
+## D-20260930-video-queue-never-rejects-and-pumps-on-completion
+
+- **状态：** accepted
+- **背景：** 视频转码线程池是 `core=max=processing-concurrency(2)` + `queue(20)` + `AbortPolicy`，上传路径用的是"拒绝即失败"（`RejectPolicy.FAIL`）——第 23 个视频在**对象与行都写完**之后被标 `FAILED`，用户看到的是"上传成功但处理失败"。而"忙"不是"坏"：队列满只说明要排队。
+- **决策：** **永不拒收**。线程池拒绝时 `releaseProcessingClaim` 把行留在 `PROCESSING` 等空位（库里那一行就是队列）；每个转码任务在 `finally` 里调 `reap(1)`——**完成即泵**，一有槽位就认领下一条。`reapStaleProcessing`（定时/启动恢复）只当"进程真的没了"的兜底，不再是排队的一部分。
+- **影响：**
+  - **`RejectPolicy` 整个枚举删掉**：全仓只有上传路径和 reaper 两个调用点，reaper 本来就是 LEAVE 语义。留着两个语义不一致的策略只会让人再选错一次。
+  - **泵放在任务 `finally` 里，不是包 executor**：`FileProcessingConfig` 的 bean 就是普通 `ThreadPoolTaskExecutor`，包 `execute()` 会造出 bean 循环依赖；`finally` 每条路径都跑、且每个释放的槽位只跑一次。
+  - **不活锁**：泵只在任务完成之后触发（槽位确定空着），`reap(1)` 匹配不到行就返回空集，拒绝时释放认领后不再重试 → 一次完成至多一次入队。
+  - **客户端轮询预算跟着抬**（600→1800 次 = 30 分钟）：积压时第 23/24 个视频要排队等（并发 2 时约 12 分钟），原来的 10 分钟上限会变成新的"失败"来源。真正的长久解是任务进度 UI，记在遗留里。
+  - 容量口径变了：视频的"并发上限"不再是"超过就失败"，而是"超过就排队等"。`processing-reap-limit` 仍要与真实空位对应。
+
+## D-20260930-form-data-status-is-a-whitelist
+
+- **状态：** accepted
+- **背景：** `submit` 收客户端传的 `status`，原来只做 `status == null ? "SUBMITTED" : status`，于是能往 `t_form_data.status` 塞 `APPROVED`/`REJECTED`——那两个是 `t_process_instance` 的状态，由引擎推进实例时写。塞进去的记录会落进台账/报表的"其它"桶，且没有任何东西能解释它。
+- **决策：** 只接受 `DRAFT`/`SUBMITTED`，其余抛 `BAD_STATUS`。
+- **影响：** 客户端如果自己实现了状态机（比如把实例状态回写到表单状态）会立刻收到明错，而不是产生无法解释的数据。台账/报表的状态分桶因此可以假定只有两个合法值。
+
+## D-20260930-contacts-export-reuses-the-list-query
+
+- **状态：** accepted
+- **背景：** 通讯录导出原来是纯前端：把**当前页**（一页 15 人）拼成 CSV。一页 15 人时"导出成功"却少了人，而且前端拿不到行级数据范围的信息，导出的范围与"看得到的范围"没有可验证的关系。
+- **决策：** 新增 `GET /api/users/export`（csv/xlsx），参数与 `GET /api/users` 一字不差、走同一条 `UserService.listAuthorized`（无分页 + 行级数据范围），表头与前端导入器的 `headerMap` 对齐；前端删掉 `buildMembersCsv`，只负责下载。
+- **影响：**
+  - **"你导出的绝不会比你看到的多"** 由"同一套参数 + 同一条查询"保证，而不是两处实现碰巧一致。
+  - **导出能原样导回**：表头就是导入器认的那组中文列名（姓名/工号/账号/手机/邮箱/职务/性别），性别出 `男/女`（导入侧 `normalizeGender` 两套都收）。
+  - **共享的渲染器**：复用台账导出的 `FormDataExport.Model/csv/xlsx`（BOM、公式注入防护、Excel 全字符串单元格）。服务端不再需要一份前端 CSV 实现，也就不会漂移。
+  - 行数上限 10,000（与台账导出同量级），截断写进审计的 `truncated`。
+  - 前端 `blobErrorMessage` 从 `pages/report/Export.tsx` 提到 `utils/format.ts`：下载接口出错时后端返回 JSON 而非文件，两处都得读出来才有话说。
+
+## D-20260930-visibility-resolves-like-the-backend
+
+- **状态：** accepted
+- **背景：** 前端 `visibleNodeIds` 原来是一遍 `forEach` 边走边判：条件引用**后面才声明**的字段时，那个字段还没被算过，"来源不可见"于是被判成"依赖它的字段不可见"——同一份数据前后端能得出两套可见性（后端 `FormDefinitionService.resolveVisible` 是按 id 递归求值 + memo）。另一处口径不一致：`Number(null)`/`Number('')` 都是 0，空数字字段能"满足" `gte 0` 之类的条件把下游字段显示出来，而后端 `compareNumbers`（BigDecimal 解析失败即 false）判不成立。
+- **决策：** `visibleNodeIds` 换成记忆化 DFS（id→node/parent 映射 + memo + `visiting` 防互指条件死循环），声明顺序无关；`numberCompare` **先拒空值再做数值转换**。
+- **影响：**
+  - 前端提交前的"可见/必填"判定与后端提交/取数时的判定同源，条件字段前后声明不再产生差异。
+  - 数值型显示条件的四个操作符（`gt/gte/lt/lte`）在"源值为空"时一律为假——这条是**口径**，别为了"空值当 0"再改回去。
+  - 明细表每行各自算一次可见性并复用给校验与"还有文件在上传"扫描：按行条件隐藏的列既不该拦提交，也不该因为在传而被当成"仍在处理"。
+
+## D-20260930-outbox-dedupe-key-is-the-outbox-row
+
+- **状态：** accepted
+- **背景：** 渠道侧的幂等键（`t_wecom_message_delivery.dedupe_key`）对非抄送事件退回 `type:instanceId:taskId:userId`，而**不同事件会共用这几个字段**（撤回后重新指派、改派回原审批人都会对同一个 task 再发一次 `TASK_ASSIGNED`）→ `ON CONFLICT DO NOTHING` 把合法的"再次通知"**静默丢掉**。另外两处：2 分钟租约期间 worker 还活着但外部调用卡住时会过期，另一个实例认领同一行投两遍；webhook 是 at-least-once 却没有任何稳定事件标识，接收端无法去重。
+- **决策：** ①幂等键改用 `type:instanceId:event.id()`（outbox 行 id 跨 attempt 稳定）；抄送保留按轮次（一轮是一条汇总消息）。②`renewLeases()` 定时**只续本 worker 自己持有的 RUNNING 行**。③webhook 请求头带 `X-AntFlow-Event-Key`、body 带 `eventKey`（同一个键）。
+- **影响：**
+  - **"重投"与"再次通知"从此可区分**：同一条 outbox 行重投键不变（去重仍有效），不同行必然不同键（不再被吞）。
+  - **续租的边界**：崩掉的进程续不了 → 它的行照样在 2 分钟后可被抢（恢复路径不变）；活着但慢的 worker 不会被抢走同一行。代价是"卡死但没崩"的 worker 会一直占着那行——对 webhook 来说，宁可晚也不愿意投两遍。
+  - **webhook 明确是 at-least-once**：接收端要幂等请用 `eventKey`。文档里不再有"我们保证只发一次"的暗示。
+  - `t_user_notification` 那条插入本来就是 `ON CONFLICT DO NOTHING`，不受影响。
+
+## D-20260930-upload-inserts-row-before-object-and-the-sweeper-is-dry-run
+
+- **状态：** accepted
+- **背景：** 上传原来是"先写对象、后插行"：`put` 成功而事务最终没提交（连接断、进程被杀）就留下一个没人引用的对象，而且那种对象按现有读路径**永远不会被发现**。另外转码结果用的是独立 attempt key，在发布前也没有任何行引用它。
+- **决策：** ①改成**先插行、后写对象**（key 由本方法生成的 UUID 算得出，两者没有先后依赖）；②新增 `MobileFileOrphanSweeper`：桶里有、**没有任何 `t_mobile_file` 行引用**、且 mtime 早于 24 小时的对象，每轮最多 500 个、逐对象删；**默认 `orphan-sweep-delete=false`，只记日志**。
+- **影响：**
+  - 现在最坏是"行在、对象没写成"，而那会让整个事务回滚——不再产生孤儿对象。
+  - **24 小时宽限覆盖两种"暂时没有引用"**：写对象与插行之间的窗口、以及转码 attempt key 在发布前的窗口。两种都是分钟级，宽限留了两个数量级。
+  - **判据是"没有行引用"，不是"没有已提交单据引用"**：`PROCESSING` 的行引用的正是它即将被替换掉的源对象，排队等转码期间那也是活的。
+  - **默认不开真删**：删除不可逆，先跑一轮看它打算删什么（日志里会打前 10 个候选）。要开就是把 `antflow.mobile.files.orphan-sweep-delete` 设 true。
+  - 存储不支持列举（`FileStorage.list()` 默认抛 `UnsupportedOperationException`）时跳过本轮，不会把定时任务打挂。
+
+## D-20260930-drop-the-unusable-jsonb-path-ops-index
+
+- **状态：** accepted
+- **背景：** `V44` 给 `t_option_data_source_row.data` 建了 `GIN (data jsonb_path_ops)`。`jsonb_path_ops` 只服务 `@>`/`@?`/`@@`，而读这张表的两条查询（`OptionRuntimeService.labelsForValues` / `querySchema`）都是 `version_id = ?` + `data ->> '列名' IN (...)` / `= ?`。实测（5 万行、`SET enable_seqscan=off` 逼优化器只能用索引）：那条真实形状的查询走的是 **Bitmap Index Scan on 主键** + Filter（49997 行被过滤），而 `data @> '{"code":"C1"}'` 才走 GIN。
+- **决策：** `V52` `DROP INDEX IF EXISTS ix_option_source_row_data;`，理由写在迁移里。
+- **影响：**
+  - 想让它有用只有两条路，都不通：把查询改成包含式（会改变语义与参数绑定），或建 `(data ->> '列名')` 表达式索引（列名是每个数据源自己配的，运行时才知道）。所以不是"暂时没用"，是**没有补救余地**。
+  - `version_id` 已经把范围收窄到一个版本（主键前导列），版本内行数有界，不需要为它再设计索引。
+  - 留着只会让导入（逐行 INSERT）多维护一份倒排：纯开销。
+
+## D-20260930-antd-deprecations-that-cannot-be-migrated-yet
+
+- **状态：** accepted（部分清理，其余明确等待）
+- **背景：** `npx antd lint ./src` 是本仓库的提交前门槛，但从来不是干净的（清理前 61 deprecated + 45 usage）。这轮只清掉语义等价的 17 处（`Alert message`→`title`、`Space split`→`separator`、`Steps direction`→`orientation`、`Modal maskClosable`→`mask.closable`）。
+- **决策：** 其余 44 处**不动**，原因逐条实测：
+  - **Select 的 `showSearch={{ onSearch, filterOption, optionFilterProp }}` 在当前依赖里是空操作**：antd 6.5.3 + rc-select 14.1.18 的 `BaseSelect` 只把 `showSearch` 当布尔用，整个 rc-select/antd select 里没有任何地方读 `showSearch.onSearch`。照提示改了一版，`AssigneePicker` 的搜索用例立刻红（关键字永远停在空串）——即"照着提示改"会**静默改坏搜索**。要改得等 antd 升到已接线的版本。
+  - **Space `direction` → `Flex`（28）**：`Space size`（small/middle/large = 8/16/24）到 `Flex gap` 要逐处判断，且两者的布局语义（inline-flex、separator、对齐）不等价 → 必须配视觉验证，不能混在"清理"里。
+  - **Drawer `width` → `size`（3）**：`size` 是枚举，自定义宽度（如 760）表达不出来，只能改 `styles`——同样是视觉改动。
+  - **静态 `message.*`/`Modal.confirm`/`notification.open`（41）**：`requestErrorConfig.ts` 这类非组件模块拿不到 hook，得先做"模块级实例由 App 组件注入"的改造，是独立一轮。
+- **影响：** 门槛目前**不是 0**，别把"`antd lint` 干净了"当前提。新增代码保持与既有写法一致（同一个页面两种写法比一条弃用警告更糟）。
+
+## D-20260930-hidden-is-not-a-secrecy-boundary（明确不做）
+
+- **状态：** accepted（记录"不做"，不是待办）
+- **背景：** `props.formPerms` 的 `HIDDEN` 目前只在**写路径**（提交时剔除、审批时按 schema 校验/回写）生效，读路径（台账/详情/导出对**有权限**的读者）原样返回。OCR 反复标它 high。
+- **决策：** **保持现状**。把它变成保密边界等于**改口径**：要对哪些视图、哪些角色、哪些字段过滤，都没定；而一旦过滤，有权限读者拿到的载荷会全部改变。
+- **影响：** 谁要把它当保密手段是误解——权限的正确表达是"这条记录你读不到"，不是"这个字段我藏起来"。真要做这件事，先定清上面三个维度，且必须逐视图验证。
+
+## D-20260930-unhandled-errors-in-frontend-tests-keep-the-flag
+
+- **状态：** accepted（先收回过一次，被 CI 打回，最终保留）
+- **背景：** `frontend/vitest.config.ts` 挂着 `dangerouslyIgnoreUnhandledErrors: true`。曾经想收回（安全网值钱），本机 Windows 连跑三次全量 59 文件 / 288 用例、退出码全 0，看着可行——**推上 CI 立刻红了**：`ReferenceError: window is not defined`，来自 react-dom 的 `scheduler.development.js → performWorkUntilDeadline`，被归到当时在跑的 `FormManagementWizard.test.tsx`（59 文件 / 288 用例全绿 + Errors 1 → 退出码 1）。根因是"React 的延后渲染活过了 happy-dom 的拆卸"，与断言无关，而且**本机复现不出来**。另一条已知来源是 `MobileFormPreview` 真挂 `<iframe src="/mobile/form-preview">`、happy-dom 真去请求它、中止时抛的 DOMException 无人接。
+- **决策：** 保留 flag。要收它必须先把"拆卸后仍在跑的 React 工作"清干净（本机复现不出来 → 在本机验证再推 CI 是碰运气，不做盲改）。
+- **影响：**
+  - **全项目不再因"未处理错误"而红**；断言失败、测试内抛出的错误照旧会红。丢的是"异步未处理错误"这层安全网——用别的手段补（写用例时自己 `await` 干净、`afterEach` 里 unmount）。
+  - 已排除的窄口径修法（别再试）：about:blank / srcdoc / javascript: 都是 origin=null（postMessage 直接 SecurityError）；`disableIframePageLoading` 会让 contentWindow 变 null（spyOn 失败，覆盖一样丢）；自挂 `unhandledRejection` 处理器挡不住（vitest 有自己的监听）；桩 `global.fetch` 也没用（iframe 文档加载走 happy-dom 内部的真实 HTTP）。
+  - **教训**：本机全绿不等于 CI 绿——环境相关的未处理错误/类型错误只在 CI 暴露（同一次里还抓到一个 `tsc -b` 的报错，本机 `npm run lint` 不跑 tsc，`vitest` 也不算类型）。改这两处之前，别拿本机绿灯当推送依据。

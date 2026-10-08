@@ -13,15 +13,19 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { DataNode } from 'antd/es/tree';
 import './Contacts.less';
 import {
-  buildMembersCsv,
   collectTreeKeys,
+  contactsPaneMode,
+  departmentPathNames,
+  filterDepartmentTree,
   normalizeGender,
+  PAGE_SIZE,
   parseMembersCsv,
   retainVisibleKeys,
   resolveDepartmentDropAction,
   summarizeSettledResults,
 } from './Contacts.utils';
-import { LeaderPicker, MemberFormModal, MembersSection } from './Contacts.components';
+import { LeaderPicker, MemberFormModal, MemberSearchResults, MembersSection } from './Contacts.components';
+import { blobErrorMessage } from '@/utils/format';
 
 interface Dept {
   id: number; companyId: number; parentId: number | null;
@@ -75,19 +79,27 @@ export default function ContactsPage() {
     enabled: !!companyId,
   });
 
-  const { data: selPath = [] } = useQuery({
-    queryKey: ['dept-path', selDeptId],
-    queryFn: () => request(`/api/departments/${selDeptId}/path`),
-    enabled: !!selDeptId,
-  });
-
   const { data: memberResult } = useQuery<UserPage>({
     queryKey: ['users-page', selDeptId, memberPage],
     queryFn: () => request('/api/users/page', { params: {
-      page: memberPage, size: 15, deptId: selDeptId, includeDescendants: true,
+      page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
     } }),
     enabled: !!selDeptId,
   });
+
+  // 搜索框双用：同一个词既过滤左树，也去后端搜人（跨部门；后端按姓名/账号/工号 LIKE，
+  // 非 admin 仍会被收窄到"可管部门 ∪ 本人"）。不传 deptId 才是全范围。
+  const trimmedSearch = search.trim();
+  const [searchPage, setSearchPage] = useState(1);
+  useEffect(() => setSearchPage(1), [trimmedSearch]);
+  const { data: searchResult, isFetching: searchLoading } = useQuery<UserPage>({
+    queryKey: ['users-search', trimmedSearch, searchPage],
+    queryFn: () => request('/api/users/page', { params: {
+      page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
+    } }),
+    enabled: !!trimmedSearch,
+  });
+  const paneMode = contactsPaneMode(search, selDeptId);
 
   const { data: leaderResult } = useQuery<UserPage>({
     queryKey: ['leader-users'],
@@ -166,19 +178,7 @@ export default function ContactsPage() {
     setSelectedMemberIds((prev) => retainVisibleKeys(prev, visibleIds));
   }, [members]);
 
-  const filteredTree = useMemo(() => {
-    if (!search.trim()) return treeData;
-    const lower = search.toLowerCase();
-    const filterNode = (nodes: DataNode[]): DataNode[] =>
-      nodes.flatMap((n) => {
-        const match = String(n.title).toLowerCase().includes(lower);
-        const filteredChildren = n.children ? filterNode(n.children) : [];
-        if (match || filteredChildren.length) return [{ ...n, children: filteredChildren }];
-        return [];
-      });
-    const result = filterNode(treeData);
-    return result;
-  }, [treeData, search]);
+  const filteredTree = useMemo(() => filterDepartmentTree(treeData, search), [treeData, search]);
 
   useEffect(() => {
     if (search.trim()) setExpandedKeys(collectTreeKeys(filteredTree));
@@ -328,10 +328,13 @@ export default function ContactsPage() {
   };
 
   // --- breadcrumb ---
+  // 从**已授权的部门列表**推导，不再请求 /api/departments/{id}/path：那条只认
+  // org:department:read，而左树是它与 org:user:read 的并集——树里点得到、面包屑却 403
+  // （点跨部门搜索结果跳过去时最容易撞上）。祖先本来就带 contextOnly 在树里。
   const breadcrumb = useMemo(() => {
-    const parts = (selPath as Dept[]).map(d => d.name);
+    const parts = departmentPathNames(deptList as Dept[], selDeptId);
     return parts.join(' / ') || '请选择部门';
-  }, [selPath]);
+  }, [deptList, selDeptId]);
 
   // ---- dept form handlers ----
   const handleDeptAdd = async () => {
@@ -405,19 +408,27 @@ export default function ContactsPage() {
     else msg.success(`已删除 ${successCount} 名成员`);
   };
 
-  const handleExportMembers = () => {
-    if (!members.length) { msg.warning('当前部门没有可导出的成员'); return; }
-    const csv = `\uFEFF${buildMembersCsv(members as UserItem[])}`;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const deptName = breadcrumb.split(' / ').pop() || '部门成员';
-    link.href = url;
-    link.download = `${deptName}-成员.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  // 导出走后端（同一条 listAuthorized：含下级部门、行级数据范围也在），以前只把**当前页**
+  // 的 15 个人拼成 CSV，一页 15 人时导出看起来"成功"却少了人。
+  const handleExportMembers = async () => {
+    if (!selDeptId) { msg.warning('请先选择部门'); return; }
+    try {
+      const blob = await request('/api/users/export', {
+        params: { deptId: selDeptId, includeDescendants: true, format: 'csv' },
+        responseType: 'blob',
+        skipErrorHandler: true,
+      });
+      const url = URL.createObjectURL(blob as Blob);
+      const anchor = document.createElement('a');
+      const deptName = breadcrumb.split(' / ').pop() || '部门成员';
+      anchor.href = url;
+      anchor.download = `${deptName}-成员.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      msg.success('已开始下载');
+    } catch (error) {
+      msg.error(await blobErrorMessage(error));
+    }
   };
 
   const handleImportMembers = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -472,7 +483,7 @@ export default function ContactsPage() {
         {/* ===== LEFT ===== */}
         <aside className="ct-left">
           <div className="ct-left-top">
-            <Input prefix={<SearchOutlined />} placeholder="搜索部门" allowClear
+            <Input prefix={<SearchOutlined />} placeholder="搜索部门或人员" allowClear
               value={search} onChange={e => setSearch(e.target.value)} />
             {/* 这里只是"够不够格看到按钮"的近似：建一级部门后端还要求该能力具 ALL 数据范围
                 （DepartmentController 的 requireAllDataScope），而前端看不到范围，越范围时由后端返回 403。 */}
@@ -501,12 +512,33 @@ export default function ContactsPage() {
               blockNode
               onDrop={onDrop}
             />
+            {/* 一个词同时过滤部门与人员：部门没匹配上时左树会空着，说一句免得以为坏了
+                （右边的人员结果可能已经有了）。 */}
+            {search.trim() && filteredTree.length === 0 && (
+              <div className="ct-tree-empty">没有匹配的部门——右侧是人员搜索结果</div>
+            )}
           </div>
         </aside>
 
         {/* ===== RIGHT ===== */}
         <main className="ct-right">
-          {selDeptId ? (
+          {paneMode === 'search' ? (
+            <MemberSearchResults
+              keyword={trimmedSearch}
+              loading={searchLoading}
+              members={searchResult?.records ?? []}
+              total={searchResult?.total ?? 0}
+              currentPage={searchPage}
+              onPageChange={setSearchPage}
+              deptNameById={deptNameById}
+              onLocate={(member) => {
+                // 定位 = 清掉关键词、选中他的部门：回到"那个部门的成员列表"。
+                setSearch('');
+                setMemberPage(1);
+                setSelDeptId(member.deptId);
+              }}
+            />
+          ) : paneMode === 'members' ? (
             <MembersSection
               breadcrumb={breadcrumb}
               members={members}
@@ -532,7 +564,7 @@ export default function ContactsPage() {
               loginAccessLoadingId={memberLoginAccess.isPending ? memberLoginAccess.variables?.id : undefined}
             />
           ) : (
-            <div className="ct-empty">请从左侧选择部门</div>
+            <div className="ct-empty">请从左侧选择部门，或在上方搜索部门与人员</div>
           )}
         </main>
       </div>

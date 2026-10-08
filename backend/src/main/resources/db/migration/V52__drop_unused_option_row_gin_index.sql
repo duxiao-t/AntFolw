@@ -1,0 +1,15 @@
+-- 删掉 t_option_data_source_row 上的 GIN(jsonb_path_ops) 索引。
+--
+-- 它**永远不会被用到**：jsonb_path_ops 只支持 `@>` / `@?` / `@@` 这类包含类操作符，而读这张表的
+-- 查询只有两种形状，都是 `version_id = ?` + `data ->> '列名' IN (...)` / `= ?`
+-- （OptionRuntimeService.labelsForValues / querySchema）。实测（5 万行、SET enable_seqscan=off
+-- 逼优化器只能走索引）：
+--   * `version_id = 1 AND data ->> 'code' IN ('C1','C2','C3')` → Bitmap Index Scan on **主键**
+--     + Filter(49997 行被过滤)，GIN 索引压根没被考虑；
+--   * 而 `data @> '{"code":"C1"}'` → Bitmap Index Scan on 该 GIN 索引。
+-- 也就是说：想让它有用，得把查询写成包含式，或者改成 `(data ->> '列名')` 表达式索引——但列名是
+-- 每个数据源自己配的（valueColumn/labelColumn 运行时才知道），建不了固定的表达式索引。
+-- `version_id` 已经把范围收窄到一个版本（主键前导列），版本内的行数是有界的。
+--
+-- 留着它只会让导入（逐行 INSERT）多维护一份倒排：纯开销，零收益。
+DROP INDEX IF EXISTS ix_option_source_row_data;

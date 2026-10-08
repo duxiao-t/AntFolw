@@ -36,10 +36,12 @@ class FormDataServiceTest {
     private FormDefinitionMapper formDefinitionMapper;
     private FormalNumberService formalNumberService;
     private UserMapper userMapper;
+    private com.antflow.org.DepartmentMapper departmentMapper;
     private FormDataService service;
     private MobileFileLinkService fileLinkService;
     private MobileDraftService draftService;
     private AuthorizationService authorizationService;
+    private com.antflow.form.options.OptionRuntimeService optionRuntime;
 
     @BeforeEach
     void setUp() {
@@ -47,14 +49,16 @@ class FormDataServiceTest {
         formDefinitionMapper = Mockito.mock(FormDefinitionMapper.class);
         formalNumberService = Mockito.mock(FormalNumberService.class);
         userMapper = Mockito.mock(UserMapper.class);
+        departmentMapper = Mockito.mock(com.antflow.org.DepartmentMapper.class);
         var formDefinitionService = new FormDefinitionService(formDefinitionMapper, json,
             Mockito.mock(FormGrantService.class));
         fileLinkService = Mockito.mock(MobileFileLinkService.class);
         draftService = Mockito.mock(MobileDraftService.class);
         authorizationService = Mockito.mock(AuthorizationService.class);
+        optionRuntime = Mockito.mock(com.antflow.form.options.OptionRuntimeService.class);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
-            formalNumberService, authorizationService, userMapper,
-            formDefinitionMapper, fileLinkService, draftService);
+            formalNumberService, authorizationService, userMapper, departmentMapper,
+            optionRuntime, fileLinkService, draftService);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(authorizationService.currentUserId()).thenReturn(7L);
@@ -141,6 +145,37 @@ class FormDataServiceTest {
     }
 
     @Test
+    void submitRejectsClientSuppliedApprovedStatus() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+
+        // APPROVED 是 t_process_instance 的状态，t_form_data.status 只有 DRAFT/SUBMITTED。
+        // 不拦的话客户端能塞进一个永远不会出现的状态，台账/报表里就落进"其它"桶。
+        assertThatThrownBy(() -> service.submit("expense", "APPROVED",
+            Map.of("applicant", "张三"), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不支持的表单状态");
+        Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
+    }
+
+    @Test
+    void mySubmissionsReturnsOnlyTheRequestedPage() {
+        Mockito.when(formDataMapper.countMySubmissions(7L, null)).thenReturn(45L);
+        FormData row = new FormData();
+        row.setId(11L);
+        Mockito.when(formDataMapper.selectMySubmissions(7L, null, 20L, 40L))
+            .thenReturn(List.of(row));
+
+        Page<FormData> page = service.mySubmissions(7L, null, 3, 20);
+
+        assertThat(page.getTotal()).isEqualTo(45L);
+        assertThat(page.getCurrent()).isEqualTo(3L);
+        assertThat(page.getSize()).isEqualTo(20L);
+        assertThat(page.getRecords()).hasSize(1);
+        // 分页必须下推到 SQL（limit/offset）：本人提交多了，以前一次全量返回整张表。
+        Mockito.verify(formDataMapper).selectMySubmissions(7L, null, 20L, 40L);
+    }
+
+    @Test
     void directSubmitRejectsMismatchedCaller() {
         Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
         Mockito.when(authorizationService.currentUserId()).thenReturn(8L);
@@ -152,7 +187,7 @@ class FormDataServiceTest {
     }
 
     @Test
-    void adminPageReturnsUsernameAndNamedFieldValues() {
+    void adminPageReturnsSubmitterIdentityAndNamedFieldValues() {
         FormData record = new FormData();
         record.setId(100L);
         record.setFormDefId(10L);
@@ -163,17 +198,103 @@ class FormDataServiceTest {
         User user = new User();
         user.setId(7L);
         user.setUsername("zhangsan");
+        user.setDisplayName("张三");
+        user.setEmployeeNo("000007");
+        user.setDeptId(4L);
+        var department = new com.antflow.org.Department();
+        department.setId(4L);
+        department.setName("技术部");
         Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(page);
+        Mockito.when(formDataMapper.selectSchemas(any()))
+            .thenReturn(java.util.List.of(new FormDataMapper.SchemaRow(100L, publishedNoWorkflowForm().getSchema())));
         Mockito.when(userMapper.selectBatchIds(any())).thenReturn(java.util.List.of(user));
-        Mockito.when(formDefinitionMapper.selectBatchIds(any()))
-            .thenReturn(java.util.List.of(publishedNoWorkflowForm()));
+        Mockito.when(departmentMapper.selectBatchIds(any())).thenReturn(java.util.List.of(department));
 
         FormData result = service.adminPage(1, 20, 10L, null, null).getRecords().get(0);
 
-        assertThat(result.getCreatedByUsername()).isEqualTo("zhangsan");
+        // 台账三列：姓名 / 工号 / 部门。
+        assertThat(result.getCreatedByName()).isEqualTo("张三");
+        assertThat(result.getCreatedByEmployeeNo()).isEqualTo("000007");
+        assertThat(result.getCreatedByDeptName()).isEqualTo("技术部");
         assertThat(result.getFieldValues()).containsExactly(
-            new FormData.FieldValue("applicant", "申请人", "张三"),
-            new FormData.FieldValue("unknown", "unknown", 123));
+            new FormData.FieldValue("applicant", "申请人", "张三", "张三", "张三"),
+            new FormData.FieldValue("unknown", "unknown", 123, "123", "123"));
+    }
+
+    /** 同一页里混着两个版本的记录：各按**自己那版**的标签与选项显示，不能一张表一个字典。 */
+    @Test
+    void adminPageResolvesEachRecordsOwnFormVersion() {
+        FormData old = new FormData();
+        old.setId(100L);
+        old.setFormDefId(10L);
+        old.setFormDefVersion(1);
+        old.setData("{\"craft\":\"option_1\"}");
+        FormData current = new FormData();
+        current.setId(101L);
+        current.setFormDefId(10L);
+        current.setFormDefVersion(2);
+        current.setData("{\"craft\":\"option_1\"}");
+        Page<FormData> page = Page.of(1, 20, 2);
+        page.setRecords(java.util.List.of(old, current));
+        Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(page);
+        Mockito.when(formDataMapper.selectSchemas(any())).thenReturn(java.util.List.of(
+            new FormDataMapper.SchemaRow(100L, versionedSchema("工艺项", "车削")),
+            new FormDataMapper.SchemaRow(101L, versionedSchema("工艺", "镗削"))));
+
+        java.util.List<FormData> records = service.adminPage(1, 20, 10L, null, null).getRecords();
+
+        assertThat(records.get(0).getFieldValues()).containsExactly(
+            new FormData.FieldValue("craft", "工艺项", "option_1", "车削", "车削"));
+        assertThat(records.get(1).getFieldValues()).containsExactly(
+            new FormData.FieldValue("craft", "工艺", "option_1", "镗削", "镗削"));
+    }
+
+    private static String versionedSchema(String label, String optionLabel) {
+        return "[{\"id\":\"craft\",\"type\":\"select\",\"label\":\"" + label + "\",\"props\":"
+            + "{\"options\":[{\"value\":\"option_1\",\"label\":\"" + optionLabel + "\"}]}}]";
+    }
+
+    @Test
+    void adminPageFallsBackToUsernameAndToleratesMissingSubmitters() {
+        FormData named = new FormData();
+        named.setId(100L);
+        named.setFormDefId(10L);
+        named.setCreatedBy(7L);
+        named.setData("{}");
+        FormData anonymous = new FormData();
+        anonymous.setId(101L);
+        anonymous.setFormDefId(10L);
+        anonymous.setData("{}");
+        // created_by 为空的历史数据：不能把空 ID 集合丢给 selectBatchIds（会拼出 IN ()），
+        // 也不该拿别人的部门名糊上去。整页都没有提交人时一次批查都不该发生。
+        Page<FormData> page = Page.of(1, 20, 2);
+        page.setRecords(java.util.List.of(anonymous));
+        Page<FormData> mixed = Page.of(1, 20, 2);
+        mixed.setRecords(java.util.List.of(named, anonymous));
+        User user = new User();
+        user.setId(7L);
+        user.setUsername("zhangsan");
+        // display_name 为空 → 显示名回落账号；没有部门 → 部门名留空。
+        Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(page);
+        Mockito.when(formDataMapper.selectSchemas(any()))
+            .thenReturn(java.util.List.of(new FormDataMapper.SchemaRow(100L, "[]"),
+                new FormDataMapper.SchemaRow(101L, "[]")));
+        Mockito.when(userMapper.selectBatchIds(any())).thenReturn(java.util.List.of(user));
+
+        FormData onlyAnonymous = service.adminPage(1, 20, 10L, null, null).getRecords().get(0);
+
+        assertThat(onlyAnonymous.getCreatedByName()).isNull();
+        assertThat(onlyAnonymous.getCreatedByDeptName()).isNull();
+        Mockito.verify(userMapper, Mockito.never()).selectBatchIds(any());
+        Mockito.verify(departmentMapper, Mockito.never()).selectBatchIds(any());
+
+        Mockito.when(formDataMapper.selectPage(any(), any())).thenReturn(mixed);
+
+        java.util.List<FormData> records = service.adminPage(1, 20, 10L, null, null).getRecords();
+
+        assertThat(records.get(0).getCreatedByName()).isEqualTo("zhangsan");
+        assertThat(records.get(0).getCreatedByEmployeeNo()).isNull();
+        Mockito.verify(departmentMapper, Mockito.never()).selectBatchIds(any());
     }
 
     private static FormDefinition publishedNoWorkflowForm() {

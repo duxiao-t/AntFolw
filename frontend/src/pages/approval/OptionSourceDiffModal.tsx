@@ -99,7 +99,7 @@ export function OptionSourceDiffModal({ sourceId, target, onClose }: {
                   type="warning"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message="列结构有变化"
+                  title="列结构有变化"
                   description={diff.columnChanges.join('；')}
                 />
               )}

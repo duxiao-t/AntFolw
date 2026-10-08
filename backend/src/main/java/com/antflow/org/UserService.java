@@ -292,9 +292,12 @@ public class UserService {
         QueryWrapper<User> query = new QueryWrapper<>();
         if (request.keyword() != null && !request.keyword().isBlank()) {
             String keyword = request.keyword().trim();
-            query.and(wrapper -> wrapper.like("username", keyword)
-                .or().like("display_name", keyword)
-                .or().like("employee_no", keyword));
+            query.and(wrapper -> {
+                wrapper.like("username", keyword)
+                    .or().like("display_name", keyword)
+                    .or().like("employee_no", keyword);
+                DepartmentMapper.applyDeptNameMatch(wrapper, keyword);
+            });
         }
         // 显式名单：候选只限这些人。仍会被下面的数据范围再过滤一次。
         // 注意「给了名单但是空的」= 明确要求"零候选"，不能当成"没给过滤"——否则设计器把
@@ -336,9 +339,13 @@ public class UserService {
         QueryWrapper<User> query = new QueryWrapper<>();
         if (keyword != null && !keyword.isBlank()) {
             String normalized = keyword.trim();
-            query.and(wrapper -> wrapper.like("username", normalized)
-                .or().like("display_name", normalized)
-                .or().like("employee_no", normalized));
+            // 关键字也匹配部门名（含下级）：通讯录里搜"研发部"要出人，不能只过滤左树。
+            query.and(wrapper -> {
+                wrapper.like("username", normalized)
+                    .or().like("display_name", normalized)
+                    .or().like("employee_no", normalized);
+                DepartmentMapper.applyDeptNameMatch(wrapper, normalized);
+            });
         }
         if (departmentId != null) {
             List<Long> requested = includeDescendants
@@ -347,7 +354,13 @@ public class UserService {
             query.in("dept_id", requested);
         }
         AuthorizationService.AuthzSnapshot snapshot = authorizationService.currentSnapshot();
-        if (!snapshot.admin()) {
+        // ALL 范围的人不该被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
+        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里的 admin/bob 就是）挡在外面，
+        // 而单条的 inCurrentDataScope 对 ALL 返回 true——两条路径口径不一致，搜人时会直接看出来。
+        var effectiveScope = authorizationService.currentDataScope(permission);
+        boolean unrestricted = effectiveScope.map(AuthorizationService.DataScopeFilter::unrestricted)
+            .orElse(false);
+        if (!snapshot.admin() && !unrestricted) {
             Set<Long> departments = authorizationService.manageableDepartments(snapshot, permission);
             boolean self = snapshot.permissionRoles().getOrDefault(permission, List.of()).stream()
                 .anyMatch(grant -> grant.dataScope() == com.antflow.authz.DataScope.SELF);

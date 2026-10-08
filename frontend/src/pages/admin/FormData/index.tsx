@@ -1,17 +1,9 @@
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
-import { useQuery } from '@tanstack/react-query';
 import { Link, request, useLocation } from '@umijs/max';
 import { Drawer, Typography } from 'antd';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  cellTextFor,
-  detailTextFor,
-  fieldColumns,
-  fieldMetas,
-  type FieldMeta,
-  type FormDataFieldValue,
-} from './fieldValues';
+import { fieldColumns, type FormDataFieldValue } from './fieldValues';
 
 type FormDataRecord = {
   id: number;
@@ -21,7 +13,10 @@ type FormDataRecord = {
   data?: unknown;
   status: 'DRAFT' | 'SUBMITTED';
   createdBy?: number;
-  createdByUsername?: string;
+  /** 姓名（后端已按 display_name→username 回落）。 */
+  createdByName?: string;
+  createdByEmployeeNo?: string;
+  createdByDeptName?: string;
   fieldValues?: FormDataFieldValue[];
   createdAt?: string;
 };
@@ -44,24 +39,6 @@ export default function AdminFormDataPage() {
   const [fields, setFields] = useState<Array<{ id: string; label: string }>>([]);
   const searchParams = new URLSearchParams(location.search);
   const initialFormDefId = searchParams.get('formDefId') ?? undefined;
-  const [formDefId, setFormDefId] = useState<string | undefined>(initialFormDefId);
-
-  // 字段类型与选项只能从表单定义里拿（数据接口不给）。取不到就退化：只有 form:data:read
-  // 的账号取定义会 404，那不该让整页报错——只是下拉显示原始值、检查项显示条目数。
-  const definition = useQuery<{ schema?: string }>({
-    queryKey: ['form-definition-for-ledger', formDefId],
-    queryFn: () => request(`/api/forms/definitions/${formDefId}`),
-    enabled: Boolean(formDefId),
-    retry: false,
-  });
-  const metas = useMemo<Map<string, FieldMeta>>(() => {
-    if (!definition.data?.schema) return new Map();
-    try {
-      return fieldMetas(JSON.parse(definition.data.schema));
-    } catch {
-      return new Map();
-    }
-  }, [definition.data?.schema]);
 
   const columns = useMemo<ProColumns<FormDataRecord>[]>(() => {
     const meta: ProColumns<FormDataRecord>[] = [
@@ -73,12 +50,31 @@ export default function AdminFormDataPage() {
         render: (_, record) => record.businessNo || '—',
       },
       {
+        // 显示姓名（不是登录账号），并且筛选也改成按姓名/工号搜——列上写着人名、
+        // 筛选框却要输入数字 id，那种割裂比不显示还难用。
         title: '提交人',
-        dataIndex: 'createdBy',
-        valueType: 'digit',
-        width: 120,
+        dataIndex: 'createdByName',
+        width: 140,
+        // 搜索框发出去的参数名要与接口一致（列名是给人看的，参数名是给后端看的）。
+        search: { transform: (value: string) => ({ submitterKeyword: value }) },
         render: (_, record) =>
-          record.createdByUsername ?? (record.createdBy ? `用户 #${record.createdBy}` : '—'),
+          record.createdByName ?? (record.createdBy ? `用户 #${record.createdBy}` : '—'),
+      },
+      {
+        title: '工号',
+        dataIndex: 'createdByEmployeeNo',
+        width: 110,
+        search: false,
+        render: (_, record) => record.createdByEmployeeNo || '—',
+      },
+      {
+        title: '部门',
+        dataIndex: 'createdByDeptName',
+        width: 150,
+        ellipsis: true,
+        search: false,
+        render: (_, record) => record.createdByDeptName
+          || <span style={{ color: 'var(--af-color-muted)' }}>未设置部门</span>,
       },
       {
         title: '提交时间',
@@ -102,8 +98,7 @@ export default function AdminFormDataPage() {
       width: 180,
       render: (_, record) => {
         const hit = record.fieldValues?.find((item) => item.fieldId === field.id);
-        const text = cellTextFor(hit?.value, metas.get(field.id));
-        return text || '—';
+        return hit?.displayText || '—';
       },
     }));
     return [
@@ -118,7 +113,7 @@ export default function AdminFormDataPage() {
       ...meta,
       ...fieldCols,
     ];
-  }, [fields, initialFormDefId, metas]);
+  }, [fields, initialFormDefId]);
 
   const loadRecords = useCallback(async (params: Record<string, any>) => {
     const result = await request<PageResult<FormDataRecord>>('/api/forms/data/admin', {
@@ -128,12 +123,11 @@ export default function AdminFormDataPage() {
         formDefId: params.formDefId,
         status: params.status,
         createdBy: params.createdBy,
+        submitterKeyword: params.submitterKeyword,
       },
     });
     const records = result.records ?? [];
     setFields(fieldColumns(records.map((record) => record.fieldValues ?? [])));
-    // 筛选里改了表单 ID 时，字段字典也要跟着换。
-    setFormDefId(params.formDefId ? String(params.formDefId) : undefined);
     return { data: records, total: result.total ?? 0, success: true };
   }, []);
 
@@ -173,7 +167,7 @@ export default function AdminFormDataPage() {
               </dt>
               <dd style={{ margin: '2px 0 0' }}>
                 <Typography.Text style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                  {detailTextFor(field.value, metas.get(field.fieldId))}
+                  {field.detailText || '—'}
                 </Typography.Text>
               </dd>
             </div>

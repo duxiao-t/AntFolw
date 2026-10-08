@@ -3,6 +3,7 @@ package com.antflow.org;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
+import com.antflow.report.FormDataExport;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -38,6 +39,81 @@ public class UserController {
         if ("user".equals(scopeType) && (userIds == null || userIds.isEmpty())) return List.of();
         return userService.listAuthorized(UserService.UserQuery.of(
             keyword, deptId, includeDescendants, leaderOnly, position, userIds));
+    }
+
+    /**
+     * 通讯录导出：CSV 或 Excel，一份「列 + 值」模型，复用台账导出的渲染
+     * （{@link FormDataExport}：CSV 带 BOM、公式注入防护、Excel 全字符串单元格）。
+     *
+     * <p>参数与 {@link #list} 一字不差，走的也是同一条 {@code listAuthorized}——所以"导出的绝不会
+     * 比看到的多"；以前前端只把**当前页**拼成 CSV，一页 15 人、导出却像导了全部门。
+     *
+     * <p>表头与前端导入器（`Contacts.utils.ts` 的 headerMap）保持同一组中文列名：导出能原样导回。
+     */
+    @GetMapping("/export")
+    @PreAuthorize("@authz.console('" + PermissionCodes.ORG_USER_READ + "')")
+    public org.springframework.http.ResponseEntity<byte[]> export(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long deptId,
+            @RequestParam(required = false) Boolean includeDescendants,
+            @RequestParam(required = false) Boolean leaderOnly,
+            @RequestParam(required = false) String position,
+            @RequestParam(required = false) List<Long> userIds,
+            @RequestParam(required = false) String scopeType,
+            @RequestParam(defaultValue = "csv") String format) {
+        authorizationService.requirePermission(PermissionCodes.ORG_USER_READ);
+        if (!java.util.Set.of("csv", "xlsx").contains(format)) {
+            throw new BizException("EXPORT_FORMAT_UNSUPPORTED", "只支持 csv 或 xlsx");
+        }
+        List<User> users = "user".equals(scopeType) && (userIds == null || userIds.isEmpty())
+            ? List.of()
+            : userService.listAuthorized(UserService.UserQuery.of(
+                keyword, deptId, includeDescendants, leaderOnly, position, userIds));
+        boolean truncated = users.size() > EXPORT_LIMIT;
+        if (truncated) users = users.subList(0, EXPORT_LIMIT);
+        var model = new FormDataExport.Model(EXPORT_HEADERS, users.stream()
+            .map(UserController::exportRow).toList());
+        byte[] body = "csv".equals(format)
+            ? FormDataExport.csv(model) : FormDataExport.xlsx(model);
+        auditService.success("org.user.export", "USER", null, AuditService.RiskLevel.HIGH, Map.of(),
+            Map.of("rowCount", users.size(), "truncated", truncated, "limit", EXPORT_LIMIT,
+                "format", format));
+        return org.springframework.http.ResponseEntity.ok()
+            .contentType(org.springframework.http.MediaType.parseMediaType("csv".equals(format)
+                ? "text/csv;charset=UTF-8"
+                : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                org.springframework.http.ContentDisposition.attachment()
+                    .filename("antflow-contacts." + format).build().toString())
+            .body(body);
+    }
+
+    /** 同步下载的行数上限（与台账导出同量级）：再多就不该走同步下载了。 */
+    static final int EXPORT_LIMIT = 10_000;
+
+    /** 列名必须与前端导入器的 headerMap 一致，否则"导出→导入"回来就不认了。 */
+    static final List<String> EXPORT_HEADERS =
+        List.of("姓名", "工号", "账号", "手机", "邮箱", "职务", "性别");
+
+    private static List<String> exportRow(User user) {
+        return List.of(
+            orEmpty(user.getDisplayName()),
+            orEmpty(user.getEmployeeNo()),
+            orEmpty(user.getUsername()),
+            orEmpty(user.getPhone()),
+            orEmpty(user.getEmail()),
+            orEmpty(user.getPosition()),
+            genderLabel(user.getGender()));
+    }
+
+    private static String orEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static String genderLabel(String value) {
+        if ("M".equals(value) || "男".equals(value)) return "男";
+        if ("F".equals(value) || "女".equals(value)) return "女";
+        return orEmpty(value);
     }
 
     @GetMapping("/page")

@@ -34,6 +34,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # 图片/视频水印要跑 ffmpeg（部署镜像里也装了）。不装的话 MediaWatermarkProcessorTest 里那两条
+      # 真机用例会被 assumeTrue 静默跳过——"水印能跑"其实从来没在 CI 里验过。
+      - name: Install ffmpeg for watermark tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-wqy-microhei
       - name: Run unit tests
         run: mvn -B test
         env:

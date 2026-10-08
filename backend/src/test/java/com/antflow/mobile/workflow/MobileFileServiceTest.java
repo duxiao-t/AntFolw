@@ -8,16 +8,30 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,6 +45,8 @@ class MobileFileServiceTest {
     private MobileFileService service;
     private AuthorizationService authorizationService;
     private List<Runnable> backgroundTasks;
+    /** 真 Template + 假管理器：单测里要能断言"某段代码有没有在事务里跑"。 */
+    private final TransactionTemplate transactions = new TransactionTemplate(new FakeTransactionManager());
 
     @BeforeEach
     void setUp() {
@@ -43,7 +59,46 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(10L * 1024 * 1024);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
+    }
+
+    /** 只做"开/提/回 + 设同步标记"的最小事务管理器；没有它 `isActualTransactionActive()` 永远是 false。 */
+    private static final class FakeTransactionManager extends AbstractPlatformTransactionManager {
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+        }
+    }
+
+    /**
+     * 先插行、后写对象。反过来的顺序会在"`put` 成功但事务最终没提交"（连接断/进程被杀）时留下
+     * 一个没人引用的对象；现在最坏是"行在、对象没写成"，而那种情况整个事务回滚。
+     */
+    @Test
+    void uploadInsertsTheRowBeforeWritingTheObject() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger putsAtInsert =
+            new java.util.concurrent.atomic.AtomicInteger(-1);
+        Mockito.when(fileMapper.insert(any(MobileFile.class))).thenAnswer(invocation -> {
+            putsAtInsert.set(storage.putCount);
+            return 1;
+        });
+
+        service.upload(pngFile("logo.png", pngBytes()), 7L);
+
+        assertThat(putsAtInsert.get()).isZero();
+        assertThat(storage.putCount).isEqualTo(1);
     }
 
     @Test
@@ -60,7 +115,7 @@ class MobileFileServiceTest {
         MobileFileProperties properties = new MobileFileProperties();
         properties.setMaxBytes(4L);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
         MockMultipartFile file = pngFile("large.png", new byte[] {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D
         });
@@ -74,7 +129,6 @@ class MobileFileServiceTest {
     @Test
     void uploadAcceptsExecutableAsAttachment() throws Exception {
         // .dll/.exe attachments are allowed; only the MZ header is required.
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = new byte[] {0x4D, 0x5A, 0x00, 0x00};
         MobileFileDto dto = service.upload(
@@ -88,7 +142,6 @@ class MobileFileServiceTest {
 
     @Test
     void uploadAcceptsArbitraryFileFormat() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = pdfBytes();
         MobileFileDto dto = service.upload(
@@ -101,7 +154,6 @@ class MobileFileServiceTest {
 
     @Test
     void uploadAcceptsArbitraryAttachmentFormat() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] content = "plain text attachment".getBytes(StandardCharsets.UTF_8);
         MobileFileDto dto = service.upload(
@@ -116,7 +168,6 @@ class MobileFileServiceTest {
     @Test
     void uploadAcceptsImageWithMismatchedMimeLabel() throws Exception {
         // Android file pickers often label JPEG bytes as image/png.
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         MobileFileDto dto = service.upload(
             new MockMultipartFile("file", "photo.png", "image/png", jpegBytes()), 7L);
@@ -132,7 +183,7 @@ class MobileFileServiceTest {
         properties.setMaxBytes(10L * 1024 * 1024);
         properties.setMaxVideoBytes(8L);
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
+            authorizationService, backgroundTasks::add, transactions);
 
         MockMultipartFile file = new MockMultipartFile("file", "clip.mp4", "video/mp4", new byte[9]);
 
@@ -146,8 +197,7 @@ class MobileFileServiceTest {
     void uploadAcceptsMp4Video() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+            authorizationService, backgroundTasks::add, transactions);
 
         byte[] content = mp4Bytes();
         MobileFileDto dto = service.upload(
@@ -164,12 +214,17 @@ class MobileFileServiceTest {
     void uploadAppliesWatermarkForVideoAndRenamesToMp4() throws Exception {
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
-            authorizationService, backgroundTasks::add);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+            authorizationService, backgroundTasks::add, transactions);
         Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
-        Mockito.when(processor.apply(Mockito.any(), Mockito.eq("video/quicktime"), Mockito.eq("AntFlow")))
-            .thenReturn(new byte[] {1, 2, 3});
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), Mockito.eq("video/quicktime"),
+                Mockito.eq("AntFlow")))
+            .thenReturn(writeProcessed(new byte[] {1, 2, 3}));
         Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+        // 入队前必须认领；租约在 publish 时也要能对上（下面 publishProcessed 的 token 断言）。
+        Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.publishProcessed(any(), any(), any(), any(), Mockito.anyLong(),
+            any(), any())).thenReturn(1);
 
         MobileFileDto dto = service.upload(
             new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()), 7L, true, "AntFlow");
@@ -183,29 +238,330 @@ class MobileFileServiceTest {
 
         backgroundTasks.get(0).run();
 
-        assertThat(row.getStatus()).isEqualTo("READY");
-        assertThat(row.getContentType()).isEqualTo("video/mp4");
-        assertThat(row.getOriginalName()).isEqualTo("clip.mp4");
+        // 结果不再覆盖原 key：写到独立 key，再用带 token 的条件更新把行的指针指过去。
+        Mockito.verify(fileMapper).publishProcessed(Mockito.eq(row.getId()), any(),
+            Mockito.startsWith(row.getStorageKey() + ".wm-"), Mockito.eq("video/mp4"),
+            Mockito.eq(3L), any(), Mockito.eq("clip.mp4"));
+        // 旧对象在发布成功后清理（测试里没有事务同步，直接删）。
+        assertThat(storage.deletedKeys).contains(row.getStorageKey());
         assertThat(storage.contentBytes).isEqualTo(new byte[] {1, 2, 3});
         assertThat(storage.contentType).isEqualTo("video/mp4");
     }
 
+    /** 租约被别人抢走（publish 条件更新影响 0 行）→ 自己的成品丢掉，绝不碰这一行。 */
     @Test
-    void uploadSkipsWatermarkWhenTextIsBlank() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
+    void publishLosingTheLeaseDropsTheAttemptObject() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenReturn(writeProcessed(new byte[] {9}));
+        Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.publishProcessed(any(), any(), any(), any(), Mockito.anyLong(),
+            any(), any())).thenReturn(0);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        service.processVideoWatermark(row.getId(), UUID.randomUUID());
+
+        // 自己的那份 attempt 对象被删掉；行没有被 publish 改过（条件更新 0 行 = 不是我的行）。
+        assertThat(storage.deletedKeys).anyMatch(key -> key.startsWith(row.getStorageKey() + ".wm-"));
+        Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
+    }
+
+    /** 续租失败（租约已被别人拿走）→ 立刻收手，不浪费时间跑 ffmpeg。 */
+    @Test
+    void processingAbortsEarlyWhenTheLeaseWasLost() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(0);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        service.processVideoWatermark(row.getId(), UUID.randomUUID());
+
+        Mockito.verify(processor, Mockito.never()).applyTo(Mockito.any(), Mockito.any(), any(), any());
+        Mockito.verify(fileMapper, Mockito.never()).publishProcessed(any(), any(), any(), any(),
+            Mockito.anyLong(), any(), any());
+    }
+
+    /** 转码后的成品超过上限 → 失败且原因可读，**绝不**把超大对象塞进存储（输入上限只管源文件）。 */
+    @Test
+    void overlyLargeTranscodedOutputFailsWithAReadableReason() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxVideoBytes(4);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenReturn(writeProcessed(new byte[] {1, 2, 3, 4, 5}));
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        row.setContentType("video/mp4");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        service.processVideoWatermark(row.getId(), UUID.randomUUID());
+
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(fileMapper).failProcessing(Mockito.eq(row.getId()), any(), error.capture());
+        assertThat(error.getValue()).contains("大小上限");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /**
+     * OOM 之类 Error 也要把行写成人话状态，**并且不能被吞掉**——原来 `catch (Exception)` 接不住
+     * Error，行会永远停在 PROCESSING，连重启都有可能再炸一次。
+     */
+    @Test
+    void processingErrorMarksRowFailedAndIsRethrown() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenThrow(new OutOfMemoryError("Java heap space"));
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        MobileFile row = existingFile(UUID.randomUUID(), 7L);
+        row.setStatus("PROCESSING");
+        Mockito.when(fileMapper.selectById(row.getId())).thenReturn(row);
+
+        assertThatThrownBy(() -> service.processVideoWatermark(row.getId(), UUID.randomUUID()))
+            .isInstanceOf(OutOfMemoryError.class);
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(fileMapper).failProcessing(Mockito.eq(row.getId()), any(), error.capture());
+        assertThat(error.getValue()).contains("OutOfMemoryError");
+    }
+
+    /** reaper：有界、先认领；队列满时只把租约还回去，**绝不**标 FAILED（那是上传路径的语义）。 */
+    @Test
+    void reaperLeavesRowProcessingWhenQueueIsFull() {
+        backgroundTasks.clear();
+        MobileFileProperties properties = new MobileFileProperties();
+        Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, rejecting, transactions);
+        UUID stale = UUID.randomUUID();
+        Mockito.when(fileMapper.claimStaleProcessing(any(), Mockito.eq(20), any()))
+            .thenReturn(java.util.List.of(stale));
+
+        service.reapStaleProcessing();
+
+        Mockito.verify(fileMapper).releaseProcessingClaim(Mockito.eq(stale), any());
+        Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
+    }
+
+    /**
+     * 队列满时上传路径**不能**把刚传上来的视频标 FAILED（那等于丢掉用户的数据）：保持 PROCESSING、
+     * 把租约还回去，等前面的任务完成时被"泵"进来。原来这里是"满了就 FAILED"，于是第 23 个并发视频
+     * 必然"上传成功却失败"。
+     */
+    @Test
+    void uploadLeavesRowProcessingWhenQueueIsFull() throws Exception {
+        Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, rejecting, transactions);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
+
+        service.upload(new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()),
+            7L, true, "AntFlow");
+
+        // 行仍是 PROCESSING（对象和行都已经写好了，只是排队排在后面）
+        ArgumentCaptor<MobileFile> captor = ArgumentCaptor.forClass(MobileFile.class);
+        Mockito.verify(fileMapper).insert(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo("PROCESSING");
+        // 租约还回去，让"完成即泵"或 reaper 能再捞；绝不标 FAILED
+        Mockito.verify(fileMapper).releaseProcessingClaim(any(), any());
+        Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
+    }
+
+    /**
+     * 完成即泵：一个转码任务做完就顺手把排队里的下一条接上（而不是干等下一轮定时 reaper）。
+     * 不泵的话队列满时上传的视频要等最多一个 reap-interval 才开始处理。
+     */
+    @Test
+    void completedVideoPumpsOneQueuedRow() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), Mockito.eq("video/quicktime"),
+                Mockito.eq("AntFlow")))
+            .thenReturn(writeProcessed(new byte[] {1, 2, 3}));
+        Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+        Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.publishProcessed(any(), any(), any(), any(), Mockito.anyLong(),
+            any(), any())).thenReturn(1);
+        UUID pending = UUID.randomUUID();
+        Mockito.when(fileMapper.claimStaleProcessing(any(), Mockito.eq(1), any()))
+            .thenReturn(java.util.List.of(pending));
+
+        service.upload(new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()),
+            7L, true, "AntFlow");
+        ArgumentCaptor<MobileFile> captor = ArgumentCaptor.forClass(MobileFile.class);
+        Mockito.verify(fileMapper).insert(captor.capture());
+        Mockito.when(fileMapper.selectById(captor.getValue().getId()))
+            .thenReturn(captor.getValue());
+        assertThat(backgroundTasks).hasSize(1);
+
+        backgroundTasks.get(0).run();
+
+        // 泵走的是"每次 1 条"，而且排进来的下一条又进了同一个队列
+        Mockito.verify(fileMapper).claimStaleProcessing(any(), Mockito.eq(1), any());
+        assertThat(backgroundTasks).hasSize(2);
+        // 被泵的那条**不需要**再 claimProcessing：claimStaleProcessing 已经在 SQL 里把 token 写好了
+        // （上传路径才需要 claimProcessing）。所以这里只有上传那一次认领。
+        Mockito.verify(fileMapper, Mockito.times(1)).claimProcessing(any(), any());
+    }
+
+    /** 图片品牌（HEIC/AVIF 也用 ftyp 盒子）谎报成 video/* 时不能被当成视频送进转码链路。 */
+    @Test
+    void videoDeclaredHeicBrandIsRejected() {
+        byte[] heic = new byte[] {
+            0, 0, 0, 24, 'f', 't', 'y', 'p', 'h', 'e', 'i', 'c', 0, 0, 0, 0,
+            'h', 'e', 'i', 'c'
+        };
+
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "photo.mp4", "video/mp4", heic), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("unsupported file content");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /** `<?xml` 开头的任意 XML 不是图片；只有声明之后真的出现 `<svg` 根才算 SVG。 */
+    @Test
+    void xmlThatIsNotSvgIsRejectedAsImage() {
+        byte[] rss = "<?xml version=\"1.0\"?><rss><channel/></rss>"
+            .getBytes(StandardCharsets.UTF_8);
+        byte[] svgWithProlog = "<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>"
+            .getBytes(StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "feed.svg", "image/svg+xml", rss), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不是支持的图片格式");
+        assertThat(service.upload(
+            new MockMultipartFile("file", "logo.svg", "image/svg+xml", svgWithProlog), 7L)
+            .contentType()).isEqualTo("image/svg+xml");
+    }
+
+    /**
+     * 图片水印必须跑在事务**外**（它要等信号量、跑几秒 ffmpeg；占着连接等会把别的接口一起拖垮），
+     * 而"去重 + 写对象 + 插行"必须在事务**内**（行锁要覆盖到 MinIO 的写入）。
+     */
+    @Test
+    void imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside() throws Exception {
+        List<Boolean> txDuringWatermark = new ArrayList<>();
+        List<Boolean> txDuringInsert = new ArrayList<>();
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+        Mockito.when(processor.resultContentType("image/png")).thenReturn("image/png");
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenAnswer(invocation -> {
+                txDuringWatermark.add(
+                    TransactionSynchronizationManager.isActualTransactionActive());
+                return writeProcessed(new byte[] {1, 2, 3});
+            });
+        Mockito.when(fileMapper.insert(any(MobileFile.class))).thenAnswer(invocation -> {
+            txDuringInsert.add(TransactionSynchronizationManager.isActualTransactionActive());
+            return 1;
+        });
+
+        service.upload(pngFile("logo.png", pngBytes()), 7L, true, "AntFlow");
+
+        assertThat(txDuringWatermark).containsExactly(false);
+        assertThat(txDuringInsert).containsExactly(true);
+    }
+
+    /** 图片闸门来自配置：设成 1 时第二个并发上传必须在信号量上等着。 */
+    @Test
+    void imageWatermarkPermitsFollowTheConfiguredConcurrency() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setImageWatermarkConcurrency(1);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+        Mockito.when(processor.resultContentType("image/png")).thenReturn("image/png");
+        CountDownLatch inWatermark = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenAnswer(invocation -> {
+                inWatermark.countDown();
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                return writeProcessed(new byte[] {1});
+            });
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = pool.submit(
+                () -> service.upload(pngFile("a.png", pngBytes()), 7L, true, "X"));
+            assertThat(inWatermark.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            Future<?> second = pool.submit(
+                () -> service.upload(pngFile("b.png", pngBytes()), 7L, true, "X"));
+            Thread.sleep(300);
+            assertThat(second.isDone()).as("闸门没生效：第二个也进了 ffmpeg").isFalse();
+            release.countDown();
+            first.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            second.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    /** 水印成品可能比输入大：覆盖回 staged 之后要再核一次上限，超了不许进存储。 */
+    @Test
+    void watermarkedImageOverTheLimitIsRejectedBeforeStorage() throws Exception {
+        byte[] input = pngBytes();
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxBytes(input.length + 1);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("image/png")).thenReturn(true);
+        Mockito.when(processor.resultContentType("image/png")).thenReturn("image/png");
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), any(), any()))
+            .thenReturn(writeProcessed(new byte[input.length + 10]));
+
+        assertThatThrownBy(() -> service.upload(pngFile("logo.png", input), 7L, true, "X"))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("file is too large");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /** 处理器现在只吃文件路径：给测试准备一个"成品文件"。 */
+    private static Path writeProcessed(byte[] content) throws IOException {
+        Path dir = Files.createTempDirectory("antflow-test-wm-");
+        Path output = dir.resolve("output.mp4");
+        Files.write(output, content);
+        return output;
+    }
+
+    /**
+     * 要水印却把文案丢了：以前静默存原图（调用方以为加了水印），现在明说——不然开了水印的字段
+     * 能悄悄产出没有水印的"证据照片"。
+     */
+    @Test
+    void uploadRejectsWatermarkWithoutText() {
         Mockito.when(processor.supports("image/png")).thenReturn(true);
 
-        byte[] content = pngBytes();
-        MobileFileDto dto = service.upload(pngFile("logo.png", content), 7L, true, "  ");
-
-        assertThat(storage.contentBytes).isEqualTo(content);
-        Mockito.verify(processor, Mockito.never()).apply(Mockito.any(), Mockito.any(), Mockito.any());
+        assertThatThrownBy(() -> service.upload(pngFile("logo.png", pngBytes()), 7L, true, "  "))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("水印文案");
+        assertThat(storage.putCount).isZero();
+        Mockito.verify(processor, Mockito.never()).applyTo(Mockito.any(), Mockito.any(), Mockito.any(),
+            Mockito.any());
     }
 
     @Test
     void uploadDeduplicatesAndRepairsExistingStorageObject() throws Exception {
         MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(existing);
+        Mockito.when(fileMapper.selectReadyDuplicateForUpdate(Mockito.anyLong(), any()))
+            .thenReturn(existing);
 
         byte[] originalBytes = pngBytes();
         MobileFileDto dto = service.upload(pngFile("logo.png", originalBytes), 7L);
@@ -218,9 +574,66 @@ class MobileFileServiceTest {
         Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
     }
 
+    /** 对象已经在存储里了：重复上传只返回旧行，不再把同一份字节往 MinIO 重写一遍。 */
+    @Test
+    void uploadDeduplicatesWithoutRewritingWhenObjectExists() throws Exception {
+        MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
+        Mockito.when(fileMapper.selectReadyDuplicateForUpdate(Mockito.anyLong(), any()))
+            .thenReturn(existing);
+        storage.existsResult = true;
+
+        MobileFileDto dto = service.upload(pngFile("logo.png", pngBytes()), 7L);
+
+        assertThat(dto.id()).isEqualTo(existing.getId());
+        assertThat(storage.putCount).isZero();
+        Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
+    }
+
+    /**
+     * 存储探针失败 ≠ 对象缺失 ≠ 文件有问题：网络抖动时整个请求必须失败在"存储"这一步。
+     * 被当成"缺失"就会每次抖动都白重传一份；被当成 BAD_FILE 会把锅甩给用户的文件。
+     */
+    @Test
+    void uploadFailsWithStorageErrorWhenProbeCannotReachStorage() throws Exception {
+        MobileFile existing = existingFile(UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60"), 7L);
+        Mockito.when(fileMapper.selectReadyDuplicateForUpdate(Mockito.anyLong(), any()))
+            .thenReturn(existing);
+        storage.failExists = true;
+
+        assertThatThrownBy(() -> service.upload(pngFile("logo.png", pngBytes()), 7L))
+            .isInstanceOf(BizException.class)
+            .satisfies(exception -> assertThat(((BizException) exception).getCode())
+                .isEqualTo("FILE_STORAGE_FAILED"));
+        assertThat(storage.putCount).isZero();
+    }
+
+    /**
+     * 上限不能只看声明的大小：声明 3 字节、实际给 5 字节，客户端就能把 `maxBytes` 绕过去
+     * （代价落在磁盘）。真实字节数只有 stage 数完才知道，所以落盘后必须再比一次。
+     */
+    @Test
+    void uploadRejectsRealBytesOverLimitWhenDeclaredSizeIsLiedAbout() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        properties.setMaxBytes(4);
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        MultipartFile lying = Mockito.mock(MultipartFile.class);
+        Mockito.when(lying.isEmpty()).thenReturn(false);
+        Mockito.when(lying.getSize()).thenReturn(3L);
+        Mockito.when(lying.getContentType()).thenReturn("image/png");
+        Mockito.when(lying.getOriginalFilename()).thenReturn("photo.png");
+        Mockito.when(lying.getInputStream())
+            .thenAnswer(invocation -> new ByteArrayInputStream(pngBytes()));
+
+        assertThatThrownBy(() -> service.upload(lying, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("file is too large");
+        assertThat(storage.putCount).isZero();
+        Mockito.verify(fileMapper, Mockito.never()).insert(any(MobileFile.class));
+    }
+
     @Test
     void uploadStoresValidatedFileMetadata() throws Exception {
-        Mockito.when(fileMapper.selectOne(any())).thenReturn(null);
 
         byte[] originalBytes = pngBytes();
         MobileFileDto dto = service.upload(pngFile("logo.png", originalBytes), 7L);
@@ -251,6 +664,8 @@ class MobileFileServiceTest {
 
         assertThat(dto.id()).isEqualTo(id);
         assertThat(dto.name()).isEqualTo("logo.png");
+        // 自己的文件直接放行：不该再去查关联实例（一页 20 张图就是几十次多余查询）
+        Mockito.verify(accessMapper, Mockito.never()).selectLinkedInstanceIds(any());
     }
 
     @Test
@@ -281,18 +696,136 @@ class MobileFileServiceTest {
         MobileFileDto dto = service.getMetadata(id, 99L, List.of("admin"));
 
         assertThat(dto.id()).isEqualTo(id);
+        Mockito.verify(accessMapper, Mockito.never()).selectLinkedInstanceIds(any());
+    }
+
+    /**
+     * 镜像里没装 ffmpeg 时（本地 docker 栈曾经就是这样）**图片**上传会同步失败——这里用真 processor
+     * 走一遍，钉住"用户看到的是能照着做的话"，而不是 `Cannot run program "ffmpeg"`。
+     */
+    @Test
+    void imageWatermarkWithMissingBinaryFailsWithAnActionableMessage() throws Exception {
+        MobileMediaProperties mediaProperties = new MobileMediaProperties();
+        mediaProperties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
+        service = new MobileFileService(fileMapper, accessMapper, storage,
+            new MobileFileProperties(), new MediaWatermarkProcessor(mediaProperties),
+            authorizationService, backgroundTasks::add, transactions);
+
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "photo.jpg", "image/jpeg", jpegBytes()),
+            7L, true, "AntFlow"))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("ffmpeg")
+            .hasMessageNotContaining("Cannot run program");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /** 声明成 image/png 的非图片字节：以前直接放行、还会走进 ffmpeg；现在按内容拒绝。 */
+    @Test
+    void imageUploadRejectsBytesThatAreNotAnImage() {
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "fake.png", "image/png",
+                "%PDF-1.7 not really an image".getBytes(StandardCharsets.US_ASCII)), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不是支持的图片格式");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /**
+     * 但**真图片都得放行**：iPhone 的 HEIC（`convertHeic` 默认没开，是原样上传的）、安卓的 AVIF、
+     * 扫描件的 TIFF、以及 SVG。漏一个就是"用户选张照片被判成不是图片"。
+     */
+    @Test
+    void imageUploadAcceptsEveryCommonImageSignature() throws Exception {
+        byte[][] contents = {
+            jpegBytes(),
+            pngBytes(),
+            "GIF89a".getBytes(StandardCharsets.US_ASCII),
+            concat(ascii("RIFF"), new byte[] {0, 0, 0, 0}, ascii("WEBP")),
+            ascii("BM00000000"),
+            new byte[] {'I', 'I', 0x2A, 0x00, 1, 2, 3},
+            concat(new byte[] {0, 0, 0, 0x18}, ascii("ftypheic"), new byte[] {0, 0, 0, 0}),
+            concat(new byte[] {0, 0, 0, 0x18}, ascii("ftypavif"), new byte[] {0, 0, 0, 0}),
+            ascii("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"),
+        };
+        for (byte[] content : contents) {
+            assertThat(service.upload(new MockMultipartFile("file", "photo.jpg", "image/jpeg", content), 7L))
+                .as("内容应以图片通过校验")
+                .isNotNull();
+        }
+    }
+
+    private static byte[] ascii(String text) {
+        return text.getBytes(StandardCharsets.US_ASCII);
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        int length = 0;
+        for (byte[] part : parts) length += part.length;
+        byte[] result = new byte[length];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, result, offset, part.length);
+            offset += part.length;
+        }
+        return result;
     }
 
     @Test
     void deleteRejectsSubmittedLinkedFile() {
         UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
-        Mockito.when(fileMapper.selectById(id)).thenReturn(existingFile(id, 7L));
+        lockFile(existingFile(id, 7L));
         Mockito.when(accessMapper.countLinks(id)).thenReturn(1L);
 
         assertThatThrownBy(() -> service.delete(id, 7L))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("file already submitted");
         Mockito.verify(fileMapper, Mockito.never()).updateById(any(MobileFile.class));
+    }
+
+    /** 处理中的视频不给删：后台正往同一个 key 写结果，删了会留下读不出来的孤儿对象。 */
+    @Test
+    void deleteRejectsFileStillBeingProcessed() {
+        UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
+        MobileFile row = existingFile(id, 7L);
+        row.setStatus("PROCESSING");
+        lockFile(row);
+
+        assertThatThrownBy(() -> service.delete(id, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("处理完再删");
+        Mockito.verify(fileMapper, Mockito.never()).updateById(any(MobileFile.class));
+        assertThat(storage.deletedKeys).isEmpty();
+    }
+
+    /**
+     * 对象删除在事务提交后执行：否则"删了对象、事务却回滚"会留下 READY 行指向不存在的对象；
+     * 反过来（提交成功、删对象失败）最多是个没人引用的孤儿。
+     */
+    @Test
+    void deleteRemovesTheObjectOnlyAfterCommit() {
+        UUID id = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
+        MobileFile row = existingFile(id, 7L);
+        lockFile(row);
+        org.springframework.transaction.support.TransactionSynchronizationManager
+            .initSynchronization();
+        try {
+            service.delete(id, 7L);
+            // 事务还没提交 → 对象还没删
+            assertThat(storage.deletedKeys).isEmpty();
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .getSynchronizations().forEach(
+                    org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+            assertThat(storage.deletedKeys).contains(row.getStorageKey());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .clearSynchronization();
+        }
+    }
+
+    /** delete 现在拿的是行锁（FOR UPDATE），测试里让批量加锁返回那一行。 */
+    private void lockFile(MobileFile row) {
+        Mockito.when(fileMapper.selectByIdsForUpdate(any())).thenReturn(java.util.List.of(row));
     }
 
     private static MockMultipartFile pngFile(String name, byte[] content) {
@@ -355,6 +888,12 @@ class MobileFileServiceTest {
         private String storageKey;
         private String contentType;
         private byte[] contentBytes = new byte[0];
+        /** 对象在不在：默认 false，让"缺了就补写"的既有语义不变。 */
+        private boolean existsResult;
+        /** 模拟"存储查不动"（网络抖动/权限）：必须原样失败，不能退化成"缺失"或 BAD_FILE。 */
+        private boolean failExists;
+        /** 被删掉的 key：断言"旧对象在发布后清理""失效的 attempt 被丢弃"用。 */
+        private final java.util.List<String> deletedKeys = new java.util.ArrayList<>();
 
         @Override
         public StoredObject put(String storageKey, InputStream content, long size,
@@ -375,7 +914,16 @@ class MobileFileServiceTest {
         }
 
         @Override
+        public boolean exists(String storageKey) {
+            if (failExists) {
+                throw new BizException("FILE_STORAGE_FAILED", "could not check object in MinIO");
+            }
+            return existsResult;
+        }
+
+        @Override
         public void delete(String storageKey) {
+            deletedKeys.add(storageKey);
         }
     }
 }

@@ -116,7 +116,8 @@ class MobileWorkflowServiceTest {
         Mockito.when(draftService.get(101L, 7L)).thenReturn(new MobileDraftDto(101L, 10L,
             "leave", "请假申请", 3, data, objectMapper.createArrayNode(), false, null, null));
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
-        Mockito.when(fileMapper.selectById(fileId)).thenReturn(file(fileId, 7L, "READY"));
+        Mockito.when(fileMapper.selectByIdsForUpdate(any()))
+            .thenReturn(List.of(file(fileId, 7L, "READY")));
         Mockito.when(engine.start(any(StartCmd.class), Mockito.eq(7L)))
             .thenReturn(Map.of("instanceId", 501L, "formDataId", 301L,
                 "firstTaskIds", List.of(401L)));

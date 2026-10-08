@@ -2,6 +2,15 @@ FROM eclipse-temurin:17-jre-jammy AS jre
 
 FROM postgres:17-bookworm AS backend
 
+# 图片/视频水印要跑 ffmpeg（`antflow.media.ffmpeg-bin`，默认就在 PATH 上）；字体是给中文水印用的——
+# wqy-microhei 的路径已经在 MediaWatermarkProcessor 的候选列表里，装完无需配置。
+# 镜像因此大约 +150MB：水印是「写进 MinIO 之前」的一步，缺了它开了水印的上传会直接 422。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       -o Acquire::Retries=5 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=60 \
+       ffmpeg fonts-wqy-microhei \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=jre /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk

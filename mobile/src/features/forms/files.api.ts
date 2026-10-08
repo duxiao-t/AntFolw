@@ -220,12 +220,18 @@ async function waitForProcessedFile(file: MobileFileDto, onProgress?: UploadProg
     return file;
   }
   onProgress?.({ phase: 'processing', progress: 97 });
-  for (let attempt = 0; attempt < 600; attempt += 1) {
+  // 30 分钟（1s/次）。转码并发只有几路，几十个视频一起传时排在后面的要等很久——服务端现在**不会**
+  // 因为队列满就失败（它保持 PROCESSING 等空位），所以这里的上限不该比"真正处理完"更早放弃。
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     const current = await apiRequest<MobileFileDto>(
       `/api/mobile/files/${encodeURIComponent(file.id)}`,
     );
-    if (current.status === 'FAILED') throw new Error('视频处理失败，请重新上传');
+    // 服务端会给出可读原因（"转码队列忙"/"存储失败"…），别吞掉换成一句通用文案——
+    // 用户看到的提示要能指导下一步（重试 / 换更小更短的视频）。
+    if (current.status === 'FAILED') {
+      throw new Error(current.failureReason || '视频处理失败，请重新上传');
+    }
     if (current.status !== 'PROCESSING') {
       onProgress?.({ phase: 'done', progress: 100 });
       return current;

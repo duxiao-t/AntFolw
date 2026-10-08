@@ -23,6 +23,7 @@ import com.antflow.mobile.workflow.MobileWorkflowMapper;
 import com.antflow.mobile.workflow.MobileDraftService;
 import com.antflow.mobile.workflow.MobileAppService;
 import com.antflow.navigation.MenuService;
+import com.antflow.report.ReportService;
 import com.antflow.mobile.workflow.FileStorage;
 import com.antflow.mobile.workflow.StoredObject;
 import com.antflow.org.User;
@@ -64,7 +65,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -80,6 +83,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     "antflow.automation.recovery-interval-ms=3600000",
     "antflow.outbox.poll-interval-ms=3600000",
     "antflow.wecom.schedule-poll-interval-ms=3600000",
+    // 关掉附件处理 reaper：否则它会跟用例里手工造的行抢，测试就不再确定。
+    "antflow.mobile.files.processing-reap-interval-ms=3600000",
     "antflow.mobile.files.storage=test",
     "antflow.jwt.secret=test-secret-0123456789-test-secret-0123456789",
     // 引导口令放在测试自己这里（pom 的全局属性会盖掉外部传值，故已从 pom 移除）。
@@ -154,6 +159,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 }
 
                 @Override
+                public boolean exists(String storageKey) {
+                    return files.containsKey(storageKey);
+                }
+
+                @Override
                 public void delete(String storageKey) {
                     files.remove(storageKey);
                 }
@@ -173,6 +183,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
     @Autowired private AuthorizationService authorizationService;
     @Autowired private RoleAdminService roleAdminService;
+    @Autowired private com.antflow.report.ReportService reportService;
     @Autowired private FormDefinitionMapper formDefinitionMapper;
     @Autowired private FormDataService formDataService;
     @Autowired private FormDataMapper formDataMapper;
@@ -183,6 +194,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private WecomService wecomService;
     @Autowired private OptionSourceService optionSourceService;
     @Autowired private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
+    @Autowired private com.antflow.mobile.workflow.MobileFileService mobileFileService;
+    @Autowired private com.antflow.mobile.workflow.MobileFileMapper mobileFileMapper;
+    @Autowired private com.antflow.mobile.workflow.MobileFileLinkService mobileFileLinkService;
 
     /**
      * 隐藏字段的选项可见性必须按"调用者自己所处的节点"判，而不是只看发起人。
@@ -350,7 +364,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             setPrincipal(userId);
 
             Page<com.antflow.form.runtime.FormData> visible = formDataService.authorizedPage(
-                1, 20, null, null, null, userId, false);
+                1, 20, null, null, null, null, userId, false);
             assertThat(visible.getRecords()).extracting(com.antflow.form.runtime.FormData::getId)
                 .contains(dataId);
         } finally {
@@ -2036,6 +2050,385 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void approvalSummaryCountsByFormAndNarrowsToTheCallersScope() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", twoApprovalFlow(bobId, adminId));
+        long scopedUser = insertUser("report-scoped");
+        long scopedRole = insertRole("report_scoped");
+        long emptyUser = insertUser("report-empty");
+        long emptyRole = insertRole("report_empty");
+        OffsetDateTime started = OffsetDateTime.now().minusDays(2).withNano(0);
+        java.util.List<Long> dataIds = new java.util.ArrayList<>();
+        try {
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'SELF')", scopedRole);
+            assignRole(scopedUser, scopedRole);
+            // DEPARTMENT 但这个用户没有部门 → 谓词集合为空 → 必须恒假（fail-closed）
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'DEPARTMENT')", emptyRole);
+            assignRole(emptyUser, emptyRole);
+
+            // admin 两单（一通过一进行中）、bob 一单（驳回）、受限账号自己一单（通过，用来验收窄）
+            dataIds.add(insertSubmittedData(formId, adminId));
+            dataIds.add(insertSubmittedData(formId, adminId));
+            dataIds.add(insertSubmittedData(formId, bobId));
+            dataIds.add(insertSubmittedData(formId, scopedUser));
+            insertInstance(processId, dataIds.get(0), "APPROVED", adminId, started, started.plusHours(2));
+            insertInstance(processId, dataIds.get(1), "RUNNING", adminId, started, null);
+            insertInstance(processId, dataIds.get(2), "REJECTED", bobId, started, started.plusHours(4));
+            insertInstance(processId, dataIds.get(3), "APPROVED", scopedUser, started,
+                started.plusHours(2));
+
+            LocalDate from = started.toLocalDate();
+            LocalDate to = LocalDate.now();
+            // 一律按这张表单收窄：同一个容器里还留着别的用例造的数据，不筛就等着顺序一变换个数字。
+            java.util.List<Long> onlyThisForm = java.util.List.of(formId);
+            setPrincipal(adminId);
+            ReportService.ApprovalSummary all = reportService.summary(from, to, onlyThisForm, null, 0);
+
+            assertThat(all.totals().started()).isEqualTo(4);
+            assertThat(all.totals().approved()).isEqualTo(2);
+            assertThat(all.totals().rejected()).isEqualTo(1);
+            assertThat(all.totals().running()).isEqualTo(1);
+            // 通过率分母只算已决：2 / (2 + 1)
+            assertThat(all.totals().approvalRate()).isEqualTo(66.7);
+            // 平均耗时只算已终态且有完成时间的：2h、4h、2h → 2.666…→ 2.7（进行中那条不算）
+            assertThat(all.totals().avgDurationHours()).isEqualTo(2.7);
+            assertThat(all.byForm()).hasSize(1);
+            assertThat(all.byForm().get(0).formName()).isEqualTo("Integration form");
+            assertThat(all.byForm().get(0).started()).isEqualTo(4);
+            // 每一条日期都有值：缺数据的日期补 0，否则折线断成几截
+            assertThat(all.byDay()).hasSize((int) java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1);
+            assertThat(all.byDay().get(0).date()).isEqualTo(from.toString());
+            assertThat(all.byDay().stream().filter(day -> day.started() > 0).findFirst().orElseThrow()
+                .started()).isEqualTo(4);
+
+            // 受限（本人）：只看得到自己那一单——范围必须真的收窄，不能等于全量
+            setPrincipal(scopedUser);
+            ReportService.ApprovalSummary own = reportService.summary(from, to, onlyThisForm, null, 0);
+            assertThat(own.totals().started()).isEqualTo(1);
+            assertThat(own.totals().approved()).isEqualTo(1);
+            assertThat(own.totals().approvalRate()).isEqualTo(100.0);
+            assertThat(own.byForm()).hasSize(1);
+            assertThat(own.byForm().get(0).started()).isEqualTo(1);
+            assertThat(own.byDay().stream().mapToLong(ReportService.DayRow::started).sum()).isEqualTo(1);
+
+            // 空范围：恒假，一条都不该漏出来
+            setPrincipal(emptyUser);
+            ReportService.ApprovalSummary none = reportService.summary(from, to, onlyThisForm, null, 0);
+            assertThat(none.totals().started()).isZero();
+            assertThat(none.byForm()).isEmpty();
+            assertThat(none.byDepartment()).isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+            // 顺序要紧：实例 → 表单数据 → 表单定义 → 角色与用户（created_by 有外键）。
+            jdbcTemplate.update("DELETE FROM t_process_instance WHERE proc_def_id = ?", processId);
+            for (Long dataId : dataIds) {
+                jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            }
+            jdbcTemplate.update("DELETE FROM t_process_definition WHERE id = ?", processId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id IN (?, ?)", scopedUser, emptyUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id IN (?, ?)", scopedRole, emptyRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)", scopedUser, emptyUser);
+            authorizationService.evict(scopedUser);
+            authorizationService.evict(emptyUser);
+        }
+    }
+
+    /** 报表只看实例的状态/时间/发起人/发起部门，直接插一行比走引擎快也更可控。 */
+    private long insertInstance(long processDefId, long formDataId, String status, long startedBy,
+                                OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                                           started_at, finished_at)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+            """, Long.class, processDefId, formDataId, status, startedBy, startedAt, finishedAt);
+    }
+
+    @Test
+    void submitterKeywordFiltersByPersonAndNeverWidensToEverything() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long mine = insertSubmittedData(formId, adminId);
+        setPrincipal(adminId);
+        try {
+            // 姓名命中（种子里 admin 的 display_name 是 "AntFlow Admin"）
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "AntFlow").getRecords())
+                .extracting(com.antflow.form.runtime.FormData::getId).contains(mine);
+            // 工号也命中
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "000001").getRecords())
+                .extracting(com.antflow.form.runtime.FormData::getId).contains(mine);
+            // 查不到人 → **零条**。这条是安全语义：若实现改成"先查 id 集合、集合空就省略条件"，
+            // 这里会退化成"返回范围内的全部记录"，等于把关键字筛选变成越权放大镜。
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "查无此人").getRecords())
+                .isEmpty();
+            // LIKE 通配符被转义：敲一个 % 不该匹配到所有人。
+            assertThat(formDataService.adminPage(1, 20, formId, null, null, "%").getRecords())
+                .isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    /**
+     * 台账按**每条记录自己的表单版本**解释：表单升版改了标签与选项之后，旧单据仍显示当时的标签与
+     * 当时的选项名，新单据显示新的。用真库跑是因为这件事整个就是那段 COALESCE 的 join 链——单测把
+     * mapper mock 掉只能断言"调用了 selectSchemas"。
+     */
+    @Test
+    void ledgerExplainsEachRecordByItsOwnFormVersion() {
+        long adminId = userId("admin");
+        String v1 = "[{\"id\":\"craft\",\"type\":\"select\",\"label\":\"工艺项\","
+            + "\"props\":{\"options\":[{\"value\":\"option_1\",\"label\":\"车削\"}]}}]";
+        String v2 = "[{\"id\":\"craft\",\"type\":\"select\",\"label\":\"工艺\","
+            + "\"props\":{\"options\":[{\"value\":\"option_1\",\"label\":\"镗削\"}]}}]";
+        long formId = insertForm("PUBLISHED", v1);
+        long oldData = submittedSelectData(formId, 1, adminId);
+        // 升版：当前定义改成 v2，同时把 v1 的 schema 快照留在版本表里（这正是 COALESCE 的第二栏）。
+        jdbcTemplate.update("""
+            INSERT INTO t_form_definition_version(form_definition_id, version_no, schema, checksum)
+            VALUES (?, 1, ?::jsonb, 'v1')
+            """, formId, v1);
+        jdbcTemplate.update("UPDATE t_form_definition SET schema = ?::jsonb, version = 2 WHERE id = ?",
+            v2, formId);
+        long newData = submittedSelectData(formId, 2, adminId);
+        setPrincipal(adminId);
+        try {
+            var rows = formDataService.adminPage(1, 50, formId, null, null).getRecords();
+
+            assertThat(fieldValuesOf(rows, oldData)).containsExactly(
+                new com.antflow.form.runtime.FormData.FieldValue("craft", "工艺项", "option_1", "车削", "车削"));
+            assertThat(fieldValuesOf(rows, newData)).containsExactly(
+                new com.antflow.form.runtime.FormData.FieldValue("craft", "工艺", "option_1", "镗削", "镗削"));
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id IN (?, ?)", oldData, newData);
+            jdbcTemplate.update("DELETE FROM t_form_definition_version WHERE form_definition_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    private long submittedSelectData(long formId, int formDefVersion, long creatorId) {        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status, created_by)
+            VALUES (?, ?, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{"craft":"option_1"}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, formDefVersion, creatorId);
+    }
+
+    /**
+     * 外链下拉的选项名在**选项行**里（schema 只写着版本与列映射），所以台账要按钉死的版本回查
+     * 值→标签。这条 SQL 是新的，mock 掉 JdbcTemplate 只能断言"拼了什么"，所以用真库跑：
+     * 值列与标签列不同名时能不能换出中文、查不到的值有没有回落原始值。
+     */
+    @Test
+    void externalOptionLabelsComeFromThePinnedVersionRows() {
+        long adminId = userId("admin");
+        String token = UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+        long sourceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_option_data_source(code, name) VALUES (?, 'Integration source') RETURNING id
+            """, Long.class, "ios_" + token);
+        long versionId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_option_data_source_version(source_id, version_no, status, columns_json,
+                                                     row_count, sha256)
+            VALUES (?, 1, 'PUBLISHED', '["code","name"]'::jsonb, 2, 'x') RETURNING id
+            """, Long.class, sourceId);
+        jdbcTemplate.update("""
+            INSERT INTO t_option_data_source_row(version_id, row_no, data) VALUES
+            (?, 1, '{"code":"option_1","name":"车削"}'::jsonb),
+            (?, 2, '{"code":"option_2","name":"镗削"}'::jsonb)
+            """, versionId, versionId);
+        String schema = "[{\"id\":\"craft\",\"type\":\"multi_select\",\"label\":\"工艺\","
+            + "\"props\":{\"optionSource\":{\"sourceId\":" + sourceId + ",\"versionId\":" + versionId
+            + ",\"valueColumn\":\"code\",\"labelColumn\":\"name\"}}}]";
+        long formId = insertForm("PUBLISHED", schema);
+        long dataId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status, created_by)
+            VALUES (?, 1, lpad(nextval('seq_business_no')::text, 12, '0'),
+                    '{"craft":["option_1","option_2","option_gone"]}'::jsonb, 'SUBMITTED', ?)
+            RETURNING id
+            """, Long.class, formId, adminId);
+        setPrincipal(adminId);
+        try {
+            var rows = formDataService.adminPage(1, 50, formId, null, null).getRecords();
+
+            assertThat(fieldValuesOf(rows, dataId)).containsExactly(
+                // 删掉的选项回落到原始值：旧单据仍要看得见"当时选的是什么"。
+                new com.antflow.form.runtime.FormData.FieldValue("craft", "工艺",
+                    List.of("option_1", "option_2", "option_gone"), "车削、镗削、option_gone",
+                    "车削、镗削、option_gone"));
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_option_data_source_version WHERE id = ?", versionId);
+            jdbcTemplate.update("DELETE FROM t_option_data_source WHERE id = ?", sourceId);
+        }
+    }
+
+    private static List<com.antflow.form.runtime.FormData.FieldValue> fieldValuesOf(
+        List<com.antflow.form.runtime.FormData> rows, long dataId) {
+        return rows.stream().filter(row -> row.getId() == dataId).findFirst().orElseThrow()
+            .getFieldValues();
+    }
+
+    @Test
+    void exportRowsAndCountAreNarrowedByTheCallersScope() {
+        // 导出必须与列表吃同一层行级范围（DataPermissionPolicyHandler 是按 mapper 语句 id
+        // 显式开启的，count 走 selectPage → 同样被覆盖）。这里就把"会不会导出得比看得到更多"钉住。
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long scopedUser = insertUser("export-scoped");
+        long scopedRole = insertRole("export_scoped");
+        long mine = insertSubmittedData(formId, scopedUser);
+        long theirs = insertSubmittedData(formId, bobId);
+        try {
+            // 行级范围跟着**读**能力走，所以受限角色两个能力都要有（只有导出权限会被挡在 403，
+            // 见下面那条断言）。
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'form:data:read', 'SELF'), (?, 'form:data:export', 'SELF')",
+                scopedRole, scopedRole);
+            assignRole(scopedUser, scopedRole);
+
+            setPrincipal(adminId);
+            assertThat(formDataService.exportRows(formId, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .contains(mine, theirs);
+            assertThat(formDataService.countForExport(formId, null, null, null, null)).isEqualTo(2);
+            // 预览计数必须跟着**时间范围**走：少了它，"预览 2 行、实际导出 0 行"就出现了。
+            assertThat(formDataService.countForExport(formId, null, null,
+                java.time.OffsetDateTime.now().plusDays(1), null)).isZero();
+
+            // 受限（本人）：只拿得到自己那条，预览的行数也必须是 1——提示的数字与实际导出必须一致
+            setPrincipal(scopedUser);
+            assertThat(formDataService.exportRows(formId, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .containsExactly(mine);
+            assertThat(formDataService.countForExport(formId, null, null, null, null)).isEqualTo(1);
+
+            // 提交人关键字同样不能把范围放大：查不到人 → 一条都不导
+            assertThat(formDataService.exportRows(formId, null, "查无此人", null, null)).isEmpty();
+            assertThat(formDataService.countForExport(formId, null, "查无此人", null, null)).isZero();
+
+            // 只有导出权限（没有读）：控制器会直接 403，而不是给一个空文件
+            long exportOnly = insertUser("export-only");
+            long exportOnlyRole = insertRole("export_only");
+            try {
+                jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, "
+                    + "scope_override) VALUES (?, 'form:data:export', 'SELF')", exportOnlyRole);
+                assignRole(exportOnly, exportOnlyRole);
+                setPrincipal(exportOnly);
+                assertThatThrownBy(() -> authorizationService.requirePermission(
+                    PermissionCodes.FORM_DATA_READ))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            } finally {
+                jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", exportOnly);
+                jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", exportOnlyRole);
+                jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", exportOnly);
+                authorizationService.evict(exportOnly);
+            }
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id IN (?, ?)", mine, theirs);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", scopedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", scopedRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", scopedUser);
+            authorizationService.evict(scopedUser);
+        }
+    }
+
+    @Test
+    void allScopeUserSearchAlsoReturnsMembersWithoutADepartment() {
+        // ALL 范围不能被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
+        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里 admin/bob 就是）挡在外面，
+        // 而单条的 inCurrentDataScope 对 ALL 是放行的——两条路径口径不一致，通讯录搜人时会直接看出来。
+        long userId = insertUser("all-scope-people-" + UUID.randomUUID());
+        long roleId = insertRole("all_scope_people_" + UUID.randomUUID().toString().replace("-", ""));
+        long deptless = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_user WHERE dept_id IS NULL ORDER BY id LIMIT 1", Long.class);
+        assertThat(deptless).as("库里得有一个没有部门的账号，否则这条用例测不到东西").isNotNull();
+        try {
+            assignRole(userId, roleId);
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override) "
+                + "VALUES (?, 'org:user:read', 'ALL')", roleId);
+            setPrincipal(userId);
+
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100).getRecords())
+                .extracting(User::getId)
+                .contains(deptless);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    /**
+     * 搜部门名也要出人，且是**命中部门及其全部下级**的成员。用真库跑是因为整件事就是一条 ltree 子查询：
+     * mock 掉 JdbcTemplate 只能断言拼进去的字符串，`<@` 写错、path 没带上级这类错照样"通过"。
+     */
+    @Test
+    void userKeywordSearchMatchesDepartmentNameIncludingDescendants() {
+        long adminId = userId("admin");
+        long companyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+        String token = UUID.randomUUID().toString().replace("-", "");
+        String keyword = "zk" + token.substring(0, 8);
+        String otherTag = "zo" + token.substring(8, 16);
+        String rootPath = "ds" + token.substring(16, 26);
+        // 只让**父部门**的名字带上关键词：子部门的人能被搜出来，才说明走的是"含下级"而不是同名。
+        long parentDept = jdbcTemplate.queryForObject("""
+            INSERT INTO t_department(company_id, path, name) VALUES (?, CAST(? AS ltree), ?)
+            RETURNING id
+            """, Long.class, companyId, rootPath, "检索总部" + keyword);
+        long childDept = jdbcTemplate.queryForObject("""
+            INSERT INTO t_department(company_id, path, name) VALUES (?, CAST(? AS ltree), ?)
+            RETURNING id
+            """, Long.class, companyId, rootPath + ".a", "研发一组" + otherTag);
+        long unrelatedDept = insertDepartment(companyId, "财务部" + otherTag);
+
+        long childMember = insertUser("ds-child-" + token.substring(0, 6));
+        long unrelatedMember = insertUser("ds-unrelated-" + token.substring(0, 6));
+        long nameMember = insertUser("ds-by-name-" + token.substring(0, 6));
+        long scopedUser = insertUser("ds-scoped-" + token.substring(0, 6));
+        long scopedRole = insertRole("ds_scoped_" + token.substring(0, 8));
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", childDept, childMember);
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?",
+            unrelatedDept, unrelatedMember);
+        jdbcTemplate.update("UPDATE t_user SET display_name = ? WHERE id = ?",
+            "员工" + keyword, nameMember);
+        try {
+            PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords()
+                .stream().map(User::getId).collect(java.util.stream.Collectors.toSet());
+            assertThat(found).contains(childMember, nameMember);
+            assertThat(found).doesNotContain(unrelatedMember);
+
+            // 新增的 OR 分支不能把数据范围冲掉：受限账号搜同一个词，命中的部门成员一个都不该漏进来。
+            jdbcTemplate.update("UPDATE t_user SET display_name = ? WHERE id = ?",
+                "受限" + keyword, scopedUser);
+            jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override)"
+                + " VALUES (?, 'org:user:read', 'SELF')", scopedRole);
+            assignRole(scopedUser, scopedRole);
+            setPrincipal(scopedUser);
+            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords())
+                .extracting(User::getId).containsExactly(scopedUser);
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", scopedUser);
+            jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", scopedRole);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?, ?, ?)",
+                childMember, unrelatedMember, nameMember, scopedUser);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id IN (?, ?, ?)",
+                childDept, parentDept, unrelatedDept);
+            authorizationService.evict(scopedUser);
+        }
+    }
+
+    @Test
     void wecomLoginOverrideAndDepartmentLeaderOrderingExecuteAgainstPostgres() {
         long adminId = userId("admin");
         long companyId = jdbcTemplate.queryForObject(
@@ -2976,6 +3369,343 @@ class PostgresTransactionalIntegrityIntegrationTest {
             jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
             jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
         }
+    }
+
+    // ---- 附件链路：租约（claim）、条件发布、删除/关联竞态。全部用真库：这些 SQL 是手写的
+    //      （FOR UPDATE / SKIP LOCKED / ON CONFLICT / 条件 UPDATE），单测把 mapper mock 掉只能断言"调了哪个方法"。
+
+    /**
+     * 租约领取：迁移前遗留的 NULL 行必须能被领到（否则最该恢复的那批永远卡住）、同一批 claim 不重叠、
+     * 领过的行不会被再领一次。这条 SQL 只有 Postgres 认（`FOR UPDATE SKIP LOCKED` + `RETURNING`）。
+     */
+    @Test
+    void staleProcessingClaimSkipsClaimedRowsButPicksUpLegacyNullRows() {
+        long ownerId = userId("admin");
+        UUID legacy = insertMobileFile(ownerId, "PROCESSING", null);
+        UUID fresh = insertMobileFile(ownerId, "PROCESSING", java.time.OffsetDateTime.now().minusMinutes(2));
+        UUID firstToken = UUID.randomUUID();
+        // 时间点全部显式写死：拿 "now()" 当 stale 线会被时钟粒度咬（renew 写入的 now() 在查询里已经"偏旧"）。
+        java.time.OffsetDateTime staleLine = java.time.OffsetDateTime.now().minusMinutes(30);
+        try {
+            // 第一轮：只应该捞到遗留的 NULL 行（最该恢复的那批）；2 分钟前刚认领的 fresh 不是 stale
+            assertThat(mobileFileMapper.claimStaleProcessing(staleLine, 10, firstToken))
+                .containsExactly(legacy);
+            // 第二轮：没得领了；同一行两个 worker 抢，带 token 条件的那个只有第一个能成
+            assertThat(mobileFileMapper.claimStaleProcessing(staleLine, 10, UUID.randomUUID())).isEmpty();
+            assertThat(mobileFileMapper.claimProcessing(legacy, UUID.randomUUID())).isZero();
+            // 模拟同一次处理拖过了 stale 窗口（worker 忘了续租）——这时 reaper 本来是抢得走的
+            setClaimTime(legacy, java.time.OffsetDateTime.now().minusHours(2));
+            // 但真路径上每步边界都续租，续租把 claimed_at 推到当下 → 抢不走
+            assertThat(mobileFileMapper.renewProcessingClaim(legacy, firstToken)).isEqualTo(1);
+            assertThat(mobileFileMapper.claimStaleProcessing(staleLine, 10, UUID.randomUUID())).isEmpty();
+            // 真没人续租（worker 死了）→ 过期租约必须能被重新领走
+            setClaimTime(legacy, java.time.OffsetDateTime.now().minusHours(2));
+            assertThat(mobileFileMapper.claimStaleProcessing(staleLine, 10, UUID.randomUUID()))
+                .containsExactly(legacy);
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id IN (?, ?)", legacy, fresh);
+        }
+    }
+
+    /**
+     * 关联必须走行锁：另一个事务锁住同一行、改完状态再提交时，`append` 只能在提交后拿到锁，
+     * 于是看到的是 DELETED、整单失败、**不留 link**。去掉 `FOR UPDATE` 就会先读到 READY、
+     * 等 FK 的 key-share 放行后照样把 link 插进去——提交成功但附件指向已删文件。
+     *
+     * <p>真实调用方（`start`/`FormDataService.submit`）都在事务里调 `append`，所以这里也把
+     * `append` 放进事务：自动提交下 `FOR UPDATE` 等于没加锁。判据是**结果**不是"有没有被挡住"
+     * ——那条子表到 `t_mobile_file` 的外键本身就会挡住 insert，光看阻塞区分不出修复前后。
+     */
+    @Test
+    void appendSeesTheDeletedStatusWhenAnotherTransactionHoldsTheRowLock() throws Exception {
+        long ownerId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long dataId = insertSubmittedData(formId, ownerId);
+        UUID fileId = insertMobileFile(ownerId, "READY", null);
+        TransactionTemplate transactions = new TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            executor.submit(() -> transactions.executeWithoutResult(status -> {
+                mobileFileMapper.selectByIdsForUpdate(List.of(fileId));
+                locked.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+                jdbcTemplate.update(
+                    "UPDATE t_mobile_file SET status = 'DELETED', deleted_at = now() WHERE id = ?",
+                    fileId);
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<Throwable> linking = executor.submit(() -> {
+                PrincipalHolder.set(new PrincipalHolder.Principal(ownerId, "integration-admin",
+                    "Integration Admin", Set.of("admin"), Set.of(), 1L, null, null));
+                try {
+                    return transactions.execute(status -> {
+                        mobileFileLinkService.append(dataId, List.of(
+                            new com.antflow.mobile.workflow.MobileFileRef(fileId, "f1", 0)), ownerId);
+                        return null;
+                    });
+                } catch (Throwable throwable) {
+                    return throwable;
+                } finally {
+                    PrincipalHolder.clear();
+                }
+            });
+            // 让 append 走到它的阻塞点（加锁版卡在 FOR UPDATE、无锁版卡在子表外键），再放行 t1 提交。
+            Thread.sleep(300);
+            release.countDown();
+            Throwable outcome = linking.get(10, TimeUnit.SECONDS);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ?", Long.class, dataId))
+                .as("附件指向了已删文件（append 结果：%s）", outcome)
+                .isZero();
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data_file WHERE form_data_id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", fileId);
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    /**
+     * 去重也要拿行锁：并发删除插在"查到重复行"和"返回那一行/补写对象"之间时，绝不能把已删文件
+     * 还给客户端（提交时会被 `append` 以 `FILE_NOT_FOUND` 拒掉整单），也不该把对象重新写回去变孤儿。
+     *
+     * <p>判据是**结果**：锁生效 → 重查时那一行已不满足 `status='READY'` → 新建一行（新 id）；
+     * 去掉 `FOR UPDATE` → 读到提交前的 READY 直接返回旧行（id 相同）。
+     */
+    /** 真实 PNG 头就够：不带 watermark 的图片上传只校验魔数，不跑 ffmpeg。 */
+    private static final byte[] TINY_PNG = {
+        (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R'};
+
+    @Test
+    void uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked() throws Exception {
+        long ownerId = userId("admin");
+        byte[] png = TINY_PNG;
+        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+            new MockMultipartFile("file", "dup.png", "image/png", png), ownerId);
+        assertThat(first.status()).isEqualTo("READY");
+        UUID freshId = null;
+        TransactionTemplate transactions = new TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            executor.submit(() -> transactions.executeWithoutResult(status -> {
+                mobileFileMapper.selectByIdsForUpdate(List.of(first.id()));
+                locked.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+                jdbcTemplate.update(
+                    "UPDATE t_mobile_file SET status = 'DELETED', deleted_at = now() WHERE id = ?",
+                    first.id());
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<com.antflow.mobile.workflow.MobileFileDto> reupload = executor.submit(
+                () -> mobileFileService.upload(
+                    new MockMultipartFile("file", "dup.png", "image/png", png), ownerId));
+            // 让它走到加锁点，再放行 t1 提交。
+            Thread.sleep(300);
+            release.countDown();
+            com.antflow.mobile.workflow.MobileFileDto again = reupload.get(20, TimeUnit.SECONDS);
+            freshId = again.id();
+            assertThat(again.id()).as("去重把已删文件还给了客户端（没走行锁）").isNotEqualTo(first.id());
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_mobile_file WHERE id = ?", String.class, again.id()))
+                .isEqualTo("READY");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_mobile_file WHERE id = ?", String.class, first.id()))
+                .isEqualTo("DELETED");
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", first.id());
+            if (freshId != null) {
+                jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", freshId);
+            }
+        }
+    }
+
+    /**
+     * 去重读必须**容忍重复行**：`FOR UPDATE` 锁不住还不存在的行，两个并发首次上传同一份字节会各插
+     * 一行（表上没有 (owner_id, sha256) 唯一约束），其后 `selectOne` 命中多行会抛
+     * `TooManyResultsException` → 下一次上传这份字节直接 500。
+     */
+    @Test
+    void uploadToleratesDuplicateReadyRowsForTheSameBytes() throws Exception {
+        long ownerId = userId("admin");
+        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+            new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
+        String sha = jdbcTemplate.queryForObject(
+            "SELECT sha256 FROM t_mobile_file WHERE id = ?", String.class, first.id());
+        // 造出"并发首次上传"留下的第二行：同 owner、同 sha、同 READY，但时间更晚。
+        UUID twin = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                                      size_bytes, sha256, status, created_at)
+            VALUES (?, ?, 'dup.png', ?, 'image/png', ?, ?, 'READY', now() + interval '1 minute')
+            """, twin, ownerId, "image/" + twin + "-dup.png", (long) TINY_PNG.length, sha);
+        try {
+            com.antflow.mobile.workflow.MobileFileDto again = mobileFileService.upload(
+                new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
+            // 固定取最早那行，而不是抛 TooManyResultsException
+            assertThat(again.id()).isEqualTo(first.id());
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id IN (?, ?)", first.id(), twin);
+        }
+    }
+
+    /** 删除×关联竞态的重放次数：单次窗口太窄，重放把"坏交错"的命中率抬起来。 */
+    private static final int RACE_REPLAYS = 8;
+
+    private void setClaimTime(UUID id, java.time.OffsetDateTime at) {
+        jdbcTemplate.update("UPDATE t_mobile_file SET processing_claimed_at = ? WHERE id = ?", at, id);
+    }
+
+    /** 带着 token 发布：token 不对（租约丢了）时改不动任何行——旧 worker 不能覆盖新结果。 */
+    @Test
+    void publishProcessedOnlySucceedsWithTheLiveClaimToken() {
+        long ownerId = userId("admin");
+        UUID fileId = insertMobileFile(ownerId, "PROCESSING", null);
+        try {
+            UUID other = UUID.randomUUID();
+            assertThat(mobileFileMapper.claimProcessing(fileId, other)).isEqualTo(1);
+            assertThat(mobileFileMapper.publishProcessed(fileId, UUID.randomUUID(),
+                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4")).isZero();
+            assertThat(mobileFileMapper.publishProcessed(fileId, other,
+                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4")).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_mobile_file WHERE id = ?", String.class, fileId))
+                .isEqualTo("READY");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT processing_claim_token FROM t_mobile_file WHERE id = ?", UUID.class, fileId))
+                .isNull();
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", fileId);
+        }
+    }
+
+    /**
+     * 删除与提交关联并发：终态只能是 {有 link 且 READY} 或 {无 link 且 DELETED}，**不能两立**
+     * （两立就是"提交成功但附件指向已删文件"那个永久坏引用）。
+     *
+     * <p>单次竞态窗口很窄（去掉行锁后实测常一次跑不出坏交错），所以重放 {@link #RACE_REPLAYS} 次把
+     * 窗口放大——交替序变了就必然踩到；没踩到只是白跑一遍，不会误报。确定性的那一半由单测守着
+     * （锁内复核 READY / DELETED 一律 FILE_NOT_FOUND）。
+     */
+    @Test
+    void deleteAndLinkCannotBothSucceedAgainstTheSameFile() throws Exception {
+        long ownerId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        try {
+            for (int attempt = 0; attempt < RACE_REPLAYS; attempt++) {
+                long dataId = insertSubmittedData(formId, ownerId);
+                UUID fileId = insertMobileFile(ownerId, "READY", null);
+                try {
+                    List<Throwable> failures = runConcurrently(ownerId,
+                        () -> mobileFileService.delete(fileId, ownerId),
+                        () -> mobileFileLinkService.append(dataId,
+                            List.of(new com.antflow.mobile.workflow.MobileFileRef(fileId, "f1", 0)),
+                            ownerId));
+                    long links = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ? AND file_id = ?",
+                        Long.class, dataId, fileId);
+                    String status = jdbcTemplate.queryForObject(
+                        "SELECT status FROM t_mobile_file WHERE id = ?", String.class, fileId);
+                    boolean linked = links > 0;
+                    boolean deleted = "DELETED".equals(status);
+                    assertThat(linked && deleted)
+                        .as("第 %d 次：一个成功的提交配上已删文件就是永久坏引用（失败：%s）",
+                            attempt, failures)
+                        .isFalse();
+                    // 而且两者不能都没成
+                    assertThat(linked || deleted).as("第 %d 次：两边都没成（失败：%s）", attempt, failures)
+                        .isTrue();
+                } finally {
+                    jdbcTemplate.update("DELETE FROM t_form_data_file WHERE form_data_id = ?", dataId);
+                    jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", fileId);
+                    jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+                }
+            }
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    /**
+     * 同一个文件落在两个字段：`t_form_data_file` 的主键是 `(form_data_id, file_id)`，去重键对不上就会
+     * 两次插入同一主键、整单 500。顺便钉住"第二个字段是权威分类"（靠 ON CONFLICT DO UPDATE）。
+     */
+    @Test
+    void sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField() {
+        long ownerId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long dataId = insertSubmittedData(formId, ownerId);
+        UUID fileId = insertMobileFile(ownerId, "READY", null);
+        try {
+            mobileFileLinkService.append(dataId, List.of(
+                new com.antflow.mobile.workflow.MobileFileRef(fileId, "fieldA", 0),
+                new com.antflow.mobile.workflow.MobileFileRef(fileId, "fieldB", 1)), ownerId);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ?", Long.class, dataId))
+                .isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT field_id FROM t_form_data_file WHERE form_data_id = ?", String.class, dataId))
+                .isEqualTo("fieldA");
+
+            // 再插一次同一个文件但换了字段：DO UPDATE 让新字段胜出（reconcileEditable 的迁移语义）
+            mobileFileLinkService.append(dataId, List.of(
+                new com.antflow.mobile.workflow.MobileFileRef(fileId, "editableField", 2)), ownerId);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT field_id FROM t_form_data_file WHERE form_data_id = ?", String.class, dataId))
+                .isEqualTo("editableField");
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_form_data_file WHERE form_data_id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", fileId);
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE id = ?", dataId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    /** 处理中的附件不给删：后台正往同一个 key 写结果。 */
+    @Test
+    void deleteRefusesAFileThatIsStillBeingProcessed() {
+        long ownerId = userId("admin");
+        UUID fileId = insertMobileFile(ownerId, "PROCESSING", null);
+        try {
+            assertThatThrownBy(() -> mobileFileService.delete(fileId, ownerId))
+                .isInstanceOf(com.antflow.engine.BizException.class)
+                .hasMessageContaining("处理完再删");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_mobile_file WHERE id = ?", String.class, fileId))
+                .isEqualTo("PROCESSING");
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_mobile_file WHERE id = ?", fileId);
+        }
+    }
+
+    private UUID insertMobileFile(long ownerId, String status, java.time.OffsetDateTime claimedAt) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                                      size_bytes, sha256, status, processing_claimed_at)
+            VALUES (?, ?, 'clip.mp4', ?, 'video/mp4', 3, 'x', ?, ?)
+            """, id, ownerId, "video/" + id + "-clip.mp4", status, claimedAt);
+        return id;
     }
 
     private long insertForm(String status, String schema, long creatorId) {

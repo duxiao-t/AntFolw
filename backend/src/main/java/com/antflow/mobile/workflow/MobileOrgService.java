@@ -42,18 +42,13 @@ public class MobileOrgService {
         query.select("id", "username", "display_name", "employee_no", "dept_id");
         String trimmedKeyword = normalizeKeyword(request.keyword());
         if (!trimmedKeyword.isEmpty()) {
-            List<Long> matchingDepartmentIds = departmentMapper.selectList(
-                new QueryWrapper<Department>().select("id").like("name", trimmedKeyword))
-                .stream().map(Department::getId).toList();
             query.and(wrapper -> {
                 wrapper.like("username", trimmedKeyword)
                     .or()
                     .like("display_name", trimmedKeyword)
                     .or()
                     .like("employee_no", trimmedKeyword);
-                if (!matchingDepartmentIds.isEmpty()) {
-                    wrapper.or().in("dept_id", matchingDepartmentIds);
-                }
+                DepartmentMapper.applyDeptNameMatch(wrapper, trimmedKeyword);
             });
         }
         // 空名单 = 明确要求零候选，不能当成"没给过滤"（见 UserService.UserQuery 的说明）。

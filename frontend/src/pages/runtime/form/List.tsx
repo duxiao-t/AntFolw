@@ -1,17 +1,22 @@
 import { ProTable } from '@ant-design/pro-components';
-import { useQuery } from '@tanstack/react-query';
 import { request } from '@umijs/max';
 
 export default function FormDataListPage() {
-  const { data } = useQuery({
-    queryKey: ['my-form-data'],
-    queryFn: () => request<any[]>('/api/forms/data').then((r: any) => r ?? []),
-  });
   return (
     <ProTable
       rowKey="id"
-      dataSource={data ?? []}
       search={false}
+      // 服务端分页：接口返回 { records, total }（本人提交可能很多，之前一次全量返回）。
+      request={async (params) => {
+        const page = await request<{ records?: any[]; total?: number }>('/api/forms/data', {
+          params: { page: params.current, size: params.pageSize },
+        });
+        return {
+          data: page?.records ?? [],
+          total: page?.total ?? 0,
+          success: true,
+        };
+      }}
       columns={[
         { title: 'ID', dataIndex: 'id' },
         { title: '表单 ID', dataIndex: 'formDefId' },

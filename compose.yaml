@@ -48,6 +48,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/antflow?stringtype=unspecified
       SPRING_DATASOURCE_USERNAME: antflow
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # 连接池没在 yml 里写死；要调就设 DB_POOL_MAX_SIZE（Spring 的 relaxed binding 直接认这个变量名）。
+      # 默认 10 == Spring 默认值，公式与建议值见 docs/capacity-tuning-2026-09-30.md。
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${DB_POOL_MAX_SIZE:-10}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD: ${ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD:?set ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD}
       AUDIT_TRUSTED_PROXIES: ${AUDIT_TRUSTED_PROXIES:-172.16.0.0/12}

@@ -1,5 +1,6 @@
-import { Upload, Button, message } from 'antd';
 import { VideoCameraOutlined } from '@ant-design/icons';
+import { MediaUploadControl } from './MediaUploadControl';
+import { ReadonlyMediaList, mediaSummary } from './MediaPreview';
 import type { FieldType } from '../../registry/types';
 
 const DEFAULT_ACCEPT = 'video/mp4,video/quicktime,video/3gpp,video/webm';
@@ -45,11 +46,8 @@ export const VideoUploadField: FieldType = {
             {node.label}
             {node.props?.required ? ' *' : ''}
           </div>
-          <div>
-            {Array.isArray(value) && value.length > 0
-              ? `已上传 ${value.length} 个视频`
-              : '未上传视频'}
-          </div>
+          <div>{mediaSummary(value, 'video')}</div>
+          <ReadonlyMediaList value={value} size={160} />
         </div>
       );
     }
@@ -59,36 +57,21 @@ export const VideoUploadField: FieldType = {
           {node.label}
           {node.props?.required ? ' *' : ''}
         </div>
-        <Upload
-          disabled={mode !== 'runtime-fill'}
+        <MediaUploadControl
+          node={node}
+          mode={mode}
+          value={value}
+          onChange={onChange}
+          kind="video"
+          multiple={!!node.props?.multiple}
+          maxCount={node.props?.maxCount ?? 1}
+          maxSizeMB={node.props?.maxSizeMB}
+          maxDuration={maxDuration}
           accept={node.props?.accept ?? DEFAULT_ACCEPT}
-          maxCount={1}
-          fileList={
-            Array.isArray(value)
-              ? (value as any[]).map((item, index) => ({
-                  uid: item.id ?? String(index),
-                  name: item.name ?? item.fileName ?? '视频',
-                  status: 'done',
-                  url: item.contentUrl ?? item.url,
-                }))
-              : []
-          }
-          beforeUpload={(file) => {
-            const maxSizeMB = node.props?.maxSizeMB;
-            if (maxSizeMB && file.size / 1024 / 1024 > maxSizeMB) {
-              message.error(`视频不能超过 ${maxSizeMB}MB`);
-              return Upload.LIST_IGNORE;
-            }
-            return false;
-          }}
-          onChange={(info) => {
-            onChange?.(info.fileList as any);
-          }}
-        >
-          <Button>
-            {node.props?.buttonText || '添加视频'}
-          </Button>
-        </Upload>
+          watermark={!!node.props?.watermark}
+          watermarkText={node.props?.watermarkText}
+          buttonText={node.props?.buttonText}
+        />
       </div>
     );
   },

@@ -94,6 +94,45 @@ describe('leaf mobile fields', () => {
     });
   });
 
+  it('keeps failed checklist photos and offers retry instead of only toasting', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      // 第一次上传失败（服务端原因），重试那次成功
+      .mockRejectedValueOnce(new Error('转码队列忙，请稍后重试'))
+      .mockResolvedValue(new Response(JSON.stringify({
+        id: 'photo-1',
+        name: 'p.jpg',
+        contentUrl: '/api/mobile/files/photo-1/content',
+        contentType: 'image/jpeg',
+        size: 3,
+        status: 'READY',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const onValueChange = vi.fn();
+    const node: MobileSchemaNode = {
+      id: 'inspection',
+      type: 'checklist',
+      label: '检查项',
+      props: {
+        items: [{ id: 'item-1', label: '设备外观', required: true }],
+        results: [
+          { id: 'ok', label: '合格', color: '#123456' },
+          { id: 'bad', label: '需整改', color: '#D93025' },
+        ],
+      },
+    };
+    const { container } = render(<ChecklistField {...baseProps(node, [], onValueChange)} />);
+
+    await userEvent.click(screen.getByRole('button', { name: '合格' }));
+    await userEvent.click(screen.getByRole('button', { name: '添加描述' }));
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    await userEvent.upload(input as HTMLInputElement, new File(['img'], 'p.jpg', { type: 'image/jpeg' }));
+
+    // 失败不被吞掉：留着文件 + 给重试入口
+    await waitFor(() => expect(screen.getByText('1 张上传失败')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(onValueChange).toHaveBeenCalled());
+    expect(screen.queryByText('1 张上传失败')).not.toBeInTheDocument();
+  });
+
   it('renders historical checklist descriptions, images, and videos in readonly mode', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['media']), { status: 200 })));
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:inspection-media');

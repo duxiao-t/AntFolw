@@ -72,5 +72,7 @@ export interface MobileFile {
   url?: string;
   sizeBytes?: number;
   status?: 'PROCESSING' | 'READY' | 'FAILED';
+  /** 服务端只在 FAILED 时给：失败原因，可直接展示给用户。 */
+  failureReason?: string;
   durationSeconds?: number;
 }

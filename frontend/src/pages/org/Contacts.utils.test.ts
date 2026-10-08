@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildMembersCsv,
   collectDepartmentIds,
+  contactsPaneMode,
+  departmentPathNames,
+  filterDepartmentTree,
   formatGender,
   normalizeGender,
   parseMembersCsv,
@@ -10,6 +12,45 @@ import {
   resolveDepartmentDropTarget,
   summarizeSettledResults,
 } from './Contacts.utils';
+
+describe('Contacts pane state', () => {
+  it('shows cross-department search results as soon as there is a keyword', () => {
+    expect(contactsPaneMode('张三', null)).toBe('search');
+    expect(contactsPaneMode('张三', 4)).toBe('search');
+    // 只有空白字符不算关键词：不加这层判断，敲个空格右栏就会跳成搜索结果。
+    expect(contactsPaneMode('   ', 4)).toBe('members');
+  });
+
+  it('falls back to members or the hint when the keyword is cleared', () => {
+    expect(contactsPaneMode('', 4)).toBe('members');
+    expect(contactsPaneMode('', null)).toBe('empty');
+  });
+});
+
+describe('Contacts breadcrumb from the authorized tree', () => {
+  const departments = [
+    { id: 1, parentId: null, name: '总公司' },
+    { id: 2, parentId: 1, name: '技术部' },
+    { id: 3, parentId: 2, name: '后端组' },
+  ];
+
+  it('walks parents up to the root', () => {
+    expect(departmentPathNames(departments, 3)).toEqual(['总公司', '技术部', '后端组']);
+  });
+
+  it('returns nothing for an unselected or unknown department', () => {
+    expect(departmentPathNames(departments, null)).toEqual([]);
+    // 搜到的部门可能不在授权树里（人员权限可见、部门权限不可见）——回空而不是崩。
+    expect(departmentPathNames(departments, 999)).toEqual([]);
+  });
+
+  it('does not loop forever on a corrupted parent cycle', () => {
+    expect(departmentPathNames([
+      { id: 1, parentId: 2, name: 'A' },
+      { id: 2, parentId: 1, name: 'B' },
+    ], 1)).toEqual(['B', 'A']);
+  });
+});
 
 describe('Contacts department tree helpers', () => {
   it('collects the selected department and all descendants', () => {
@@ -22,6 +63,46 @@ describe('Contacts department tree helpers', () => {
     ], 1);
 
     expect(ids.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('keeps the whole subtree of a matched node', () => {
+    const tree = [
+      { title: '总公司', key: 1, children: [
+        { title: '研发中心', key: 2, children: [
+          { title: '研发一组', key: 3 },
+          { title: '研发二组', key: 4 },
+        ] },
+        { title: '财务部', key: 5 },
+      ] },
+    ];
+
+    expect(filterDepartmentTree(tree, '研发')).toEqual([
+      { title: '总公司', key: 1, children: [
+        // 命中的节点连同它下面**没命中**的子节点一起留下——滤掉的话部门在、点进去却是空的。
+        { title: '研发中心', key: 2, children: [
+          { title: '研发一组', key: 3 },
+          { title: '研发二组', key: 4 },
+        ] },
+      ] },
+    ]);
+  });
+
+  it('keeps the ancestor chain leading to a match, and nothing when there is no match', () => {
+    const tree = [
+      { title: '总公司', key: 1, children: [
+        { title: '研发中心', key: 2, children: [{ title: '研发一组', key: 3 }] },
+        { title: '财务部', key: 5 },
+      ] },
+    ];
+
+    expect(filterDepartmentTree(tree, '一组')).toEqual([
+      { title: '总公司', key: 1, children: [
+        { title: '研发中心', key: 2, children: [{ title: '研发一组', key: 3 }] },
+      ] },
+    ]);
+    expect(filterDepartmentTree(tree, '不存在')).toEqual([]);
+    // 空关键词 = 不过滤，返回原树（不是空树）。
+    expect(filterDepartmentTree(tree, '  ')).toBe(tree);
   });
 });
 
@@ -105,41 +186,6 @@ describe('Contacts CSV helpers', () => {
     expect(formatGender('女')).toBe('女');
   });
 
-  it('exports members with Chinese headers and escapes CSV cells', () => {
-    const csv = buildMembersCsv([
-      {
-        id: 1,
-        employeeNo: '000001',
-        username: 'zhangsan',
-        displayName: '张三,主管',
-        email: 'z"s@example.com',
-        phone: '13800000000',
-        position: '研发',
-        gender: 'M',
-        deptId: 2,
-      },
-    ]);
-
-    expect(csv).toBe('姓名,工号,账号,手机,邮箱,职务,性别\r\n"张三,主管",000001,zhangsan,13800000000,"z""s@example.com",研发,男');
-  });
-
-  it('neutralizes spreadsheet formulas in exported member fields', () => {
-    const csv = buildMembersCsv([{
-      displayName: '=HYPERLINK("https://evil.example")',
-      employeeNo: '000001',
-      username: '+cmd',
-      phone: '',
-      email: ' safe@example.com',
-      position: '\t@SUM(1,1)',
-      gender: 'M',
-      deptId: 2,
-    }]);
-
-    expect(csv).toContain('"\'=HYPERLINK(""https://evil.example"")"');
-    expect(csv).toContain("'+cmd");
-    expect(csv).toContain('"\'\t@SUM(1,1)"');
-  });
-
   it('imports Chinese-header CSV rows into the selected department', () => {
     const result = parseMembersCsv('姓名,工号,账号,手机,邮箱,职务,性别\n李四,000002,lisi,13900000000,lisi@example.com,产品,女', 7);
 
@@ -198,19 +244,14 @@ describe('Contacts bulk action helpers', () => {
 });
 
 describe('Contacts CSV round trip', () => {
+  // 导出搬到了后端（`GET /api/users/export`），夹具用**服务端实际输出的字面量**：
+  // 服务端那一半（表头、性别出中文、公式前缀、带 BOM）由 UserExportControllerTest 钉住，
+  // 两边合起来才是完整的"导出 → 导入"契约。以前两边各有一份 buildMembersCsv，会慢慢漂移。
   it('导出的文件原样导回来，值不变（含类公式值）', () => {
-    const member = {
-      displayName: '=SUM(A1)',
-      employeeNo: '100001',
-      username: 'alice',
-      phone: '13800000000',
-      email: 'alice@example.com',
-      position: '+组长',
-      gender: 'F',
-      deptId: 7,
-    };
+    const exported = '\uFEFF姓名,工号,账号,手机,邮箱,职务,性别\r\n'
+      + "'=SUM(A1),100001,alice,13800000000,alice@example.com,'+组长,女";
 
-    const parsed = parseMembersCsv(buildMembersCsv([member]), 7);
+    const parsed = parseMembersCsv(exported, 7);
 
     expect(parsed.errors).toEqual([]);
     expect(parsed.rows).toEqual([{
@@ -226,19 +267,12 @@ describe('Contacts CSV round trip', () => {
   });
 
   it('含逗号与引号的值也能往返', () => {
-    const member = {
-      displayName: '张三, "阿三"',
-      employeeNo: '',
-      username: 'zhangsan',
-      phone: '',
-      email: '',
-      position: '',
-      gender: 'M',
-      deptId: 1,
-    };
+    const exported = '\uFEFF姓名,工号,账号,手机,邮箱,职务,性别\r\n'
+      + '"张三, ""阿三""",,zhangsan,,,,男';
 
-    const parsed = parseMembersCsv(buildMembersCsv([member]), 1);
+    const parsed = parseMembersCsv(exported, 1);
 
     expect(parsed.rows[0].displayName).toBe('张三, "阿三"');
+    expect(parsed.rows[0].gender).toBe('M');
   });
 });

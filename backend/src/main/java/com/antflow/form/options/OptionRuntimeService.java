@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -26,12 +27,45 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class OptionRuntimeService {
+    /** 一次标签回查最多带多少个值：这是一页数据的显示需求，不该退化成全表扫描入口。 */
+    private static final int MAX_LABEL_LOOKUP = 500;
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final AuthorizationService authorization;
     private final DefinitionVersionRepository versions;
 
     public OptionPage query(OptionQuery request) { return querySchema(schema(request), request); }
+
+    /**
+     * 一批已选值 → 选项标签，供台账/导出把 `option_1` 显示成中文。
+     *
+     * <p>按 schema 里**钉死的 versionId** 查，且**不校验发布态**：历史单据钉着已停用的版本也得
+     * 出得来标签（{@link #requireVersion} 的注释说明了读路径为什么不校验）。
+     *
+     * <p>查不到的值不进结果，由调用方回落原始值——表单删了选项之后，旧单据仍要看得见"当时选的是什么"。
+     */
+    public Map<String, String> labelsForValues(long versionId, String valueColumn,
+                                               String labelColumn, Collection<String> values) {
+        if (versionId <= 0 || valueColumn.isBlank() || labelColumn.isBlank() || values == null
+                || values.isEmpty()) {
+            return Map.of();
+        }
+        // 只查用到的值：整版扫一遍在 2 万行的源上就是每次翻页都白读 2 万行。
+        List<String> wanted = values.stream().filter(value -> value != null && !value.isBlank())
+            .distinct().limit(MAX_LABEL_LOOKUP).toList();
+        if (wanted.isEmpty()) return Map.of();
+        String placeholders = String.join(", ", java.util.Collections.nCopies(wanted.size(), "?"));
+        List<Object> args = new ArrayList<>(List.of(labelColumn, valueColumn, versionId, valueColumn));
+        args.addAll(wanted);
+        Map<String, String> labels = new LinkedHashMap<>();
+        jdbc.query("SELECT data ->> CAST(? AS text) AS label, data ->> CAST(? AS text) AS value"
+                + " FROM t_option_data_source_row"
+                + " WHERE version_id = ? AND data ->> CAST(? AS text) IN (" + placeholders + ")",
+            rs -> { labels.putIfAbsent(Objects.toString(rs.getString(2), ""),
+                Objects.toString(rs.getString(1), "")); }, args.toArray());
+        return labels;
+    }
 
     public OptionPage preview(long formId, PreviewQuery request) {
         authorization.requireFormMaintenance(formId, PermissionCodes.FORM_DEFINITION_MANAGE);

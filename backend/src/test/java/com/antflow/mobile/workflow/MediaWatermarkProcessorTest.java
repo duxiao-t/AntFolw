@@ -6,11 +6,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class MediaWatermarkProcessorTest {
@@ -35,24 +39,37 @@ class MediaWatermarkProcessorTest {
     }
 
     @Test
-    void watermarksJpegImageWithRealFfmpeg() throws Exception {
+    void watermarksJpegImageWithRealFfmpeg(@TempDir Path workDir) throws Exception {
         assumeTrue(ffmpegAvailable(), "ffmpeg is not installed");
-        byte[] original = jpegBytes();
-        byte[] processed = processor.apply(original, "image/jpeg", "AntFlow");
-        assertThat(processed).isNotEmpty();
-        BufferedImage image = ImageIO.read(new ByteArrayInputStream(processed));
+        Path input = writeTemp(workDir, "photo.jpg", jpegBytes());
+
+        Path output = processor.applyTo(input, workDir, "image/jpeg", "AntFlow");
+
+        assertThat(Files.size(output)).isPositive();
+        BufferedImage image = ImageIO.read(output.toFile());
         assertThat(image).isNotNull();
         assertThat(image.getWidth()).isEqualTo(64);
         assertThat(image.getHeight()).isEqualTo(48);
     }
 
     @Test
-    void watermarksMp4VideoWithRealFfmpeg() throws Exception {
+    void watermarksMp4VideoWithRealFfmpeg(@TempDir Path workDir) throws Exception {
         assumeTrue(ffmpegAvailable(), "ffmpeg is not installed");
         byte[] original = sampleMp4Bytes();
-        byte[] processed = processor.apply(original, "video/mp4", "AntFlow");
-        assertThat(processed).isNotEmpty();
-        assertThat(processed).isNotEqualTo(original);
+        Path input = writeTemp(workDir, "clip.mp4", original);
+
+        Path output = processor.applyTo(input, workDir, "video/mp4", "AntFlow");
+
+        assertThat(output.getFileName().toString()).isEqualTo("output.mp4");
+        assertThat(Files.size(output)).isPositive();
+        // 输入本身没被动过（成品是另一个文件）：这是"不原地覆盖"的最小守护。
+        assertThat(Files.readAllBytes(input)).isEqualTo(original);
+    }
+
+    private static Path writeTemp(Path workDir, String name, byte[] content) throws IOException {
+        Path path = workDir.resolve(name);
+        Files.write(path, content);
+        return path;
     }
 
     private static boolean ffmpegAvailable() {
@@ -63,6 +80,45 @@ class MediaWatermarkProcessorTest {
         } catch (Exception exception) {
             return false;
         }
+    }
+
+    // ---- 缺二进制这条路：镜像里没装 ffmpeg 时，用户看到的必须是"能照着做"的话，
+    //      而不是 Cannot run program "ffmpeg"。下面三条都不需要真 ffmpeg。
+
+    @Test
+    void probeReportsMissingFfmpegBinary() {
+        MobileMediaProperties properties = new MobileMediaProperties();
+        properties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
+        MediaWatermarkProcessor missing = new MediaWatermarkProcessor(properties);
+
+        assertThat(missing.probe().ffmpegAvailable()).isFalse();
+    }
+
+    @Test
+    void missingBinaryFailsWithAnActionableMessage(@TempDir Path workDir) throws Exception {
+        MobileMediaProperties properties = new MobileMediaProperties();
+        properties.setFfmpegBin("antflow-no-such-ffmpeg-binary");
+        MediaWatermarkProcessor missing = new MediaWatermarkProcessor(properties);
+        Path input = writeTemp(workDir, "photo.jpg", jpegBytes());
+
+        assertThatThrownBy(() -> missing.applyTo(input, workDir, "image/jpeg", "AntFlow"))
+            .isInstanceOf(com.antflow.engine.BizException.class)
+            .hasMessageContaining("ffmpeg")
+            .hasMessageNotContaining("Cannot run program");
+    }
+
+    @Test
+    void probeReportsTheConfiguredFontAndIgnoresAMissingOne(@TempDir Path tempDir) throws Exception {
+        Path font = Files.createFile(tempDir.resolve("font.ttf"));
+        MobileMediaProperties properties = new MobileMediaProperties();
+        properties.setWatermarkFont(font.toString());
+        assertThat(new MediaWatermarkProcessor(properties).probe().fontPath())
+            .isEqualTo(font.toString());
+
+        // 配了但文件不在：当成"没有字体"，启动探测才能把它 WARN 出来（把不存在的 fontfile 交给
+        // ffmpeg 是直接报错）。
+        properties.setWatermarkFont(tempDir.resolve("nope.ttf").toString());
+        assertThat(new MediaWatermarkProcessor(properties).probe().fontPath()).isNull();
     }
 
     private static byte[] jpegBytes() throws IOException {

@@ -50,7 +50,46 @@ export interface DeptTreeItem {
   parentId: number | null;
 }
 
-const exportHeaders = ['姓名', '工号', '账号', '手机', '邮箱', '职务', '性别'];
+/** 成员列表与人员搜索共用的分页大小：两处请求必须一致，否则表格页数和数据边界对不上。 */
+export const PAGE_SIZE = 15;
+
+export type ContactsPaneMode = 'search' | 'members' | 'empty';
+
+/**
+ * 右栏该显示什么。有关键词就显示**跨部门的人员搜索结果**（左树的过滤同时生效），
+ * 没有关键词才回到"当前部门的成员"。抽成纯函数是为了让三态可测、也不散在 JSX 里。
+ */
+export function contactsPaneMode(keyword: string, selDeptId: number | null): ContactsPaneMode {
+  if (keyword.trim()) return 'search';
+  return selDeptId === null ? 'empty' : 'members';
+}
+
+/**
+ * 从**已授权**的部门列表推导祖先链（面包屑用）。
+ *
+ * 不用 `/api/departments/{id}/path`：那条只认 `org:department:read`，而左树的可见范围是它与
+ * `org:user:read` 的并集——于是会出现"树里点得到、面包屑却 403 卡住"（跨部门搜索跳转更容易撞上）。
+ * 祖先本来就带着 `contextOnly` 在树里，直接推导既准又不发请求。
+ */
+export interface DeptPathItem {
+  id: number;
+  parentId?: number | null;
+  name: string;
+}
+
+export function departmentPathNames(list: DeptPathItem[], deptId: number | null): string[] {
+  if (deptId === null) return [];
+  const byId = new Map(list.map((item) => [item.id, item]));
+  const names: string[] = [];
+  const guard = new Set<number>();
+  let current = byId.get(deptId);
+  while (current && !guard.has(current.id)) {
+    guard.add(current.id);
+    names.unshift(current.name);
+    current = current.parentId == null ? undefined : byId.get(current.parentId);
+  }
+  return names;
+}
 
 const headerMap: Record<string, keyof Omit<MemberCsvItem, 'id' | 'deptId'>> = {
   姓名: 'displayName',
@@ -113,6 +152,27 @@ export function collectTreeKeys(nodes: { key: Key; children?: { key: Key; childr
   return nodes.flatMap((n) => [n.key, ...(n.children ? collectTreeKeys(n.children) : [])]);
 }
 
+export interface DeptTreeNode {
+  title?: unknown;
+  children?: DeptTreeNode[];
+}
+
+/**
+ * 关键字过滤部门树：命中的节点保留**整棵子树**。
+ *
+ * 以前命中后只留也命中的子节点，搜"研发中心"会把研发一组/二组全滤掉——用户看到部门在，
+ * 点进去却一个下级都没有。命中的就是"这个部门及其下面全部"。
+ */
+export function filterDepartmentTree<T extends DeptTreeNode>(nodes: T[], keyword: string): T[] {
+  const lower = keyword.trim().toLowerCase();
+  if (!lower) return nodes;
+  return nodes.flatMap((node) => {
+    if (String(node.title ?? '').toLowerCase().includes(lower)) return [{ ...node }];
+    const children = node.children ? filterDepartmentTree(node.children as T[], lower) : [];
+    return children.length ? [{ ...node, children }] : [];
+  });
+}
+
 export function collectDepartmentIds(list: DeptTreeItem[], selectedId: number | null): number[] {
   if (selectedId === null) return [];
   const byParent = new Map<number | null, number[]>();
@@ -130,19 +190,6 @@ export function collectDepartmentIds(list: DeptTreeItem[], selectedId: number | 
     stack.push(...(byParent.get(id) ?? []));
   }
   return result;
-}
-
-export function buildMembersCsv(members: MemberCsvItem[]): string {
-  const rows = members.map((m) => [
-    m.displayName ?? '',
-    m.employeeNo ?? '',
-    m.username ?? '',
-    m.phone ?? '',
-    m.email ?? '',
-    m.position ?? '',
-    formatGender(m.gender),
-  ]);
-  return [exportHeaders, ...rows].map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
 }
 
 export function summarizeSettledResults(results: PromiseSettledResult<unknown>[]): SettledSummary {
@@ -201,16 +248,9 @@ export function parseMembersCsv(content: string, deptId: number): MemberCsvParse
   return { rows: errors.length ? [] : rows, errors };
 }
 
-/** 会被 Excel 当公式执行的起始字符（前导空白也算）。 */
+/** 会被 Excel 当公式执行的起始字符（前导空白也算）。导出侧的同类防护现在在后端
+ * （`FormDataExport`），这里只服务于导入：把导出文件里的前导撇号还原回去。 */
 const FORMULA_PREFIX = /^\s*[=+\-@]/;
-
-function escapeCsvCell(value: string): string {
-  // 前导空白/控制字符 + `=+-@` 会被 Excel 当公式执行。\s 已覆盖真正会被当触发器的 \t \r，
-  // 原来还写了 \u0000-\u001f 的区段，Biome 的 noControlCharactersInRegex 不接受，去掉不影响防护。
-  const safe = FORMULA_PREFIX.test(value) ? `'${value}` : value;
-  if (/[",\r\n]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
-  return safe;
-}
 
 /**
  * 与 escapeCsvCell 对称：把我们自己加的那个前导撇号去掉。
