@@ -54,18 +54,26 @@ public class WebhookNotificationListener implements NotificationListener {
     public void onEvent(NotificationEvent e) {
         if (!accepts(e)) return;
         try {
-            String body = json.writeValueAsString(Map.of(
-                "type", e.getType(),
-                "procInstId", e.getProcInstId(),
-                "userId", e.getUserId(),
-                "message", e.getMessage(),
-                "timestamp", java.time.Instant.now().toString()
-            ));
+            // 投递是 at-least-once（异常后 outbox 会重投），所以必须给出一个**稳定的事件键**让
+            // 接收端能幂等：同一个 outbox 行重投时键不变，不同事件一定不同。
+            String eventKey = e.getDeliveryKey();
+            var payload = new java.util.LinkedHashMap<String, Object>();
+            payload.put("type", e.getType());
+            payload.put("procInstId", e.getProcInstId());
+            payload.put("userId", e.getUserId());
+            payload.put("message", e.getMessage());
+            payload.put("timestamp", java.time.Instant.now().toString());
+            if (eventKey != null && !eventKey.isBlank()) payload.put("eventKey", eventKey);
+            String body = json.writeValueAsString(payload);
             HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .build();
-            HttpRequest req = HttpRequest.newBuilder(URI.create(onCompleteUrl))
-                .header("Content-Type", "application/json")
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(onCompleteUrl))
+                .header("Content-Type", "application/json");
+            if (eventKey != null && !eventKey.isBlank()) {
+                request.header("X-AntFlow-Event-Key", eventKey);
+            }
+            HttpRequest req = request
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .timeout(Duration.ofSeconds(5))
                 .build();

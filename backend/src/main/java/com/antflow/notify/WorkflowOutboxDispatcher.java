@@ -33,6 +33,24 @@ public class WorkflowOutboxDispatcher {
         }
     }
 
+    /**
+     * 投递期间的续租。**只续本 worker 自己持有的行**——崩掉的进程续不了，它的行照样会在 2 分钟后
+     * 变成可抢的（恢复路径不受影响），而"还活着但某个外部调用卡了很久"的 worker 不会被另一个
+     * 实例抢走同一行、把通知投两遍。视频转码那条租约用的是同一套思路（renewProcessingClaim）。
+     */
+    @Scheduled(fixedDelayString = "${antflow.outbox.lease-renew-interval-ms:30000}")
+    public void renewLeases() {
+        try {
+            jdbc.update("""
+                UPDATE t_workflow_outbox SET locked_at = now()
+                WHERE status = 'RUNNING' AND locked_by = ?
+                  AND locked_at < now() - interval '30 seconds'
+                """, workerId);
+        } catch (Exception error) {
+            log.warn("Workflow outbox lease renewal failed: {}", error.toString());
+        }
+    }
+
     Event claim() {
         return jdbc.query("""
             WITH candidate AS (
@@ -107,13 +125,23 @@ public class WorkflowOutboxDispatcher {
         return value == null ? null : ((Number) value).longValue();
     }
 
+    /**
+     * 每个通知在渠道侧的幂等键。
+     *
+     * <p>非抄送事件用 **outbox 行 id**：重投同一行必须是同一个键（渠道表的 `ON CONFLICT DO NOTHING`
+     * 靠它去重），而**不同**行必须不同键——早先用 `type:instanceId:taskId:userId`，这几个字段
+     * 会被不同事件共用（撤回后重新指派、改派回原审批人都会对同一个 task 再发一次 TASK_ASSIGNED），
+     * 于是合法的"再次通知"被当成重复静默丢掉。`event.id()` 两次都一样、跨 attempt 稳定。
+     *
+     * <p>抄送保留按轮次：一轮抄送是一条**汇总**消息，同一轮里多出来的 outbox 行不该再发一次。
+     */
     private static String deliveryKey(Event event, JsonNode payload) {
-        if (!"CC_ASSIGNED".equals(event.type()) || event.recipientId() == null
-            || !payload.path("roundNo").canConvertToInt()) {
-            return null;
+        if ("CC_ASSIGNED".equals(event.type()) && event.recipientId() != null
+            && payload.path("roundNo").canConvertToInt()) {
+            return "CC_ASSIGNED:" + event.instanceId() + ":" + payload.path("roundNo").asInt()
+                + ":" + event.recipientId();
         }
-        return "CC_ASSIGNED:" + event.instanceId() + ":" + payload.path("roundNo").asInt()
-            + ":" + event.recipientId();
+        return event.type() + ":" + event.instanceId() + ":" + event.id();
     }
 
     record Event(UUID id, long instanceId, String type, Long recipientId,
