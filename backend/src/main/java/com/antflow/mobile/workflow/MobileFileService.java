@@ -145,7 +145,11 @@ public class MobileFileService {
     }
 
     /**
-     * 上传的事务段：去重（含 {@code FOR UPDATE} 行锁）→ 写对象 → 插行 → 视频登记提交后入队。
+     * 上传的事务段：去重（含 {@code FOR UPDATE} 行锁）→ 插行 → 写对象 → 视频登记提交后入队。
+     *
+     * <p>**先插行、后写对象**（key 由这里生成的 UUID 算得出，两者没有先后依赖）：反过来的话，
+     * `put` 成功而事务最终没提交（连接断、进程被杀）就留下一个没人引用的对象。现在最坏只是
+     * "行在、对象没写成"，而那种情况整个事务回滚，行也不会留下。
      *
      * <p>**去重锁必须和 MinIO 的写入在同一个事务里**：否则并发 {@code delete} 会插进"查到重复行"和
      * "写回去"之间（那正是 d95a746 修的东西）。能逃出这里的异常全是 unchecked（{@code writeStorageObject}
@@ -160,7 +164,7 @@ public class MobileFileService {
                 ownerId, staged.sha256());
             if (existing != null) {
                 // 对象在就只返回旧行：同一份字节重复上传不必再往 MinIO 写一遍（也因此不必碰
-                // 那些已被提交单据引用的对象）。不在才补写——那是现在唯一的自愈机会（没有孤儿清扫器）。
+                // 那些已被提交单据引用的对象）。不在才补写——读的时候对不上就是这样自愈的。
                 if (!storage.exists(existing.getStorageKey())) {
                     writeStorageObject(existing.getStorageKey(), staged, submittedContentType);
                 }
@@ -170,7 +174,6 @@ public class MobileFileService {
 
         UUID id = UUID.randomUUID();
         String storageKey = kindPrefix(submittedContentType) + id + "-" + originalName;
-        writeStorageObject(storageKey, staged, submittedContentType);
 
         MobileFile row = new MobileFile();
         row.setId(id);
@@ -183,6 +186,7 @@ public class MobileFileService {
         row.setStatus(asyncVideo ? PROCESSING_STATUS : READY_STATUS);
         row.setWatermarkText(asyncVideo ? watermarkLabel : null);
         fileMapper.insert(row);
+        writeStorageObject(storageKey, staged, submittedContentType);
         if (asyncVideo) scheduleVideoProcessing(id);
         return toDto(row);
     }

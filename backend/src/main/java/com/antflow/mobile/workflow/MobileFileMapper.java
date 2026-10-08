@@ -104,6 +104,14 @@ public interface MobileFileMapper extends BaseMapper<MobileFile> {
     MobileFile selectReadyDuplicateForUpdate(@Param("ownerId") long ownerId,
                                              @Param("sha256") String sha256);
 
+    /**
+     * 所有行引用着的对象 key（孤儿清扫器的判据）。不筛 `status`：PROCESSING 的行引用的正是它即将
+     * 被替换掉的源对象，排队等转码期间那也是活的。
+     */
+    @Select("SELECT storage_key FROM t_mobile_file WHERE storage_key IS NOT NULL")
+    @InterceptorIgnore(dataPermission = "true")
+    List<String> selectAllStorageKeys();
+
     /** 按 id 升序批量加行锁：删除与"提交时关联附件"靠它串行化（固定锁序，不产生 ABBA）。 */
     @Select("""
         <script>

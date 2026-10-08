@@ -26,6 +26,11 @@ public class MobileFileProperties {
     private int processingStaleMinutes = 30;
     /** 每轮 reaper 最多认领几条：要和真实空位（线程数 + 队列容量）对应，领了跑不了只是白领。 */
     private int processingReapLimit = 20;
+    /**
+     * 孤儿对象清扫要不要**真的删**。默认 false = 只记日志：删除不可逆，先跑一轮看它打算删什么，
+     * 确认无误再打开。
+     */
+    private boolean orphanSweepDelete = false;
     private Minio minio = new Minio();
 
     @Data

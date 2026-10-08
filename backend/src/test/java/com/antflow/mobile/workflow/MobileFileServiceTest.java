@@ -82,6 +82,25 @@ class MobileFileServiceTest {
         }
     }
 
+    /**
+     * 先插行、后写对象。反过来的顺序会在"`put` 成功但事务最终没提交"（连接断/进程被杀）时留下
+     * 一个没人引用的对象；现在最坏是"行在、对象没写成"，而那种情况整个事务回滚。
+     */
+    @Test
+    void uploadInsertsTheRowBeforeWritingTheObject() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger putsAtInsert =
+            new java.util.concurrent.atomic.AtomicInteger(-1);
+        Mockito.when(fileMapper.insert(any(MobileFile.class))).thenAnswer(invocation -> {
+            putsAtInsert.set(storage.putCount);
+            return 1;
+        });
+
+        service.upload(pngFile("logo.png", pngBytes()), 7L);
+
+        assertThat(putsAtInsert.get()).isZero();
+        assertThat(storage.putCount).isEqualTo(1);
+    }
+
     @Test
     void uploadRejectsEmptyFile() {
         MockMultipartFile file = new MockMultipartFile("file", "empty.png", "image/png", new byte[0]);

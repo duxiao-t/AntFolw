@@ -12,6 +12,7 @@ import io.minio.errors.ErrorResponseException;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.InputStreamResource;
@@ -106,6 +107,22 @@ public class MinioFileStorage implements FileStorage {
         } catch (Exception exception) {
             throw new IOException("could not delete object from MinIO", exception);
         }
+    }
+
+    @Override
+    public List<StoredKey> list() {
+        List<StoredKey> keys = new java.util.ArrayList<>();
+        try {
+            for (var result : client.listObjects(io.minio.ListObjectsArgs.builder()
+                    .bucket(bucket()).recursive(true).build())) {
+                io.minio.messages.Item item = result.get();
+                keys.add(new StoredKey(item.objectName(),
+                    item.lastModified() == null ? null : item.lastModified().toOffsetDateTime()));
+            }
+        } catch (Exception exception) {
+            throw new BizException("FILE_STORAGE_FAILED", "could not list objects from MinIO");
+        }
+        return keys;
     }
 
     private void ensureBucket() {
