@@ -37,18 +37,18 @@ export default defineConfig({
     // 15s 在负载下不够：app.test.tsx 这类重挂载的用例单跑 7/7 全过、在全量里跑到 18s+ 就超时，
     // 表现成"每次红的文件都不一样"的 flake。
     testTimeout: 30000,
-    // MobileFormPreview 挂的是 <iframe src="/mobile/form-preview">，happy-dom 会真去请求它；
-    // 请求失败/被中断时抛的 DOMException 无人接，vitest 记成 unhandled error → Test 步骤退出码
-    // 非 0（用例 50 文件全 passed，却不定时红）。
+    // 这里曾经挂着 `dangerouslyIgnoreUnhandledErrors: true`：MobileFormPreview 挂的是
+    // <iframe src="/mobile/form-preview">，happy-dom 会真去请求它，请求被中止时抛的 DOMException
+    // 无人接，于是被记成 unhandled error。那个 flag 的代价是**全项目不再因未处理错误而红**，
+    // 而这层安全网值钱（断言失败照样红，丢的是"异步未处理错误"）。
     //
-    // 实测排除过的窄口径修法：about:blank / srcdoc / javascript: 都是 origin=null（postMessage
-    // 直接 SecurityError）；happy-dom 的 disableIframePageLoading 会让 contentWindow 变成 null
-    // （spyOn 就失败，覆盖一样丢）；自己挂 unhandledRejection 处理器挡不住（vitest 有自己的监听）；
+    // 现在收回（vitest 4.1.10，连跑三次全量 59 文件 / 288 用例都是绿的，退出码 0）：那条
+    // DOMException 仍然会打到控制台，但不再让 run 失败。若它在负载下又真的变红，按这个顺序试：
+    //   1) 把握手抽成"接收 contentWindow 的函数"单测，DOM 级用例只留 src/allow 两个属性断言；
+    //   2) 都不行再把这个 flag 加回来，并把当时的原因写在它旁边。
+    // 已排除的窄口径修法（别再试）：about:blank / srcdoc / javascript: 都是 origin=null
+    // （postMessage 直接 SecurityError）；disableIframePageLoading 会让 contentWindow 变 null
+    // （spyOn 失败，覆盖一样丢）；自挂 unhandledRejection 处理器挡不住（vitest 有自己的监听）；
     // 桩 global.fetch 也没用（iframe 文档加载走 happy-dom 内部的真实 HTTP）。
-    //
-    // 代价说清楚：**全项目不再因"未处理错误"而红**。断言失败、测试内抛出的错误照旧会红；
-    // 丢的是"异步未处理错误"这层安全网。要换回窄口径就只剩"给组件加开关、测试不挂真 iframe",
-    // 那会把 postMessage 握手的 DOM 级覆盖降级成纯函数级。
-    dangerouslyIgnoreUnhandledErrors: true,
   },
 });
