@@ -101,7 +101,6 @@ describe('mobile file api', () => {
     MockXMLHttpRequest.completionMode = 'load';
     MockXMLHttpRequest.loaded = 50;
     MockXMLHttpRequest.statuses = [200];
-    MockXMLHttpRequest.bodies = [];
     MockXMLHttpRequest.autoRespond = true;
     vi.useRealTimers();
   });
