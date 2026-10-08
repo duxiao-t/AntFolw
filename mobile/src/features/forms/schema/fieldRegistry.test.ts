@@ -170,6 +170,27 @@ describe('mobile field registry', () => {
     ).toEqual({ cl: '「外观」的描述必填' });
   });
 
+  // 照片控件靠 maxCount 挡"选不动"，但草稿恢复出来的超量值照样能提交——校验也要看一遍。
+  it('caps checklist photos per item', () => {
+    const schema: MobileSchemaNode[] = [{
+      id: 'cl',
+      type: 'checklist',
+      label: '检查',
+      props: {
+        items: [{ id: 'a', label: '外观' }],
+        allowDescription: false,
+        photoMaxCount: 1,
+      },
+    }];
+
+    expect(validateSchemaValues(schema, {
+      cl: [{ itemId: 'a', result: 'ok', photos: [{ id: 'f1' }, { id: 'f2' }] }],
+    })).toEqual({ cl: '「外观」最多上传 1 张照片' });
+    expect(validateSchemaValues(schema, {
+      cl: [{ itemId: 'a', result: 'ok', photos: [{ id: 'f1' }] }],
+    })).toEqual({});
+  });
+
   it('uses an explicit unsupported field definition for unknown type codes', () => {
     const field = getFieldDefinition('legacy_field');
 

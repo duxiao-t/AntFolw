@@ -66,6 +66,7 @@ export const VideoUploadField: FieldType = {
           multiple={!!node.props?.multiple}
           maxCount={node.props?.maxCount ?? 1}
           maxSizeMB={node.props?.maxSizeMB}
+          maxDuration={maxDuration}
           accept={node.props?.accept ?? DEFAULT_ACCEPT}
           watermark={!!node.props?.watermark}
           watermarkText={node.props?.watermarkText}

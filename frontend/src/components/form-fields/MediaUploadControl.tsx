@@ -34,6 +34,26 @@ function errorMessage(error: unknown) {
 }
 
 /**
+ * 读视频时长（秒）。读不出来返回 null = 不拦：有些容器/浏览器拿不到元数据，宁可放过也不能
+ * 因为"读不出"就把用户的文件挡在门外。
+ */
+function readVideoDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    const done = (value: number | null) => {
+      video.removeAttribute('src');
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => done(Number.isFinite(video.duration) ? video.duration : null);
+    video.onerror = () => done(null);
+    video.src = url;
+  });
+}
+
+/**
  * 图片/视频/附件的上传控件（桌面端四处共用：图片、视频、文件、检查项照片）。
  *
  * <p>几条不能动的约定：
@@ -50,7 +70,7 @@ function errorMessage(error: unknown) {
  */
 export function MediaUploadControl({
   node, mode, value, onChange, kind, multiple, maxCount, maxSizeMB, accept, watermark,
-  watermarkText, buttonText, hint,
+  watermarkText, maxDuration, buttonText, hint,
 }: {
   node: SchemaNode;
   mode: FieldMode;
@@ -63,6 +83,8 @@ export function MediaUploadControl({
   accept?: string;
   watermark?: boolean;
   watermarkText?: string;
+  /** 视频时长上限（秒）：选完文件后按真实时长拦，配了 `maxDuration` 却只在设计器预览里显示等于没拦。 */
+  maxDuration?: number;
   buttonText?: string;
   hint?: string;
 }) {
@@ -132,11 +154,20 @@ export function MediaUploadControl({
     }
   };
 
-  const enqueue = (file: File) => {
+  const enqueue = async (file: File) => {
     // 再挡一次数量：`beforeUpload` 里读到的 state 是这一批开始时的，一次选多个文件时靠它拦不住。
     if (limit != null && filesRef.current.length + inFlightRef.current >= limit) {
       message.error(`最多上传 ${limit} 个`);
       return;
+    }
+    if (kind === 'video' && typeof maxDuration === 'number') {
+      // 时长只能从媒体元数据读，是异步的：`beforeUpload` 的返回类型没有"promise 拒绝"这一档，
+      // 所以放在真正入队之前挡（上传还没发生，用户重选一个短的就行）。
+      const duration = await readVideoDuration(file);
+      if (duration != null && duration > maxDuration) {
+        message.error(`视频不能超过 ${maxDuration} 秒`);
+        return;
+      }
     }
     const item: PendingItem = {
       uid: nextUid(), name: file.name, status: 'uploading', percent: 0, file,
@@ -194,7 +225,7 @@ export function MediaUploadControl({
       accept={accept}
       listType={kind === 'image' ? 'picture' : 'text'}
       fileList={fileList}
-      customRequest={(options) => enqueue(options.file as File)}
+      customRequest={(options) => void enqueue(options.file as File)}
       onRemove={(file) => remove(String(file.uid))}
       beforeUpload={(file) => {
         if (maxSizeMB && file.size / 1024 / 1024 > maxSizeMB) {

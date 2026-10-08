@@ -51,6 +51,22 @@ describe('desktop native fields', () => {
     expect(onChange).toHaveBeenLastCalledWith('CODE-128');
   });
 
+  // 取景器只有"关闭"按钮能收尾：字段被卸载（切路由/条件隐藏）时不 abort 的话摄像头会一直亮着。
+  it('aborts an in-flight scan when the field unmounts', async () => {
+    let captured: AbortSignal | undefined;
+    media.scan.mockImplementation((signal: AbortSignal) => {
+      captured = signal;
+      return new Promise(() => {});
+    });
+    const view = renderField(ScanCodeField.Component, { id: 'code', type: 'scan_code', label: '条码' }, '', vi.fn());
+
+    fireEvent.click(screen.getByRole('button', { name: /扫码/ }));
+    expect(captured?.aborted).toBe(false);
+
+    view.unmount();
+    expect(captured?.aborted).toBe(true);
+  });
+
   it('records and uploads audio without choosing an existing file', async () => {
     const stop = vi.fn().mockResolvedValue({ file: new File(['voice'], 'voice.webm', { type: 'audio/webm' }), durationSeconds: 8 });
     media.begin.mockResolvedValue({ stop });

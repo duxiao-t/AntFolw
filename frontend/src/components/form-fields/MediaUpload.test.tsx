@@ -36,6 +36,19 @@ async function pickFile(container: HTMLElement, file = new File(['x'], 'photo.jp
   fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
 }
 
+/** happy-dom 不解码媒体，时长只能自己塞：`createElement('video')` 返回一个"元数据已就绪"的替身。 */
+function stubVideoDuration(seconds: number) {
+  const createElement = document.createElement.bind(document);
+  const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+    const element = createElement(tag);
+    if (tag !== 'video') return element;
+    Object.defineProperty(element, 'duration', { value: seconds, configurable: true });
+    queueMicrotask(() => element.dispatchEvent(new Event('loadedmetadata')));
+    return element;
+  }) as typeof document.createElement);
+  return () => spy.mockRestore();
+}
+
 describe('桌面端媒体上传', () => {
   beforeEach(() => {
     media.upload.mockReset();
@@ -112,6 +125,28 @@ describe('桌面端媒体上传', () => {
     onChange.mock.calls.forEach(([value]) => {
       expect(Array.isArray(value) ? value.filter(Boolean) : []).toEqual([]);
     });
+  });
+
+  it('超过 maxDuration 的视频在入队前就被挡下（不上传、不进表单值）', async () => {
+    const restore = stubVideoDuration(120);
+    const onChange = vi.fn<Change>();
+    const { container } = render(
+      <App>
+        <VideoUploadField.Component
+          node={{ id: 'clip', type: 'video_upload', label: '视频', props: { maxDuration: 60 } }}
+          mode="runtime-fill" value={[]} onChange={onChange} />
+      </App>,
+    );
+
+    try {
+      await pickFile(container, new File(['x'], 'clip.mp4', { type: 'video/mp4' }));
+
+      expect(await screen.findByText(/视频不能超过 60 秒/)).toBeInTheDocument();
+      expect(media.upload).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 
   it('删除已上传的文件会调服务端删除，并从值里移除', async () => {

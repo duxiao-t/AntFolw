@@ -376,10 +376,17 @@ function validateChecklist(node: MobileSchemaNode, value: unknown) {
   const items = checklistItems(node);
   const entries = entriesFromValue(value, items);
   const allowDescription = node.props?.allowDescription !== false;
+  // 照片上限：控件那边靠 maxCount 挡，但那只是"选不动"——草稿里恢复出来的（或别的端写进去的）
+  // 超量值照样能提交，所以校验也得看一遍。
+  const photoMaxCount =
+    typeof node.props?.photoMaxCount === 'number' ? node.props.photoMaxCount : 9;
   for (const item of items) {
     const entry = entries.find((e) => e.id === item.id);
     if (item.required && (!entry || !entry.status)) {
       return `请完成检查项「${item.label}」`;
+    }
+    if (Array.isArray(entry?.images) && entry.images.length > photoMaxCount) {
+      return `「${item.label}」最多上传 ${photoMaxCount} 张照片`;
     }
     if (allowDescription && entry?.status) {
       const map = node.props?.descriptionRequiredByResult;

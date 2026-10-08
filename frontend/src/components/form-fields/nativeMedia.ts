@@ -157,18 +157,22 @@ export type AudioRecording = {
   stop(): Promise<{ file: File; durationSeconds: number }>;
 };
 
-export async function scanCodeWithCamera(): Promise<string | null> {
+/**
+ * 打开摄像头扫码，返回码内容（用户取消返回 null）。
+ *
+ * <p>`signal` 用来在调用方卸载时收尾（切路由、组件被条件渲染掉）：没有它就只有"关闭"按钮
+ * 能停摄像头，中途离开会让摄像头一直亮着——用户看得见的资源泄漏。
+ */
+export async function scanCodeWithCamera(signal?: AbortSignal): Promise<string | null> {
   requireSecureContext('扫码');
+  if (signal?.aborted) return null;
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持摄像头扫码');
+  // 先把 zxing 加载完再铺取景器：加载期间被取消的话，DOM 里什么都没留下（否则那段窗口里
+  // 的 abort 没人接，取景器会一直挂在屏幕上）。
+  const { BrowserMultiFormatReader } = await import('@zxing/browser');
+  if (signal?.aborted) return null;
   const overlay = scannerOverlay();
   document.body.appendChild(overlay.root);
-  let BrowserMultiFormatReader: typeof import('@zxing/browser').BrowserMultiFormatReader;
-  try {
-    ({ BrowserMultiFormatReader } = await import('@zxing/browser'));
-  } catch (error) {
-    overlay.root.remove();
-    throw error;
-  }
   const reader = new BrowserMultiFormatReader();
   let controls: Awaited<ReturnType<typeof reader.decodeFromConstraints>> | undefined;
   return new Promise<string | null>((resolve, reject) => {
@@ -185,6 +189,7 @@ export async function scanCodeWithCamera(): Promise<string | null> {
       if (error) reject(cameraError(error)); else resolve(value);
     };
     overlay.close.onclick = () => finish(null);
+    signal?.addEventListener('abort', () => finish(null), { once: true });
     reader.decodeFromConstraints(
       { video: { facingMode: { ideal: 'environment' } }, audio: false },
       overlay.video,
