@@ -246,3 +246,102 @@
   - **MP 的 wrapper 不合适做这条 SQL**：它把 `last()` 拼在 `ORDER BY` 之前、再自己追加 `LIMIT 1`，`orderByAsc(...).last("LIMIT 1 FOR UPDATE")` 生成非法 SQL（真库用例当场 `BadSqlGrammar`）。要精确控制就写显式 `@Select`。
   - 两个上限都是**配置**而不是硬件：视频 = `processing-concurrency + processing-queue-capacity`（默认 22，超出直接 FAILED）；图片 = 信号量（默认 2，不拒收只排队）。硬件决定速率与内存（每路 720p ≈ 1 核 + 200MB）。生产按规格调，见容量文档的表。
   - `compose.yaml` 的 Hikari 变量用 `${DB_POOL_MAX_SIZE:-10}`：compose 的默认值语法是 `:-`，写成 Spring 那种 `${VAR:10}` 只会打个警告然后停住。
+
+## D-20260930-video-queue-never-rejects-and-pumps-on-completion
+
+- **状态：** accepted
+- **背景：** 视频转码线程池是 `core=max=processing-concurrency(2)` + `queue(20)` + `AbortPolicy`，上传路径用的是"拒绝即失败"（`RejectPolicy.FAIL`）——第 23 个视频在**对象与行都写完**之后被标 `FAILED`，用户看到的是"上传成功但处理失败"。而"忙"不是"坏"：队列满只说明要排队。
+- **决策：** **永不拒收**。线程池拒绝时 `releaseProcessingClaim` 把行留在 `PROCESSING` 等空位（库里那一行就是队列）；每个转码任务在 `finally` 里调 `reap(1)`——**完成即泵**，一有槽位就认领下一条。`reapStaleProcessing`（定时/启动恢复）只当"进程真的没了"的兜底，不再是排队的一部分。
+- **影响：**
+  - **`RejectPolicy` 整个枚举删掉**：全仓只有上传路径和 reaper 两个调用点，reaper 本来就是 LEAVE 语义。留着两个语义不一致的策略只会让人再选错一次。
+  - **泵放在任务 `finally` 里，不是包 executor**：`FileProcessingConfig` 的 bean 就是普通 `ThreadPoolTaskExecutor`，包 `execute()` 会造出 bean 循环依赖；`finally` 每条路径都跑、且每个释放的槽位只跑一次。
+  - **不活锁**：泵只在任务完成之后触发（槽位确定空着），`reap(1)` 匹配不到行就返回空集，拒绝时释放认领后不再重试 → 一次完成至多一次入队。
+  - **客户端轮询预算跟着抬**（600→1800 次 = 30 分钟）：积压时第 23/24 个视频要排队等（并发 2 时约 12 分钟），原来的 10 分钟上限会变成新的"失败"来源。真正的长久解是任务进度 UI，记在遗留里。
+  - 容量口径变了：视频的"并发上限"不再是"超过就失败"，而是"超过就排队等"。`processing-reap-limit` 仍要与真实空位对应。
+
+## D-20260930-form-data-status-is-a-whitelist
+
+- **状态：** accepted
+- **背景：** `submit` 收客户端传的 `status`，原来只做 `status == null ? "SUBMITTED" : status`，于是能往 `t_form_data.status` 塞 `APPROVED`/`REJECTED`——那两个是 `t_process_instance` 的状态，由引擎推进实例时写。塞进去的记录会落进台账/报表的"其它"桶，且没有任何东西能解释它。
+- **决策：** 只接受 `DRAFT`/`SUBMITTED`，其余抛 `BAD_STATUS`。
+- **影响：** 客户端如果自己实现了状态机（比如把实例状态回写到表单状态）会立刻收到明错，而不是产生无法解释的数据。台账/报表的状态分桶因此可以假定只有两个合法值。
+
+## D-20260930-contacts-export-reuses-the-list-query
+
+- **状态：** accepted
+- **背景：** 通讯录导出原来是纯前端：把**当前页**（一页 15 人）拼成 CSV。一页 15 人时"导出成功"却少了人，而且前端拿不到行级数据范围的信息，导出的范围与"看得到的范围"没有可验证的关系。
+- **决策：** 新增 `GET /api/users/export`（csv/xlsx），参数与 `GET /api/users` 一字不差、走同一条 `UserService.listAuthorized`（无分页 + 行级数据范围），表头与前端导入器的 `headerMap` 对齐；前端删掉 `buildMembersCsv`，只负责下载。
+- **影响：**
+  - **"你导出的绝不会比你看到的多"** 由"同一套参数 + 同一条查询"保证，而不是两处实现碰巧一致。
+  - **导出能原样导回**：表头就是导入器认的那组中文列名（姓名/工号/账号/手机/邮箱/职务/性别），性别出 `男/女`（导入侧 `normalizeGender` 两套都收）。
+  - **共享的渲染器**：复用台账导出的 `FormDataExport.Model/csv/xlsx`（BOM、公式注入防护、Excel 全字符串单元格）。服务端不再需要一份前端 CSV 实现，也就不会漂移。
+  - 行数上限 10,000（与台账导出同量级），截断写进审计的 `truncated`。
+  - 前端 `blobErrorMessage` 从 `pages/report/Export.tsx` 提到 `utils/format.ts`：下载接口出错时后端返回 JSON 而非文件，两处都得读出来才有话说。
+
+## D-20260930-visibility-resolves-like-the-backend
+
+- **状态：** accepted
+- **背景：** 前端 `visibleNodeIds` 原来是一遍 `forEach` 边走边判：条件引用**后面才声明**的字段时，那个字段还没被算过，"来源不可见"于是被判成"依赖它的字段不可见"——同一份数据前后端能得出两套可见性（后端 `FormDefinitionService.resolveVisible` 是按 id 递归求值 + memo）。另一处口径不一致：`Number(null)`/`Number('')` 都是 0，空数字字段能"满足" `gte 0` 之类的条件把下游字段显示出来，而后端 `compareNumbers`（BigDecimal 解析失败即 false）判不成立。
+- **决策：** `visibleNodeIds` 换成记忆化 DFS（id→node/parent 映射 + memo + `visiting` 防互指条件死循环），声明顺序无关；`numberCompare` **先拒空值再做数值转换**。
+- **影响：**
+  - 前端提交前的"可见/必填"判定与后端提交/取数时的判定同源，条件字段前后声明不再产生差异。
+  - 数值型显示条件的四个操作符（`gt/gte/lt/lte`）在"源值为空"时一律为假——这条是**口径**，别为了"空值当 0"再改回去。
+  - 明细表每行各自算一次可见性并复用给校验与"还有文件在上传"扫描：按行条件隐藏的列既不该拦提交，也不该因为在传而被当成"仍在处理"。
+
+## D-20260930-outbox-dedupe-key-is-the-outbox-row
+
+- **状态：** accepted
+- **背景：** 渠道侧的幂等键（`t_wecom_message_delivery.dedupe_key`）对非抄送事件退回 `type:instanceId:taskId:userId`，而**不同事件会共用这几个字段**（撤回后重新指派、改派回原审批人都会对同一个 task 再发一次 `TASK_ASSIGNED`）→ `ON CONFLICT DO NOTHING` 把合法的"再次通知"**静默丢掉**。另外两处：2 分钟租约期间 worker 还活着但外部调用卡住时会过期，另一个实例认领同一行投两遍；webhook 是 at-least-once 却没有任何稳定事件标识，接收端无法去重。
+- **决策：** ①幂等键改用 `type:instanceId:event.id()`（outbox 行 id 跨 attempt 稳定）；抄送保留按轮次（一轮是一条汇总消息）。②`renewLeases()` 定时**只续本 worker 自己持有的 RUNNING 行**。③webhook 请求头带 `X-AntFlow-Event-Key`、body 带 `eventKey`（同一个键）。
+- **影响：**
+  - **"重投"与"再次通知"从此可区分**：同一条 outbox 行重投键不变（去重仍有效），不同行必然不同键（不再被吞）。
+  - **续租的边界**：崩掉的进程续不了 → 它的行照样在 2 分钟后可被抢（恢复路径不变）；活着但慢的 worker 不会被抢走同一行。代价是"卡死但没崩"的 worker 会一直占着那行——对 webhook 来说，宁可晚也不愿意投两遍。
+  - **webhook 明确是 at-least-once**：接收端要幂等请用 `eventKey`。文档里不再有"我们保证只发一次"的暗示。
+  - `t_user_notification` 那条插入本来就是 `ON CONFLICT DO NOTHING`，不受影响。
+
+## D-20260930-upload-inserts-row-before-object-and-the-sweeper-is-dry-run
+
+- **状态：** accepted
+- **背景：** 上传原来是"先写对象、后插行"：`put` 成功而事务最终没提交（连接断、进程被杀）就留下一个没人引用的对象，而且那种对象按现有读路径**永远不会被发现**。另外转码结果用的是独立 attempt key，在发布前也没有任何行引用它。
+- **决策：** ①改成**先插行、后写对象**（key 由本方法生成的 UUID 算得出，两者没有先后依赖）；②新增 `MobileFileOrphanSweeper`：桶里有、**没有任何 `t_mobile_file` 行引用**、且 mtime 早于 24 小时的对象，每轮最多 500 个、逐对象删；**默认 `orphan-sweep-delete=false`，只记日志**。
+- **影响：**
+  - 现在最坏是"行在、对象没写成"，而那会让整个事务回滚——不再产生孤儿对象。
+  - **24 小时宽限覆盖两种"暂时没有引用"**：写对象与插行之间的窗口、以及转码 attempt key 在发布前的窗口。两种都是分钟级，宽限留了两个数量级。
+  - **判据是"没有行引用"，不是"没有已提交单据引用"**：`PROCESSING` 的行引用的正是它即将被替换掉的源对象，排队等转码期间那也是活的。
+  - **默认不开真删**：删除不可逆，先跑一轮看它打算删什么（日志里会打前 10 个候选）。要开就是把 `antflow.mobile.files.orphan-sweep-delete` 设 true。
+  - 存储不支持列举（`FileStorage.list()` 默认抛 `UnsupportedOperationException`）时跳过本轮，不会把定时任务打挂。
+
+## D-20260930-drop-the-unusable-jsonb-path-ops-index
+
+- **状态：** accepted
+- **背景：** `V44` 给 `t_option_data_source_row.data` 建了 `GIN (data jsonb_path_ops)`。`jsonb_path_ops` 只服务 `@>`/`@?`/`@@`，而读这张表的两条查询（`OptionRuntimeService.labelsForValues` / `querySchema`）都是 `version_id = ?` + `data ->> '列名' IN (...)` / `= ?`。实测（5 万行、`SET enable_seqscan=off` 逼优化器只能用索引）：那条真实形状的查询走的是 **Bitmap Index Scan on 主键** + Filter（49997 行被过滤），而 `data @> '{"code":"C1"}'` 才走 GIN。
+- **决策：** `V52` `DROP INDEX IF EXISTS ix_option_source_row_data;`，理由写在迁移里。
+- **影响：**
+  - 想让它有用只有两条路，都不通：把查询改成包含式（会改变语义与参数绑定），或建 `(data ->> '列名')` 表达式索引（列名是每个数据源自己配的，运行时才知道）。所以不是"暂时没用"，是**没有补救余地**。
+  - `version_id` 已经把范围收窄到一个版本（主键前导列），版本内行数有界，不需要为它再设计索引。
+  - 留着只会让导入（逐行 INSERT）多维护一份倒排：纯开销。
+
+## D-20260930-antd-deprecations-that-cannot-be-migrated-yet
+
+- **状态：** accepted（部分清理，其余明确等待）
+- **背景：** `npx antd lint ./src` 是本仓库的提交前门槛，但从来不是干净的（清理前 61 deprecated + 45 usage）。这轮只清掉语义等价的 17 处（`Alert message`→`title`、`Space split`→`separator`、`Steps direction`→`orientation`、`Modal maskClosable`→`mask.closable`）。
+- **决策：** 其余 44 处**不动**，原因逐条实测：
+  - **Select 的 `showSearch={{ onSearch, filterOption, optionFilterProp }}` 在当前依赖里是空操作**：antd 6.5.3 + rc-select 14.1.18 的 `BaseSelect` 只把 `showSearch` 当布尔用，整个 rc-select/antd select 里没有任何地方读 `showSearch.onSearch`。照提示改了一版，`AssigneePicker` 的搜索用例立刻红（关键字永远停在空串）——即"照着提示改"会**静默改坏搜索**。要改得等 antd 升到已接线的版本。
+  - **Space `direction` → `Flex`（28）**：`Space size`（small/middle/large = 8/16/24）到 `Flex gap` 要逐处判断，且两者的布局语义（inline-flex、separator、对齐）不等价 → 必须配视觉验证，不能混在"清理"里。
+  - **Drawer `width` → `size`（3）**：`size` 是枚举，自定义宽度（如 760）表达不出来，只能改 `styles`——同样是视觉改动。
+  - **静态 `message.*`/`Modal.confirm`/`notification.open`（41）**：`requestErrorConfig.ts` 这类非组件模块拿不到 hook，得先做"模块级实例由 App 组件注入"的改造，是独立一轮。
+- **影响：** 门槛目前**不是 0**，别把"`antd lint` 干净了"当前提。新增代码保持与既有写法一致（同一个页面两种写法比一条弃用警告更糟）。
+
+## D-20260930-hidden-is-not-a-secrecy-boundary（明确不做）
+
+- **状态：** accepted（记录"不做"，不是待办）
+- **背景：** `props.formPerms` 的 `HIDDEN` 目前只在**写路径**（提交时剔除、审批时按 schema 校验/回写）生效，读路径（台账/详情/导出对**有权限**的读者）原样返回。OCR 反复标它 high。
+- **决策：** **保持现状**。把它变成保密边界等于**改口径**：要对哪些视图、哪些角色、哪些字段过滤，都没定；而一旦过滤，有权限读者拿到的载荷会全部改变。
+- **影响：** 谁要把它当保密手段是误解——权限的正确表达是"这条记录你读不到"，不是"这个字段我藏起来"。真要做这件事，先定清上面三个维度，且必须逐视图验证。
+
+## D-20260930-unhandled-errors-count-again-in-frontend-tests
+
+- **状态：** accepted
+- **背景：** `frontend/vitest.config.ts` 曾挂 `dangerouslyIgnoreUnhandledErrors: true`，起因是 `MobileFormPreview` 真的挂 `<iframe src="/mobile/form-preview">`，happy-dom 会去请求它、中止时抛的 DOMException 无人接。代价是**全项目不再因未处理错误而红**——那层安全网比一条控制台噪音值钱。
+- **决策：** 收回该 flag。实测（vitest 4.1.10）连跑三次全量 59 文件 / 288 用例全部退出码 0，那条 DOMException 只打印、不再让 run 失败。
+- **影响：** 异步未处理错误重新算红。已排除的窄口径修法（about:blank 的 origin=null、`disableIframePageLoading` 的 contentWindow=null、自挂 `unhandledRejection`、桩 `global.fetch`）与"万一以后又在负载下变红"的处理顺序都写在 `vitest.config.ts` 的注释里，别重复试。

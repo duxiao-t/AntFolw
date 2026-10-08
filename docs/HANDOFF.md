@@ -1,12 +1,50 @@
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-09-30T18:30:00+08:00`
+- **更新时间：** `2026-10-08T10:30:00+08:00`
 - **分支：** `feat/contacts-report-export`（从 `master` = `4328845` 拉出，未推）。前两轮都已合并进 master：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排。
 
 ---
 
-## 最新一轮：媒体并发（图片不再占着连接等信号量 / 闸门可配 / 移动端失败可见）
+## 最新一轮：历史遗留清理（第 23 个视频不再 FAILED / 队列语义 / 前端该拦没拦）
+
+你点名两件事：**清理历史遗留** + **"23 个以上在途时第 23 个上传成功却 FAILED"**。先订正了两条我自己
+写错的记录（`t_mobile_file.watermark_text` 其实**早就在落库**、空值语义也已经是 `—`），确认"遗留"里
+真正还开着的分四块。队列语义按你选的 **永不拒收** 落地：行留在库里保持 `PROCESSING`，任何一个转码
+完成就立刻认领一条补位；reaper 只当崩溃恢复的兜底。
+
+| 提交 | 内容 |
+| --- | --- |
+| `50d395a` | P0 文档订正（上面那两条过期记录） |
+| `a849f28` | P1 **队列语义**：删掉 `RejectPolicy` 整个枚举，池满时 `releaseProcessingClaim`（保持 PROCESSING 等空位）；任务 `finally` 里 `reap(1)` **完成即泵**；客户端轮询 600→1800 次（30 分钟）；顺带 `ftyp` 分支不再把 `heic/mif1/msf1/avif/avis` 判成 `video/mp4`；`<?xml` 收紧成"声明之后必须真出现 `<svg`"；删掉没人调的 `findReadyDuplicate` wrapper |
+| `e48e4ee` | P2 后端四条：通讯录导出改走后端（`GET /api/users/export`，同一条 `listAuthorized`，不再只导当前页）、本人提交列表分页（`limit/offset` + `countMySubmissions`）、`status` 白名单、台账 `table_list` 单元格出首行 |
+| `506fcf8` | P3 前端"该拦没拦"五条：可见性改记忆化 DFS（条件引用后声明的字段不再误判）+ 数值比较先拒空值；明细表逐行校验 + 行数上下限 + 行内隐藏列不算"还在传"；检查项逐项校验（含照片上限，两端都补）；桌面视频 `maxDuration` 真拦；扫码卸载时 abort |
+| `c615061` | P4.2 outbox 三处：幂等键改成 `type:instanceId:event.id()`（不再静默丢"再次通知"）、投递期间只续**自己持有**的租约、webhook 带稳定事件键 |
+| `437eda6` | P4.3 上传改"先插行后写对象" + 孤儿对象清扫器（默认只记日志） |
+| `4f63601` | P4.1 收回 vitest 的 `dangerouslyIgnoreUnhandledErrors`（未处理错误重新算红） |
+| `37e1cf3` | P4.5 antd 弃用只清理 17 处语义等价的；另 44 处**实测不能自动改**（见下） |
+| `da8360f` | P4.6 V52 删掉用不到的 GIN 索引（先 EXPLAIN） |
+
+**验证**：后端 `mvn -B test` **556 绿**（基线 544）、前端 `npm test` **288 绿**（基线 280）、移动端
+`npx vitest run` **351 绿**（基线 350）；`biome lint` 只有既有的 3 条 warning，`tsc` 干净。每条守护都
+验过"去掉修复即失败"：P1 的 `uploadLeavesRowProcessingWhenQueueIsFull` / `completedVideoPumpsOneQueuedRow`、
+P2 的 9 条（`UserExportControllerTest` 6 + `FormDataServiceTest` 2 + `FormValueDisplayTest` 1）、P3 的 11 条、
+P4.2 的 3 条（webhook 那条用真 HTTP server 收）、P4.3 的 4 条。P4.5 是纯改名，靠 288 条用例兜。
+
+**踩到的一个大坑（值得单说）**：`npx antd lint` 建议把 `Select` 的 `onSearch`/`filterOption` 迁进
+`showSearch={{…}}`，但当前依赖里**这个对象形式是空操作**——antd 6.5.3 + rc-select 14.1.18 只把
+`showSearch` 当布尔用，没有任何地方读 `showSearch.onSearch`。我照提示改了一版，`AssigneePicker` 的
+搜索用例当场红（关键字永远停在空串）：**"照着 lint 提示改"会把搜索静默改坏**。所以这次只做"语义等价
+且用例能兜住"的 17 处，其余连同理由写进 `D-20260930-antd-deprecations-that-cannot-be-migrated-yet`。
+
+**这轮没做**：P4.4 换静态 ffmpeg 把镜像从 1.57GB 压到 ~1.2GB（它的退出条件是"重建镜像后**实测**
+镜像大小 + 启动探测 + 中文水印渲染"三条都过，本轮没有跑真机那一步，不做比做一个没验证的 Dockerfile
+改动更安全）；真机回归（24 个重型视频 → 24/24 READY、0 FAILED）同样**待跑**，代码层面的守护已全绿。
+孤儿清扫器目前是 dry-run（默认不删），要在真机看一轮日志后再决定开不开真删。
+
+---
+
+## 上一轮：媒体并发（图片不再占着连接等信号量 / 闸门可配 / 移动端失败可见）
 
 你让压一遍并发，于是有了 `docs/capacity-tuning-2026-09-30.md`。压测把"两个上限"分开了：视频的 22 个
 （`processing-concurrency + queue`）和图片的"2 路闸门"**都是配置**，换更大的机器也是在同一个地方失败，
@@ -211,18 +249,37 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
 - **PR #3 = 选项数据源按 demo 的信息结构重排**：列表改表格 + 详情抽屉 + 版本 Timeline 卡片 + 版本对比 + 生命周期弹窗；V50 版本「变更说明」；修 `importDraft` 漏递增 `source.version`（乐观锁洞）与 `unpublish` 不清 `disabled_at`（版本状态机洞）。同轮 OCR 30 条 → 采纳 8 / 驳回 3 / 留档 1（行表 GIN 索引确实没被任何查询用到，删它要单独一条迁移 + EXPLAIN）。
 - **PR #2 = 实测反馈 17 条**：监控页回归（Java 文本块吞行尾空格 → `AND1 = 1`）、登录 401 不整页刷新、节点名显示中文、指定人员 400、发起人按 ROOT 判隐藏、条件值读外部数据源、**CC 抄送永不投递**（`Map.of` 撞 null）。验证基线见下。
 
-## 已知遗留（七轮累计）
+## 已知遗留（八轮累计）
 
-- **`npx antd lint ./src` 从来不是干净的**：现在 61 deprecated + 42 usage（`Alert` 的 `message`、`Space direction`、模板页里的静态 `message.xxx` 等）。`frontend/CLAUDE.md` 把它列为提交前必过项，实际不是门槛——新代码与既有写法保持一致，别单独给新文件换风格（否则同一个页面两种写法）。要做就整仓一次性刷。
-- 本人提交列表无分页；`status` 无白名单校验（能写进 `APPROVED` 等非法值，报表里落进 `other` 桶）。
-- 通讯录的一批既有问题（见上，含"导出只含当前页"）。桌面用户/部门选择「默认填充」与「候选范围」是两件独立配置，范围把本人排除时下拉显示裸 id。**「定位」按钮只判 `deptId` 是否存在**：理论上成员所在部门可能不在左树里（部门权限比人员权限窄），那种情况下点定位会落到一个选不中的部门——按数据范围收窄的口径这条现在到不了，真出现再加。
-- 台账 `table_list` 在**单元格**里仍是「N 项」（详情抽屉才逐行展开）；`values()` 里明细行的子字段没做成独立列。
-- 「未填写」之外的**空值语义**（已订正）：导出取的是 `detailText`，空值已经是 `—`；只有"**记录里根本没有该字段**"才落空串（`FormDataExport.model` 的 `getOrDefault(fieldId, "")`）—— 与列上的 `displayText || '—'` 是同一种口径，不再是两回事。
-- **outbox 投递租约可能重复投递**；**`HIDDEN` 不是保密边界**；前端测试环境关掉了"未处理错误"安全网（`dangerouslyIgnoreUnhandledErrors`）；移动端 lint 既有错误未动；存量角色权限三条（V40）只记录不改；选项行表 GIN 索引（删它要单独一条迁移 + EXPLAIN）。
+- **`npx antd lint ./src` 不是干净的，而且短期清不掉**：清理后是 44 deprecated + 45 usage。其中
+  **Select 的 `onSearch`/`filterOption`（13 处）在当前依赖里没有安全改法**——`showSearch={{…}}` 这个对象
+  形式是空操作（antd 6.5.3 + rc-select 14.1.18 只把 `showSearch` 当布尔用），改了会把搜索静默改坏；
+  `Space direction`（28）与 `Drawer width`（3）是布局语义变化，要做必须配视觉验证；静态
+  `message.*`/`Modal.confirm`（41）要先做"模块级实例注入"。理由详见
+  `D-20260930-antd-deprecations-that-cannot-be-migrated-yet`。新代码与既有写法保持一致，别单独换风格。
+- **P4.4 镜像瘦身没做**：后端镜像还是 1.57GB（apt 的 ffmpeg 拖进 mesa/llvm）。换静态构建的退出条件是
+  "重建后实测镜像大小 + 启动探测 + 中文水印渲染"三条都过——本轮没跑真机，宁可不做也不提交一个
+  没验证的 Dockerfile。真机回归（24 个重型视频 → 24/24 READY、0 FAILED）同样待跑。
+- **孤儿清扫器目前是 dry-run**（`antflow.mobile.files.orphan-sweep-delete` 默认 false，只记日志）：
+  要在真机看一轮"它打算删什么"再决定开不开。
+- **webhook 是 at-least-once**：接收端要幂等请用 `X-AntFlow-Event-Key` / body 的 `eventKey`。
+- 通讯录剩下的一批（**导出只含当前页**已修）：部门移动后不刷新成员、删空末页不回位、负责人候选只取
+  100 人且不可键盘操作、清空上级不持久化、凭据入口只按 admin 显示。桌面用户/部门选择「默认填充」与
+  「候选范围」是两件独立配置，范围把本人排除时下拉显示裸 id。**「定位」按钮只判 `deptId` 是否存在**：
+  理论上成员所在部门可能不在左树里（部门权限比人员权限窄），那种情况下点定位会落到一个选不中的部门
+  ——按数据范围收窄的口径这条现在到不了，真出现再加。
+- 台账 `values()` 里明细行的子字段没做成独立列（单元格已改成出首行）。
+- 「未填写」之外的**空值语义**（已订正）：导出取的是 `detailText`，空值已经是 `—`；只有"**记录里根本
+  没有该字段**"才落空串（`FormDataExport.model` 的 `getOrDefault(fieldId, "")`）—— 与列上的
+  `displayText || '—'` 是同一种口径，不再是两回事。
+- **`HIDDEN` 不是保密边界**（已写成"明确不做"，见 `D-20260930-hidden-is-not-a-secrecy-boundary`）；
+  移动端 lint 既有 warning 未动；存量角色权限三条（V40）只记录不改。
+- 视频积压时**没有进度 UI**（只能靠客户端轮询等）——队列语义已经是"永久排队不失败"，但用户看不到
+  "排在第几位"。真正的解是任务进度，记在这里。
 
 ## 验证基线
 
-后端 `mvn -B test` **544**、前端 `npm test` **280**（未动）、移动 `npx vitest run` **350**；前端 `biome lint` 4 warnings（既有）+ `tsc` 干净。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
+后端 `mvn -B test` **556**、前端 `npm test` **288**、移动 `npx vitest run` **351**；前端 `biome lint` 3 warnings（既有）+ `tsc` 干净；`npx antd lint ./src` 44 deprecated + 45 usage（见遗留）。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
 
 > **移动端 `npx vitest run` 会带出一条 unhandled error**（`unmountComponentAtNode is not a function`，来自 antd-mobile 的 Popup/rc-util 与 React 19 的卸载路径）。单独跑 `fields.test.tsx` 或 `files.api.test.ts` 都没有 —— 是既有测试之间的干扰，与本轮改动无关，别误判成回归。
 
