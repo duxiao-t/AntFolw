@@ -37,10 +37,17 @@ P4.2 的 3 条（webhook 那条用真 HTTP server 收）、P4.3 的 4 条。P4.5
 搜索用例当场红（关键字永远停在空串）：**"照着 lint 提示改"会把搜索静默改坏**。所以这次只做"语义等价
 且用例能兜住"的 17 处，其余连同理由写进 `D-20260930-antd-deprecations-that-cannot-be-migrated-yet`。
 
-**这轮没做**：P4.4 换静态 ffmpeg 把镜像从 1.57GB 压到 ~1.2GB（它的退出条件是"重建镜像后**实测**
-镜像大小 + 启动探测 + 中文水印渲染"三条都过，本轮没有跑真机那一步，不做比做一个没验证的 Dockerfile
-改动更安全）；真机回归（24 个重型视频 → 24/24 READY、0 FAILED）同样**待跑**，代码层面的守护已全绿。
-孤儿清扫器目前是 dry-run（默认不删），要在真机看一轮日志后再决定开不开真删。
+**真机回归（决定性证据，镜像重建后）**：24 个 ~10MB / 720p / 带水印的视频**并发 24 提交**——
+**24/24 HTTP 200 PROCESSING**（修复前是 22 + 2 FAILED），排空后 **24/24 READY、0 FAILED、0 PROCESSING**
+（第 23、24 个不再被拒）。MinIO 侧对账：`video` 行 138 = 对象 138、**孤儿候选 0**；`image` 侧 126 行
+对 124 对象（缺的两个是上一轮手工 curl 造的行，读路径会自愈重写，与本轮无关）。V52 在真库上
+`Successfully applied 1 migration ... now at version v52`，启动探测
+`媒体水印就绪：ffmpeg='ffmpeg'，字体='/usr/share/fonts/truetype/wqy/wqy-microhei.ttc'` 正常。
+
+**这轮没做**：P4.4 换静态 ffmpeg 把镜像从 1.57GB 压到 ~1.2GB——它的退出条件是"重建后**实测**镜像大小
++ 启动探测 + 中文水印渲染"三条都过，本轮只重建了镜像（1.57GB 未动），没有动 Dockerfile：宁可不做，
+也不提交一个没验证的 apt→tarball 改动。孤儿清扫器目前仍是 dry-run（默认不删），要在真机看一轮日志
+（上面对账的"孤儿候选 0"说明现在没什么可删）再决定开不开真删。
 
 ---
 
@@ -258,8 +265,8 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
   `message.*`/`Modal.confirm`（41）要先做"模块级实例注入"。理由详见
   `D-20260930-antd-deprecations-that-cannot-be-migrated-yet`。新代码与既有写法保持一致，别单独换风格。
 - **P4.4 镜像瘦身没做**：后端镜像还是 1.57GB（apt 的 ffmpeg 拖进 mesa/llvm）。换静态构建的退出条件是
-  "重建后实测镜像大小 + 启动探测 + 中文水印渲染"三条都过——本轮没跑真机，宁可不做也不提交一个
-  没验证的 Dockerfile。真机回归（24 个重型视频 → 24/24 READY、0 FAILED）同样待跑。
+  "重建后实测镜像大小 + 启动探测 + 中文水印渲染"三条都过——本轮重建过镜像、只验了后两条，没动
+  Dockerfile：宁可不做也不提交一个没验证的 apt→tarball 改动。
 - **孤儿清扫器目前是 dry-run**（`antflow.mobile.files.orphan-sweep-delete` 默认 false，只记日志）：
   要在真机看一轮"它打算删什么"再决定开不开。
 - **webhook 是 at-least-once**：接收端要幂等请用 `X-AntFlow-Event-Key` / body 的 `eventKey`。
