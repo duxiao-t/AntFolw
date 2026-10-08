@@ -209,22 +209,35 @@ public class MobileFileService {
      * 定期把"没人认领或租约已过期"的 PROCESSING 行重新排进队列。**有界**（每轮最多
      * {@code processing-reap-limit} 条）且**先认领**：认领不到的说明别人正在跑，直接跳过。
      *
-     * <p>被队列拒绝时保持 PROCESSING（见 {@link RejectPolicy#LEAVE}）——原来在启动恢复里被拒就直接标
+     * <p>被队列拒绝时保持 PROCESSING（{@link #enqueueVideoProcessing}）——原来在启动恢复里被拒就直接标
      * FAILED，一次崩溃留下的积压会有一大半"永久失败"。
      */
     @Scheduled(fixedDelayString = "${antflow.mobile.files.processing-reap-interval-ms:60000}")
     void reapStaleProcessing() {
+        int requeued = reap(properties.getProcessingReapLimit());
+        if (requeued > 0) {
+            log.info("重新排入 {} 个滞留的视频水印任务", requeued);
+        }
+    }
+
+    /**
+     * 认领并排队至多 {@code limit} 条待处理行，返回排进去的条数。
+     *
+     * <p>三个调用点：启动恢复（{@link #recoverPendingVideoProcessing}）、定时 reaper，以及
+     * **每个转码任务完成时**（`reap(1)`，见 {@link #enqueueVideoProcessing} 里包的那层 try/finally）。
+     * 最后这个"完成即泵"是关键：队列满时上传的视频不再被标 FAILED，而是留在库里等 —— 靠它把排队里的
+     * 下一条**立刻**接上，而不是干等下一轮定时（默认 60s）。
+     */
+    private int reap(int limit) {
         OffsetDateTime staleBefore = OffsetDateTime.now()
             .minusMinutes(properties.getProcessingStaleMinutes());
         // 这一轮的租约 token：一批行共用一个（它们本来就属于同一轮调度），拒绝时按它整体归还。
         UUID reapClaim = UUID.randomUUID();
-        java.util.List<UUID> claimed = fileMapper.claimStaleProcessing(staleBefore,
-            properties.getProcessingReapLimit(), reapClaim);
-        if (claimed.isEmpty()) return;
-        log.info("重新排入 {} 个滞留的视频水印任务", claimed.size());
+        java.util.List<UUID> claimed = fileMapper.claimStaleProcessing(staleBefore, limit, reapClaim);
         // claimStaleProcessing 已经把同一批的租约写成一个 token 了，这里只负责入队；
         // 被队列拒绝就 release 这个 token 等下一轮（不会误伤别人的租约）。
-        claimed.forEach(id -> enqueueVideoProcessing(id, reapClaim, RejectPolicy.LEAVE));
+        claimed.forEach(id -> enqueueVideoProcessing(id, reapClaim));
+        return claimed.size();
     }
 
     void processVideoWatermark(UUID id, UUID claim) {
@@ -342,24 +355,16 @@ public class MobileFileService {
         }
     }
 
-    /** 队列满时怎么办。**两处语义刻意不同**，所以让调用点明说，而不是一个布尔。 */
-    private enum RejectPolicy {
-        /** 刚上传完：客户端正在轮询，必须马上给个答案。 */
-        FAIL,
-        /** 恢复/reaper：没空位就保持 PROCESSING，下一轮再来（标 FAILED 就永久丢了）。 */
-        LEAVE
-    }
-
     private void scheduleVideoProcessing(UUID id) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    claimAndEnqueueVideo(id, RejectPolicy.FAIL);
+                    claimAndEnqueueVideo(id);
                 }
             });
         } else {
-            claimAndEnqueueVideo(id, RejectPolicy.FAIL);
+            claimAndEnqueueVideo(id);
         }
     }
 
@@ -367,22 +372,34 @@ public class MobileFileService {
      * 认领后入队。**必须认领**：不认领的话，排在队列里的行 `claim_token` 仍是 NULL，
      * 定时 reaper 会把"没人认领"当成滞留任务抢走 —— 同一行跑两遍。
      */
-    private void claimAndEnqueueVideo(UUID id, RejectPolicy policy) {
+    private void claimAndEnqueueVideo(UUID id) {
         UUID claim = UUID.randomUUID();
         if (fileMapper.claimProcessing(id, claim) == 0) return; // 别人已经在跑
-        enqueueVideoProcessing(id, claim, policy);
+        enqueueVideoProcessing(id, claim);
     }
 
-    private void enqueueVideoProcessing(UUID id, UUID claim, RejectPolicy policy) {
+    /**
+     * 入队。**队列满不再失败**：行和对象都已经写好了，标 FAILED 等于把用户刚传上来的视频丢掉。
+     * 改成把租约还回去、保持 PROCESSING，等前面的任务完成时把它泵进来（见上面那层 try/finally 的
+     * `reap(1)`），定时 reaper 兜底。
+     *
+     * <p>上传路径与恢复路径**语义一致**：原来上传路径是"满了就 FAILED"，于是第 23 个并发视频必然
+     * "上传成功却失败"——而它其实只是排队排在后面。
+     */
+    private void enqueueVideoProcessing(UUID id, UUID claim) {
         try {
-            fileProcessingExecutor.execute(() -> processVideoWatermark(id, claim));
+            fileProcessingExecutor.execute(() -> {
+                try {
+                    processVideoWatermark(id, claim);
+                } finally {
+                    // 完成即泵：刚空出一个槽位，把排在库里的下一条接上。被拒/没得领都会直接返回，不重试。
+                    reap(1);
+                }
+            });
         } catch (RejectedExecutionException exception) {
-            if (policy == RejectPolicy.FAIL) {
-                fileMapper.failProcessing(id, claim, "file processing queue is full");
-            } else {
-                // 保持 PROCESSING 并把租约还回去，让下一轮 reaper 再捞。
-                fileMapper.releaseProcessingClaim(id, claim);
-            }
+            // 保持 PROCESSING 并把租约还回去，让"完成即泵"或下一轮 reaper 再捞。
+            log.info("转码队列已满，任务留在待处理队列里等空位（file={}）", id);
+            fileMapper.releaseProcessingClaim(id, claim);
         }
     }
 
@@ -478,21 +495,14 @@ public class MobileFileService {
         }
     }
 
+    /**
+     * 读文件头给魔数嗅探用。512 字节是给"带 XML 声明的 SVG"留的余量——`<?xml ...?>` 之后还要能
+     * 看见 `<svg` 根（只读 16 字节时只能看见声明本身，就没法把任意 XML 和 SVG 区分开）。
+     */
     private static byte[] readHeader(Path path) throws IOException {
         try (InputStream input = Files.newInputStream(path)) {
-            return input.readNBytes(16);
+            return input.readNBytes(512);
         }
-    }
-
-    /**
-     * 找同一 owner 已存在的同内容文件（{@code FOR UPDATE} 行锁的语义见
-     * {@link MobileFileMapper#selectReadyDuplicateForUpdate}）。
-     *
-     * <p>READ COMMITTED 下锁等待结束后谓词会重新求值：并发删除若已提交，这一行不再满足
-     * `status='READY'`（被谓词跳过）→ 返回 null → 走"新建一行"。
-     */
-    private MobileFile findReadyDuplicate(long ownerId, String sha256) {
-        return fileMapper.selectReadyDuplicateForUpdate(ownerId, sha256);
     }
 
     private void validateContent(String submittedContentType, byte[] content) {
@@ -565,7 +575,7 @@ public class MobileFileService {
                 return "image/avif";
             }
         }
-        // SVG 是文本（`<svg` / `<?xml`），可能带 BOM 或前导空白。
+        // SVG 是文本（`<svg` 或 `<?xml ...?><svg`），可能带 BOM 或前导空白。
         String head = new String(content, 0, Math.min(content.length, 64), StandardCharsets.UTF_8)
             .replace("\uFEFF", "");
         while (head.startsWith(" ") || head.startsWith("\n") || head.startsWith("\r")
@@ -573,8 +583,17 @@ public class MobileFileService {
             head = head.substring(1);
         }
         head = head.toLowerCase(Locale.ROOT);
-        if (head.startsWith("<svg") || head.startsWith("<?xml") || head.startsWith("<!doctype svg")) {
+        if (head.startsWith("<svg") || head.startsWith("<!doctype svg")) {
             return "image/svg+xml";
+        }
+        // 带 XML 声明的 SVG：**声明之后必须真的出现 `<svg` 根**。只看 `<?xml` 会把任意 XML 文档
+        // （RSS、配置、随便一段 XML）都当成图片放进来——报错文案也就跟着指错方向。
+        if (head.startsWith("<?xml")) {
+            int prologEnd = head.indexOf("?>");
+            int root = head.indexOf("<svg");
+            if (prologEnd > 0 && root > prologEnd) {
+                return "image/svg+xml";
+            }
         }
         return null;
     }
@@ -608,6 +627,12 @@ public class MobileFileService {
             }
             if (brand.startsWith("3gp")) {
                 return "video/3gpp";
+            }
+            // 图片品牌也是 ftyp 盒子（HEIC/AVIF 家族）：声明成 video/* 的图片不能被当成视频送进
+            // 水印链路（那会白跑一次 ffmpeg 然后把行标成失败）。这些品牌一律"不是视频"。
+            if (brand.startsWith("hei") || brand.startsWith("mif") || brand.startsWith("msf")
+                || brand.startsWith("avi")) {
+                return null;
             }
             return "video/mp4";
         }

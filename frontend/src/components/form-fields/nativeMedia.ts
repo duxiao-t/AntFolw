@@ -101,7 +101,9 @@ export async function waitForNativeFileReady(
     return file;
   }
   options.onProgress?.({ percent: 97, phase: 'processing' });
-  for (let attempt = 0; attempt < 600; attempt += 1) {
+  // 30 分钟（1s/次）。转码并发只有几路，几十个视频一起传时排在后面的要等很久——服务端现在**不会**
+  // 因为队列满就失败（它保持 PROCESSING 等空位），所以这里的上限不该比"真正处理完"更早放弃。
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     const current = await request<NativeFile>(
       `${MEDIA_UPLOAD_ENDPOINT}/${encodeURIComponent(file.id)}`,

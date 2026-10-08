@@ -39,10 +39,10 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
 两个未用 import、失效 `{@value}`）；1 条**核实后已被现有缓解**：`detectImageContentType` 把任何 `<?xml`
 开头的文本判成 `image/svg+xml`，但 `/content` 无条件带 `Content-Disposition: attachment`（`MobileFileController:61-64`），
 直接打开那个 URL 只会下载、不会在本站源里渲染 → `<svg onload>` 跑不起来，所以**没加**那行 CSP
-（真要做是加固，不是修洞）。1 条**留档不改**：`ftyp` 品牌回退把 `heic/mif1/avif` 判成 `video/mp4`
-（要客户端谎报 mime 才踩到，后果是 FAILED 行 + 可读原因）。
+（真要做是加固，不是修洞）。1 条当时**留档不改**：`ftyp` 品牌回退把 `heic/mif1/avif` 判成 `video/mp4`
+（要客户端谎报 mime 才踩到）——**已在下一轮的 P1 修掉**（`detectContentType` 对这些品牌返回 null）。
 
-**不在本轮**：把视频的"硬失败"产品化（23 个以上在途时的退避/重试策略）、自适应限流/背压、图片水印异步化、
+**不在本轮**：自适应限流/背压、图片水印异步化、
 把 MinIO `put` 移出事务（回滚会留孤儿对象，而且行锁必须覆盖 put）。
 
 ---

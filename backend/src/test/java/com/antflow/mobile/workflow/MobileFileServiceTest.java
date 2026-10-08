@@ -335,9 +335,13 @@ class MobileFileServiceTest {
         Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
     }
 
-    /** 对照：同一条路走上传，被拒就是 FAILED（客户端在轮询，得立刻知道）。 */
+    /**
+     * 队列满时上传路径**不能**把刚传上来的视频标 FAILED（那等于丢掉用户的数据）：保持 PROCESSING、
+     * 把租约还回去，等前面的任务完成时被"泵"进来。原来这里是"满了就 FAILED"，于是第 23 个并发视频
+     * 必然"上传成功却失败"。
+     */
     @Test
-    void uploadPathMarksFailedWhenQueueIsFull() throws Exception {
+    void uploadLeavesRowProcessingWhenQueueIsFull() throws Exception {
         Executor rejecting = command -> { throw new RejectedExecutionException("full"); };
         MobileFileProperties properties = new MobileFileProperties();
         service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
@@ -348,8 +352,85 @@ class MobileFileServiceTest {
         service.upload(new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()),
             7L, true, "AntFlow");
 
-        Mockito.verify(fileMapper).failProcessing(any(), any(), Mockito.contains("queue"));
-        Mockito.verify(fileMapper, Mockito.never()).releaseProcessingClaim(any(), any());
+        // 行仍是 PROCESSING（对象和行都已经写好了，只是排队排在后面）
+        ArgumentCaptor<MobileFile> captor = ArgumentCaptor.forClass(MobileFile.class);
+        Mockito.verify(fileMapper).insert(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo("PROCESSING");
+        // 租约还回去，让"完成即泵"或 reaper 能再捞；绝不标 FAILED
+        Mockito.verify(fileMapper).releaseProcessingClaim(any(), any());
+        Mockito.verify(fileMapper, Mockito.never()).failProcessing(any(), any(), any());
+    }
+
+    /**
+     * 完成即泵：一个转码任务做完就顺手把排队里的下一条接上（而不是干等下一轮定时 reaper）。
+     * 不泵的话队列满时上传的视频要等最多一个 reap-interval 才开始处理。
+     */
+    @Test
+    void completedVideoPumpsOneQueuedRow() throws Exception {
+        MobileFileProperties properties = new MobileFileProperties();
+        service = new MobileFileService(fileMapper, accessMapper, storage, properties, processor,
+            authorizationService, backgroundTasks::add, transactions);
+        Mockito.when(processor.supports("video/quicktime")).thenReturn(true);
+        Mockito.when(processor.applyTo(Mockito.any(), Mockito.any(), Mockito.eq("video/quicktime"),
+                Mockito.eq("AntFlow")))
+            .thenReturn(writeProcessed(new byte[] {1, 2, 3}));
+        Mockito.when(processor.resultContentType("video/quicktime")).thenReturn("video/mp4");
+        Mockito.when(fileMapper.claimProcessing(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.renewProcessingClaim(any(), any())).thenReturn(1);
+        Mockito.when(fileMapper.publishProcessed(any(), any(), any(), any(), Mockito.anyLong(),
+            any(), any())).thenReturn(1);
+        UUID pending = UUID.randomUUID();
+        Mockito.when(fileMapper.claimStaleProcessing(any(), Mockito.eq(1), any()))
+            .thenReturn(java.util.List.of(pending));
+
+        service.upload(new MockMultipartFile("file", "clip.mov", "video/quicktime", movBytes()),
+            7L, true, "AntFlow");
+        ArgumentCaptor<MobileFile> captor = ArgumentCaptor.forClass(MobileFile.class);
+        Mockito.verify(fileMapper).insert(captor.capture());
+        Mockito.when(fileMapper.selectById(captor.getValue().getId()))
+            .thenReturn(captor.getValue());
+        assertThat(backgroundTasks).hasSize(1);
+
+        backgroundTasks.get(0).run();
+
+        // 泵走的是"每次 1 条"，而且排进来的下一条又进了同一个队列
+        Mockito.verify(fileMapper).claimStaleProcessing(any(), Mockito.eq(1), any());
+        assertThat(backgroundTasks).hasSize(2);
+        // 被泵的那条**不需要**再 claimProcessing：claimStaleProcessing 已经在 SQL 里把 token 写好了
+        // （上传路径才需要 claimProcessing）。所以这里只有上传那一次认领。
+        Mockito.verify(fileMapper, Mockito.times(1)).claimProcessing(any(), any());
+    }
+
+    /** 图片品牌（HEIC/AVIF 也用 ftyp 盒子）谎报成 video/* 时不能被当成视频送进转码链路。 */
+    @Test
+    void videoDeclaredHeicBrandIsRejected() {
+        byte[] heic = new byte[] {
+            0, 0, 0, 24, 'f', 't', 'y', 'p', 'h', 'e', 'i', 'c', 0, 0, 0, 0,
+            'h', 'e', 'i', 'c'
+        };
+
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "photo.mp4", "video/mp4", heic), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("unsupported file content");
+        assertThat(storage.putCount).isZero();
+    }
+
+    /** `<?xml` 开头的任意 XML 不是图片；只有声明之后真的出现 `<svg` 根才算 SVG。 */
+    @Test
+    void xmlThatIsNotSvgIsRejectedAsImage() {
+        byte[] rss = "<?xml version=\"1.0\"?><rss><channel/></rss>"
+            .getBytes(StandardCharsets.UTF_8);
+        byte[] svgWithProlog = "<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>"
+            .getBytes(StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> service.upload(
+            new MockMultipartFile("file", "feed.svg", "image/svg+xml", rss), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不是支持的图片格式");
+        assertThat(service.upload(
+            new MockMultipartFile("file", "logo.svg", "image/svg+xml", svgWithProlog), 7L)
+            .contentType()).isEqualTo("image/svg+xml");
     }
 
     /**
