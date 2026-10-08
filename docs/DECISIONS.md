@@ -339,9 +339,12 @@
 - **决策：** **保持现状**。把它变成保密边界等于**改口径**：要对哪些视图、哪些角色、哪些字段过滤，都没定；而一旦过滤，有权限读者拿到的载荷会全部改变。
 - **影响：** 谁要把它当保密手段是误解——权限的正确表达是"这条记录你读不到"，不是"这个字段我藏起来"。真要做这件事，先定清上面三个维度，且必须逐视图验证。
 
-## D-20260930-unhandled-errors-count-again-in-frontend-tests
+## D-20260930-unhandled-errors-in-frontend-tests-keep-the-flag
 
-- **状态：** accepted
-- **背景：** `frontend/vitest.config.ts` 曾挂 `dangerouslyIgnoreUnhandledErrors: true`，起因是 `MobileFormPreview` 真的挂 `<iframe src="/mobile/form-preview">`，happy-dom 会去请求它、中止时抛的 DOMException 无人接。代价是**全项目不再因未处理错误而红**——那层安全网比一条控制台噪音值钱。
-- **决策：** 收回该 flag。实测（vitest 4.1.10）连跑三次全量 59 文件 / 288 用例全部退出码 0，那条 DOMException 只打印、不再让 run 失败。
-- **影响：** 异步未处理错误重新算红。已排除的窄口径修法（about:blank 的 origin=null、`disableIframePageLoading` 的 contentWindow=null、自挂 `unhandledRejection`、桩 `global.fetch`）与"万一以后又在负载下变红"的处理顺序都写在 `vitest.config.ts` 的注释里，别重复试。
+- **状态：** accepted（先收回过一次，被 CI 打回，最终保留）
+- **背景：** `frontend/vitest.config.ts` 挂着 `dangerouslyIgnoreUnhandledErrors: true`。曾经想收回（安全网值钱），本机 Windows 连跑三次全量 59 文件 / 288 用例、退出码全 0，看着可行——**推上 CI 立刻红了**：`ReferenceError: window is not defined`，来自 react-dom 的 `scheduler.development.js → performWorkUntilDeadline`，被归到当时在跑的 `FormManagementWizard.test.tsx`（59 文件 / 288 用例全绿 + Errors 1 → 退出码 1）。根因是"React 的延后渲染活过了 happy-dom 的拆卸"，与断言无关，而且**本机复现不出来**。另一条已知来源是 `MobileFormPreview` 真挂 `<iframe src="/mobile/form-preview">`、happy-dom 真去请求它、中止时抛的 DOMException 无人接。
+- **决策：** 保留 flag。要收它必须先把"拆卸后仍在跑的 React 工作"清干净（本机复现不出来 → 在本机验证再推 CI 是碰运气，不做盲改）。
+- **影响：**
+  - **全项目不再因"未处理错误"而红**；断言失败、测试内抛出的错误照旧会红。丢的是"异步未处理错误"这层安全网——用别的手段补（写用例时自己 `await` 干净、`afterEach` 里 unmount）。
+  - 已排除的窄口径修法（别再试）：about:blank / srcdoc / javascript: 都是 origin=null（postMessage 直接 SecurityError）；`disableIframePageLoading` 会让 contentWindow 变 null（spyOn 失败，覆盖一样丢）；自挂 `unhandledRejection` 处理器挡不住（vitest 有自己的监听）；桩 `global.fetch` 也没用（iframe 文档加载走 happy-dom 内部的真实 HTTP）。
+  - **教训**：本机全绿不等于 CI 绿——环境相关的未处理错误/类型错误只在 CI 暴露（同一次里还抓到一个 `tsc -b` 的报错，本机 `npm run lint` 不跑 tsc，`vitest` 也不算类型）。改这两处之前，别拿本机绿灯当推送依据。

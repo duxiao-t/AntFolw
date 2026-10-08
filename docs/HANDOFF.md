@@ -21,7 +21,7 @@
 | `506fcf8` | P3 前端"该拦没拦"五条：可见性改记忆化 DFS（条件引用后声明的字段不再误判）+ 数值比较先拒空值；明细表逐行校验 + 行数上下限 + 行内隐藏列不算"还在传"；检查项逐项校验（含照片上限，两端都补）；桌面视频 `maxDuration` 真拦；扫码卸载时 abort |
 | `c615061` | P4.2 outbox 三处：幂等键改成 `type:instanceId:event.id()`（不再静默丢"再次通知"）、投递期间只续**自己持有**的租约、webhook 带稳定事件键 |
 | `437eda6` | P4.3 上传改"先插行后写对象" + 孤儿对象清扫器（默认只记日志） |
-| `4f63601` | P4.1 收回 vitest 的 `dangerouslyIgnoreUnhandledErrors`（未处理错误重新算红） |
+| `4f63601` | P4.1 收回 vitest 的 `dangerouslyIgnoreUnhandledErrors`——**推上 CI 被打了回来**，见下“CI 打回的两处” |
 | `37e1cf3` | P4.5 antd 弃用只清理 17 处语义等价的；另 44 处**实测不能自动改**（见下） |
 | `da8360f` | P4.6 V52 删掉用不到的 GIN 索引（先 EXPLAIN） |
 
@@ -43,6 +43,16 @@ P4.2 的 3 条（webhook 那条用真 HTTP server 收）、P4.3 的 4 条。P4.5
 对 124 对象（缺的两个是上一轮手工 curl 造的行，读路径会自愈重写，与本轮无关）。V52 在真库上
 `Successfully applied 1 migration ... now at version v52`，启动探测
 `媒体水印就绪：ffmpeg='ffmpeg'，字体='/usr/share/fonts/truetype/wqy/wqy-microhei.ttc'` 正常。
+
+**CI 打回的两处（本机全绿≠CI 绿，值得记住）**：推上去之后 CI 在旧 head 看不到的两条立刻暴露——
+① `frontend/vitest.config.ts` 收回 `dangerouslyIgnoreUnhandledErrors` 后，Linux 上冒出
+`ReferenceError: window is not defined`（react-dom 的 `performWorkUntilDeadline`，归到
+`FormManagementWizard.test.tsx`；59 文件 / 288 用例全绿但 Errors 1 → 退出码 1）。本机 Windows 连跑
+三次都绿、**复现不出来**，盲改只会来回耗 CI，所以按计划里的退路**把 flag 加回去**，理由与"已排除的
+窄口径修法"都写进 `vitest.config.ts` 注释与 `D-20260930-unhandled-errors-in-frontend-tests-keep-the-flag`。
+② `mobile/src/features/forms/files.api.test.ts` 里有一行 `MockXMLHttpRequest.bodies = []`（上一轮改
+harness 时留下的），`tsc -b` 报 TS2339 —— 而移动端的 `npm run lint` 不跑 tsc、`vitest` 也不算类型，
+所以只有 CI 的 `npm run build` 看得见。删掉那行即可（顺带：以后动移动端要本地跑一次 `npm run build`）。
 
 **这轮没做**：P4.4 换静态 ffmpeg 把镜像从 1.57GB 压到 ~1.2GB——它的退出条件是"重建后**实测**镜像大小
 + 启动探测 + 中文水印渲染"三条都过，本轮只重建了镜像（1.57GB 未动），没有动 Dockerfile：宁可不做，
@@ -281,6 +291,9 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
   `displayText || '—'` 是同一种口径，不再是两回事。
 - **`HIDDEN` 不是保密边界**（已写成"明确不做"，见 `D-20260930-hidden-is-not-a-secrecy-boundary`）；
   移动端 lint 既有 warning 未动；存量角色权限三条（V40）只记录不改。
+- **前端测试开着 `dangerouslyIgnoreUnhandledErrors`**（收回过一次、被 CI 打回，理由见
+  `D-20260930-unhandled-errors-in-frontend-tests-keep-the-flag`）：即"全项目不再因未处理错误而红"。
+  想收它得先解决"React 延后渲染活过 happy-dom 拆卸"（本机复现不出来）。
 - 视频积压时**没有进度 UI**（只能靠客户端轮询等）——队列语义已经是"永久排队不失败"，但用户看不到
   "排在第几位"。真正的解是任务进度，记在这里。
 
