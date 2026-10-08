@@ -13,7 +13,6 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { DataNode } from 'antd/es/tree';
 import './Contacts.less';
 import {
-  buildMembersCsv,
   collectTreeKeys,
   contactsPaneMode,
   departmentPathNames,
@@ -26,6 +25,7 @@ import {
   summarizeSettledResults,
 } from './Contacts.utils';
 import { LeaderPicker, MemberFormModal, MemberSearchResults, MembersSection } from './Contacts.components';
+import { blobErrorMessage } from '@/utils/format';
 
 interface Dept {
   id: number; companyId: number; parentId: number | null;
@@ -408,19 +408,27 @@ export default function ContactsPage() {
     else msg.success(`已删除 ${successCount} 名成员`);
   };
 
-  const handleExportMembers = () => {
-    if (!members.length) { msg.warning('当前部门没有可导出的成员'); return; }
-    const csv = `\uFEFF${buildMembersCsv(members as UserItem[])}`;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const deptName = breadcrumb.split(' / ').pop() || '部门成员';
-    link.href = url;
-    link.download = `${deptName}-成员.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  // 导出走后端（同一条 listAuthorized：含下级部门、行级数据范围也在），以前只把**当前页**
+  // 的 15 个人拼成 CSV，一页 15 人时导出看起来"成功"却少了人。
+  const handleExportMembers = async () => {
+    if (!selDeptId) { msg.warning('请先选择部门'); return; }
+    try {
+      const blob = await request('/api/users/export', {
+        params: { deptId: selDeptId, includeDescendants: true, format: 'csv' },
+        responseType: 'blob',
+        skipErrorHandler: true,
+      });
+      const url = URL.createObjectURL(blob as Blob);
+      const anchor = document.createElement('a');
+      const deptName = breadcrumb.split(' / ').pop() || '部门成员';
+      anchor.href = url;
+      anchor.download = `${deptName}-成员.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      msg.success('已开始下载');
+    } catch (error) {
+      msg.error(await blobErrorMessage(error));
+    }
   };
 
   const handleImportMembers = async (event: React.ChangeEvent<HTMLInputElement>) => {

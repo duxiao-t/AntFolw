@@ -90,6 +90,14 @@ public final class FormValueDisplay {
         FieldMeta meta = metas.get(fieldId);
         if (meta == null) return cellText(value);
         if ("checklist".equals(meta.type()) && value.isArray()) return checklistSummary(value, meta);
+        if ("table_list".equals(meta.type()) && value.isArray()) {
+            // 单元格只放**首行**（详情抽屉才逐行展开）：原来落到 cellText() 只剩"N 项"，
+            // 列表上完全看不出填了什么。多行时留个省略号，提示去详情看。
+            String detail = tableListDetail(value, meta);
+            if (detail.isEmpty()) return "";
+            int lineBreak = detail.indexOf('\n');
+            return lineBreak < 0 ? detail : detail.substring(0, lineBreak) + " …";
+        }
         String select = selectText(meta, value);
         return select == null ? cellText(value) : select;
     }

@@ -74,6 +74,12 @@ public class FormDataService {
         }
         authorizationService.requireFormUse(fd.getId());
         String normalizedStatus = status == null ? "SUBMITTED" : status;
+        // status 是客户端传进来的：`t_form_data.status` 只有 DRAFT/SUBMITTED 两个合法值
+        // （APPROVED/REJECTED 是 **t_process_instance** 的状态，引擎推进实例时写的）。不拦的话
+        // 客户端能塞进一个永远不会出现的状态，台账/报表里就落进"其它"桶、也没法解释。
+        if (!"DRAFT".equals(normalizedStatus) && !"SUBMITTED".equals(normalizedStatus)) {
+            throw new BizException("BAD_STATUS", "不支持的表单状态：" + normalizedStatus);
+        }
         // 挂了已发布流程的表单只能走引擎发起。否则直接提交会造出 status=SUBMITTED、却没有
         // t_process_instance/审批任务的记录——桌面 /api/forms/data 与移动 /api/mobile/submissions
         // 都调这里，客户端只是"按 settings.workflowEnabled 自己选路"，服务端不兜底就能被绕过。
@@ -104,16 +110,28 @@ public class FormDataService {
 
     public record SubmitResult(Long dataId, String businessNo) { }
 
-    public List<FormData> mySubmissions(Long userId, String formCode) {
+    /**
+     * 本人提交列表（分页）。用独立 mapper 方法而不是 {@code selectPage}：见
+     * {@link FormDataMapper#selectMySubmissions} 的注释（语句 id 与数据权限拦截器的关系）。
+     */
+    public Page<FormData> mySubmissions(Long userId, String formCode, long page, long size) {
+        long safePage = Math.max(page, 1);
+        long safeSize = Math.min(Math.max(size, 1), 100);
         Long formDefId = null;
         if (formCode != null) {
             var fd = formDefinitionService.getByCode(formCode);
             // 指定了 code 却查不到（改名/下架/写错）时必须返回空：早先 formDefId 落成 null，
             // 而下传给 SQL 的 null 含义是"不过滤表单"，于是把该用户**所有**表单的提交都吐了出来。
-            if (fd == null) return List.of();
+            if (fd == null) return new Page<>(safePage, safeSize, 0);
             formDefId = fd.getId();
         }
-        return mapper.selectMySubmissions(userId, formDefId);
+        long total = mapper.countMySubmissions(userId, formDefId);
+        List<FormData> records = total == 0
+            ? List.of()
+            : mapper.selectMySubmissions(userId, formDefId, safeSize, (safePage - 1) * safeSize);
+        var result = new Page<FormData>(safePage, safeSize, total);
+        result.setRecords(records);
+        return result;
     }
 
     public Page<FormData> adminPage(long page, long size, Long formDefId,

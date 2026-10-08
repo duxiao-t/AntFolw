@@ -25,10 +25,24 @@ public interface FormDataMapper extends BaseMapper<FormData> {
         WHERE created_by = #{userId}
         <if test="formDefId != null"> AND form_def_id = #{formDefId} </if>
         ORDER BY created_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
         </script>
         """)
     List<FormData> selectMySubmissions(@Param("userId") long userId,
-                                       @Param("formDefId") Long formDefId);
+                                       @Param("formDefId") Long formDefId,
+                                       @Param("limit") long limit,
+                                       @Param("offset") long offset);
+
+    /** 与 {@link #selectMySubmissions} 同一组过滤条件的总数（分页要用）。 */
+    @InterceptorIgnore(dataPermission = "true")
+    @Select("""
+        <script>
+        SELECT COUNT(*) FROM t_form_data
+        WHERE created_by = #{userId}
+        <if test="formDefId != null"> AND form_def_id = #{formDefId} </if>
+        </script>
+        """)
+    long countMySubmissions(@Param("userId") long userId, @Param("formDefId") Long formDefId);
 
     /** 本人草稿是自助数据，不依赖管理端的 form:data:read 能力。 */
     @InterceptorIgnore(dataPermission = "true")

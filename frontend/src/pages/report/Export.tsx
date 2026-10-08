@@ -4,6 +4,7 @@ import { request } from '@umijs/max';
 import { App, Alert, Button, Input, Select, Space, Typography } from 'antd';
 import { createStyles } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
+import { blobErrorMessage } from '@/utils/format';
 import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from './Center';
 
 const useStyles = createStyles(({ token }) => ({
@@ -34,20 +35,6 @@ const FORMAT_OPTIONS = [
 ] as const;
 
 type ExportFormat = (typeof FORMAT_OPTIONS)[number]['value'];
-
-/** 出错时后端返回的是 JSON 而不是文件，axios 把整个响应体当 Blob 收下来了——读出来才有话说。 */
-async function blobErrorMessage(error: any): Promise<string> {
-  const data = error?.response?.data;
-  if (data instanceof Blob) {
-    try {
-      const parsed = JSON.parse(await data.text());
-      if (parsed?.message) return String(parsed.message);
-    } catch {
-      // 不是 JSON 就用下面的兜底
-    }
-  }
-  return error?.message ?? '导出失败';
-}
 
 export default function ExportPage() {
   const { styles } = useStyles();

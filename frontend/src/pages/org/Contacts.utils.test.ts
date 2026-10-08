@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildMembersCsv,
   collectDepartmentIds,
   contactsPaneMode,
   departmentPathNames,
@@ -187,41 +186,6 @@ describe('Contacts CSV helpers', () => {
     expect(formatGender('女')).toBe('女');
   });
 
-  it('exports members with Chinese headers and escapes CSV cells', () => {
-    const csv = buildMembersCsv([
-      {
-        id: 1,
-        employeeNo: '000001',
-        username: 'zhangsan',
-        displayName: '张三,主管',
-        email: 'z"s@example.com',
-        phone: '13800000000',
-        position: '研发',
-        gender: 'M',
-        deptId: 2,
-      },
-    ]);
-
-    expect(csv).toBe('姓名,工号,账号,手机,邮箱,职务,性别\r\n"张三,主管",000001,zhangsan,13800000000,"z""s@example.com",研发,男');
-  });
-
-  it('neutralizes spreadsheet formulas in exported member fields', () => {
-    const csv = buildMembersCsv([{
-      displayName: '=HYPERLINK("https://evil.example")',
-      employeeNo: '000001',
-      username: '+cmd',
-      phone: '',
-      email: ' safe@example.com',
-      position: '\t@SUM(1,1)',
-      gender: 'M',
-      deptId: 2,
-    }]);
-
-    expect(csv).toContain('"\'=HYPERLINK(""https://evil.example"")"');
-    expect(csv).toContain("'+cmd");
-    expect(csv).toContain('"\'\t@SUM(1,1)"');
-  });
-
   it('imports Chinese-header CSV rows into the selected department', () => {
     const result = parseMembersCsv('姓名,工号,账号,手机,邮箱,职务,性别\n李四,000002,lisi,13900000000,lisi@example.com,产品,女', 7);
 
@@ -280,19 +244,14 @@ describe('Contacts bulk action helpers', () => {
 });
 
 describe('Contacts CSV round trip', () => {
+  // 导出搬到了后端（`GET /api/users/export`），夹具用**服务端实际输出的字面量**：
+  // 服务端那一半（表头、性别出中文、公式前缀、带 BOM）由 UserExportControllerTest 钉住，
+  // 两边合起来才是完整的"导出 → 导入"契约。以前两边各有一份 buildMembersCsv，会慢慢漂移。
   it('导出的文件原样导回来，值不变（含类公式值）', () => {
-    const member = {
-      displayName: '=SUM(A1)',
-      employeeNo: '100001',
-      username: 'alice',
-      phone: '13800000000',
-      email: 'alice@example.com',
-      position: '+组长',
-      gender: 'F',
-      deptId: 7,
-    };
+    const exported = '\uFEFF姓名,工号,账号,手机,邮箱,职务,性别\r\n'
+      + "'=SUM(A1),100001,alice,13800000000,alice@example.com,'+组长,女";
 
-    const parsed = parseMembersCsv(buildMembersCsv([member]), 7);
+    const parsed = parseMembersCsv(exported, 7);
 
     expect(parsed.errors).toEqual([]);
     expect(parsed.rows).toEqual([{
@@ -308,19 +267,12 @@ describe('Contacts CSV round trip', () => {
   });
 
   it('含逗号与引号的值也能往返', () => {
-    const member = {
-      displayName: '张三, "阿三"',
-      employeeNo: '',
-      username: 'zhangsan',
-      phone: '',
-      email: '',
-      position: '',
-      gender: 'M',
-      deptId: 1,
-    };
+    const exported = '\uFEFF姓名,工号,账号,手机,邮箱,职务,性别\r\n'
+      + '"张三, ""阿三""",,zhangsan,,,,男';
 
-    const parsed = parseMembersCsv(buildMembersCsv([member]), 1);
+    const parsed = parseMembersCsv(exported, 1);
 
     expect(parsed.rows[0].displayName).toBe('张三, "阿三"');
+    expect(parsed.rows[0].gender).toBe('M');
   });
 });

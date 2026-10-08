@@ -128,6 +128,23 @@ class FormValueDisplayTest {
             """))).isEqualTo("名称=齿轮；工艺=车削\n名称=轴");
     }
 
+    /** 单元格只放首行：以前没有 table_list 分支，列表上只看到"N 项"，完全看不出填了什么。 */
+    @Test
+    void tableListCellsShowTheFirstRowAndHintAtTheRest() throws Exception {
+        FormValueDisplay display = display("""
+            [{"id":"rows","type":"table_list","label":"明细","children":[
+               {"id":"c-name","type":"text","label":"名称"}]}]
+            """, "{}");
+
+        assertThat(display.cell("rows", json.readTree("""
+            [{"c-name":"齿轮"},{"c-name":"轴"}]
+            """))).isEqualTo("名称=齿轮 …");
+        assertThat(display.cell("rows", json.readTree("[{\"c-name\":\"齿轮\"}]")))
+            .isEqualTo("名称=齿轮");
+        // 空行也算一行，但不该冒出"…"。
+        assertThat(display.cell("rows", json.readTree("[]"))).isEmpty();
+    }
+
     @Test
     void externalOptionSourcesAreResolvedFromThePinnedVersion() throws Exception {
         String schema = """

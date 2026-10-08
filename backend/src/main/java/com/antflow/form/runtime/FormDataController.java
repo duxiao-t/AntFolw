@@ -102,9 +102,11 @@ public class FormDataController {
 
     @GetMapping
     @PreAuthorize("@authz.consoleEntry()")
-    public List<FormData> mySubmissions(@RequestParam(required = false) String formCode) {
+    public Page<FormData> mySubmissions(@RequestParam(required = false) String formCode,
+                                        @RequestParam(defaultValue = "1") long page,
+                                        @RequestParam(defaultValue = "20") long size) {
         var p = PrincipalHolder.current().orElseThrow();
-        return service.mySubmissions(p.userId(), formCode);
+        return service.mySubmissions(p.userId(), formCode, page, size);
     }
 
     @GetMapping("/admin")

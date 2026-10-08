@@ -145,6 +145,37 @@ class FormDataServiceTest {
     }
 
     @Test
+    void submitRejectsClientSuppliedApprovedStatus() {
+        Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+
+        // APPROVED 是 t_process_instance 的状态，t_form_data.status 只有 DRAFT/SUBMITTED。
+        // 不拦的话客户端能塞进一个永远不会出现的状态，台账/报表里就落进"其它"桶。
+        assertThatThrownBy(() -> service.submit("expense", "APPROVED",
+            Map.of("applicant", "张三"), 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("不支持的表单状态");
+        Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
+    }
+
+    @Test
+    void mySubmissionsReturnsOnlyTheRequestedPage() {
+        Mockito.when(formDataMapper.countMySubmissions(7L, null)).thenReturn(45L);
+        FormData row = new FormData();
+        row.setId(11L);
+        Mockito.when(formDataMapper.selectMySubmissions(7L, null, 20L, 40L))
+            .thenReturn(List.of(row));
+
+        Page<FormData> page = service.mySubmissions(7L, null, 3, 20);
+
+        assertThat(page.getTotal()).isEqualTo(45L);
+        assertThat(page.getCurrent()).isEqualTo(3L);
+        assertThat(page.getSize()).isEqualTo(20L);
+        assertThat(page.getRecords()).hasSize(1);
+        // 分页必须下推到 SQL（limit/offset）：本人提交多了，以前一次全量返回整张表。
+        Mockito.verify(formDataMapper).selectMySubmissions(7L, null, 20L, 40L);
+    }
+
+    @Test
     void directSubmitRejectsMismatchedCaller() {
         Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
         Mockito.when(authorizationService.currentUserId()).thenReturn(8L);

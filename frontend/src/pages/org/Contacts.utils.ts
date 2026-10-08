@@ -91,8 +91,6 @@ export function departmentPathNames(list: DeptPathItem[], deptId: number | null)
   return names;
 }
 
-const exportHeaders = ['姓名', '工号', '账号', '手机', '邮箱', '职务', '性别'];
-
 const headerMap: Record<string, keyof Omit<MemberCsvItem, 'id' | 'deptId'>> = {
   姓名: 'displayName',
   displayName: 'displayName',
@@ -194,19 +192,6 @@ export function collectDepartmentIds(list: DeptTreeItem[], selectedId: number | 
   return result;
 }
 
-export function buildMembersCsv(members: MemberCsvItem[]): string {
-  const rows = members.map((m) => [
-    m.displayName ?? '',
-    m.employeeNo ?? '',
-    m.username ?? '',
-    m.phone ?? '',
-    m.email ?? '',
-    m.position ?? '',
-    formatGender(m.gender),
-  ]);
-  return [exportHeaders, ...rows].map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
-}
-
 export function summarizeSettledResults(results: PromiseSettledResult<unknown>[]): SettledSummary {
   const successCount = results.filter((r) => r.status === 'fulfilled').length;
   return { successCount, failedCount: results.length - successCount };
@@ -263,16 +248,9 @@ export function parseMembersCsv(content: string, deptId: number): MemberCsvParse
   return { rows: errors.length ? [] : rows, errors };
 }
 
-/** 会被 Excel 当公式执行的起始字符（前导空白也算）。 */
+/** 会被 Excel 当公式执行的起始字符（前导空白也算）。导出侧的同类防护现在在后端
+ * （`FormDataExport`），这里只服务于导入：把导出文件里的前导撇号还原回去。 */
 const FORMULA_PREFIX = /^\s*[=+\-@]/;
-
-function escapeCsvCell(value: string): string {
-  // 前导空白/控制字符 + `=+-@` 会被 Excel 当公式执行。\s 已覆盖真正会被当触发器的 \t \r，
-  // 原来还写了 \u0000-\u001f 的区段，Biome 的 noControlCharactersInRegex 不接受，去掉不影响防护。
-  const safe = FORMULA_PREFIX.test(value) ? `'${value}` : value;
-  if (/[",\r\n]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
-  return safe;
-}
 
 /**
  * 与 escapeCsvCell 对称：把我们自己加的那个前导撇号去掉。
