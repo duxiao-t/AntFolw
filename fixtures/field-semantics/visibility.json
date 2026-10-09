@@ -1,0 +1,98 @@
+{
+  "note": "字段可见性口径的共同约定。桌面(frontend/src/registry/displayConditions.ts)、移动(mobile/src/features/forms/schema/validators.ts)、后端(FormDefinitionService.resolveVisible)读同一份。预期值来自下面的规则，**不取自任一当前实现**——实现与这里不一致时，改实现，不是改期望。",
+  "rule": [
+    "visible(node) = 父链可见 && (无来源 || 来源不在 schema 内 || 来源可见) && displayCondition 成立 && props.hidden !== true",
+    "没有 displayCondition 的字段视为条件成立",
+    "来源字段被删掉（id 不在 schema 里）时：来源可见性那一项跳过，但**条件本身仍按值判**——值取不到 → 条件不成立 → 字段不可见。设计器保存时会清掉悬空条件（useFormDesignerStore.cleanupDisplayConditions），所以这条是防御性行为，三端口径一致",
+    "数值比较先拒空值：空值不满足 gt/gte/lt/lte（Number('') 是 0，会误判为满足）",
+    "条件可以引用**后面才声明**的字段：可见性必须与 schema 的声明顺序无关",
+    "环（互指 A↔B、自指 A→A）是配置错误：保存与发布都要拒绝；运行时按『来源视为不满足』给出确定性结果，绝不递归爆栈"
+  ],
+  "cases": [
+    {
+      "id": "forward-reference-declaration-order-independent",
+      "intent": "条件引用后面才声明的字段——顺序无关，两端必须一致（移动端曾经在这里漂移）",
+      "schema": [
+        { "id": "dependent", "type": "text", "props": { "displayCondition": { "fieldId": "source", "operator": "eq", "value": "yes" } } },
+        { "id": "source", "type": "select" }
+      ],
+      "values": { "source": "yes" },
+      "expect": { "visible": ["dependent", "source"] }
+    },
+    {
+      "id": "forward-reference-not-matched",
+      "intent": "同一个前向引用，来源值不满足条件时依赖字段不可见",
+      "schema": [
+        { "id": "dependent", "type": "text", "props": { "displayCondition": { "fieldId": "source", "operator": "eq", "value": "yes" } } },
+        { "id": "source", "type": "select" }
+      ],
+      "values": { "source": "no" },
+      "expect": { "visible": ["source"] }
+    },
+    {
+      "id": "mutual-reference",
+      "intent": "互指：保存/发布拒绝；运行时不崩，按来源不满足给确定性结果",
+      "schema": [
+        { "id": "a", "type": "text", "props": { "displayCondition": { "fieldId": "b", "operator": "eq", "value": "yes" } } },
+        { "id": "b", "type": "text", "props": { "displayCondition": { "fieldId": "a", "operator": "eq", "value": "yes" } } }
+      ],
+      "values": { "a": "yes", "b": "yes" },
+      "expect": { "visible": [], "cycle": ["a", "b", "a"], "rejectedAtSaveOrPublish": true }
+    },
+    {
+      "id": "self-reference",
+      "intent": "自指：同互指，且设计器里更容易被构造成（导入/API 是入口，界面已按声明顺序禁止成环）",
+      "schema": [
+        { "id": "a", "type": "text", "props": { "displayCondition": { "fieldId": "a", "operator": "eq", "value": "yes" } } }
+      ],
+      "values": { "a": "yes" },
+      "expect": { "visible": [], "cycle": ["a", "a"], "rejectedAtSaveOrPublish": true }
+    },
+    {
+      "id": "hidden-source",
+      "intent": "来源字段自己 hidden 时，依赖它的字段一并不可见（条件本身成立也没用）",
+      "schema": [
+        { "id": "source", "type": "select", "props": { "hidden": true } },
+        { "id": "dependent", "type": "text", "props": { "displayCondition": { "fieldId": "source", "operator": "eq", "value": "yes" } } }
+      ],
+      "values": { "source": "yes" },
+      "expect": { "visible": [] }
+    },
+    {
+      "id": "missing-source-condition-still-evaluated",
+      "intent": "来源字段被删（id 不在 schema 内）：来源可见性不拦，但条件仍按值判 → 取不到值 → 不可见。三端一致；设计器保存时会清掉这种悬空条件",
+      "schema": [
+        { "id": "dependent", "type": "text", "props": { "displayCondition": { "fieldId": "gone", "operator": "eq", "value": "yes" } } }
+      ],
+      "values": {},
+      "expect": { "visible": [] }
+    },
+    {
+      "id": "empty-value-never-satisfies-number-compare",
+      "intent": "空值不满足 gte 0：Number('') 是 0，不先拒空会把空字段当成满足条件",
+      "schema": [
+        { "id": "amount", "type": "number" },
+        { "id": "dependent", "type": "text", "props": { "displayCondition": { "fieldId": "amount", "operator": "gte", "value": 0 } } }
+      ],
+      "values": { "amount": "" },
+      "expect": { "visible": ["amount"] }
+    },
+    {
+      "id": "child-hidden-when-parent-hidden",
+      "intent": "父链不可见时子字段不可见，即使子字段自己的条件成立",
+      "schema": [
+        { "id": "gate", "type": "select" },
+        {
+          "id": "container", "type": "span_layout",
+          "props": { "displayCondition": { "fieldId": "gate", "operator": "eq", "value": "open" } },
+          "children": [
+            { "id": "inner", "type": "text" },
+            { "id": "inner-child", "type": "text", "props": { "displayCondition": { "fieldId": "gate", "operator": "eq", "value": "open" } } }
+          ]
+        }
+      ],
+      "values": { "gate": "closed" },
+      "expect": { "visible": ["gate"] }
+    }
+  ]
+}

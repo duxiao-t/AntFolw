@@ -1,12 +1,76 @@
+> 架构审计（2026-10-09）：见 [分模块技术选型与演化路线](architecture-review-2026-10-09.md)。
+> 核验结论：保留模块化单体，修订设计器 big-bang、生成契约和集成前提。
+> **整改已开始（同日）**：P0a 的 A2（共享 fixture）与 P0b（两个已复现缺陷）已实施，见下"最新一轮"。
+
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-08T10:30:00+08:00`
-- **分支：** `feat/contacts-report-export`（从 `master` = `4328845` 拉出，未推）。前两轮都已合并进 master：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排。
+- **更新时间：** `2026-10-09T15:30:00+08:00`
+- **分支：** `master`（= `a8c6790`，本轮改动**未提交**）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
 
 ---
 
-## 最新一轮：历史遗留清理（第 23 个视频不再 FAILED / 队列语义 / 前端该拦没拦）
+## 最新一轮：P0b 缺陷修复 + A2 共享 fixture（可见性口径）
+
+按审计报告 B3 的 P0 行开工，双轨里的 **A2（fixture 骨架）与 P0b（已复现缺陷）** 已落地；
+A1/A3/A4（契约链路、边界门禁、六指标）**未开始**。
+
+| 变更 | 内容 |
+| --- | --- |
+| `fixtures/field-semantics/visibility.json`（新） | 三端共用的可见性口径 fixture：8 条用例（前向引用 ×2、互指、自指、隐藏来源、悬空来源、空值数值比较、父链隐藏）。期望值写在 fixture 里，**不取自任一实现** |
+| `frontend/src/registry/displayConditions.ts` | 修 `visiting` 守卫（`has` 再 `add`；原 `!visiting.add(id)` 恒假 = 没判环，互指/自指直接 `RangeError`）；新增 `findDisplayConditionCycle`（显式栈，拒绝在保存/发布）；改掉那条说反了的注释 |
+| `backend/.../FormDefinitionService.java` | 新增 `rejectDisplayConditionCycles`：**保存（新建/更新草稿）与发布都拒绝**环；**故意不放进 `parseSchema`** —— 存量已发布表单可能已带环，提交路径拒绝会让它们当场填不了 |
+| `mobile/.../schema/validators.ts` | `visibleNodeIds` 换成与桌面同源的递归+memo（旧 forEach 版是桌面修过的旧算法）；`numberCompare` 补"先拒空值" |
+| `frontend/src/components/FormRenderer/FormRenderer.tsx` | 未知字段类型不再 `return null`（静默空洞），改显式占位 `[data-unknown-field-type]` |
+| 三个测试 | `displayConditions.fixture.test.ts` / `validators.fixture.test.ts` / `FormDefinitionServiceSchemaTest`（+6 用例）+ `FormRenderer.test.tsx`（+1） |
+
+**fixture 一上线就抓到第二个漂移**：移动端 `numberCompare` 没先拒空值，空数字字段能满足 `gte 0`、
+把依赖字段显示出来（桌面与后端都判不成立）。这是报告里没有的——原报告只知道前向引用那一处。
+取证（移动端 `git show HEAD:` 的旧实现跑同一份 fixture）：**修复前 6/8，修复后 8/8**；
+桌面修复前互指/自指 `RangeError`（`Maximum call stack size exceeded`），修复后 8/8。
+
+**验证**：后端 `mvn -B test` **569 绿**（基线 563，+6）；前端 `npm test` **300 绿**（基线 291，+9）；
+移动端 `npx vitest run` **359 绿**（基线 351，+8）；`npm run tsc` 干净、`biome lint` 仍是既有 4 条 warning。
+守护取证：把 `rejectDisplayConditionCycles` 短路 → 4 条拒绝用例当场红（已还原）；
+环检测/占位断言在旧实现下结构性不可能通过。
+
+**发现并修正的一处自身错误**：我原先在 fixture 里写的规则是"来源字段被删 → 条件视为成立"，
+实测桌面 **与后端**（`FormDefinitionService.isVisible` 取 `values.get(fieldId)` 为 null）都判"不成立"——
+是我的规则写错了，不是实现错。fixture 已按真实规则改写并注明设计器保存时会清悬空条件。
+
+---
+
+## 上一轮：「数据导出」并入「表单管理 → 提交数据」
+
+你要求把「数据与报表 → 数据导出」挪到「表单管理 → 提交数据」。形态按你选的是**表格工具栏「导出」按钮 → 弹窗**，
+导出接口（`/api/forms/data/admin/export`、`/api/reports/form-data-count`）与能力点 `form:data:export` 都没动，只换入口。
+
+| 文件 | 内容 |
+| --- | --- |
+| `frontend/src/pages/admin/FormData/ExportModal.tsx`（新） | 原 `report/Export.tsx` 的表单体套进 `Modal`；`defaults` 承接表格当前的表单/状态/提交人筛选 |
+| `frontend/src/pages/report/Export.tsx`（删） | 独立页面撤下；`Export.test.tsx` → `admin/FormData/ExportModal.test.tsx` |
+| `frontend/src/pages/admin/FormData/index.tsx` | ProTable `toolBarRender` 加「导出」按钮（有 `form:data:export` 才显示）+ 条件渲染弹窗；`loadRecords` 里留一份 `lastQuery` 当默认值 |
+| `registry.ts` / `config/page-capabilities.json` / `locales/zh-CN/menu.ts` | 删 `report.export`（三处必须同时删，见下） |
+| `config/routes.ts` | `/report/export` → 重定向到 `/approval/form-data`（旧书签/旧菜单缓存不再 404） |
+| `backend/.../V53__retire_data_export_menu.sql`（新） | 删 `t_menu` 那行 + 推进菜单版本；`form:data:export` 能力点保留 |
+
+**为什么菜单行必须跟 JSON 一起删**：`MenuService.loadTree()` 对每一行的 `page_key` 都要
+`PageCapabilityRegistry.require()`，只在一边删会让**整棵导航**报 `MENU_PAGE_KEY_UNKNOWN`（不是"少一项菜单"）。
+
+**验证**：后端 `mvn -B test` **563 绿**（基线 563，全新探针库跑完 V1–V53；集成用例里 `menuService.menu()` 会逐行校验 pageKey）；
+前端 `npm test` **291 绿**（基线 288）、`npm run tsc` 干净、`npm run build` 通过；探针库实测 `t_menu` 已无 `report.export`、
+`t_menu_revision.version = 3`、`form:data:export` 仍在。守护：把 `defaults={lastQuery.current}` 改成 `defaults={{}}`，
+`ledgerColumns.test.tsx`「导出按钮把表格当前筛选带进弹窗」当场红。**真机（本机 docker）没重跑**——要生效得重建 web 镜像，
+且 V53 会删掉库里那行菜单。
+
+**这轮踩到的坑（重要）**：我为了让类型检查跑起来敲了 `npx tsc -b`，它在源码旁**生成 `.js`/`.d.ts`**（854 个）；
+vitest 解析 `./ExportModal` 时 **`.js` 优先于 `.tsx`**，于是测试一直在跑**旧的编译产物**——现象是"组件挂载了、
+effect 也跑了、但 DOM 是空的"，查了很久。正确命令是 `npm run tsc`（= `tsc --noEmit`）。产物已清干净
+（`git ls-files --others --exclude-standard` 现在只剩本轮两个新文件）。
+
+---
+
+## 上一轮：历史遗留清理（第 23 个视频不再 FAILED / 队列语义 / 前端该拦没拦）
 
 你点名两件事：**清理历史遗留** + **"23 个以上在途时第 23 个上传成功却 FAILED"**。先订正了两条我自己
 写错的记录（`t_mobile_file.watermark_text` 其实**早就在落库**、空值语义也已经是 `—`），确认"遗留"里

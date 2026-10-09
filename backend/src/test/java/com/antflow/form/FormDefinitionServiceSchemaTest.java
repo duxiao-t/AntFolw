@@ -78,7 +78,91 @@ class FormDefinitionServiceSchemaTest {
         assertThat(saved.getStatus()).isEqualTo("PUBLISHED");
     }
 
+    @Test void saveDraftRejectsMutualDisplayConditionCycle() throws Exception {
+        when(mapper.selectById(1L)).thenReturn(draft());
+
+        assertThatThrownBy(() -> service.saveDraft(1L, null, null, null,
+            json.readTree(CYCLE_MUTUAL), null, 7L))
+            .isInstanceOfSatisfying(BizException.class, error -> {
+                assertThat(error.getCode()).isEqualTo("BAD_SCHEMA");
+                assertThat(error.getMessage()).contains("a → b → a");
+            });
+    }
+
+    @Test void saveDraftRejectsSelfReferencingDisplayCondition() throws Exception {
+        when(mapper.selectById(1L)).thenReturn(draft());
+
+        assertThatThrownBy(() -> service.saveDraft(1L, null, null, null,
+            json.readTree(CYCLE_SELF), null, 7L))
+            .isInstanceOfSatisfying(BizException.class, error -> {
+                assertThat(error.getCode()).isEqualTo("BAD_SCHEMA");
+                assertThat(error.getMessage()).contains("a → a");
+            });
+    }
+
+    @Test void saveDraftRejectsCycleHiddenInsideChildren() throws Exception {
+        // 容器/明细项里的子字段同样进图：collectConditionSources 必须递归 children。
+        String nested = "[{\"id\":\"container\",\"type\":\"span_layout\",\"children\":["
+            + "{\"id\":\"x\",\"type\":\"text\",\"props\":{\"displayCondition\":"
+            + "{\"fieldId\":\"y\",\"operator\":\"eq\",\"value\":\"1\"}}},"
+            + "{\"id\":\"y\",\"type\":\"text\",\"props\":{\"displayCondition\":"
+            + "{\"fieldId\":\"x\",\"operator\":\"eq\",\"value\":\"1\"}}}]}]";
+        when(mapper.selectById(1L)).thenReturn(draft());
+
+        assertThatThrownBy(() -> service.saveDraft(1L, null, null, null,
+            json.readTree(nested), null, 7L))
+            .isInstanceOfSatisfying(BizException.class, error ->
+                assertThat(error.getCode()).isEqualTo("BAD_SCHEMA"));
+    }
+
+    @Test void saveDraftStillAcceptsForwardReferenceAndDanglingSource() throws Exception {
+        // 拦环不能顺手把合法引用一起拦掉：前向引用（引用后面才声明的字段）与悬空来源都不是环。
+        when(mapper.selectById(1L)).thenReturn(draft());
+
+        String forward = "[{\"id\":\"dependent\",\"type\":\"text\",\"props\":{\"displayCondition\":"
+            + "{\"fieldId\":\"source\",\"operator\":\"eq\",\"value\":\"yes\"}}},"
+            + "{\"id\":\"source\",\"type\":\"select\"},"
+            + "{\"id\":\"dangling\",\"type\":\"text\",\"props\":{\"displayCondition\":"
+            + "{\"fieldId\":\"gone\",\"operator\":\"eq\",\"value\":\"yes\"}}}]";
+
+        assertThatCode(() -> service.saveDraft(1L, null, null, null,
+            json.readTree(forward), null, 7L)).doesNotThrowAnyException();
+    }
+
+    @Test void publishRejectsDisplayConditionCycle() throws Exception {
+        var fd = draft();
+        fd.setSchema(CYCLE_MUTUAL);
+        when(mapper.selectById(1L)).thenReturn(fd);
+
+        assertThatThrownBy(() -> service.publish(1L))
+            .isInstanceOfSatisfying(BizException.class, error -> {
+                assertThat(error.getCode()).isEqualTo("BAD_SCHEMA");
+                assertThat(error.getMessage()).contains("互指");
+            });
+    }
+
+    @Test void submittingALegacyCyclicSchemaStillWorks() throws Exception {
+        // 故意**不**在 parseSchema 里拦环：存量已发布的表单可能已经带环（"界面禁止成环"是后来的事），
+        // 在提交路径上拒绝会让那些表单当场填不了。所以环只在**保存与发布**拒绝，运行时给确定性结果
+        // （环上节点按来源不满足处理）。前端相应地把 `visiting` 守卫写对，不再递归爆栈。
+        assertThatCode(() -> service.validateSubmission(CYCLE_MUTUAL, Map.of("a", "yes", "b", "yes")))
+            .doesNotThrowAnyException();
+    }
+
     private static final String SCHEMA = "[{\"id\":\"a\",\"type\":\"text\"}]";
+    private static final String CYCLE_MUTUAL = "[{\"id\":\"a\",\"type\":\"text\",\"props\":"
+        + "{\"displayCondition\":{\"fieldId\":\"b\",\"operator\":\"eq\",\"value\":\"yes\"}}},"
+        + "{\"id\":\"b\",\"type\":\"text\",\"props\":{\"displayCondition\":"
+        + "{\"fieldId\":\"a\",\"operator\":\"eq\",\"value\":\"yes\"}}}]";
+    private static final String CYCLE_SELF = "[{\"id\":\"a\",\"type\":\"text\",\"props\":"
+        + "{\"displayCondition\":{\"fieldId\":\"a\",\"operator\":\"eq\",\"value\":\"yes\"}}}]";
+
+    /** 可编辑草稿：保存/发布路径的入口状态。 */
+    private FormDefinition draft() {
+        var fd = published();
+        fd.setStatus("DRAFT");
+        return fd;
+    }
 
     /**
      * 已发布表单。schema 故意写成 **Postgres jsonb 读回来的排版**（冒号/逗号后带空格），

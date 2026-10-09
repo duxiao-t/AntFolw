@@ -111,19 +111,46 @@ export function isVisibleNode(
     && matchesDisplayCondition(node.props?.displayCondition, values);
 }
 
+/**
+ * 可见节点集合。**记忆化递归，声明顺序无关** —— 与桌面 `frontend/src/registry/displayConditions.ts`
+ * 同一套口径（那份注释 + `fixtures/field-semantics/` 的 fixture 是两端的共同约定）。
+ *
+ * <p>这里原本是"一遍 `forEach` 边走边判"的旧算法：条件引用**后面才声明**的字段时，那个字段还没进
+ * `visibleIds`，"来源可见"就被判成否——同一张表单桌面显示、手机上不显示。桌面早已改成递归 + memo，
+ * 移动端漏改，于是漂移了两个版本（这就是"复制必漂移"的第一个实例）。现在两端读同一份 fixture 钉住。
+ *
+ * <p>环（互指 A↔B、自指 A→A）在保存/发布时会被拒，但存量 schema 里可能已经有：走到递归栈上的
+ * 节点时把它的来源当作"不满足"（该节点不可见），保证确定性、绝不递归爆栈。
+ */
 export function visibleNodeIds(nodes: MobileSchemaNode[], values: MobileFormValues) {
-  const allIds = new Set(flattenNodes(nodes).map((node) => node.id));
-  const visibleIds = new Set<string>();
-  const visit = (items: MobileSchemaNode[], parentVisible: boolean) => {
-    items.forEach((node) => {
-      const sourceId = displayConditionSourceId(node);
-      const sourceVisible = !sourceId || !allIds.has(sourceId) || visibleIds.has(sourceId);
-      const visible = parentVisible && sourceVisible && isVisibleNode(node, values);
-      if (visible) visibleIds.add(node.id);
-      visit(node.children ?? [], visible);
-    });
+  const all = flattenNodes(nodes);
+  const byId = new Map(all.map((node) => [node.id, node]));
+  const parentOf = new Map<string, string>();
+  for (const node of all) {
+    for (const child of node.children ?? []) parentOf.set(child.id, node.id);
+  }
+  const memo = new Map<string, boolean>();
+  const visiting = new Set<string>();
+  const resolve = (id: string): boolean => {
+    const cached = memo.get(id);
+    if (cached !== undefined) return cached;
+    const node = byId.get(id);
+    if (!node) return false;
+    if (visiting.has(id)) return false;
+    visiting.add(id);
+    const parentId = parentOf.get(id);
+    const sourceId = displayConditionSourceId(node);
+    const visible = (parentId === undefined || resolve(parentId))
+      && (!sourceId || !byId.has(sourceId) || resolve(sourceId))
+      && isVisibleNode(node, values);
+    visiting.delete(id);
+    memo.set(id, visible);
+    return visible;
   };
-  visit(nodes, true);
+  const visibleIds = new Set<string>();
+  for (const node of all) {
+    if (resolve(node.id)) visibleIds.add(node.id);
+  }
   return visibleIds;
 }
 
@@ -258,11 +285,18 @@ function matchesDisplayCondition(condition: unknown, values: MobileFormValues) {
   }
 }
 
+/**
+ * 大小比较。**先拒空值再做数值转换**：`Number('')` 是 0，于是空数字字段能满足 `gte 0` 之类的条件、
+ * 把依赖它的字段显示出来，而后端 `compareNumbers`（解析不出数字即 false）判它不成立——两端可见性
+ * 会对不上。桌面 `displayConditions.numberCompare` 早先修过这一条，移动端漏了：fixture
+ * `empty-value-never-satisfies-number-compare` 抓到的第二个漂移。
+ */
 function numberCompare(
   sourceValue: unknown,
   targetValue: unknown,
   compare: (left: number, right: number) => boolean,
 ) {
+  if (isEmptyValue(sourceValue) || isEmptyValue(targetValue)) return false;
   const left = Number(sourceValue);
   const right = Number(targetValue);
   return Number.isFinite(left) && Number.isFinite(right) && compare(left, right);

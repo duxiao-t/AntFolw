@@ -314,6 +314,32 @@ function DesignerFieldFrame({
   );
 }
 
+/**
+ * 本端没有该字段类型的渲染器时的占位。
+ *
+ * <p>以前这里是 `if (!ft) return null`：桌面注册表有 21 种类型，后端 `FIELD_TYPES` 允许 26 种
+ * （`radio / checkbox / search / time / switch` 目前只有移动端渲染器），于是这类表单在桌面**开出来
+ * 是个洞**——不报错、看起来"就是这样"，提交时又因为必填被拒，错误还指不到字段。显式画出来，
+ * 至少让人知道该换移动端填写或让管理员改类型。补齐这 5 种渲染器是后续工作（P2），不是本占位的替代。
+ */
+function UnknownFieldPlaceholder({ node }: { node: SchemaNode }) {
+  return (
+    <div
+      data-unknown-field-type={node.type}
+      style={{
+        padding: '10px 12px',
+        border: '1px dashed var(--af-color-line)',
+        borderRadius: 6,
+        color: 'var(--af-color-muted)',
+        fontSize: 12,
+        lineHeight: 1.7,
+      }}
+    >
+      {`桌面端还没有「${node.type}」的渲染器（字段：${node.label ?? node.id}）。请用移动端填写，或让表单管理员改成其他类型。`}
+    </div>
+  );
+}
+
 export function FormRenderer({
   schema,
   mode,
@@ -343,7 +369,6 @@ export function FormRenderer({
         const node = schema.find((item) => item.id === id);
         if (!node) return null;
         const ft = formRegistry[node.type];
-        if (!ft) return null;
         const effectiveMode = fieldModes?.[node.id] ?? mode;
         if (effectiveMode === 'hidden') return null;
         if (!shouldRenderNode(node, effectiveMode, visibleIds)) return null;
@@ -361,7 +386,7 @@ export function FormRenderer({
               },
             }
           : node;
-        const field = (
+        const field = ft ? (
           <ft.Component
             node={renderNode}
             mode={effectiveMode}
@@ -379,6 +404,8 @@ export function FormRenderer({
               onChange?.(clearLinkedValues(scopeSchema ?? schema, node.id, { ...(value ?? {}), [node.id]: v }));
             }}
           />
+        ) : (
+          <UnknownFieldPlaceholder node={renderNode} />
         );
         if (isDesigner) {
           return (

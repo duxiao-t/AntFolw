@@ -104,6 +104,7 @@ public class FormDefinitionService {
             fd.setName(name);
             fd.setDescription(description);
             fd.setVersion(1);
+            rejectDisplayConditionCycles(schema);
             fd.setSchema(writeJson(schema));
             fd.setSettings(writeJson(settings == null ? java.util.Map.of() : settings));
             fd.setStatus("DRAFT");
@@ -125,6 +126,9 @@ public class FormDefinitionService {
             // 表单的审批流开关、业务单号配置就这样无声消失。
             String nextSchema = schema == null ? fd.getSchema() : writeJson(schema);
             String nextSettings = settings == null ? fd.getSettings() : writeJson(settings);
+            // 草稿不校验结构（历来如此），但**环**要拦：它会让设计器预览与两端渲染都给出
+            // 一个说不清的可见性结果，留到发布才发现太晚。
+            if (schema != null) rejectDisplayConditionCycles(schema);
             // 数据源的「可引用表单」清单只拦**新增**绑定：引用被撤销后，已经绑着它的字段照常保存
             // （见 OptionRuntimeService.requireNewBindingsAreReferenced 的说明）。
             if (schema != null && optionRuntimeService != null) {
@@ -171,7 +175,10 @@ public class FormDefinitionService {
                 optionRuntimeService.requireNewBindingsAreReferenced(
                     fd.getId(), fd.getSchema(), writeJson(schema));
             }
-            if (schema != null) fd.setSchema(writeJson(schema));
+            if (schema != null) {
+                rejectDisplayConditionCycles(schema);
+                fd.setSchema(writeJson(schema));
+            }
             if (settings != null) fd.setSettings(writeJson(settings));
         }
         mapper.updateById(fd);
@@ -591,7 +598,66 @@ public class FormDefinitionService {
     }
 
     private void validateSchema(String s) {
-        parseSchema(s).forEach(this::validatePublishingNode);
+        var nodes = parseSchema(s);
+        rejectDisplayConditionCycles(nodes);
+        nodes.forEach(this::validatePublishingNode);
+    }
+
+    /**
+     * 拒绝 displayCondition 的环（互指 A↔B、自指 A→A）。
+     *
+     * <p>环是**配置错误**：环上字段到底显不显示没有可解释的答案。运行时不会崩（{@code resolveVisible}
+     * 用 Java `Set.add` 的布尔返回值判环），但两端都会给出一个"谁也说不清对不对"的结果，所以保存与
+     * 发布都拒绝。（前端 `visibleNodeIds` 曾经写成 `!visiting.add(id)`——JS 的 `Set.add` 返回集合本身，
+     * 那个条件恒假、等于没判环，自指与互指会直接 RangeError，抛在 React 渲染里就是整页白屏。）
+     *
+     * <p>只查环，不在这里补别的结构校验：草稿保存历来不校验结构，改成全量校验会让存量草稿存不下去。
+     */
+    private void rejectDisplayConditionCycles(Object schema) {
+        JsonNode root;
+        try {
+            root = json.valueToTree(schema);
+        } catch (IllegalArgumentException e) {
+            return; // 形状怪异的对象交给既有结构校验，这里只管环
+        }
+        if (root == null || !root.isArray()) return;
+        var nodes = new java.util.ArrayList<JsonNode>();
+        root.forEach(nodes::add);
+        rejectDisplayConditionCycles(nodes);
+    }
+
+    private void rejectDisplayConditionCycles(List<JsonNode> roots) {
+        var sourceOf = new java.util.LinkedHashMap<String, String>();
+        roots.forEach(node -> collectConditionSources(node, sourceOf));
+        var state = new java.util.HashMap<String, Integer>();
+        for (String start : sourceOf.keySet()) {
+            if (state.containsKey(start)) continue;
+            var path = new java.util.ArrayList<String>();
+            String id = start;
+            while (id != null && !state.containsKey(id)) {
+                state.put(id, 1);
+                path.add(id);
+                String next = sourceOf.get(id);
+                id = next == null || next.isBlank() ? null : next;
+            }
+            if (id != null && state.get(id) == 1) {
+                var cycle = new java.util.ArrayList<>(path.subList(path.indexOf(id), path.size()));
+                cycle.add(id);
+                throw new BizException("BAD_SCHEMA",
+                    "displayCondition 互指: " + String.join(" → ", cycle) + "，请改掉引用");
+            }
+            path.forEach(visited -> state.put(visited, 2));
+        }
+    }
+
+    private void collectConditionSources(JsonNode node, Map<String, String> out) {
+        String id = node.path("id").asText("");
+        if (!id.isBlank()) {
+            var condition = node.path("props").path("displayCondition");
+            out.putIfAbsent(id, condition.path("fieldId")
+                .asText(condition.path("field").asText("")).trim());
+        }
+        node.path("children").forEach(child -> collectConditionSources(child, out));
     }
 
     private List<com.fasterxml.jackson.databind.JsonNode> parseSchema(String s) {

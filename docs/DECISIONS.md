@@ -348,3 +348,36 @@
   - **全项目不再因"未处理错误"而红**；断言失败、测试内抛出的错误照旧会红。丢的是"异步未处理错误"这层安全网——用别的手段补（写用例时自己 `await` 干净、`afterEach` 里 unmount）。
   - 已排除的窄口径修法（别再试）：about:blank / srcdoc / javascript: 都是 origin=null（postMessage 直接 SecurityError）；`disableIframePageLoading` 会让 contentWindow 变 null（spyOn 失败，覆盖一样丢）；自挂 `unhandledRejection` 处理器挡不住（vitest 有自己的监听）；桩 `global.fetch` 也没用（iframe 文档加载走 happy-dom 内部的真实 HTTP）。
   - **教训**：本机全绿不等于 CI 绿——环境相关的未处理错误/类型错误只在 CI 暴露（同一次里还抓到一个 `tsc -b` 的报错，本机 `npm run lint` 不跑 tsc，`vitest` 也不算类型）。改这两处之前，别拿本机绿灯当推送依据。
+
+## D-20261009-data-export-moves-into-form-data-page
+
+- **状态：** accepted
+- **背景：** 「数据导出」原本是「数据与报表」下的独立页面（`report.export` + `/report/export`），但它的内容（表单台账 + 字段列）与「表单管理 → 提交数据」完全同源，用户要在两个入口间来回找。
+- **决策：** 撤下该页面，导出表单改成「提交数据」表格工具栏的「导出」按钮 + 弹窗；默认沿用表格当前的表单/状态/提交人筛选（时间范围仍由弹窗自己给，表格没有这个筛选）。导出接口与能力点 `form:data:export` 不变。
+  - **注册表、`page-capabilities.json`、`t_menu` 行必须同一轮一起删**：`MenuService.loadTree()` 会为每一行的 page_key 调 `PageCapabilityRegistry.require()`，只删一边会让整棵导航报 `MENU_PAGE_KEY_UNKNOWN`。故 V53 顺带推进 `t_menu_revision.version`，让已登录前端重拉导航。
+  - **弹窗由调用方「开着才渲染」**，不要在弹窗内部用 `useEffect` 同步 `defaults`：那样用户改了筛选后，任何一次重渲染都会把输入打回默认值。（先试过 `Modal destroyOnHidden` + `open` prop，实测首次打开拿到的仍是挂载时的旧 `defaults`。）
+- **影响：** `/report/export` 只留一条重定向，不再有独立页面；旧菜单项由 V53 删掉后需要重建 web 镜像才在界面上消失。
+
+## D-20261009-never-run-tsc-build-in-frontend
+
+- **状态：** accepted
+- **背景：** 前端 `npm run tsc` 是 `max setup && tsc --noEmit`（正确的类型检查）。这轮为了"跑一次类型检查"敲了 `npx tsc -b`，而根 `tsconfig.json` 带 `declaration: true` 且没有 `noEmit` → 它在**源码旁边生成了 854 个 `.js`/`.d.ts`**。
+- **决策：** 前端永远只用 `npm run tsc` / `npm run lint`，**不要 `tsc -b`**。
+- **影响：** 一旦生成，vitest 解析 `./ExportModal` 时 **`.js` 优先于 `.tsx`**，测试静默跑在旧的编译产物上——现象是"组件挂载了、effect 也跑了、DOM 却是空的"（改动没生效，怎么改都不对）。排查时先用 `git ls-files --others --exclude-standard -- '*.js' '*.d.ts'` 确认有没有产物；清掉即可（`--exclude-standard` 保证不误删被 gitignore 的 `.umi/` 与已跟踪的 `request-temp.js` 之类真源码）。
+
+## D-20261009-display-condition-cycles-rejected-at-save-and-publish
+
+- **状态：** accepted
+- **背景：** `displayCondition` 的环（互指 A↔B、自指 A→A）是配置错误，但没人拦：前端 `visibleNodeIds` 的判环守卫写成了 `if (!node || !visiting.add(id)) return false;` —— **JS 的 `Set.add` 返回集合本身（恒真）**，`!visiting.add(id)` 恒为 false，等于没判环；上方注释却写着"防住互指条件死循环"。实测互指与自指都 `RangeError: Maximum call stack size exceeded`，而它被 `FormRenderer` 的渲染路径调用，抛在 React 渲染里会让**整页白屏**（表单既打不开也提交不了）。后端 `resolveVisible` 用的是 Java `Set.add`（返回布尔），没有这个 bug。
+- **决策：** **保存与发布都拒绝环**（`BAD_SCHEMA`，消息带环路径如 `a → b → a`）；运行时不崩、按"来源视为不满足"给确定性结果。具体落点：
+  - 后端 `rejectDisplayConditionCycles` 在 `saveDraft`（新建与更新）、`update`、publish 的 `validateSchema` 生效 —— 覆盖导入与直接调 API 的路径。
+  - **故意不放进 `parseSchema`**：它同时被 `validateSubmission` 等提交路径使用，存量已发布表单可能已带环（界面禁止成环是后来的事），在提交路径拒绝会让它们当场填不了。故提交路径保持宽容，只在写路径拒绝。
+  - 前端设计器**不必新增**候选过滤：`useFormDesignerStore.allowedDisplayRuleTargetIds` 早已按"来源必须是 select + 目标必须在来源之后 + `reachesSource` 防回边"限制成环，界面构造不出环；环的真实入口是导入与 API。
+- **影响：** 新保存/发布的表单不会带环；存量带环的表单照常可填可读（确定性结果），清理属后续数据治理。前端新增 `findDisplayConditionCycle`（显式栈，不递归）供保存前提示。
+
+## D-20261009-shared-field-semantics-fixtures
+
+- **状态：** accepted
+- **背景：** 字段可见性/校验/显示文本在三端各有一份实现（桌面 `registry/displayConditions.ts`、移动 `schema/validators.ts`、后端 `FormDefinitionService`，另有 SQL 视图）。已经实际漂移：移动端的 `visibleNodeIds` 是桌面"边走边判"的**旧版拷贝**（条件引用后面才声明的字段时两端结果不同），且 `numberCompare` 漏了"先拒空值"（空数字字段能满足 `gte 0`）。两处都是没人发现的漂移，直到两端显示不一致。
+- **决策：** 建**三端共用的 fixture**（`fixtures/field-semantics/visibility.json`）作为口径的单一约定：每条用例含 schema + values + 期望（可见集合、环路径），期望值**写在 fixture 里、不取自任一实现**；桌面与移动各有一份 `*.fixture.test.ts` 读同一份 JSON，后端在 `FormDefinitionServiceSchemaTest` 里覆盖环的拒绝。实现与 fixture 不一致时**改实现**，只有口径本身变了才动期望，且三端一起动。
+- **影响：** fixture 上线当天就抓到移动端第二个漂移（报告里没有的那处）。后续每加一条语义（新的操作符、新的容器类型）都应先加 fixture 再加实现。这也是把"复制 → 漂移 → 无人发现"变成"红灯"的最便宜手段；在没有共享包机制（两端独立 lockfile、Umi 与 Vite 异构）的前提下，fixture 是当前唯一可行的单一真源载体。

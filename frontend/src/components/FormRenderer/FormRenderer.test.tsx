@@ -129,4 +129,23 @@ describe('FormRenderer', () => {
     rerender(<FormRenderer schema={schema} mode="runtime-fill" value={{ source: 'c' }} />);
     expect(screen.queryByText('补充说明')).not.toBeInTheDocument();
   });
+
+  it('warns instead of leaving a silent hole for a field type this side cannot render', () => {
+    // 后端允许 26 种字段类型，桌面注册表只有 21 种（radio/checkbox/search/time/switch 缺渲染器）。
+    // 以前是 `if (!ft) return null`：表单开出来是个洞，不报错、看着"就是这样"，提交时又因为必填
+    // 被拒且错误指不到字段。现在必须显式画出来。
+    const schema = [
+      { id: 'pick', type: 'radio', label: '单选' },
+      { id: 'other', type: 'text', label: '其他' },
+    ] as unknown as SchemaNode[];
+
+    render(<FormRenderer schema={schema} mode="runtime-fill" value={{}} />);
+
+    const placeholder = document.querySelector('[data-unknown-field-type="radio"]');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.textContent).toContain('桌面端还没有');
+    expect(placeholder?.textContent).toContain('单选');
+    // 认识的字段照常渲染——占位不能顺手把别的字段也吞了。
+    expect(screen.getByText('其他')).toBeInTheDocument();
+  });
 });
