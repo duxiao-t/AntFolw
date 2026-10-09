@@ -35,16 +35,11 @@ public class FormDefinitionService {
     private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
-    private static final Set<String> FIELD_TYPES = Set.of(
-        "text", "textarea", "number", "money",
-        "radio", "checkbox", "select", "multi_select", "search",
-        "date", "date_range", "time", "switch",
-        "image_upload", "video_upload", "file_upload", "checklist",
-        "user_picker", "dept_picker",
-        "description", "span_layout", "table_list", "matrix_fill",
-        "scan_code", "audio_upload", "location"
-    );
-    private static final Set<String> CONTAINER_TYPES = Set.of("span_layout");
+    // 字段类型清单的唯一真源在 FieldTypeCatalog（它同时生成 fixtures/field-semantics/field-types.json
+    // 供两端注册表对账）。这里以前是手写的一份 Set，和前端、移动端各自手写的清单会静默漂移。
+    private static final Set<String> FIELD_TYPES = FieldTypeCatalog.ids();
+    private static final Set<String> CONTAINER_TYPES =
+        FieldTypeCatalog.idsOfKind(FieldTypeCatalog.Kind.CONTAINER);
 
     public Page<FormDefinitionMapper.Summary> list(long page, long size, String keyword,
                                                    String status) {
