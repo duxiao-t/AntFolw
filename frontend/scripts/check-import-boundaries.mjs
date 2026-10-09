@@ -71,8 +71,11 @@ function importsOf(source) {
   const specs = new Set();
   for (const re of [FROM_RE, SIDE_RE, DYN_RE]) {
     re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(source))) specs.add(m[1]);
+    let m = re.exec(source);
+    while (m !== null) {
+      specs.add(m[1]);
+      m = re.exec(source);
+    }
   }
   return [...specs];
 }
