@@ -10,7 +10,73 @@
 
 ---
 
-## 最新一轮：A7-1 实例完成 webhook 共用出站校验
+## 最新一轮：P2 第一块——桌面 5 种渲染器 + display-text 口径对拍
+
+两件事。**H1 缺口 5 → 0；H2 渠道并集 → 4/4**（明细见下）。
+
+### 一、桌面补齐 `radio/checkbox/search/time/switch`
+
+后端与移动端都认这 5 种，桌面没有渲染器 → 渲染成"桌面端还没有「X」的渲染器"的虚线占位，
+等于**移动端/导入出来的表单在桌面上这几个字段填不了**。
+
+| 变更 | 内容 |
+| --- | --- |
+| `components/form-fields/{Radio,Checkbox,Search,Time,Switch}Field.tsx`（新） | 值形状以移动端为准：radio 标量 / checkbox 数组 / search 字符串 / time `"HH:mm"` / switch 严格 boolean |
+| `components/form-fields/choiceFieldOptions.ts`（新） | radio/checkbox 的选项读取，**保留原值** |
+| `pages/designer/form/Inspector.tsx` | **真正生效的接线在这里**：新增 `case 'radio'/'checkbox'`（复用 `SelectOptionsEditor`）、`case 'search'/'time'`（占位符）、`case 'switch'`（开/关文案） |
+| `registry/formRegistry.ts` / `FormDesigner.tsx` / `fieldTypes.generated.test.ts` | 注册 5 个 + 调色板图标 + `KNOWN_MISSING` 归零 |
+
+**两个实施时才发现、值得记住的点：**
+
+1. **给注册字段写 `ConfigPanel` 是无效的。** 设计器走集中式 `Inspector.renderComponentSettings()`
+   （`default: return null`），`grep` 证实 **`ConfigPanel` 在 `frontend/src` 里零渲染点**——
+   `MultiSelectField.tsx` 那句 `ConfigPanel: SelectField.ConfigPanel` 本来就是死代码。能配选项靠的是 Inspector 的 `case`。
+2. **不能复用 `normalizeSelectOptions`。** 它把 `isOther` 选项的 value 改写成 `__antflow_other__`，
+   而移动端保留原值——导入自移动端的 `{value:'other',label:'其他',isOther:true}` 存的 `other` 会匹配不上。
+   这条有专门用例钉住（改成复用即红）。
+
+`UnknownFieldPlaceholder` **保留**：26 种补齐后它在当前后端下不可达，但挡的是**版本错位**，
+删掉等于撤掉 P0b 的 B3 守护。它的用例改用合成类型 `legacy_unknown`。
+
+### 二、display-text fixture（新维度）+ Java/SQL 对拍
+
+审计要把 SQL 接进 H2 对拍，**但前提不成立**：`v_form_ledger` 是 **BI 脱敏投影**、不是显示渲染器——
+`V49:56` 的类型白名单不含 `text/textarea/search`，自由文本两列**都是 NULL**（真库测试 `:812-814` 早就断言了）。
+它与 Java 的重叠面只有"值 → 选项标签"。所以这活儿是**新开一个维度**，不是接线。
+
+- `fixtures/field-semantics/display-text.json`（新）：6 条 case，每条带显式 `fieldId`；
+  数组原文按**解析后的 JSON** 比（`textJson`）；**"字段缺失 → 无行" 与 "值为 null → 有行但列 NULL" 分开断言**。
+- `FormValueDisplayFixtureTest.java`（新，Java 侧）+ `PostgresTransactionalIntegrityIntegrationTest#ledgerMatchesTheSharedDisplayFixture`（SQL 侧）。
+  SQL 夹具**为每条 case 建匹配的版本快照**并置 `SUBMITTED`——V49 按行自己的版本钉 `meta`，缺快照会回退最新版、掩盖版本错误。
+
+**H2 指标同时修了一个方向 bug**：原实现借用了 H1 的 `subset()`，而 H2 的方向相反
+→ **加 `sql` 渠道被判变差、丢 `java` 渠道反而通过**。改成"丢基线渠道才是变差"，加
+`node scripts/health-metrics.mjs --self-test` 守方向，并把渠道改成**声明式分维度**
+（`visibility` 桌面/移动、`fieldTypes` 桌面/移动/Java、`displayText` Java/SQL），
+分母来自完整声明。输出现在给的是 `并集 4/4（visibility: desktop/mobile；fieldTypes: …；displayText: java/sql）`
+——**并集不能读成"同一套语义四端全部对拍"**。
+
+### 验证
+
+- 前端 **312 绿**（基线 302）、`npm run tsc` 干净、`biome` 4 条既有 warning / **0 error**；移动端未改。
+- 后端 **580 绿**（基线 577，+3 = `FormValueDisplayFixtureTest` 2 条 + PG 的 fixture 用例 1 条）；
+  `ArchitectureBoundaryTest` 无新增冻结条目。
+- 守护取证（都已还原）：拆掉 Inspector 的 `case 'radio'` → 配置往返用例红；
+  `choiceOptions` 改成改写 `isOther` → "保留原值"用例红；改错 `expect.sqlLabel` → PG 用例红；
+  移走 `FormValueDisplayFixtureTest` → 指标报 "H2 displayText 维度丢失渠道：java"。
+- **顺手修掉我自己上一轮的两个 biome 违规**（单独一个 commit `041a9d1`）：`check-import-boundaries.mjs` 里
+  `while ((m = re.exec(...)))` 是 **error** 级 `noAssignInExpressions`，**会让 CI 的 Lint 步骤直接红**——
+  上一轮我只跑了 tsc 和 vitest，没跑 `npm run biome:lint`。
+
+### 明确记录、本轮不修
+
+`FormValueDisplay.java:241` 只对 `multi_select` 拼标签；`checkbox` 数组走到
+`type != multi_select && value.isArray()` 就 `return null`，回退通用值展示（SQL 侧同样只认 `multi_select`）。
+**桌面补出 checkbox 渲染器不会顺带修好它在台账/导出里的标签显示**——记作**待收敛的现状，不是目标契约**。
+
+---
+
+## 上一轮：A7-1 实例完成 webhook 共用出站校验
 
 审计报告"最该先动"第 1 条：完成回调 `notify/WebhookNotificationListener` 自建裸 `HttpClient`、没有任何出站护栏，
 而 TRIGGER 的 `automation/WebhookClient.java:41` 有。现在共用同一套。

@@ -435,3 +435,36 @@
   - `followRedirects(NEVER)` 显式写出（JDK 本来就是默认，写出来是防将来被顺手改；与 `WebhookClient.java:70` 一致）。
 - **已接受的代价（重要，别当成 bug）：** `WebhookSecurityPolicy.java:80-81` 的私网放行是 `allowPrivateAddresses && !prod`，**prod 下恒假** → **内网/腾讯完成回调在生产环境打不通**。要救它只能开全局 `allow-private-addresses`，而那会**同时放宽设计器可写的 TRIGGER 通道**（TRIGGER 仍受 `allowed-hosts` 约束，所以放宽的幅度有限，但确实放宽了）。这是"共用一套策略"的一致性代价，是明确选择的，不是缺陷。
 - **影响：** 两条出站通道现在同一个护栏。**未做**：抽公共 `HttpClient` bean（报告里的"共用客户端"）——对安全结论没有影响，归 P5 的集成收敛。
+
+## D-20261009-display-text-fixture-cross-checks-java-and-sql
+
+- **状态：** accepted
+- **背景：** 审计想把 SQL 层接进 H2"共用语义对拍"。核对后发现**前提不成立**：`v_form_ledger` 不是显示文本渲染器，是 **BI 脱敏投影**——`V49:56` 给 `value_json`/`value_text` 加了类型白名单（`number/money/date/date_range/time/switch/radio/checkbox/select/multi_select/user_picker/dept_picker/table_list`），**`text/textarea/search` 不在内 → 两列都是 NULL**，真库测试 `PostgresTransactionalIntegrityIntegrationTest:812-814` 早就断言了这条。它与 Java `FormValueDisplay` 的重叠面**只有"值 → 选项标签"**；Java 的 checklist 汇总、table_list 明细、附件处理 SQL 一概没有。所以"接线"其实是**新开一个维度**。
+- **决策：** 建 `fixtures/field-semantics/display-text.json`，两侧对同一份期望负责：
+  - Java `FormValueDisplay.cell()`（`backend/src/test/java/com/antflow/form/runtime/FormValueDisplayFixtureTest.java`）。
+  - SQL `v_form_ledger.value_label` / `value_text`（`PostgresTransactionalIntegrityIntegrationTest#ledgerMatchesTheSharedDisplayFixture`）。
+  - 每条 case 带**显式 `fieldId`**；**数组原文按解析后的 JSON 比**（`textJson`），不把 jsonb 的空格格式当业务口径；
+    **"字段缺失 → 没有台账行" 与 "值为 null → 有行、列 NULL" 分开断言**；
+    SQL 夹具**为每条 case 建匹配的 `t_form_definition_version` 快照**并置 `data.status='SUBMITTED'`——
+    V49 按行自己的版本钉 `meta`，缺快照会**回退最新版**，把版本错误掩盖成"看着对"。
+  - **期望按各层真实契约写**：自由文本那格是 `java=原文` 而 `sqlLabel=null, sqlText=null`（脱敏），不是"两侧都输出原文"。
+- **影响：** Java 与 SQL 的显示口径现在有一份共同的可执行期望。**未做且明确记录**：`checkbox` 数组在两侧都**没有**标签映射
+  （`FormValueDisplay.java:241` 只认 `multi_select`；SQL 同）——桌面补出 checkbox 渲染器不会顺带修好它在台账/导出里的显示，
+  这是**待收敛的现状，不是目标契约**。
+
+## D-20261009-health-metrics-h2-direction-and-per-dimension-channels
+
+- **状态：** accepted
+- **背景：** H2 复用了我给 H1 写的 `subset()` 辅助函数，但两者的"变差"方向**相反**：H1 是"新增缺口"变差，
+  H2 是"新增渠道"变好。结果是**加 `sql` 渠道被判变差、丢 `java` 渠道反而通过**——门禁的方向是反的。
+  同时 `channels` 是目录扫描（`java` 扫整个 `backend/src`），会把真库集成测试目录也计入，与新的 `sql` 渠道重复记账；
+  打印写死 `/4`，而名单里根本没有 `sql`，读者把"3/4"误读成"还缺一块"。
+- **决策：** **改方向，不是改基线**（更新基线会把 bug 一起冻住）：
+  - H2 判定改成"**基线里的渠道丢了才算变差**"；新增渠道是变好（打印提示，不报错）。
+  - 加 `node scripts/health-metrics.mjs --self-test`（沿用 `deploy.sh --self-test` 的仓内先例，不引框架）：
+    三条断言守住方向——新增渠道不报变差、丢渠道报变差、**分维度**丢渠道也报变差。
+  - 渠道改成**声明式分维度**：`visibility` = 桌面/移动；`fieldTypes` = 桌面/移动/Java(`backend/src/main`)；
+    `displayText` = Java(`backend/src/test/.../form/runtime`) / SQL(`backend/src/test/.../integration`)。
+    **分母来自完整声明** `['desktop','mobile','java','sql']`，输出同时给并集与分维度明细。
+- **影响：** 并集 4/4 现在与明细一起打印，**不再能被读成"同一套语义四端全部对拍"**。把 `--self-test` 加进 CI 是可选的下一步（目前只在本地/评审时跑）。
+

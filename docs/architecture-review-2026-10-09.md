@@ -291,7 +291,12 @@ P0 必备 fixture：条件前向引用与互指、隐藏来源、空值数值条
 | 指标 | 本报告 B4 的现状值 | 本轮实测 | 说明 |
 | --- | --- | --- | --- |
 | H1 字段支持差集 | 缺口 5 | 缺口 5（后端 26 / 桌面 21 / 移动 26） | 相符；缺口还由 A1 的两条生成物对账测试兜底 |
-| H2 共用语义测试接入数 | **0/4** | **3/4**（desktop/java/mobile 接了，**SQL 没接**） | 变好——A2 的 fixture 落地后三端已读同一份（Java 只读了 `field-types.json`，可见性那份还没接） |
+| H2 共用语义测试接入数 | **0/4** | 渠道**并集 4/4**（desktop/java/mobile/sql） | 变好，但**并集不是"四端全部对拍"**：真实接入是**分维度**的——可见性 = 桌面/移动；field-types = 桌面/移动/Java；display-text = Java/SQL。指标已改成按维度记录并同时打印明细，分母来自完整声明而不是已接入数 |
+
+> **口径澄清（2026-10-09，P2 实施后补）**：上面这句「4/4」原先只写在 H2 的现状格里，容易被读成
+> "同一套语义已经四端全部对拍"。实际是**四条通道各自被某份 fixture 覆盖过**，没有一份 fixture 是四端都读的。
+> 指标输出现在同时给并集与分维度明细；判定也改成"丢渠道才是变差"（原实现方向写反了：
+> 新增渠道被判变差、丢失渠道反而通过）。
 | H3 手写重复业务 DTO | 5 | 5 | 相符 |
 | H4 可写运行时实现数 | 2，活跃 v1 实例 **待实测** | 2，活跃 v1 实例 **`null`（仍未测）** | 刻意不写 0；查法已存进脚本 |
 | H5 专用架构边界门禁 | 0 类 | **Java 3 类 / TS 3 类** | 变好——A3 落地；必需 V2 的可选注入仍是 1 |
@@ -318,5 +323,23 @@ boot 配方的现成参照是 `PostgresTransactionalIntegrityIntegrationTest`（
 PG 走环境变量或 Testcontainer，本地 88 条用例 0 skip），**CI 现有 PG service 就够，不需要 MinIO**。
 并入 P1 而不是现在做的理由：产物的消费方在 P1，先落一个没有消费方、没有门禁的快照等于再造一个化石。
 
-仍未做（留给 P2）：补齐桌面端 `radio/checkbox/search/time/switch` 的渲染器（当前是显式占位）、
-把 SQL 视图接进 H2 的口径对拍。
+**第三轮（同日，P2 第一块）**：上面那两条"仍未做"都做了。
+① 桌面补齐 `radio/checkbox/search/time/switch` 五种渲染器，**H1 缺口 5 → 0**；
+② 建了 `fixtures/field-semantics/display-text.json` 这个**新维度**（值 → 显示文本），Java 与 SQL 各断言自己能做的那部分，**H2 渠道并集 → 4/4**。
+
+**三条实施时核对出来的、与本报告措辞不符的事实（都写进 DECISIONS 与本文件，别照着旧措辞理解）：**
+
+1. **台账不是显示文本渲染器，是脱敏投影。** `V49:56` 的 `value_json`/`value_text` 有**类型白名单**，
+   `text/textarea/search` 不在内 → 自由文本两列都是 NULL（真库测试 `:812-814` 早就断言了）。
+   与 Java `FormValueDisplay` 的重叠面**只有"值 → 选项标签"**；Java 的 checklist 汇总、table_list 明细、附件处理，SQL 全没有。
+   所以"把 SQL 接进对拍"不是接线，是**新开一个维度**。
+2. **`ConfigPanel` 是死字段。** 设计器走集中式 `Inspector.renderComponentSettings()`，`grep` 证实
+   `ConfigPanel` 在 `frontend/src` 里**零渲染点**——给注册字段写 `ConfigPanel` 不会让设计器出现选项编辑器。
+   radio/checkbox 能配选项靠的是 Inspector 里新加的 `case`。
+3. **H2 的比较方向原来写反了**（新增渠道被判变差、丢失渠道反而通过）。这与"更新基线"是两件事：
+   改方向 + 加 `--self-test`，不是把基线改一改盖过去。
+
+**明确记录、本轮不修的差异（避免"缺口归零"被读成"语义全一致"）**：
+`FormValueDisplay.java:241` 的 `selectText` **只对 `multi_select` 拼标签**；`checkbox` 是数组值，
+走到 `type != multi_select && value.isArray()` 就 `return null`，回退成通用值展示。SQL 侧同样只处理 `multi_select`。
+**所以桌面补出 checkbox 渲染器，并不会顺带修好 checkbox 在台账/导出里的标签显示**——那是**待收敛的现状，不是目标契约**。
