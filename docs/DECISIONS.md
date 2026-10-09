@@ -468,3 +468,36 @@
     **分母来自完整声明** `['desktop','mobile','java','sql']`，输出同时给并集与分维度明细。
 - **影响：** 并集 4/4 现在与明细一起打印，**不再能被读成"同一套语义四端全部对拍"**。把 `--self-test` 加进 CI 是可选的下一步（目前只在本地/评审时跑）。
 
+## D-20261009-company-attribution-policy（**提议，等 owner + 日期**）
+
+- **状态：** **proposed** —— 报告把它列为"最该早定"的一项（P4 之前），这里把选项与代价摆出来，**等产品/负责人拍板**再落实现。
+- **背景（已复核的现状）：**
+  - **公司轴只存在于组织与企微**：`t_company`（`V1:15-19`）、`t_department.company_id NOT NULL`（`V1:21-29`）、以及 4 张 `t_wecom_*`（`V30`）。**没有任何业务表有 company 维度**——`t_form_definition`/`t_process_definition`/`t_form_resource_grant`/`t_role`/`t_permission`/`t_process_instance`/`t_form_data`/`t_task`/`t_workflow_job`/`t_audit_event`/`t_workflow_outbox` 全没有。
+  - **已经有"发起时快照"的先例**：`t_process_instance.started_by` + `started_dept_id`（`ProcessEngine.java:121-124` 写入，`V20:88-94` 回填），数据范围就是按它过滤（`InstanceScopeSql.java:41,45`）。**但公司不在这份快照里**，只能由 `started_dept_id → t_department.company_id` **现推**。
+  - **授权链路没有任何公司过滤**：`DataScope` 是 `SELF/DEPARTMENT/DEPARTMENT_AND_DESCENDANTS/CUSTOM/ALL`（`DataScope.java:3-9`）；`manageableDepartments` 在 `ALL` 下返回**全部**部门（`AuthorizationService.java:209,248,326`）。`admin` 按角色码放行（`:631`），**没有公司级管理员的概念**。用户与公司的关系是**间接的**（`t_user.dept_id → t_department.company_id`）。
+  - seed 的 admin **`dept_id` 为 NULL**（`V2:9-19`）→ 它发起的实例 `started_dept_id` 也是 NULL，**将来无从回溯公司**。
+
+- **为什么"现在定"比"以后定"便宜（这是本提议的核心）**：公司**可以从部门现推，而部门是可以改归属的**。今天做归属快照，回填是**精确**的（`dept → company` 当前映射即历史映射）；等组织调整过、部门合并/迁移/删除之后再回填，就只能得到**近似值或无法判断**。这与 `started_dept_id` 当初做成快照是同一个理由。
+
+- **六个子决策、选项与代价**（建议值附在每行末尾）：
+
+| # | 子决策 | 选项 | 代价 / 影响 | 我的建议 |
+|---|---|---|---|---|
+| 1 | 表单/流程模板是否按公司归属 | (a) **全局共享**（现状）；(b) 每个公司一套模板 | (a) 零成本，但"能看到多少个模板"完全由授权决定；(b) 要改 `t_form_definition`/`t_process_definition` + 全部列表查询 + 设计器 | **(a) 全局共享**：模板是"能力"，不是"数据" |
+| 2 | 发布版本是否不可变 | (a) 不可变（现状，`V31` 版本表）；(b) 允许改历史版本 | (a) 零成本；(b) 要动版本钉住语义，影响历史可读性 | **(a) 保持** |
+| 3 | 「公司级使用授权」怎么表达 | (a) 给 `t_form_resource_grant` 加 `COMPANY` 主题类型；(b) 新增独立的公司级授权表 | (a) 一次前滚迁移 + `AuthorizationService.requireFormUse` 里多一个分支（小）；(b) 多一套表与查询（中） | **(a)**：它已经有 USER/ROLE 两种主题，加第三种最省 |
+| 4 | 实例/数据/作业的归属在哪一刻固定 | (a) **创建时快照 `company_id`**；(b) 查询时由 `started_dept_id` 现推 | (a) 加列 + 回填 + 写路径；(b) 零成本，但**组织一变历史就漂**，且 NULL 部门行永远无解 | **(a) 快照**——这正是"早定省钱"的那一条 |
+| 5 | 公司管理员 vs 全局管理员 | (a) 只在**授权**上分层（公司管理员的 `manageableDepartments` 被限制在本公司）；(b) 再引入一套角色/权限命名空间 | (a) 改 `manageableDepartments`/`currentDataScope` 加公司过滤，**不动角色模型**（中）；(b) 角色、权限码、`SecurityAuthorizationController` 全要动（大） | **(a)**：现有 `admin` 是全局的，先只收敛数据范围 |
+| 6 | 调岗/部门改归属是否改历史归属 | (a) 不改（快照说了算）；(b) 跟着部门走 | 若 #4 选 (a)，本条**零额外成本**——这正是快照的意义 | **(a)** |
+
+- **需要你给的（这才是本提议的交付物）**：
+  1. 上面 6 行的取舍（尤其 #1 与 #4，它们是"全局模板 + 实例固定归属"还是"按公司分家"的分水岭）；
+  2. **owner + 日期**——报告明确指出，这项不定就会漂到 P4 之后，而那时代价最大；
+  3. 若 #4 选快照：**NULL `started_dept_id` 的历史实例怎么算**（seed admin 就是这一类）。定量的两条只读查询（**本轮未在生产执行**）：
+     ```sql
+     SELECT count(*) FROM t_process_instance WHERE started_dept_id IS NULL;
+     SELECT company_id, count(*) FROM t_process_instance pi
+       JOIN t_department d ON d.id = pi.started_dept_id GROUP BY 1 ORDER BY 2 DESC;
+     ```
+- **影响：** 未决策前不动任何 schema。P4（公司隔离实施，报告估 15–25 天）依赖这里的 #1/#4/#5。
+
