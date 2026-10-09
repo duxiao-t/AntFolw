@@ -1,0 +1,10 @@
+[
+  "no-cross-page-import | pages/approval/BusinessNumberEditor.tsx -> pages/designer/process/types",
+  "no-cross-page-import | pages/approval/FormManagementWizard.test.tsx -> pages/designer/form/useFormDesignerStore",
+  "no-cross-page-import | pages/approval/FormManagementWizard.tsx -> pages/designer/form/FormDesigner",
+  "no-cross-page-import | pages/approval/FormManagementWizard.tsx -> pages/designer/form/useFormDesignerStore",
+  "no-cross-page-import | pages/approval/FormManagementWizard.tsx -> pages/designer/process/ProcessDesigner",
+  "no-cross-page-import | pages/approval/FormManagementWizard.tsx -> pages/designer/process/types",
+  "no-cross-page-import | pages/approval/FormManagementWizard.tsx -> pages/designer/process/validation",
+  "no-cross-page-import | pages/approval/RecordList.tsx -> pages/proc/detailPresentation"
+]

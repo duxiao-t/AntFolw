@@ -1,7 +1,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import dayjs from 'dayjs';
-import ReportCenterPage, { rangeParams, tzOffsetMinutes } from './Center';
+import { rangeParams, tzOffsetMinutes } from '@/utils/dateRange';
+import ReportCenterPage from './Center';
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('@umijs/max', () => ({ request }));

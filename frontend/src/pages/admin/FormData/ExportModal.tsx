@@ -3,7 +3,7 @@ import { request } from '@umijs/max';
 import { App, Button, Input, Modal, Select, Space, Typography } from 'antd';
 import { createStyles } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
-import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from '@/pages/report/Center';
+import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from '@/utils/dateRange';
 import { blobErrorMessage } from '@/utils/format';
 
 const useStyles = createStyles(({ token }) => ({

@@ -4,7 +4,8 @@ import { request } from '@umijs/max';
 import { Alert, Empty, Select, Typography } from 'antd';
 import { createStyles } from 'antd-style';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { type ApprovalSummary, RANGE_PRESETS, rangeParams, tzOffsetMinutes } from './Center';
+import { type ApprovalSummary } from './Center';
+import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from '@/utils/dateRange';
 
 const useStyles = createStyles(({ token }) => ({
   filterBar: {
