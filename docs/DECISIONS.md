@@ -424,3 +424,14 @@
     只有 **4 个文件**，消费者只有 `frontend/src/pages/table-list/` 的 **4 个文件**（demo 脚手架），
     **生产代码 0 处 import**（真实调用是 95 处直接 `request()`，45 个文件）。所以 6 条路径 → 163 条路径影响的是 demo 页。
   - **本轮没有提交 spec**：没有比对门禁的生成物一定会变成谎话（`oneapi.json` 就是没门禁的模板契约躺了两年的样子）。
+
+## D-20261009-instance-complete-webhook-shares-outbound-policy
+
+- **状态：** accepted
+- **背景：** 审计 A7-1：实例完成回调 `notify/WebhookNotificationListener` 自建裸 `HttpClient`、**一个出站护栏都没有**，而 TRIGGER 的 `automation/WebhookClient.java:41` 调了 `WebhookSecurityPolicy`——两条出站通道防护不一致。核对后确认两点：① 该 URL 来自服务端 `@Value("${antflow.webhook.on-complete:}")`，**不是用户可控**（用户/设计器可控的是 TRIGGER，URL 写在流程定义 JSON 里），所以这是"防护不一致"而不是已证实的 SSRF，可利用性仍为 **[待实测]**；② `antflow.webhook.on-complete` 在仓库所有配置里都没设，监听器默认关闭（`accepts()` 空 URL 即 false），**改动不会改断任何现有部署**。
+- **决策：** 完成回调**共用 TRIGGER 那一套全局策略**，不新开第二种信任设置：
+  - 投递前 `securityPolicy.validate(uri)`（`WebhookNotificationPolicy` 同款：scheme + 生产强制 https + `allowed-hosts` + DNS 解析后的地址黑名单）。校验放在 `try` **之外**：目标不合法是配置问题，不该被兜底包成 "webhook failed for instance X"，否则日志里分不清"地址不被允许"和"对面没响应"。
+  - 启动时 `validateDefinition(uri)` 先校验一次（**只做静态检查、不做 DNS**——webhook 主机的解析抖动不该拖着整个应用起不来）。配错在启动就喊，而不是等 10 次退避重试变 `DEAD`。`validateDefinition` 是既有方法（`ProcessDefinitionService.java:636` 用它校验 TRIGGER URL）；`@Value` 没有"保存"时刻，**启动**就是它的对应时刻。
+  - `followRedirects(NEVER)` 显式写出（JDK 本来就是默认，写出来是防将来被顺手改；与 `WebhookClient.java:70` 一致）。
+- **已接受的代价（重要，别当成 bug）：** `WebhookSecurityPolicy.java:80-81` 的私网放行是 `allowPrivateAddresses && !prod`，**prod 下恒假** → **内网/腾讯完成回调在生产环境打不通**。要救它只能开全局 `allow-private-addresses`，而那会**同时放宽设计器可写的 TRIGGER 通道**（TRIGGER 仍受 `allowed-hosts` 约束，所以放宽的幅度有限，但确实放宽了）。这是"共用一套策略"的一致性代价，是明确选择的，不是缺陷。
+- **影响：** 两条出站通道现在同一个护栏。**未做**：抽公共 `HttpClient` bean（报告里的"共用客户端"）——对安全结论没有影响，归 P5 的集成收敛。

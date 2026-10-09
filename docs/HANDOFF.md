@@ -1,16 +1,46 @@
 > 架构审计（2026-10-09）：见 [分模块技术选型与演化路线](architecture-review-2026-10-09.md)。
 > 核验结论：保留模块化单体，修订设计器 big-bang、生成契约和集成前提。
-> **整改已开始（同日）**：P0a/P0b 的 A2、A3、A4 与字段类型真源已实施，见下"最新一轮"。
+> **整改已开始（同日）**：P0a/P0b 的 A2、A3、A4 与字段类型真源已实施；随后 A7-1（完成回调共用出站校验）也已收敛，见下"最新一轮"。
 
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-09T16:10:00+08:00`
+- **更新时间：** `2026-10-09T17:05:00+08:00`
 - **分支：** `master`（= `a8c6790`，本轮改动**未提交**）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
 
 ---
 
-## 最新一轮：A1 字段类型真源 + A3 边界门禁 + A4 六指标
+## 最新一轮：A7-1 实例完成 webhook 共用出站校验
+
+审计报告"最该先动"第 1 条：完成回调 `notify/WebhookNotificationListener` 自建裸 `HttpClient`、没有任何出站护栏，
+而 TRIGGER 的 `automation/WebhookClient.java:41` 有。现在共用同一套。
+
+| 变更 | 内容 |
+| --- | --- |
+| `notify/WebhookNotificationListener.java` | 构造注入 `WebhookSecurityPolicy`；投递前 `validate(uri)`（scheme + 生产 https + `allowed-hosts` + DNS 后地址黑名单）；新增 `@PostConstruct validateConfiguredUrl()` 做**无 DNS** 的启动静态校验；`followRedirects(NEVER)` 显式化 |
+| `notify/WebhookNotificationListenerTest.java` | 原应用例改造夹具（127.0.0.1 现在要先放行，照抄 `WebhookClientTest` 的写法）+ 3 条新用例 |
+
+**核对结论（比报告更进一步）**：该 URL 来自服务端 `@Value`，**不是用户可控**；且 `antflow.webhook.on-complete`
+在仓库所有配置里都没设（监听器默认关闭）→ **这次改动不会改断任何现有部署**。可利用性仍为 `[待实测]`，
+**没有**升级成"已证实 SSRF"。
+
+**你拍板的边界（代价要记住）**：**共用全局策略**。因此 `WebhookSecurityPolicy.java:80-81` 的
+`allowPrivateAddresses && !prod` 意味着 **prod 下内网/腾讯完成回调打不通**；要救只能开全局 `allow-private-addresses`，
+而那会同时放宽设计器可写的 TRIGGER 通道。见 `D-20261009-instance-complete-webhook-shares-outbound-policy`。
+
+**验证**：后端 `mvn -B test` **577 绿**（基线 574，+3）。守护取证：注释掉 `securityPolicy.validate(target)`
+→ "主机不在白名单"与"环回被拒"两条当场红（已还原）。`ArchitectureBoundaryTest` 没新增冻结条目——
+新增的 `notify → automation` 依赖**不成环**（两边原本互不 import），与事先判断一致。
+
+**两个测试设计点**（都不显然，写下来免得被"简化"掉）：
+- 校验必须在 `try` **之外**：放里面会被兜底 catch 包成 `IllegalStateException("webhook failed for instance X")`，
+  日志里就分不清"目标不被允许"和"对面没响应"。
+- 启动校验用 `validateDefinition`（不做 DNS）而不是 `validate`：后者会解析主机，webhook 域名的 DNS 抖动
+  不该拖着整个应用起不来。
+
+---
+
+## 上一轮：A1 字段类型真源 + A3 边界门禁 + A4 六指标
 
 P0a 剩下的三件一起落地。**A1 只做了一半**（见下的"没做"）。
 

@@ -115,6 +115,15 @@ values = { source: "yes" }
 
 动作：P0 先核对配置入口和网络可达性，再共用出站校验与客户端；定义可信内网集成的允许范围，避免直接套用默认禁私网策略造成现有企业回调中断。核对重定向、解析后连接及超时行为；不因已经调用策略就宣布所有 SSRF 风险消失。证据：`backend/src/main/java/com/antflow/automation/WebhookSecurityPolicy.java:20`、`:34`。预计 1–3 工作日；若确认低信任方可控目标，立即按安全缺陷修复，不等 P5。
 
+> **实施进展（2026-10-09 同日）：防护不一致已收敛；可利用性仍为 [待实测]，未升级为已证实。**
+> 完成回调改为共用 `WebhookSecurityPolicy`（投递前 `validate`，含 DNS 后的地址黑名单；启动时 `validateDefinition`
+> 先做无 DNS 的静态校验）。核对结论：URL 是服务端 `@Value` 配置、**不是用户可控**，且 `antflow.webhook.on-complete`
+> 在全部仓库配置里都没有设置（监听器默认关闭），所以本次改动不会改断任何现有部署。
+> 上面那句「定义可信内网集成的允许范围」——这一决策已拍板为**共用全局策略**，其代价（prod 下私网被无条件禁 →
+> 内网完成回调在生产不可用）是明确接受的，见 `D-20261009-instance-complete-webhook-shares-outbound-policy`。
+> （注：这里说的"决策项"是本文 A7 的动作项；不要与 A5 的引擎条目混淆。）
+> 未做：客户端对象共用（抽公共 HttpClient bean）——对安全结论无影响，归 P5。
+
 **A7-2 [已复核｜原方案事实错误] WeCom 已有 client、crypto 和持久化同步作业。** `backend/src/main/java/com/antflow/integration/wecom/WecomService.java:66`、`:77` 注入 WecomClient 与 WecomSecretCipher；`:219` 插入 `t_wecom_sync_job`，`:233` 在提交后投递执行器，`:335` 才外呼。它没有复用 workflow job，不等于没有入队。应把剩余的同步编排/账号映射职责拆清，复用现有设施。
 
 **[已复核] 现有恢复动作是重启后将活动作业标为失败并提示重新同步。** WecomService `:299` 将全部 PENDING/RUNNING 标为 FAILED；`:319` 为进程内执行器。这是已复核的代码行为。若部署多个后端副本，新副本启动可能影响其他副本活动任务，是需要确认启动调用和部署方式的推断。多副本前应有 owner/lease、检查点和可重试幂等；不是为所有同步另造一套队列。预计 4–8 工作日，归入 P5。
