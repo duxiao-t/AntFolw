@@ -12,7 +12,9 @@ import { formRegistry } from './formRegistry';
  * <p>两个方向都拦：后端加了新类型 → 第一条红（必须补渲染器或显式登记）；桌面加了后端不认的类型 →
  * 第二条红（那种表单渲染得出来、却存不下去）。
  */
-const KNOWN_MISSING = ['checkbox', 'radio', 'search', 'switch', 'time'];
+// 2026-10-09 起归零：5 种都在桌面补齐了渲染器。断言是"相等"而不是"包含"，
+// 所以这个数组只减不增；将来后端加新类型，这里会红，逼着补渲染器或显式登记。
+const KNOWN_MISSING: string[] = [];
 
 const declared: string[] = (fieldTypeSpec as { fieldTypes: { id: string }[] }).fieldTypes
   .map((type) => type.id);

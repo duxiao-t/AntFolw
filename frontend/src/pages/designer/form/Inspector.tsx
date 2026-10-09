@@ -777,6 +777,55 @@ function renderComponentSettings(
           )}
         </Space>
       );
+    // radio/checkbox 是「用按钮组呈现的下拉」：选项编辑复用同一个 SelectOptionsEditor
+    // （它按 {...option, ...patch} 改单项，保留 hidden/disabled/color，数值也不会被字符串化成
+    // SelectField.ConfigPanel 那种 textarea 的毛病）。它们没有下拉的 allowClear/搜索/最多选择数。
+    case 'radio':
+    case 'checkbox':
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <SelectOptionsEditor
+            value={props.options}
+            multiple={node.type === 'checkbox'}
+            defaultValue={props.defaultValue}
+            enableColors={props.enableOptionColor === true}
+            onChange={(options) => updateProps({ options })}
+            onDefaultChange={(defaultValue) => updateProps({ defaultValue })}
+            onEnableColorsChange={(enableOptionColor, options) =>
+              updateProps({ enableOptionColor, options })
+            }
+          />
+        </Space>
+      );
+    case 'search':
+    case 'time':
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <PanelField label="占位提示">
+            <Input
+              value={props.placeholder ?? ''}
+              onChange={(event) => updateProps({ placeholder: event.target.value })}
+            />
+          </PanelField>
+        </Space>
+      );
+    case 'switch':
+      return (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <PanelField label="开状态文案">
+            <Input
+              value={props.checkedText ?? '是'}
+              onChange={(event) => updateProps({ checkedText: event.target.value })}
+            />
+          </PanelField>
+          <PanelField label="关状态文案">
+            <Input
+              value={props.uncheckedText ?? '否'}
+              onChange={(event) => updateProps({ uncheckedText: event.target.value })}
+            />
+          </PanelField>
+        </Space>
+      );
     case 'user_picker':
       return (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
