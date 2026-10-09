@@ -37,6 +37,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -867,6 +870,80 @@ class PostgresTransactionalIntegrityIntegrationTest {
         } finally {
             jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
+    }
+
+    /**
+     * 「值 → 显示文本」共用 fixture 的 **SQL 侧**：同一份 `fixtures/field-semantics/display-text.json`，
+     * Java 侧由 `FormValueDisplayFixtureTest` 断言。两层对着同一份期望，口径漂了才会有人喊。
+     *
+     * <p>注意台账是**脱敏投影**、不是显示渲染器：自由文本（text/textarea/search）不在 V49 的类型白名单里，
+     * `value_label` 与 `value_text` 都是 NULL。这是契约，不是遗漏。
+     */
+    @Test
+    void ledgerMatchesTheSharedDisplayFixture() throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode fixture = mapper.readTree(Files.readString(
+            Path.of("..", "fixtures", "field-semantics", "display-text.json"),
+            StandardCharsets.UTF_8));
+
+        String schema = "ledger_text_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            int index = 0;
+            for (JsonNode testCase : fixture.path("cases")) {
+                index++;
+                String id = testCase.path("id").asText();
+                String code = "display_" + index;
+                String schemaJson = mapper.writeValueAsString(testCase.path("schema"));
+
+                long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                    + ".t_form_definition(code, name, schema, settings, status) "
+                    + "VALUES (?, ?, ?::jsonb, '{}'::jsonb, 'PUBLISHED') RETURNING id",
+                    Long.class, code, id, schemaJson);
+                // 行自己的版本快照必须存在：V49 按 form_def_version 钉 meta，缺了会**回退最新版**
+                // ——那会把版本错误掩盖成"看着对"。
+                jdbcTemplate.update("INSERT INTO " + schema
+                    + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                    + "VALUES (?, 1, ?::jsonb, 'fixture')", formId, schemaJson);
+                long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                    + ".t_form_data(form_def_id, form_def_version, data, status) "
+                    + "VALUES (?, 1, ?::jsonb, 'SUBMITTED') RETURNING id",
+                    Long.class, formId, mapper.writeValueAsString(testCase.path("data")));
+
+                String fieldId = testCase.path("fieldId").asText();
+                JsonNode expect = testCase.path("expect").path("sql");
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT value_label, value_text FROM " + schema
+                        + ".v_form_ledger WHERE data_id = ? AND field_id = ?", dataId, fieldId);
+
+                assertThat(rows).as("台账行数不符：%s", id)
+                    .hasSize(expect.path("row").asBoolean() ? 1 : 0);
+                if (!expect.path("row").asBoolean()) continue;
+
+                Map<String, Object> row = rows.get(0);
+                assertThat(row.get("value_label")).as("value_label 不符：%s", id)
+                    .isEqualTo(fixtureText(expect.path("label")));
+                if (expect.has("textJson")) {
+                    Object rawText = row.get("value_text");
+                    assertThat(rawText).as("value_text 应是 JSON 数组文本：%s", id).isNotNull();
+                    assertThat(mapper.readTree(String.valueOf(rawText)))
+                        .as("value_text 按 JSON 解析后不符：%s", id)
+                        .isEqualTo(expect.get("textJson"));
+                } else {
+                    assertThat(row.get("value_text")).as("value_text 不符：%s", id)
+                        .isEqualTo(fixtureText(expect.path("text")));
+                }
+            }
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    /** fixture 里 `null` 与"键不存在"都表示期望 SQL NULL。 */
+    private static String fixtureText(JsonNode node) {
+        return node.isTextual() ? node.asText() : null;
     }
 
     @Test

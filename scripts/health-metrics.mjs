@@ -63,15 +63,55 @@ function h1() {
 }
 
 // ── H2 共用语义测试接入数：哪几个渠道在读同一份 fixture ────────────────────────
-// 渠道 = 桌面 / 移动 / Java / SQL。SQL 那一格现在没人读（BI 视图还是自己一套口径）。
+//
+// 三个要点（前两条是审计指出的、已经踩过的坑）：
+//  1. **分母来自完整渠道声明**，不是已接入的数量。写死"/4"而名单里根本没有 sql，就会让人把
+//     "3/4" 读成"还缺一块"，其实口径从来没定义清楚。
+//  2. **按维度分开记**。并集 4/4 只能说明"四条通道各自被某份 fixture 覆盖过"，**不能**读成
+//     "同一套语义已经四端全部对拍"——可见性只有桌面/移动两份，显示文本是 Java/SQL 两份。
+//  3. 渠道判定按目录，且 java 只扫 `backend/src/main`：扫整个 `backend/src` 会把真库集成测试
+//     目录也算进来，与 sql 渠道重复记账。
+const H2_DECLARED_CHANNELS = ['desktop', 'mobile', 'java', 'sql'];
+const H2_DIMENSIONS = {
+  visibility: {
+    fixture: 'fixtures/field-semantics/visibility.json',
+    consumers: { desktop: ['frontend/src'], mobile: ['mobile/src'] },
+  },
+  fieldTypes: {
+    fixture: 'fixtures/field-semantics/field-types.json',
+    consumers: {
+      desktop: ['frontend/src'],
+      mobile: ['mobile/src'],
+      java: ['backend/src/main'],
+    },
+  },
+  displayText: {
+    fixture: 'fixtures/field-semantics/display-text.json',
+    consumers: {
+      java: ['backend/src/test/java/com/antflow/form/runtime'],
+      sql: ['backend/src/test/java/com/antflow/integration'],
+    },
+  },
+};
+
 function h2() {
-  const channels = { desktop: 'frontend/src', mobile: 'mobile/src', java: 'backend/src' };
-  const wired = [];
-  for (const [name, dir] of Object.entries(channels)) {
-    const files = walk(p(dir), (n) => /\.(ts|tsx|java)$/.test(n));
-    if (referencing(files, 'field-semantics').length > 0) wired.push(name);
+  const byDimension = {};
+  const union = new Set();
+  for (const [dimension, spec] of Object.entries(H2_DIMENSIONS)) {
+    const wired = [];
+    for (const [channel, dirs] of Object.entries(spec.consumers)) {
+      const hit = dirs.some((dir) => {
+        const files = walk(p(dir), (n) => /\.(ts|tsx|java)$/.test(n));
+        return referencing(files, 'field-semantics').length > 0;
+      });
+      if (hit) {
+        wired.push(channel);
+        union.add(channel);
+      }
+    }
+    byDimension[dimension] = wired.sort();
   }
-  return { channels: wired.sort() };
+  return { declared: H2_DECLARED_CHANNELS, union: [...union].sort(), byDimension };
 }
 
 // ── H3 手写重复业务 DTO：独立声明的 FormDefinition 副本数 ──────────────────────
@@ -136,7 +176,18 @@ function compare(base, now) {
   };
   subset('H1 desktop 缺的字段类型', base.H1.missingDesktop, now.H1.missingDesktop);
   subset('H1 mobile 缺的字段类型', base.H1.missingMobile, now.H1.missingMobile);
-  subset('H2 已接入共用 fixture 的渠道', base.H2.channels, now.H2.channels);
+  // H2 的方向与 H1 **相反**：H1 新增"缺口"才叫变差，H2 新增"渠道"是变好——丢渠道才是变差。
+  // 这里曾经借用上面的 subset()，方向是反的：加 sql 渠道被判变差、丢 java 渠道反而通过。
+  for (const channel of base.H2.union) {
+    if (!now.H2.union.includes(channel)) worse.push(`H2 渠道丢失：${channel}`);
+  }
+  for (const [dimension, wired] of Object.entries(base.H2.byDimension)) {
+    for (const channel of wired) {
+      if (!(now.H2.byDimension[dimension] ?? []).includes(channel)) {
+        worse.push(`H2 ${dimension} 维度丢失渠道：${channel}`);
+      }
+    }
+  }
   if (now.H3.declarations.length > base.H3.declarations.length) {
     worse.push(`H3 手写 FormDefinition 副本 ${base.H3.declarations.length} → ${now.H3.declarations.length}`);
   }
@@ -155,6 +206,37 @@ function compare(base, now) {
 }
 
 const current = { H1: h1(), H2: h2(), H3: h3(), H4: h4(), H5: h5(), H6: h6() };
+
+// 方向自检：这两条守的正是"比较写反了"这个已经犯过的错。用 `__probe__` 这种不存在的渠道名，
+// 免得真渠道恰好已接入时断言变成空跑。
+if (process.argv.includes('--self-test')) {
+  const assert = (condition, message) => {
+    if (!condition) {
+      console.error(`✗ ${message}`);
+      process.exit(1);
+    }
+    console.log(`✓ ${message}`);
+  };
+  const withUnion = (union) => ({ ...current, H2: { ...current.H2, union } });
+  assert(
+    compare(current, withUnion([...current.H2.union, '__probe__'])).length === 0,
+    '新增渠道必须判为变好（不报变差）',
+  );
+  assert(
+    compare(current, withUnion(current.H2.union.filter((c) => c !== current.H2.union[0]))).length > 0,
+    '丢失基线里的渠道必须报变差',
+  );
+  // 分维度同样只许增不许减。
+  const [dimension, wired] = Object.entries(current.H2.byDimension)[0];
+  assert(
+    compare(current, {
+      ...current,
+      H2: { ...current.H2, byDimension: { ...current.H2.byDimension, [dimension]: wired.slice(1) } },
+    }).length > 0,
+    `分维度丢失渠道必须报变差（${dimension}）`,
+  );
+  process.exit(0);
+}
 
 if (process.argv.includes('--write')) {
   const json = JSON.stringify(current, null, 2);
@@ -180,9 +262,15 @@ if (worse.length) {
 }
 
 const h4note = current.H4.activeV1Instances === null ? '，H4 活跃 v1 实例数仍是"未测"（不当作 0）' : '';
+// H2 同时给并集与**分维度明细**：并集只说明"每条通道被某份 fixture 覆盖过"，
+// 不能读成"同一套语义已四端全部对拍"。
+const h2breakdown = Object.entries(current.H2.byDimension)
+  .map(([dimension, wired]) => `${dimension}: ${wired.join('/') || '无'}`)
+  .join('；');
 console.log(
   `健康指标 OK：H1 缺口 桌面 ${current.H1.missingDesktop.length}/移动 ${current.H1.missingMobile.length}、` +
-    `H2 ${current.H2.channels.length}/4 渠道、H3 ${current.H3.declarations.length} 份副本、` +
+    `H2 渠道并集 ${current.H2.union.length}/${current.H2.declared.length}（${h2breakdown}）、` +
+    `H3 ${current.H3.declarations.length} 份副本、` +
     `H4 ${current.H4.writableRuntimes} 套运行时、H5 Java ${current.H5.javaGates}/TS ${current.H5.tsGates} 类门禁、` +
     `H6 预算 ${current.H6.entryBudgetKiB}/${current.H6.lazyBudgetKiB} KiB${h4note}`,
 );
