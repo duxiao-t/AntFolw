@@ -274,7 +274,19 @@ P0 必备 fixture：条件前向引用与互指、隐藏来源、空值数值条
 
 ## 附录 C：实施进展（2026-10-09 同日，由另一轮实施）
 
-报告 B3 的 P0 行已开工：**A2（共享 fixture）与 P0b（两个已复现缺陷）已实施**；A1/A3/A4 未开始。
+报告 B3 的 P0 行已开工：**A2（共享 fixture）、P0b（两个已复现缺陷）、A1（字段类型真源，半）、A3（两侧边界门禁）、A4（六指标进 CI）** 均已实施。
+
+**A4 的六个指标在这轮有了可执行载体**（`scripts/health-metrics.mjs` + `docs/health-metrics.baseline.json`，CI 的 `metrics` job）。
+实测值与 B4 表格的差异，按"变好/变差/未测"分开记：
+
+| 指标 | 本报告 B4 的现状值 | 本轮实测 | 说明 |
+| --- | --- | --- | --- |
+| H1 字段支持差集 | 缺口 5 | 缺口 5（后端 26 / 桌面 21 / 移动 26） | 相符；缺口还由 A1 的两条生成物对账测试兜底 |
+| H2 共用语义测试接入数 | **0/4** | **3/4**（desktop/java/mobile 接了，**SQL 没接**） | 变好——A2 的 fixture 落地后三端已读同一份（Java 只读了 `field-types.json`，可见性那份还没接） |
+| H3 手写重复业务 DTO | 5 | 5 | 相符 |
+| H4 可写运行时实现数 | 2，活跃 v1 实例 **待实测** | 2，活跃 v1 实例 **`null`（仍未测）** | 刻意不写 0；查法已存进脚本 |
+| H5 专用架构边界门禁 | 0 类 | **Java 3 类 / TS 3 类** | 变好——A3 落地；必需 V2 的可选注入仍是 1 |
+| H6 移动端体积预算 | 阈值 160/180 KiB，产物未测 | 阈值同；产物 **`null`（仍未测）** | 测量仍归 mobile 自己的预算门禁，这里只读阈值 |
 面向实施的细节见 `HANDOFF.md` 顶部"最新一轮"，口径决策见 `DECISIONS.md` 的
 `D-20261009-display-condition-cycles-rejected-at-save-and-publish` 与 `D-20261009-shared-field-semantics-fixtures`。
 
@@ -287,6 +299,10 @@ P0 必备 fixture：条件前向引用与互指、隐藏来源、空值数值条
 | 未知类型静默返回的行号 | `FormRenderer.tsx:346` | 相符（`if (!ft) return null` 就在该行区间），已改为显式占位 |
 | 移动端漂移数量 | 1 处（前向引用） | **2 处**：fixture 还抓到 `numberCompare` 未先拒空值（空值满足 `gte 0`），桌面与后端都判不成立 |
 
-未做且不打算在本轮做（留给 P0a 其余项与 P2）：A1 生成的字段语义 spec 与真实契约链路、
-A3 架构边界门禁（ArchUnit `FreezingArchRule` / Biome 导入限制）、A4 六指标进 CI、
-补齐桌面端 `radio/checkbox/search/time/switch` 的渲染器（当前是显式占位）。
+**第二轮（同日，A1/A3/A4）**：A1 只做了**前半**（字段类型真源 `FieldTypeCatalog` → 生成 `fixtures/field-semantics/field-types.json` → 两端注册表对账）；
+**真实 OpenAPI 契约链路仍未做**，但前提已实测：活栈 `/v3/api-docs` 是 **118 KB / 163 条 `/api/` 路径**，nginx 不代理、容器里无 HTTP 客户端，故必须**构建期导出 + 提交 + CI 比对无差异**（详见 `docs/DECISIONS.md` 的
+`D-20261009-real-openapi-contract-generate-at-build-time-not-runtime`；本轮**故意没有提交那份 spec**，因为无门禁的生成物必然腐坏）。
+A3 两侧门禁、A4 六指标均已落地并验过"造一条新违规就红"。
+
+仍未做（留给 P0a 其余项与 P2）：A1 的真实契约产物与 `schemaPath` 重指、
+补齐桌面端 `radio/checkbox/search/time/switch` 的渲染器（当前是显式占位）、把 SQL 视图接进 H2 的口径对拍。

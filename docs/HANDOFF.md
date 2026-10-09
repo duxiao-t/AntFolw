@@ -1,19 +1,60 @@
 > 架构审计（2026-10-09）：见 [分模块技术选型与演化路线](architecture-review-2026-10-09.md)。
 > 核验结论：保留模块化单体，修订设计器 big-bang、生成契约和集成前提。
-> **整改已开始（同日）**：P0a 的 A2（共享 fixture）与 P0b（两个已复现缺陷）已实施，见下"最新一轮"。
+> **整改已开始（同日）**：P0a/P0b 的 A2、A3、A4 与字段类型真源已实施，见下"最新一轮"。
 
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-09T15:30:00+08:00`
+- **更新时间：** `2026-10-09T16:10:00+08:00`
 - **分支：** `master`（= `a8c6790`，本轮改动**未提交**）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
 
 ---
 
-## 最新一轮：P0b 缺陷修复 + A2 共享 fixture（可见性口径）
+## 最新一轮：A1 字段类型真源 + A3 边界门禁 + A4 六指标
 
-按审计报告 B3 的 P0 行开工，双轨里的 **A2（fixture 骨架）与 P0b（已复现缺陷）** 已落地；
-A1/A3/A4（契约链路、边界门禁、六指标）**未开始**。
+P0a 剩下的三件一起落地。**A1 只做了一半**（见下的"没做"）。
+
+| 变更 | 内容 |
+| --- | --- |
+| `backend/.../form/FieldTypeCatalog.java`（新） | 字段类型的**唯一真源**：26 种 × {kind, media, options, displaySource, requiredAble}。`FIELD_TYPES`/`CONTAINER_TYPES` 改成从这里取 |
+| `fixtures/field-semantics/field-types.json`（新，生成物） | 由 catalog 生成、随仓库提交；`FieldTypeCatalogSpecTest` 对账（不一致即红，`-Dantflow.fieldTypes.write=true` 重建） |
+| `frontend/src/registry/fieldTypes.generated.test.ts`（新） | 桌面**缺的 5 种**（`checkbox/radio/search/switch/time`）显式登记；断言用**相等**而非包含——补上一个渲染器就得把缺口改小，缺口只减不增 |
+| `mobile/.../schema/fieldTypes.generated.test.ts`（新） | 移动端缺口 `[]`，同一条约定 |
+| `backend/src/test/java/com/antflow/ArchitectureBoundaryTest.java`（新） | ArchUnit + `FreezingArchRule`，3 条规则（领域→mobile、生产→dev、审计→业务）。存盘在 `backend/archunit_store/`（R1 冻 33 条，R2/R3 空） |
+| `frontend/scripts/check-import-boundaries.mjs`（新） | TS 侧小图检查，3 条规则 + 基线 `frontend/import-boundaries.baseline.json`（冻 8 条跨页面 import）。**Biome 没有冻结机制**，所以规则能表达的用 Biome、表达不了的（跨页面内部依赖）用这个脚本 |
+| `scripts/health-metrics.mjs` + `docs/health-metrics.baseline.json`（新） | 六指标实测基线，只禁止变差；CI 里单独一个 `metrics` job（纯 Node 内置模块，几秒） |
+
+**六指标的实测值**（全部来自扫描，不是抄报告的）：H1 缺口 桌面 5 / 移动 0（后端 26、桌面 21、移动 26）；
+H2 共用 fixture 渠道 **3/4**（desktop/java/mobile 接了，**SQL 没接**）；H3 手写 `FormDefinition` **5 份**；
+H4 可写运行时 **2**、活跃 v1 实例数 **`null`（未测，刻意不写 0）**；H5 Java 3 类 / TS 3 类门禁 + 必需 V2 的可选注入 1；
+H6 预算 160/180 KiB、实测产物 **`null`**（由 mobile 自己的预算门禁产出，这里只读）。
+
+**顺手清掉自己造的一条违规**：`ExportModal.tsx` 原本 `import ... from '@/pages/report/Center'`（跨页面），
+把 `RANGE_PRESETS/rangeParams/tzOffsetMinutes` 上移到 `frontend/src/utils/dateRange.ts`，
+四个引用方一起改。**没有把自己的新违规冻进基线**——那样等于第一件事就把门禁作废。
+
+**验证**：后端 `mvn -B test` **574 绿**（基线 569，+5）；前端 `npm test` **302 绿**（基线 300，+2）、
+`npm run tsc` 干净；移动端 `npx vitest run` **361 绿**（基线 359，+2）。守护取证（都已还原）：
+往 `frontend/src/utils/` 塞一句 `import ... from '@/pages/report/Dashboard'` → 边界门禁红（exit 1）；
+加第 6 份 `type FormDefinition` → 六指标红（exit 1）；把移动端入口预算 160→260 → 六指标红。
+
+**没做（A1 的另一半）**：真实 OpenAPI 契约链路。实测**契约确实存在**——活栈后端容器内
+`/v3/api-docs` 返回 200、**118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），
+但 nginx 不代理它、容器里也没有 curl/wget（我是用 `bash` 的 `/dev/tcp` 取的）。
+要落成产物，得**构建期 boot 一次上下文导出 + 提交 spec + CI 比对无差异**（现在的 `mvn test` 不 boot 上下文，
+仓库里唯一的全上下文测试 `AntFlowApplicationTests` 还是 `@Disabled`）。
+**故意没提交那份 spec**：没有 CI 比对门禁的生成物一定会变成谎话（`frontend/config/oneapi.json` 就是前车之鉴——
+那是 Ant Design Pro 的模板契约，不是业务契约）。下一步见 `docs/DECISIONS.md`。
+
+**移动端本机那 1 个 unhandled error**：`src/features/forms/fields/fields.test.tsx`（25 条用例全过，
+但 happy-dom 拆 iframe 时抛 `NetworkError` → vitest exit 1）。该文件相对 HEAD **未改动**、单跑也复现，
+是**本机（Node 24）环境**问题，与本轮无关；CI 用的 Node 22 上 master 一直是绿的，故没动它。
+
+---
+
+## 上一轮：P0b 缺陷修复 + A2 共享 fixture（可见性口径）
+
+按审计报告 B3 的 P0 行开工，双轨里的 **A2（fixture 骨架）与 P0b（已复现缺陷）** 已落地。
 
 | 变更 | 内容 |
 | --- | --- |

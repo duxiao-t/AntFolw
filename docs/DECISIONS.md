@@ -381,3 +381,32 @@
 - **背景：** 字段可见性/校验/显示文本在三端各有一份实现（桌面 `registry/displayConditions.ts`、移动 `schema/validators.ts`、后端 `FormDefinitionService`，另有 SQL 视图）。已经实际漂移：移动端的 `visibleNodeIds` 是桌面"边走边判"的**旧版拷贝**（条件引用后面才声明的字段时两端结果不同），且 `numberCompare` 漏了"先拒空值"（空数字字段能满足 `gte 0`）。两处都是没人发现的漂移，直到两端显示不一致。
 - **决策：** 建**三端共用的 fixture**（`fixtures/field-semantics/visibility.json`）作为口径的单一约定：每条用例含 schema + values + 期望（可见集合、环路径），期望值**写在 fixture 里、不取自任一实现**；桌面与移动各有一份 `*.fixture.test.ts` 读同一份 JSON，后端在 `FormDefinitionServiceSchemaTest` 里覆盖环的拒绝。实现与 fixture 不一致时**改实现**，只有口径本身变了才动期望，且三端一起动。
 - **影响：** fixture 上线当天就抓到移动端第二个漂移（报告里没有的那处）。后续每加一条语义（新的操作符、新的容器类型）都应先加 fixture 再加实现。这也是把"复制 → 漂移 → 无人发现"变成"红灯"的最便宜手段；在没有共享包机制（两端独立 lockfile、Umi 与 Vite 异构）的前提下，fixture 是当前唯一可行的单一真源载体。
+
+## D-20261009-frontend-import-boundary-gate-with-committed-baseline
+
+- **状态：** accepted
+- **背景：** 桌面端页面之间直接 import 对方的内部实现（`FormManagementWizard` 拿 `designer/*` 的 4 个模块、`RecordList` 拿 `proc/detailPresentation`……共 8 处），改一页会连带改另一页，且这些内部件永远无法单独测。后端这边有 ArchUnit，TS 这边一条都没有。
+- **决策：** 写一个**只拦新增**的小图检查 `frontend/scripts/check-import-boundaries.mjs`，三条规则（页面之间不许互 import 内部件 / `components/**` 不许 import `pages/**` / `utils/**` 不许 import 页面或组件），存量违规冻在 `frontend/import-boundaries.baseline.json`，接进 CI 的 frontend job（`npm run check:boundaries`）。
+  - **不用 Biome 的 `noRestrictedImports` 做主力**：它能表达"某目录不许引某前缀"，但**没有冻结机制**（没有 ArchUnit `FreezingArchRule` 那样的存盘），存量 8 处一上规则就是全红，而 P0 明确不许为"全绿"重构全仓。所以用带基线的脚本；Biome 留给它自己那几条。
+  - 解析用**行锚定的正则**而不是 TS 解析器（不引新依赖）：`^\s*(import|export)…from '…'` + 副作用 import + 动态 `import()`。行锚定顺带避免把注释里的 `// import x from 'y'` 当成真依赖。
+- **影响：** 基线里那 8 条是**已知库存**，不是认可；`--write` 会把已被修掉的条目从基线里去掉并提示，防止基线偷偷膨胀。**本轮顺手清掉了自己刚造的 1 条**（`ExportModal` 跨页面 import `report/Center` → 三个纯函数上移到 `frontend/src/utils/dateRange.ts`）——第 9 条本来是我几分钟前写的，冻进去等于开局就作废门禁。
+
+## D-20261009-health-metrics-baseline-unknown-is-not-zero
+
+- **状态：** accepted
+- **背景：** 审计报告 B4 定了六个健康指标，但"现状值"是那次扫描的快照，没有可执行的载体：不接进 CI 就会随代码漂走，而一旦有人把没测过的量写成 0，门禁会假装通过（报告专门警告过这条）。
+- **决策：** `scripts/health-metrics.mjs`（纯 Node 内置模块，无依赖）+ 实测基线 `docs/health-metrics.baseline.json`，CI 里单独一个 `metrics` job。三条纪律写进脚本注释：**测不到记 `null` 不写 0**；**基线是实测值不是目标值**；**变好不拦（只提示收紧基线）、变差当场红**。
+  - 每条指标自己定义"什么是变差"（`compare()` 里逐条写，不做通用引擎）：H1 缺口集合只许变小；H2 接入渠道只许变多；H3 副本数、H4 运行时数、H5 必需 V2 的可选注入数只许不增；H5 门禁数、H6 预算只许不减/不放松。
+  - **H4 的"活跃 v1 实例数"刻意留 `null`（未测）**：那要连生产库查，CI 拿不到。脚本里同时存下了查法（`SELECT engine_version, status, count(*) FROM t_process_instance GROUP BY 1,2;`），留待有人真去查，而不是拿 0 冒充。
+  - **H6 的实测产物也留 `null`**：体积数字由 mobile 自己的 `check:bundle-budget` 产出并已在 CI 里拦，这里只读它的阈值，不重复实现一套测量。
+- **影响：** 六条指标的当前值现在只有一处可查（基线文件），且"未测"与"为零"在文件里长得不一样。H1 的缺口另外还有 A1 那两条生成物对账测试兜底（缺口只减不增）。
+
+## D-20261009-real-openapi-contract-generate-at-build-time-not-runtime
+
+- **状态：** accepted（**只定了取法，产物未做**）
+- **背景：** 审计报告说桌面 codegen"复用已接通的 OpenAPI"——核验后那句是错的：`frontend/config/config.ts` 的 `schemaPath` 指向 `frontend/config/oneapi.json`，其 `info.title` 是 **"Ant Design Pro"**，即模板脚手架契约，业务契约从未接通。本轮实测：活栈后端容器内 `GET /v3/api-docs` 返回 **200、118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），契约**确实存在且可确定性产出**。
+- **决策：** 真实契约**必须构建期导出并提交**，不能让前端运行时去 fetch 后端：
+  - 经 web（:7070）取 `/v3/api-docs` 拿到的是 **SPA 首页 HTML**（nginx 没代理，0 条 `/api/` 路径）。
+  - 容器里连 `curl`/`wget` 都没有（本轮是用 `bash` 的 `/dev/tcp` 手工取的），所以"部署后再抓"这条路也不通。
+  - 做法：CI 里 boot 一次上下文导出 spec + 提交 + **比对无差异**（生成物不一致即拒），再把 `schemaPath` 指过去。
+- **影响：** **本轮故意没有提交那份 spec**——没有比对门禁的生成物一定会变成谎话（`oneapi.json` 就是没门禁的模板契约躺了两年的样子）。落成产物前需要先解决：现在的 `mvn test` 不 boot 上下文（仓库里唯一的全上下文测试 `AntFlowApplicationTests` 还是 `@Disabled("requires local PostgreSQL and local MinIO")`），要引入一个 env 门控的导出测试或 springdoc 的 maven 插件，并确认 CI 的 PG-only 环境够不够 boot。**重指 `schemaPath` 还会让 `npm run openapi` 重生成 `src/services/`，那是 P1/P5 的量级，不在 P0。**
