@@ -1,14 +1,13 @@
 import { DownloadOutlined } from '@ant-design/icons';
-import { PageContainer } from '@ant-design/pro-components';
 import { request } from '@umijs/max';
-import { App, Alert, Button, Input, Select, Space, Typography } from 'antd';
+import { App, Button, Input, Modal, Select, Space, Typography } from 'antd';
 import { createStyles } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
+import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from '@/pages/report/Center';
 import { blobErrorMessage } from '@/utils/format';
-import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from './Center';
 
 const useStyles = createStyles(({ token }) => ({
-  form: { display: 'grid', gap: 12, maxWidth: 560 },
+  form: { display: 'grid', gap: 12 },
   row: { display: 'grid', gap: 6 },
   label: { fontSize: 13 },
   note: { color: 'var(--af-color-muted)', fontSize: 12, lineHeight: 1.7 },
@@ -36,12 +35,27 @@ const FORMAT_OPTIONS = [
 
 type ExportFormat = (typeof FORMAT_OPTIONS)[number]['value'];
 
-export default function ExportPage() {
+/** 「提交数据」表格当前筛选带进来的默认值；打开弹窗时的那一份为准。 */
+export type ExportDefaults = {
+  formDefId?: number;
+  status?: string;
+  submitterKeyword?: string;
+};
+
+export default function ExportModal({
+  defaults,
+  onClose,
+}: {
+  defaults?: ExportDefaults;
+  onClose: () => void;
+}) {
   const { styles } = useStyles();
   const { message } = App.useApp();
-  const [formDefId, setFormDefId] = useState<number>();
-  const [status, setStatus] = useState('');
-  const [submitterKeyword, setSubmitterKeyword] = useState('');
+  // 由调用方「开着才渲染」，每次打开都是全新挂载：初始值直接取 props 就好，
+  // 不用 useEffect 去同步 defaults（那样会在用户改筛选后被重渲染打回去）。
+  const [formDefId, setFormDefId] = useState<number | undefined>(defaults?.formDefId);
+  const [status, setStatus] = useState(defaults?.status ?? '');
+  const [submitterKeyword, setSubmitterKeyword] = useState(defaults?.submitterKeyword ?? '');
   const [days, setDays] = useState(30);
   const [format, setFormat] = useState<ExportFormat>('xlsx');
   const [formOptions, setFormOptions] = useState<Array<{ value: number; label: string }>>([]);
@@ -111,7 +125,7 @@ export default function ExportPage() {
   const truncated = count != null && count.total > count.limit;
 
   return (
-    <PageContainer subTitle="把表单台账导成 Excel 或 CSV，内容与「表单管理 → 数据」里看到的一致">
+    <Modal title="导出数据" open onCancel={onClose} footer={null} width={560}>
       <div className={styles.form}>
         <div className={styles.row}>
           <span className={styles.label}>格式</span>
@@ -172,19 +186,17 @@ export default function ExportPage() {
           )}
         </div>
 
-        <Button type="primary" icon={<DownloadOutlined />} loading={busy}
-          disabled={counting || !count || count.total === 0} onClick={() => void download()}>
-          {format === 'csv' ? '导出 CSV' : '导出 Excel'}
-        </Button>
-      </div>
+        <Typography.Text className={styles.note}>
+          导出内容与背后列表看到的完全一致（提交人 / 工号 / 部门 + 该表单字段列，取值也是页面显示的那份文本）；导出动作会记一条审计。
+        </Typography.Text>
 
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginTop: 16, maxWidth: 560 }}
-        title="导出范围与你在「表单管理 → 数据」里看到的完全一致"
-        description="列表显示的提交人 / 工号 / 部门 + 该表单的字段列会一起导出，取值也是页面显示的那份文本（下拉给选项名、检查项给逐条结果）；范围外（以及你没有权限看的）数据不会出现。导出动作会记一条审计。"
-      />
-    </PageContainer>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button type="primary" icon={<DownloadOutlined />} loading={busy}
+            disabled={counting || !count || count.total === 0} onClick={() => void download()}>
+            {format === 'csv' ? '导出 CSV' : '导出 Excel'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

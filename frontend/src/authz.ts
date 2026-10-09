@@ -6,6 +6,7 @@ export const CAPABILITY = {
   formAuthorizationManage: 'form:authorization:manage',
   formOptionSourceManage: 'form:option_source:manage',
   formDataRead: 'form:data:read',
+  formDataExport: 'form:data:export',
   workflowInstanceRead: 'workflow:instance:read',
   workflowInstanceOverride: 'workflow:instance:override',
   workflowInstanceWithdraw: 'workflow:instance:withdraw',

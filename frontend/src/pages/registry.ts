@@ -46,8 +46,6 @@ export const PAGES: PageDef[] = [
     readCapabilities: PAGE_CAPABILITIES['report.center'] },
   { key: 'report.view', label: '数据看板', path: '/report/view', component: './report/Dashboard',
     icon: 'dashboard', readCapabilities: PAGE_CAPABILITIES['report.view'] },
-  { key: 'report.export', label: '数据导出', path: '/report/export', component: './report/Export',
-    icon: 'export', readCapabilities: PAGE_CAPABILITIES['report.export'] },
   { key: 'security.roles', label: '角色管理', path: '/security/roles',
     component: './security/Role', icon: 'idcard',
     readCapabilities: PAGE_CAPABILITIES['security.roles'] },

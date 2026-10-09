@@ -1,19 +1,25 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import ExportPage from './Export';
+import ExportModal, { type ExportDefaults } from './ExportModal';
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('@umijs/max', () => ({ request }));
+// 只用到 Center 里的时间范围助手，但模块本身会拖进 pro-components（进而拖进 antd 的
+// zh_CN locale，vitest 解析不了）；本仓库的页面测试一律把 pro-components 挡掉。
 vi.mock('@ant-design/pro-components', () => ({
   PageContainer: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }));
 
-function renderPage() {
-  return render(<App><ExportPage /></App>);
+function renderModal(defaults?: ExportDefaults) {
+  return render(
+    <App>
+      <ExportModal defaults={defaults} onClose={() => {}} />
+    </App>,
+  );
 }
 
-describe('数据导出', () => {
+describe('数据导出弹窗', () => {
   beforeEach(() => {
     request.mockReset();
     // happy-dom 没有 objectURL 实现，这里只需要它别炸。
@@ -28,7 +34,7 @@ describe('数据导出', () => {
       return Promise.resolve(new Blob(['x']));
     });
 
-    renderPage();
+    renderModal();
 
     expect(await screen.findByText('42')).toBeInTheDocument();
     expect(screen.getByText(/上限 10000 行/)).toBeInTheDocument();
@@ -43,7 +49,7 @@ describe('数据导出', () => {
       return Promise.resolve(new Blob(['x']));
     });
 
-    renderPage();
+    renderModal();
 
     expect(await screen.findByText(/共有 24000 行，超过上限只导前 10000 行/)).toBeInTheDocument();
     // 显示的是"实际会拿到多少"，不是总数
@@ -57,7 +63,7 @@ describe('数据导出', () => {
       return Promise.resolve(new Blob(['x']));
     });
 
-    renderPage();
+    renderModal();
 
     expect(await screen.findByText(/当前条件没有数据/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /导出 Excel/ })).toBeDisabled();
@@ -70,7 +76,7 @@ describe('数据导出', () => {
       return Promise.resolve(new Blob(['业务单号\n']));
     });
 
-    renderPage();
+    renderModal();
     await screen.findByText('3');
 
     fireEvent.change(screen.getByLabelText('提交人'), { target: { value: ' 张三 ' } });
@@ -98,7 +104,7 @@ describe('数据导出', () => {
       return Promise.resolve(new Blob(['x']));
     });
 
-    renderPage();
+    renderModal();
     await screen.findByText('3');
 
     // 计数请求必须带 from/to：少了它，改了时间范围预览数字也不变。
@@ -116,5 +122,23 @@ describe('数据导出', () => {
 
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/data/admin/export',
       expect.objectContaining({ params: expect.objectContaining({ format: 'csv' }) })));
+  });
+
+  it('默认沿用「提交数据」表格当前的筛选（表单 / 状态 / 提交人）', async () => {
+    request.mockImplementation((url: string) => {
+      if (url === '/api/reports/form-data-count') return Promise.resolve({ total: 7, limit: 10000 });
+      if (url === '/api/forms/definitions') return Promise.resolve({ records: [] });
+      return Promise.resolve(new Blob(['x']));
+    });
+
+    renderModal({ formDefId: 12, status: 'SUBMITTED', submitterKeyword: '李四' });
+    await screen.findByText('7');
+
+    // 预览就必须已经带上：否则先看到的是"全部数据"的行数，点下载才变。
+    const countParams = request.mock.calls.find(([url]) => url === '/api/reports/form-data-count')?.[1]
+      ?.params;
+    expect(countParams).toEqual(expect.objectContaining({
+      formDefId: 12, status: 'SUBMITTED', submitterKeyword: '李四',
+    }));
   });
 });

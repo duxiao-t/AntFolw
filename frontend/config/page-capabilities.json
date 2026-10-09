@@ -6,7 +6,6 @@
   "approval.monitor": ["workflow:monitor:read"],
   "report.center": ["form:data:read"],
   "report.view": ["form:data:read"],
-  "report.export": ["form:data:export"],
   "security.roles": ["security:role:read"],
   "security.user-permissions": ["security:user_role:read"],
   "security.audit-log": ["audit:event:read"],

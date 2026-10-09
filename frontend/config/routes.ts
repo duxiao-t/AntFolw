@@ -46,6 +46,8 @@ export default [
   { path: '/tasks/done', component: './tasks/Done', hideInMenu: true, access: 'canUseTasks' },
   { path: '/proc', component: './proc/Sent', hideInMenu: true, access: 'canUseProcesses' },
   { path: '/proc/:id', component: './proc/Detail', hideInMenu: true, access: 'canUseProcessDetail' },
+  // 旧「数据导出」页已并入「表单管理 → 提交数据」；bookmark / 旧菜单缓存仍会打到这里。
+  { path: '/report/export', redirect: '/approval/form-data', hideInMenu: true },
   { path: '/account/settings', component: './account/settings', hideInMenu: true },
   { path: '/account/center', redirect: '/account/settings' },
 

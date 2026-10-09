@@ -27,7 +27,6 @@ export default {
   // 数据与报表
   'menu.report': '数据与报表',
   'menu.report.center': '报表中心',
-  'menu.report.export': '数据导出',
   'menu.report.view': '数据看板',
 
   // 系统设置

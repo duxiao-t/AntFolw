@@ -1,12 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminFormDataPage from './index';
 
-const { request } = vi.hoisted(() => ({ request: vi.fn() }));
+const { request, state } = vi.hoisted(() => ({
+  request: vi.fn(),
+  // 导出按钮按能力显示，默认给个没有权限的用户（列定义的用例不关心它）。
+  state: { currentUser: undefined as any },
+}));
 vi.mock('@umijs/max', () => ({
   request,
   useLocation: () => ({ search: '' }),
+  useModel: () => ({ initialState: state.currentUser ? { currentUser: state.currentUser } : undefined }),
   Link: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -16,7 +22,8 @@ vi.mock('@ant-design/pro-components', () => ({
   PageContainer: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
   ProTable: (props: any) => {
     tableProps = props;
-    return <table />;
+    // 工具栏照真实 ProTable 一样渲染出来，导出按钮才点得到。
+    return <table>{props.toolBarRender?.()}</table>;
   },
 }));
 
@@ -28,7 +35,11 @@ const row = {
 
 async function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><AdminFormDataPage /></QueryClientProvider>);
+  render(
+    <QueryClientProvider client={client}>
+      <App><AdminFormDataPage /></App>
+    </QueryClientProvider>,
+  );
   await Promise.resolve();
   return tableProps;
 }
@@ -36,6 +47,7 @@ async function renderPage() {
 describe('台账列表的列与筛选', () => {
   beforeEach(() => {
     tableProps = undefined;
+    state.currentUser = undefined;
     request.mockReset();
     request.mockImplementation(() => Promise.resolve({ records: [row], total: 1 }));
   });
@@ -90,5 +102,26 @@ describe('台账列表的列与筛选', () => {
     expect(fieldColumn.render(null, { fieldValues: [] })).toBe('—');
     expect(request.mock.calls.some(([url]) => String(url).includes('/api/forms/definitions/')))
       .toBe(false);
+  });
+
+  it('没有导出能力就不给导出按钮', async () => {
+    await renderPage();
+    expect(screen.queryByRole('button', { name: /导出/ })).toBeNull();
+  });
+
+  it('导出按钮把表格当前筛选带进弹窗（预览行数用的就是它）', async () => {
+    state.currentUser = { roles: [], permissions: ['form:data:export'] };
+    const props = await renderPage();
+    // ProTable 应用筛选后调 request，这里就是"用户点了查询"那一刻。
+    await act(async () => {
+      await props.request({ current: 1, pageSize: 20, formDefId: 5, submitterKeyword: '张三' });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /导出/ }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/api/reports/form-data-count',
+      expect.objectContaining({
+        params: expect.objectContaining({ formDefId: 5, submitterKeyword: '张三' }),
+      })));
   });
 });
