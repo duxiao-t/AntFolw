@@ -38,13 +38,24 @@ H6 预算 160/180 KiB、实测产物 **`null`**（由 mobile 自己的预算门�
 往 `frontend/src/utils/` 塞一句 `import ... from '@/pages/report/Dashboard'` → 边界门禁红（exit 1）；
 加第 6 份 `type FormDefinition` → 六指标红（exit 1）；把移动端入口预算 160→260 → 六指标红。
 
-**没做（A1 的另一半）**：真实 OpenAPI 契约链路。实测**契约确实存在**——活栈后端容器内
+**没做（A1 的另一半 → 已定并入 P1）**：真实 OpenAPI 契约产物。实测**契约确实存在**——活栈后端容器内
 `/v3/api-docs` 返回 200、**118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），
 但 nginx 不代理它、容器里也没有 curl/wget（我是用 `bash` 的 `/dev/tcp` 取的）。
-要落成产物，得**构建期 boot 一次上下文导出 + 提交 spec + CI 比对无差异**（现在的 `mvn test` 不 boot 上下文，
-仓库里唯一的全上下文测试 `AntFlowApplicationTests` 还是 `@Disabled`）。
-**故意没提交那份 spec**：没有 CI 比对门禁的生成物一定会变成谎话（`frontend/config/oneapi.json` 就是前车之鉴——
-那是 Ant Design Pro 的模板契约，不是业务契约）。下一步见 `docs/DECISIONS.md`。
+**取舍：并入 P1 做**（消费方是 P1 的 API client / 移动端 DTO，与 H3 的目标阶段一致；先落一个没有消费方、
+没有门禁的快照等于再造一个化石）。**取法与入口点清单已记档**，见
+`D-20261009-real-openapi-contract-generate-at-build-time-not-runtime`——其中**早先"P1/P5 量级"的代价评估是错的**：
+实测生成目录只 4 个文件、只被 `pages/table-list/` 这个 demo 页引用、生产代码 0 处 import；后端 boot 也不用新基础设施
+（照抄 `PostgresTransactionalIntegrityIntegrationTest` 的 `storage=test` + 内存 `FileStorage`，本地 88 条用例 0 skip，
+CI 现有 PG service 就够）。
+
+**需要人做的一件（本机拿不到）**：H4 里"活跃 v1 实例数"仍是 `null`（**刻意没写 0**，`null` 与零必须能分辨）。
+在生产库跑一次：
+
+```sql
+SELECT engine_version, status, count(*) FROM t_process_instance GROUP BY 1,2;
+```
+
+把结果填进 `docs/health-metrics.baseline.json` 的 `H4.activeV1Instances`（脚本里同时存着这句查法）。
 
 **移动端本机那 1 个 unhandled error**：`src/features/forms/fields/fields.test.tsx`（25 条用例全过，
 但 happy-dom 拆 iframe 时抛 `NetworkError` → vitest exit 1）。该文件相对 HEAD **未改动**、单跑也复现，

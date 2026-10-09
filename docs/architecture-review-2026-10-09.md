@@ -300,9 +300,14 @@ P0 必备 fixture：条件前向引用与互指、隐藏来源、空值数值条
 | 移动端漂移数量 | 1 处（前向引用） | **2 处**：fixture 还抓到 `numberCompare` 未先拒空值（空值满足 `gte 0`），桌面与后端都判不成立 |
 
 **第二轮（同日，A1/A3/A4）**：A1 只做了**前半**（字段类型真源 `FieldTypeCatalog` → 生成 `fixtures/field-semantics/field-types.json` → 两端注册表对账）；
-**真实 OpenAPI 契约链路仍未做**，但前提已实测：活栈 `/v3/api-docs` 是 **118 KB / 163 条 `/api/` 路径**，nginx 不代理、容器里无 HTTP 客户端，故必须**构建期导出 + 提交 + CI 比对无差异**（详见 `docs/DECISIONS.md` 的
-`D-20261009-real-openapi-contract-generate-at-build-time-not-runtime`；本轮**故意没有提交那份 spec**，因为无门禁的生成物必然腐坏）。
 A3 两侧门禁、A4 六指标均已落地并验过"造一条新违规就红"。
 
-仍未做（留给 P0a 其余项与 P2）：A1 的真实契约产物与 `schemaPath` 重指、
-补齐桌面端 `radio/checkbox/search/time/switch` 的渲染器（当前是显式占位）、把 SQL 视图接进 H2 的口径对拍。
+**A1 的后半（真实 OpenAPI 契约产物）已定并入 P1** —— 与 H3「手写重复业务 DTO」的目标阶段一致（本报告 `:217`）。
+取法与前提已实测并记档在 `D-20261009-real-openapi-contract-generate-at-build-time-not-runtime`：活栈 `/v3/api-docs` 是
+**118 KB / 163 条 `/api/` 路径**，nginx 不代理、容器里无 HTTP 客户端，故必须**构建期导出 + 提交 + CI 比对无差异**；
+boot 配方的现成参照是 `PostgresTransactionalIntegrityIntegrationTest`（`storage=test` + 内存 `FileStorage` 顶掉 MinIO，
+PG 走环境变量或 Testcontainer，本地 88 条用例 0 skip），**CI 现有 PG service 就够，不需要 MinIO**。
+并入 P1 而不是现在做的理由：产物的消费方在 P1，先落一个没有消费方、没有门禁的快照等于再造一个化石。
+
+仍未做（留给 P2）：补齐桌面端 `radio/checkbox/search/time/switch` 的渲染器（当前是显式占位）、
+把 SQL 视图接进 H2 的口径对拍。

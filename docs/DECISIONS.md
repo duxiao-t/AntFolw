@@ -403,10 +403,24 @@
 
 ## D-20261009-real-openapi-contract-generate-at-build-time-not-runtime
 
-- **状态：** accepted（**只定了取法，产物未做**）
-- **背景：** 审计报告说桌面 codegen"复用已接通的 OpenAPI"——核验后那句是错的：`frontend/config/config.ts` 的 `schemaPath` 指向 `frontend/config/oneapi.json`，其 `info.title` 是 **"Ant Design Pro"**，即模板脚手架契约，业务契约从未接通。本轮实测：活栈后端容器内 `GET /v3/api-docs` 返回 **200、118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），契约**确实存在且可确定性产出**。
+- **状态：** accepted（**取法已定；产物并入 P1**）
+- **背景：** 审计报告说桌面 codegen"复用已接通的 OpenAPI"——核验后那句是错的：`frontend/config/config.ts` 的 `schemaPath` 指向 `frontend/config/oneapi.json`，其 `info.title` 是 **"Ant Design Pro"**，即模板脚手架契约，业务契约从未接通。实测：活栈后端容器内 `GET /v3/api-docs` 返回 **200、118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），契约**确实存在且可确定性产出**。
 - **决策：** 真实契约**必须构建期导出并提交**，不能让前端运行时去 fetch 后端：
   - 经 web（:7070）取 `/v3/api-docs` 拿到的是 **SPA 首页 HTML**（nginx 没代理，0 条 `/api/` 路径）。
   - 容器里连 `curl`/`wget` 都没有（本轮是用 `bash` 的 `/dev/tcp` 手工取的），所以"部署后再抓"这条路也不通。
   - 做法：CI 里 boot 一次上下文导出 spec + 提交 + **比对无差异**（生成物不一致即拒），再把 `schemaPath` 指过去。
-- **影响：** **本轮故意没有提交那份 spec**——没有比对门禁的生成物一定会变成谎话（`oneapi.json` 就是没门禁的模板契约躺了两年的样子）。落成产物前需要先解决：现在的 `mvn test` 不 boot 上下文（仓库里唯一的全上下文测试 `AntFlowApplicationTests` 还是 `@Disabled("requires local PostgreSQL and local MinIO")`），要引入一个 env 门控的导出测试或 springdoc 的 maven 插件，并确认 CI 的 PG-only 环境够不够 boot。**重指 `schemaPath` 还会让 `npm run openapi` 重生成 `src/services/`，那是 P1/P5 的量级，不在 P0。**
+  - **产物并入 P1**（与 H3「手写重复业务 DTO」的目标阶段一致，`docs/architecture-review-2026-10-09.md:217`）：
+    契约的消费方是 P1 的 API client / 移动端 DTO，先落产物等于又造一个没有消费方、没有门禁的化石。
+- **影响 / P1 入口点清单**（照做即可，不必重新勘探）：
+  - **boot 配方照抄** `backend/src/test/java/com/antflow/integration/PostgresTransactionalIntegrityIntegrationTest.java:80-125`：
+    `@SpringBootTest` + `"antflow.mobile.files.storage=test"`（`:88`）+ `@Import(...TestFileStorageConfig.class)`（`:96`，内存
+    `FileStorage` 顶掉 MinIO）+ PG 走 `ANTFLOW_TEST_POSTGRES_URL` 否则起 Testcontainer（`:103-125`）。本地实测这套在
+    `mvn -B test` 里跑 **88 条用例 0 skip / 38.7s**。**CI 的 backend job 已有 PG service，不用加服务，也不需要 MinIO。**
+    （对比：`AntFlowApplicationTests` 是 `@Disabled` 的，不是这条路的参照。）
+  - `/v3/api-docs` 已 `permitAll`（`backend/src/main/java/com/antflow/auth/SecurityConfig.java:78`），导出不用鉴权。
+  - **未实测（先做这个再动手）**：springdoc 输出是否稳定可 diff —— `application.yml:123-127` 只有 `swagger-ui.path` /
+    `api-docs.path`，**没有排序配置**。先连生成两次对比；不稳就先固定输出顺序，否则"重新生成无差异"会假红。
+  - **前端成本比先前估计的小得多**（早先这里写的"P1/P5 量级"是错的）：生成目录 `frontend/src/services/ant-design-pro/`
+    只有 **4 个文件**，消费者只有 `frontend/src/pages/table-list/` 的 **4 个文件**（demo 脚手架），
+    **生产代码 0 处 import**（真实调用是 95 处直接 `request()`，45 个文件）。所以 6 条路径 → 163 条路径影响的是 demo 页。
+  - **本轮没有提交 spec**：没有比对门禁的生成物一定会变成谎话（`oneapi.json` 就是没门禁的模板契约躺了两年的样子）。
