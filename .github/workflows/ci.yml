@@ -7,6 +7,18 @@ on:
     branches: [master, main]
 
 jobs:
+  # 六个健康指标（docs/architecture-review-2026-10-09.md B4）：冻结实测基线，只禁止变差。
+  # 纯 Node 内置模块，不需要装依赖，所以单独一个 job，几秒就跑完。
+  metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Health metrics
+        run: node scripts/health-metrics.mjs
+
   backend:
     runs-on: ubuntu-latest
     services:
@@ -64,6 +76,9 @@ jobs:
         run: npm run biome:lint
       - name: Type-check
         run: npm run tsc
+      # 导入边界：只拦新增（存量冻在 frontend/import-boundaries.baseline.json）。
+      - name: Import boundaries
+        run: npm run check:boundaries
       - name: Test
         run: npm test
       - name: Build

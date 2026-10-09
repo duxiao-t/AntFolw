@@ -1,0 +1,46 @@
+{
+  "H1": {
+    "backend": 26,
+    "desktop": 21,
+    "mobile": 26,
+    "missingDesktop": [
+      "checkbox",
+      "radio",
+      "search",
+      "switch",
+      "time"
+    ],
+    "missingMobile": []
+  },
+  "H2": {
+    "channels": [
+      "desktop",
+      "java",
+      "mobile"
+    ]
+  },
+  "H3": {
+    "declarations": [
+      "frontend/src/pages/admin/FormList/index.tsx:13",
+      "frontend/src/pages/approval/FormManagementList.tsx:18",
+      "frontend/src/pages/approval/FormManagementWizard.tsx:49",
+      "frontend/src/pages/designer/form/FormDesigner.tsx:236",
+      "frontend/src/pages/designer/process/ProcessDesigner.tsx:55"
+    ]
+  },
+  "H4": {
+    "writableRuntimes": 2,
+    "activeV1Instances": null,
+    "how": "SELECT engine_version, status, count(*) FROM t_process_instance GROUP BY 1,2;"
+  },
+  "H5": {
+    "javaGates": 3,
+    "tsGates": 3,
+    "requiredFalseRuntimeInjections": 1
+  },
+  "H6": {
+    "entryBudgetKiB": 160,
+    "lazyBudgetKiB": 180,
+    "measured": null
+  }
+}
