@@ -16,6 +16,8 @@
     "biome:lint": "biome lint",
     "biome": "biome check --write",
     "openapi": "max openapi",
+    "openapi:generate": "node scripts/openapi-antflow.mjs --write",
+    "openapi:check": "node scripts/openapi-antflow.mjs --check",
     "prepare": "npx husky && max setup",
     "preview": "max preview --port 8000",
     "preview:build": "max build && max preview --port 8000",
@@ -31,7 +33,8 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "doctor": "react-doctor .",
-    "tsc": "max setup && tsc --noEmit"
+    "tsc": "max setup && tsc --noEmit",
+    "tsc:openapi": "tsc -p tsconfig.openapi.json"
   },
   "browserslist": [
     "defaults"
