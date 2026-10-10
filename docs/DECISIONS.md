@@ -468,9 +468,9 @@
     **分母来自完整声明** `['desktop','mobile','java','sql']`，输出同时给并集与分维度明细。
 - **影响：** 并集 4/4 现在与明细一起打印，**不再能被读成"同一套语义四端全部对拍"**。把 `--self-test` 加进 CI 是可选的下一步（目前只在本地/评审时跑）。
 
-## D-20261009-company-attribution-policy（**提议，等 owner + 日期**）
+## D-20261009-company-attribution-policy
 
-- **状态：** **proposed** —— 报告把它列为"最该早定"的一项（P4 之前），这里把选项与代价摆出来，**等产品/负责人拍板**再落实现。
+- **状态：** **accepted**（政策已拍板；**实现排期归 P4**，见下"仍未定"）。报告把它列为"最该早定"的一项。
 - **背景（已复核的现状）：**
   - **公司轴只存在于组织与企微**：`t_company`（`V1:15-19`）、`t_department.company_id NOT NULL`（`V1:21-29`）、以及 4 张 `t_wecom_*`（`V30`）。**没有任何业务表有 company 维度**——`t_form_definition`/`t_process_definition`/`t_form_resource_grant`/`t_role`/`t_permission`/`t_process_instance`/`t_form_data`/`t_task`/`t_workflow_job`/`t_audit_event`/`t_workflow_outbox` 全没有。
   - **已经有"发起时快照"的先例**：`t_process_instance.started_by` + `started_dept_id`（`ProcessEngine.java:121-124` 写入，`V20:88-94` 回填），数据范围就是按它过滤（`InstanceScopeSql.java:41,45`）。**但公司不在这份快照里**，只能由 `started_dept_id → t_department.company_id` **现推**。
@@ -490,14 +490,24 @@
 | 5 | 公司管理员 vs 全局管理员 | (a) 只在**授权**上分层（公司管理员的 `manageableDepartments` 被限制在本公司）；(b) 再引入一套角色/权限命名空间 | (a) 改 `manageableDepartments`/`currentDataScope` 加公司过滤，**不动角色模型**（中）；(b) 角色、权限码、`SecurityAuthorizationController` 全要动（大） | **(a)**：现有 `admin` 是全局的，先只收敛数据范围 |
 | 6 | 调岗/部门改归属是否改历史归属 | (a) 不改（快照说了算）；(b) 跟着部门走 | 若 #4 选 (a)，本条**零额外成本**——这正是快照的意义 | **(a)** |
 
-- **需要你给的（这才是本提议的交付物）**：
-  1. 上面 6 行的取舍（尤其 #1 与 #4，它们是"全局模板 + 实例固定归属"还是"按公司分家"的分水岭）；
-  2. **owner + 日期**——报告明确指出，这项不定就会漂到 P4 之后，而那时代价最大；
-  3. 若 #4 选快照：**NULL `started_dept_id` 的历史实例怎么算**（seed admin 就是这一类）。定量的两条只读查询（**本轮未在生产执行**）：
-     ```sql
-     SELECT count(*) FROM t_process_instance WHERE started_dept_id IS NULL;
-     SELECT company_id, count(*) FROM t_process_instance pi
-       JOIN t_department d ON d.id = pi.started_dept_id GROUP BY 1 ORDER BY 2 DESC;
-     ```
-- **影响：** 未决策前不动任何 schema。P4（公司隔离实施，报告估 15–25 天）依赖这里的 #1/#4/#5。
+- **已拍板（2026-10-10）**：
+  - **#1 模板全局共享** —— 模板是"能力"不是"数据"；一套模板，谁**能用**由公司级授权决定。
+  - **#4 创建时快照 `company_id`** —— 与现有 `started_dept_id` 同一做法。
+  - **#5 公司管理员只收敛数据范围** —— 不动现有的全局 `admin`（角色码放行），只把公司级管理员的
+    `manageableDepartments` / 数据范围限制在本公司；**不引入租户命名空间**。
+- **连带确定（由上三条推出来的，不需要再单独拍）**：
+  - **#3 公司级使用授权是"全局共享"能成立的前提**，因此不再是可选项：给 `t_form_resource_grant`
+    的主题类型加 `COMPANY`（它已有 USER/ROLE 两种，加第三种最省）。**没有这一步，全局共享就等于"所有公司都能用所有表单"。**
+  - **#6 调岗/部门改归属不改历史归属** —— 由 #4 的快照直接保证，零额外成本。
+  - **#2 发布版本不可变保持现状**（`V31` 版本表已经这么做）。
+- **仍未定（实现前必须回答）**：**`started_dept_id IS NULL` 的历史实例怎么算**——seed 的 admin
+  `dept_id` 就是 NULL（`V2:9-19`），它发起的实例回溯不出公司。两条定量的只读查询（**本轮未在生产执行**）：
+  ```sql
+  SELECT count(*) FROM t_process_instance WHERE started_dept_id IS NULL;
+  SELECT d.company_id, count(*) FROM t_process_instance pi
+    JOIN t_department d ON d.id = pi.started_dept_id GROUP BY 1 ORDER BY 2 DESC;
+  ```
+  另需 **P4 的 owner + 排期**。
+- **影响：** 决策已定，但**本轮不动任何 schema**。P4（公司隔离实施，报告估 15–25 天）的实现顺序应是
+  #4 的快照（含回填）→ #3 的 COMPANY 授权主题 → #5 的数据范围收敛；三者的共同前提是上面那条 NULL 归属口径。
 
