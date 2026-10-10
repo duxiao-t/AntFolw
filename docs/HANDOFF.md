@@ -3,17 +3,58 @@
 > **整改已开始（同日）**：P0a/P0b 的 A2、A3、A4 与字段类型真源已实施；A7-1（完成回调共用出站校验）已收敛；P2 第一块（桌面 5 种渲染器 + display-text 对拍）已完成。
 > **公司归属政策已拍板**（`D-20261009-company-attribution-policy`，2026-10-10）：模板全局共享、实例归属**创建时快照 `company_id`**、公司管理员只收敛数据范围。
 > **先做 P4a（归属快照），做完再回 P1**。历史口径已定：**无法证明归属的保留 `company_id = NULL`（待确认）**，不自动归属、不按今天部门猜；写路径清点见该决策条目（实例只有 1 个写入口，无流程/草稿的 `t_form_data` 必须自己快照）。
-> 仍差：**P4a 的 owner + 排期**，以及两个产品口径（无部门全局管理员的目标公司、草稿建好后跨公司调岗再提交取哪个时刻）。
+> **P4a 已实施（2026-10-10，见下"最新一轮"）**：两个产品口径已定（无部门全局管理员**显式指定**目标公司；草稿转正**取草稿创建时**）。
+> 仍差：**P4a 的 owner + 发布/排期**（历史归属的人工确认、滚动部署检查），然后按 `P4a 验收 → P1 → #3 COMPANY 授权 → #5 数据范围` 推进。
 
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-09T17:05:00+08:00`
+- **更新时间：** `2026-10-10T10:15:00+08:00`
 - **分支：** `master`（= `a8c6790`，本轮改动**未提交**）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
 
 ---
 
-## 最新一轮：P2 第一块——桌面 5 种渲染器 + display-text 口径对拍
+## 最新一轮：P4a——公司归属快照（V54 + 写路径 + 两端选择器）
+
+**只锁归属，不动读权限**（公司隔离是 P4 的事）。三态：`(非空,false)` 已确认快照 / `(非空,true)` 历史推断 /
+`(NULL,false)` 待确认——**`NULL` 行的 `false` 不代表"已确认"**。
+
+| 变更 | 内容 |
+| --- | --- |
+| `db/migration/V54__company_attribution_snapshot.sql`（新） | 两表加 `company_id`/`company_inferred`（含 FK）；**回填前查重**（一份 `form_data` 挂多个实例就 `RAISE EXCEPTION` 停下）；实例按**自己的 `started_dept_id`** 回填并标 `inferred=true`；`t_form_data` 沿用所属实例；其余保持 NULL |
+| `org/CompanyAttribution.java`（新） | 按**身份**分档：有部门 → 由 `PrincipalHolder` 的部门推导（请求给了不一致的公司就拒）；无部门 + 管理员 → 必须显式指定；无部门 + 非管理员 → 拒。`forDraft(stored, explicit)` 只认草稿行里的快照 |
+| `ProcessEngine` / `InstanceController` / `MobileWorkflowService` / `FormDataService` / `MobileDraftService` | 解析一律在**调用方**；`StartCmd` 携带已解析的 `companyId`，引擎只 fail-closed（为 null 直接拒）。删除草稿仍在两次 insert **成功之后**（同一事务） |
+| `MobileDraftDto` / 各请求 DTO | 暴露/接收 `companyId`（`company_inferred` 只读展示） |
+| `mobile/src/features/forms/{FormFillPage,SubmitConfirmPage,drafts.api,start.api,submitFlow.store}.ts(x)` | 填写页公司选择器（**只在没有部门时出现**）；归属跨页带进确认页并**进幂等 payload**；已存草稿只展示固定归属 |
+| `frontend/src/pages/runtime/form/Fill.tsx` | 同上的桌面版（`departmentId` 为空才出现，antd `Select`） |
+
+**两个实施时才发现、值得记住的点：**
+
+1. **引擎不能自己解析归属。** 它分不清"用户显式选的"与"从草稿继承的"，而且它没有身份
+   （`PrincipalHolder` 只在请求线程）。所以 `StartCmd` 换成"已解析好的值 + 引擎 fail-closed"，
+   草稿转正走 `forDraft(草稿行的 company_id, …)`。见 `D-20261010-company-attribution-resolved-by-caller-not-engine`。
+2. **种子 `admin` 没有部门**（`V2__seed.sql`，`bob` 也是）→ 改动前是"能发起"、改动后**必须选公司**，
+   否则整条主链路对 `admin` 直接坏掉。这就是选择器必须落在**填写页**（保存草稿时就要公司）而非确认页的原因。
+   顺带：无部门的**非管理员**（`bob`）按口径一律拒建——这是有意的行为变更。
+3. **ArchUnit 基线必须手工补行。** `FreezingArchRule` 每跑一次会**删掉已过时**的行，但**不会自动加入**新行；
+   而违规行文本里含构造器/方法签名，P4a 改签名后门禁就报"新增违规"。做法与理由见
+   `D-20261010-archunit-baseline-refrozen-on-signature-change`。
+
+**验证**：后端 `mvn -B test` **600 绿**（基线 580，+20：`CompanyAttributionTest` 14、真库 5、引擎 fail-closed 1；
+探针库 `antflow_p4a_probe` 全新重建后跑完 V1–V54）、前端 `npm test` **314 绿**（基线 312，+2 = `runtime/form/Fill.test.tsx`）、
+`npm run tsc`/`npm run lint` 干净（4 条既有 warning、0 error）、移动端 `npx vitest run` **362 绿**（基线 361，+1）。
+守护取证（都已还原）：草稿改回 `resolve()` → 移动单测红（`expected 42L but was 0L`）；
+删掉"有部门的人传别家公司"分支 → `CompanyAttributionTest` 红；V54 回填改成按 `t_user.dept_id` →
+真库回填用例红（`expected 2L but was 3L`）；去掉引擎 null 检查 → 报 `FORM_NOT_PUBLISHED` 而非 `BAD_COMPANY`；
+把 `deleteAfterSubmit` 提前到 insert 之前 → 真库 `legacyDraftWithoutCompanySnapshotIsBlockedAndKept` 红（`DRAFT_NOT_FOUND`）。
+
+**没做（要说清）**：① 活栈手点（浏览器里点选择器）——本机 docker 栈要重建镜像才能带上这轮改动，
+未做；规则层与真库层已覆盖。② **滚动部署检查**（迁移先上、应用后上，上线后抽查新建记录 `company_id` 非空）
+属发布动作，未做。③ P4a 的 owner + 排期仍未定。
+
+---
+
+## 上一轮：P2 第一块——桌面 5 种渲染器 + display-text 口径对拍
 
 两件事。**H1 缺口 5 → 0；H2 渠道并集 → 4/4**（明细见下）。
 

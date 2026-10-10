@@ -556,3 +556,30 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
   后续还要明确它是**新增一种授予方式**，还是**必须通过的公司门槛**——只加一个 OR 分支，
   **不会**自动限制已有的全局 ROLE 授权。
 
+
+## D-20261010-company-attribution-resolved-by-caller-not-engine
+
+- **状态：** accepted
+- **背景：** P4a 落地时发现"谁来解析归属"不能含糊。引擎（`ProcessEngine.start`）分不清
+  「用户显式选的公司」与「从草稿继承的快照」，而且它没有身份（`PrincipalHolder` 只在请求线程里）；
+  计划里"引擎调 `CompanyAttribution.resolve(...)`"那一版会让"草稿转正式"必须重新解析——正是要避免的事。
+- **决策：** 解析放在**调用方**（`InstanceController` / `MobileWorkflowService` / `FormDataService` /
+  `MobileDraftService`），`StartCmd` 只携带**已解析好**的 `companyId`；引擎只剩一道 fail-closed 检查
+  （为 `null` 直接拒绝，绝不静默落一条无归属的记录）。草稿转正走
+  `CompanyAttribution.forDraft(草稿行里的 company_id, 请求值)`——**只认快照**，绝不按当前部门重解析。
+- **影响：** 新增/修改写路径时，`new StartCmd(...)` 必须显式给出归属（编译器会指出全部调用点）。
+  `t_task` / `t_workflow_job` 不加列、继续从实例继承。领域包不再新增对 `mobile` 适配层的类型依赖
+  （`ArchitectureBoundaryTest` 会拦；因此 `MobileDraftService` 只回 `Long` 而不是整个 `MobileDraftDto`）。
+
+## D-20261010-archunit-baseline-refrozen-on-signature-change
+
+- **状态：** accepted
+- **背景：** `ArchitectureBoundaryTest` 用 `FreezingArchRule` 冻结"存量违规"。它比对的是**违规行的文本**，
+  而行的文本里含**构造器与方法签名**。P4a 给 `FormDataService`/`SubmitRequest` 加了参数、
+  改了 `submit` 的重载形状，于是同一批"领域→mobile"依赖的描述文本变了，门禁报成"新增违规"。
+  实测：`HEAD` 上该规则是绿的，确认变化只涉及这两个类的签名（没有新增跨包依赖）后才动基线。
+- **决策：** 只针对 `f2b55862`（`domainDoesNotDependOnTheMobileAdapter`）**追加**新签名形态的行，
+  **不删**旧行、**不改规则措辞**（改措辞等于清空基线）。追加后连跑两遍确认收敛（`FreezingArchRule`
+  每次运行都会**移除已过时的行**，但**不会自动加入新行**，所以必须手工补）。其余两条规则未动。
+- **影响：** 以后凡是改了会出现在违规行文本里的签名，都要按同样办法补行——**先确认没有真的新增跨包依赖**，
+  再补文本。存盘文件里会长期同时存在旧/新签名形态的行，这是该机制的常态，不是脏数据。
