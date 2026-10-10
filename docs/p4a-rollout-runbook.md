@@ -2,8 +2,9 @@
 
 > **owner:** 待定（谁负责历史归属 `company_id IS NULL` 的后续确认 + 上线验收）
 > **window:** 待定（维护窗口时间）
+> **draft handler:** 待定（谁负责 §6.2 的历史草稿逐条回填）
 >
-> 这两项见 `HANDOFF.md` 顶部"仍差"。**未填不影响本 runbook 可用**，但上线前必须落名。
+> 这三项见 `HANDOFF.md` 顶部"仍差"。**未填不影响本 runbook 可用**，但上线前必须落名。
 
 本 runbook 只覆盖 **V54 + 新应用一起上线**。它**不改读权限**——公司隔离是 P4 后续的事。
 
@@ -64,10 +65,11 @@ V54 失败**损坏不了任何东西**（见 §5），所以它**不是**用来"
 
 ---
 
-## 2. 备份（**最后兜底**，不是主要恢复手段）
+## 2. 备份与镜像留存（**先把能回退的东西存下来**）
 
-它只在"迁移**成功**、随后才发现业务问题"这种场景下有用；"迁移失败"不需要它（见 §5）。
-但正因为那是唯一兜底，**命令要能照着敲**，不能只指向一个目录。
+§2.1–§2.3 是**数据库备份**：它只在"迁移**成功**、随后才发现业务问题"这种场景下有用；
+"迁移失败"不需要它（见 §5）。§2.4 是**旧镜像留存**，它是 §5.3「回退旧镜像」那一格能成立的前提。
+两件事都必须在 §3 动任何东西**之前**做完。
 
 ### 2.1 做备份
 
@@ -119,19 +121,48 @@ docker compose --env-file .env up -d backend web
 > `stop web backend` → `pg_restore --clean --if-exists` → `up`。
 > 两条路选一条即可，别混用格式。
 
+### 2.4 保存当前镜像（**顺序写死：tag 必须早于 build**）
+
+**为什么必须做**：`compose.yaml` 的 backend/web **只有 `build:`、没有 `image:`** ⇒ 每次
+`docker compose up -d --build` 都覆盖同一个 `antflow-local-backend:latest`；`deploy.sh` 里
+**没有** `docker tag` / `docker save` / 推镜像。所以**不先存，就没有"上一个镜像"可回退**，
+§5.3 那张表里的"回退旧镜像"当场不成立。
+
+**顺序**（`--build` 会覆盖 `latest`，**先 build 再 tag 存下来的是新镜像**）：
+
+```bash
+# 1) 先看清现在跑的是哪一份
+docker compose --env-file .env.docker.local images backend web
+
+# 2) 记录 ID —— 写进发布记录，第 4 步要核对
+docker image inspect --format '{{.Id}}' antflow-local-backend:latest
+
+# 3) 此刻还没 build，tag 到的才是旧镜像
+docker tag antflow-local-backend:latest antflow-local-backend:pre-v54
+docker tag antflow-local-web:latest     antflow-local-web:pre-v54
+
+# 4) 校验 tag 指向的确实是第 2 步记下的那个 ID；不一致就停，别往下走
+docker image inspect --format '{{.Id}}' antflow-local-backend:pre-v54
+
+# 5) 到这里才可以 build
+```
+
+`docker save` 是**可选加强**（把镜像落成 tar 进备份目录，防 `docker image prune`），
+**不是 tag 的替代**。tag 与 image ID 都要进发布记录。
+
 ---
 
 ## 3. 上线步骤
 
 1. **镜像在窗口前就构建好**：`docker compose --env-file .env.docker.local build backend web`。
-   把编译时间移出窗口。
+   把编译时间移出窗口。**但 build 之前必须先做完 §2.4 的 tag**，否则就存不到旧镜像了。
 2. **停旧容器**。
 3. **起新版本**：`docker compose --env-file .env.docker.local up -d backend web`
    （V54 随启动生效）。
 4. **健康检查**：`http://127.0.0.1:7070/actuator/health`（`deploy.sh:192-193` 用同一个探针）。
    起不来的处置见 §5。
 
-### 窗口时长要按**整个 Flyway migrate** 估，不只是两个 UPDATE
+### 3.1 窗口时长要按**整个 Flyway migrate** 估，不只是两个 UPDATE
 
 V54 在窗口里要干的全部事情（`V54:20-23,42-55,61-64`）：
 
@@ -143,8 +174,39 @@ V54 在窗口里要干的全部事情（`V54:20-23,42-55,61-64`）：
 | `UPDATE t_form_data … FROM t_process_instance` | 同上 |
 | 2 × `CREATE INDEX` | **不是 `CONCURRENTLY`** → 取 SHARE 锁，**建索引期间该表无法写入**。大表上这一步常比回填更贵 |
 
-⇒ **在副库上掐表要掐完整的 `Flyway migrate`**（不是单跑两条 UPDATE），
-并记下各段耗时与有没有**锁等待**。**这个数只能在生产量级的副库上量，本文件不给估算值。**
+⇒ **掐表要掐完整的 `Flyway migrate`**（不是单跑两条 UPDATE）。**本文件不给估算值。**
+
+### 3.2 预演：用仓内工具，在副本库上量
+
+工具是 `scripts/rehearse-v54.sh` + `scripts/rehearse/V54Rehearsal.java`（走**项目自己那份 Flyway**，
+量总耗时 + 采样 `pg_locks`/`pg_stat_activity`，并在 migrate 前打印三个表的行数）。
+
+**输入从哪来 —— 两条路径别混：**
+
+| 目的 | 输入 | 说明 |
+| --- | --- | --- |
+| **本地功能验证**（工具能不能跑通） | `scripts/test-docker.sh:105-111` 的 `clone_database()` | 它克隆的是**当前本地 compose 库**，**不是生产快照** ⇒ **不能用来定窗口长度** |
+| **生产量级计时**（定窗口要的数） | 生产的 `pg_dump -Fc` 恢复进副本库 | 见下面命令 |
+
+```bash
+# 生产量级副本：建库 → 建 marker 表 → 灌入生产快照
+createdb -h <host> -U <u> antflow_rehearsal
+psql -h <host> -U <u> -d antflow_rehearsal -c \
+  "CREATE TABLE rehearsal_marker(note text, created_at timestamptz DEFAULT now()); \
+   INSERT INTO rehearsal_marker(note) VALUES ('由生产快照 <dump 文件名> 恢复，<日期>');"
+pg_restore -h <host> -U <u> -d antflow_rehearsal --no-owner --no-privileges <prod.dump>
+
+# 跑预演（--old-image-check 顺带做旧镜像的 Flyway 那道门）
+bash scripts/rehearse-v54.sh --jdbc jdbc:postgresql://<host>/antflow_rehearsal \
+  --user <u> --password <p> --confirm --old-image-check
+```
+
+**工具的三道闸**（靠边界，不靠命名约定）：库名不能是 `antflow`、必须带 `rehearsal_marker` 表
+（上面那句 `CREATE` 就是它的来源，比库名约定硬）、迁移历史最后一行必须正好是 `53`
+（按 `installed_rank` 取最后一行判，**不是** `MAX(version)`——那一列是 varchar，`MAX` 会得出
+`'9' > '53'`）。它还会复跑 V54 的重复 `form_data_id` 查询并**列出 offender** 后中止。
+
+**把工具打印的行数与源库对一遍**，对不上就别拿这组耗时定窗口。
 
 ---
 
@@ -219,17 +281,53 @@ guard 会抛，但它走 `jdbcTemplate.execute(sql)`——那是**驱动层**的
 **先前那条理由是错的**：我写过"旧代码不读这两列所以回退安全"——那压根没检查 Flyway，
 而 Flyway 才是启动期的硬门。**已按实测结论替换。**
 
-**仍未实测的一格（要在副库补）**：`spring.jpa.hibernate.ddl-auto: validate`（`application.yml:21`）。
-旧实体没有 `company_id`/`company_inferred` 映射，而 `validate` 只查"映射到的表/列在不在"、
-不查多余列，所以**预期通过**——但这是**推理，不是实测**。
-**窗口前补一步（两分钟）**：用**上一个镜像 tag** 配一个 V54 的库副本起一次，看能不能过。
+**还有一格**：`spring.jpa.hibernate.ddl-auto: validate`（基础 `application.yml:18-21`，
+对**所有 profile** 生效）。旧实体没有 `company_id`/`company_inferred` 映射，而 `validate` 只查
+"映射到的表/列在不在"、不查多余列 → **预期通过**。分两半，(a) 已实测通过，(b) 仍待做：
+
+**(a) 机制代理（不需要旧镜像）—— ✅ 2026-10-10 已跑过，通过**：
+
+在已到 V54 的探针库 `antflow_p4a_probe` 上 `ALTER TABLE t_process_instance ADD COLUMN
+rehearsal_extra text`（**没有任何实体映射它**），然后跑 `mvn -B test -Dtest=ApiContractSnapshotTest`
+—— 它 boot 的就是**真实应用上下文**，`ddl-auto` 取自 `application.yml`（`validate`）：
+
+```
+Tests run: 1, Failures: 0, Errors: 0   → BUILD SUCCESS
+```
+
+**上下文干净启动、日志里没有 `SchemaManagementException`** ⇒ "实体没映射的多余列不会让 `validate`
+失败"这条机制成立（事后已 `DROP COLUMN` 还原）。这正是旧镜像面对 V54 的处境。
+
+**复跑方式**（换成你自己的库）：
+
+```bash
+# 1) 在已到 V54 的副本上加一列没人映射的列
+psql -h <host> -U <u> -d antflow_rehearsal \
+  -c "ALTER TABLE t_process_instance ADD COLUMN rehearsal_extra text;"
+
+# 2) 用当前 jar 以 validate 起一次（Flyway 对已在 V54 的库是空操作）
+java -jar backend/target/antflow-backend-*.jar \
+  --spring.datasource.url='jdbc:postgresql://<host>/antflow_rehearsal' \
+  --spring.datasource.username=<u> --spring.datasource.password=<p> \
+  --spring.jpa.hibernate.ddl-auto=validate \
+  --antflow.mobile.files.storage=test --server.port=0
+
+# 期望：上下文正常启动；日志里**没有** org.hibernate.tool.schema.spi.SchemaManagementException
+# 收尾
+psql -h <host> -U <u> -d antflow_rehearsal \
+  -c "ALTER TABLE t_process_instance DROP COLUMN rehearsal_extra;"
+```
+
+**(b) 权威检查（窗口前，用 §2.4 存下的真镜像）** —— 把上面的 `java -jar` 换成
+`docker run` 那个 **`antflow-local-backend:pre-v54`** tag，配一个 V54 的库副本起一次。
+**(a) 是代理，(b) 才是权威**；只有 (b) 跑过，才能说"回退旧镜像"这一格闭合。
 
 ### 5.3 分场景
 
 | 场景 | 数据库状态 | 处置 |
 | --- | --- | --- |
 | **V54 在启动时中止** | **仍是 V53**（§5.1：无半迁移状态、历史表无 V54 行） | 先人工处理那份重复挂载，或回退旧镜像（配 V53 本来就能跑）。**不需要 `flyway repair`**。**不要**先动库。 |
-| **V54 成功、应用没起起来 / 健康检查不过** | **是 V54**（列已加、历史表有 V54 行） | 与上面的库状态**不同**，别混。① 若原因是应用侧（配置/端口/依赖），**优先修好重起新镜像**；② 要回退旧镜像的话，按 §5.2 已实测可行，但先做完那一格未实测的验证。③ **注意代价**：回退后旧代码写的实例 `company_id` 是 NULL ⇒ **归因暂停**，§4 的 4a 会开始非 0，这不是 bug 而是本次回退的直接后果，要写进发布记录。 |
+| **V54 成功、应用没起起来 / 健康检查不过** | **是 V54**（列已加、历史表有 V54 行） | 与上面的库状态**不同**，别混。① 若原因是应用侧（配置/端口/依赖），**优先修好重起新镜像**；② 要回退旧镜像的话，**前提是 §2.4 存下了 `pre-v54` tag**（没存就没有可回退的镜像），且 §5.2(b) 那一格要跑过。③ **注意代价**：回退后旧代码写的实例 `company_id` 是 NULL ⇒ **归因暂停**，§4 的 4a 会开始非 0，这不是 bug 而是本次回退的直接后果，要写进发布记录。 |
 | 迁移成功、随后发现归属**写错** | V54 | 这时才用 §2 的备份。**回退镜像撤销不了已被回填的列值**。 |
 | 迁移成功但 4a 查出**漏写**非 0 | V54 | 不是迁移问题，是应用 bug。按 `ProcessEngine.java:89-92` 那条 fail-closed 链往回查调用方。 |
 
@@ -245,6 +343,8 @@ guard 会抛，但它走 `jdbcTemplate.execute(sql)`——那是**驱动层**的
 
 ## 6. 历史 `company_id IS NULL` 的处理（已定）
 
+### 6.1 政策
+
 **接受保持 NULL，上线后按需确认。** 不自动归属、不按发起人今天的部门猜。
 
 口径依据：`D-20261009-company-attribution-policy` 与 `DECISIONS.md:505-516`。
@@ -253,6 +353,110 @@ guard 会抛，但它走 `jdbcTemplate.execute(sql)`——那是**驱动层**的
 1. 有 `started_dept_id` 且部门仍在 → 已回填，标 `company_inferred = true`（**是推断值**，
    因为 `started_dept_id` 本身就是 `V20:88-94` 当年按"迁移当时"的用户部门推断的）。
 2. `started_dept_id IS NULL`（含 seed `admin` 的无部门发起、系统发起）→ **保持 NULL**。
-3. 没有实例的 `t_form_data`（无流程提交、草稿）→ **保持 NULL**（没有部门快照可依）。
+3. 没有实例的 `t_form_data`（无流程提交、**草稿**）→ **保持 NULL**（没有部门快照可依）。
 
 §1 的盘点结果只用来评估规模，**不进文档**。
+
+### 6.2 历史草稿：`draft handler` 逐条回填（**这不是"可选后续"，是上线后立刻要做的事**）
+
+**为什么紧迫**：V54 的 step 2 只按实例回填（`V54:49-55`），而草稿没有实例 ⇒
+**全部** V54 之前的草稿都是 `company_id IS NULL`。而 `forDraft` 的
+`storedCompanyId == null` 检查在**最前面**（`CompanyAttribution.java:71-77`），
+在它之后才看 `explicitCompanyId` ⇒
+
+- 现有公司选择器**结构上救不了**旧草稿（NULL 时根本不看请求里的公司）；
+- **提交被阻**，而且 `MobileDraftService.update:65` 也过 `forDraft` ⇒ **保存也被阻**；
+- 两端草稿都存 `t_form_data status='DRAFT'`（**没有** `t_mobile_draft` 表）；
+- 桌面端不经 UI 触达（`frontend/src/pages/runtime/form/Fill.tsx:130` 写死 `draftId: null`），
+  **移动端是硬阻断**（HTTP 422）。
+
+**时间线**（`company_id` 是 V54 才有的列 ⇒ 枚举/回填只能在**窗口后**）：
+
+| 时点 | 动作 |
+| --- | --- |
+| **窗口前** | 只用旧 schema 计数（**不许**查 `company_id`）：`status='DRAFT'` + `NOT EXISTS instance` 就是全部历史草稿数 |
+| **窗口后** | 枚举明细 → `draft handler` 逐条确认 → 回填 → 验证 + 功能抽查 |
+
+**枚举**：
+
+```sql
+SELECT fd.id, fd.form_def_id, fd.created_by, fd.created_at, fd.updated_at
+FROM t_form_data fd
+WHERE fd.status = 'DRAFT' AND fd.company_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = fd.id)
+ORDER BY fd.created_at;
+```
+
+**回填**——事务 + 行锁 + **同一组三层守卫**，且**影响行数必须为 1**：
+
+```sql
+BEGIN;
+
+-- 1) 先锁住并确认"这一条确实是历史草稿"。三层守卫缺一不可：是草稿 / 归属为空 / 没有实例。
+--    返回 0 行 ⇒ 它已经不是历史草稿（已回填 / 已转正 / 有实例）→ ROLLBACK，别硬改。
+SELECT id, form_def_id, created_by
+FROM t_form_data
+WHERE id = :draft_id
+  AND status = 'DRAFT'
+  AND company_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM t_process_instance pi
+                  WHERE pi.form_data_id = t_form_data.id)
+FOR UPDATE;
+
+-- 2) 带**同一组**守卫的 UPDATE（防并发下 id 已被改走 / 已被别人回填）
+UPDATE t_form_data
+SET company_id = :company, company_inferred = false   -- 人确认的，所以 false（不是推断值）
+WHERE id = :draft_id
+  AND status = 'DRAFT'
+  AND company_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM t_process_instance pi
+                  WHERE pi.form_data_id = t_form_data.id);
+
+-- 3) 必须影响 1 行。0 行 → ROLLBACK 并查明原因。
+COMMIT;
+```
+
+> **没有这组守卫会静默改错**：只按 `id` 更新就可能改到已转正或已确认的记录。
+
+**验证**——分开报"历史遗留"与"上线后新增"，**两个都要看**：
+
+```sql
+-- (i) 历史遗留的 NULL 草稿：回填后应归零
+SELECT count(*) AS legacy_drafts_null
+FROM t_form_data fd
+WHERE fd.status = 'DRAFT' AND fd.company_id IS NULL
+  AND fd.created_at < :deploy_ts
+  AND NOT EXISTS (SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = fd.id);
+
+-- (ii) 上线之后才出现的 NULL 草稿：必须为 0（非 0 = 应用漏写，是 bug 不是历史遗留）
+SELECT count(*) AS new_drafts_null
+FROM t_form_data fd
+WHERE fd.status = 'DRAFT' AND fd.company_id IS NULL
+  AND fd.created_at >= :deploy_ts
+  AND NOT EXISTS (SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = fd.id);
+```
+
+**"归零"不是成功口径**：回填只解掉 `COMPANY_PENDING` 一个门。草稿还可能因为**别的**规则
+不能保存/提交——表单不再 `PUBLISHED`、`form_def_version` 与当前版本不一致
+（`MobileWorkflowService.start` 抛 `DRAFT_VERSION_MISMATCH`）、`readOnly`、以及
+`requireFormUse` 的权限变化。所以还要报一遍这些：
+
+```sql
+SELECT fd.id, fd.form_def_id, fd.form_def_version,
+       f.version AS current_version, f.status AS form_status
+FROM t_form_data fd JOIN t_form_definition f ON f.id = fd.form_def_id
+WHERE fd.status = 'DRAFT' AND fd.company_id IS NOT NULL
+  AND (f.status <> 'PUBLISHED' OR fd.form_def_version <> f.version);
+```
+
+并**至少抽查一条回填过的草稿走真实路径**：移动端 `PUT /api/mobile/drafts/{id}` 能保存；
+若表单仍发布且版本一致，再验一次提交。**不要**把"NULL 归零"等同于"用户已经能用"。
+
+**两条附注**：
+
+1. 这条路径顺带让现有提示变真。`forDraft` 抛的是
+   `…暂时无法提交；请联系管理员确认归属后再提交`——在没有确认机制时它是空话，
+   有了 `draft handler` + 上面那条 SQL 才成立。所以**不必改文案**。
+2. **已知粗糙点，记录不修**：`MobileDraftService.update:65` 复用同一个 `forDraft`，
+   于是**保存**草稿时抛的是那句"暂时无法**提交**"。文案对保存路径不准确。
+   零成本修法是给 `update` 单独文案，但那属于改产品代码，本 runbook 不做。

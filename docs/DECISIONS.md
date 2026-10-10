@@ -686,3 +686,45 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
   **那个数只能在生产量级的副库上量**，runbook 不给估算值。§1 那条重复 `form_data_id`
   检查的价值因此被**重新定位**：不是"防损坏"（V54 损坏不了），而是**别在停机窗口里才发现**。
   **仍未定**：owner、发布窗口。
+
+## D-20261010-legacy-drafts-stay-blocked-until-a-human-confirms-the-company
+
+- **状态：** accepted（口径已定；处置方式=**人工 SQL 逐条回填**，不改产品代码）
+- **背景：** V54 的 step 2 只按实例回填（`V54:49-55`），而**草稿没有实例** ⇒ 全部 V54 之前的草稿
+  都是 `company_id IS NULL`。两端草稿都存 `t_form_data status='DRAFT'`（**没有** `t_mobile_draft` 表）。
+  于是 `CompanyAttribution.forDraft`（`CompanyAttribution.java:71-77`）对它们抛
+  `COMPANY_PENDING` → HTTP 422。
+- **两个不直观的点（都会让"顺手修一下"落空）**：
+  1. **现有公司选择器结构上救不了旧草稿。** `storedCompanyId == null` 的检查在**最前面**，
+     在它之后才看 `explicitCompanyId` ⇒ 用户在请求里带了公司也没用。选择器是按"无部门账号建**新**草稿"
+     设计的，不是"认领旧草稿"。⇒ 若要代码放开，必须改 `forDraft` 的语义（把"显式选择"与"推断"分开），
+     那是产品改动，本轮不做。
+  2. **阻的不只是提交，保存也被阻。** `MobileDraftService.update:65` 也过 `forDraft`，
+     所以用户连继续写这份草稿都不行。而且它抛的是"暂时无法**提交**"——文案对保存路径不准确
+     （已知粗糙点，记录不修）。
+  桌面端不经 UI 触达（`frontend/src/pages/runtime/form/Fill.tsx:130` 写死 `draftId: null`），
+  所以这是**移动端的硬阻断**。
+- **决策：** 不改代码，由 runbook 里指定的 `draft handler` **逐条人工确认**后用 SQL 回填
+  （`company_inferred` 保持 `false` = 已确认快照，不是推断值）。回填语句必须**事务 + `FOR UPDATE` +
+  三层守卫（是草稿 / 归属为空 / 没有实例）**，且**影响行数必须为 1** —— 只按 `id` 更新会改错行。
+- **影响：** ① 这条路径顺带让 `forDraft` 那句"请联系管理员确认归属"**变真**（此前没有任何确认机制，
+  它是空话）——所以文案不必改。② **必须在窗口后尽快做**，回填前移动端用户的提交与保存都被挡，
+  不是"上线后按需"。③ **"NULL 归零"不是成功口径**：还要单独报"仍被别的规则挡住"的草稿
+  （表单不再 `PUBLISHED` / `form_def_version` 不匹配 / `readOnly` / 权限变化），并抽查一条走真实保存路径。
+
+## D-20261010-rollback-needs-an-image-tagged-before-build
+
+- **状态：** accepted（写进 runbook §2.4；**这不是建议，是回退预案成立的前提**）
+- **背景：** `compose.yaml` 的 backend/web **只有 `build:`、没有 `image:`** ⇒ Compose 自动命名成
+  `antflow-local-backend:latest`，**每次 `docker compose up -d --build` 都覆盖同一个 tag**；
+  `deploy.sh:180-190` 里**没有** `docker tag` / `docker save` / 推镜像。本机那些 `predeploy-*` tag 与
+  `backups/predeploy-*/previous-images.tar` 来自**未提交**的机制（全仓 grep `predeploy` 零命中）。
+  ⇒ 照原来的流程，"回退旧镜像"**没有镜像可回退**。
+- **决策：** 把"存旧镜像"写成上线步骤里的硬前置，且**顺序写死**：
+  `docker compose images` → `image inspect` 记下 ID → **tag** → `image inspect` 校验 tag 指向的
+  就是那个 ID → **然后才允许 `build`**。
+- **为什么顺序是重点：** `--build` 会覆盖 `latest`，**先 build 再 tag 存下来的是新镜像**，
+  回退预案当场失效——而且 tag 名字看着挺对，不容易发现。
+  `docker save` 是**可选加强**（防 `docker image prune`），**不是 tag 的替代**。
+- **影响：** tag 与 image ID 都要进发布记录。同一条约束也决定了 `ddl-auto: validate` 那格
+  能不能做权威验证（runbook §5.2(b)）：**没有 `pre-v54` tag 就只能做机制代理，不能下结论**。
