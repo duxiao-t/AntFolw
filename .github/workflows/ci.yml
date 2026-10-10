@@ -76,9 +76,17 @@ jobs:
         run: npm run biome:lint
       - name: Type-check
         run: npm run tsc
+      # 生成的声明（src/services/antflow/typings.d.ts）平时被 tsconfig 的 skipLibCheck 跳过，
+      # 只有"被引用处"受检查。这条单独用 skipLibCheck:false 检查它本身，范围只有该文件。
+      - name: Type-check generated declarations
+        run: npm run tsc:openapi
       # 导入边界：只拦新增（存量冻在 frontend/import-boundaries.baseline.json）。
       - name: Import boundaries
         run: npm run check:boundaries
+      # 契约 client 必须能由提交的 config/antflow-api.json 重生成且逐字一致：
+      # 新增（漏提交）/ 遗留（该删）/ 内容不一致 三个方向都红。
+      - name: Contract client up to date
+        run: npm run openapi:check
       - name: Test
         run: npm test
       - name: Build
