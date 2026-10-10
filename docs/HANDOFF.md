@@ -4,13 +4,75 @@
 > **公司归属政策已拍板**（`D-20261009-company-attribution-policy`，2026-10-10）：模板全局共享、实例归属**创建时快照 `company_id`**、公司管理员只收敛数据范围。
 > **先做 P4a（归属快照），做完再回 P1**。历史口径已定：**无法证明归属的保留 `company_id = NULL`（待确认）**，不自动归属、不按今天部门猜；写路径清点见该决策条目（实例只有 1 个写入口，无流程/草稿的 `t_form_data` 必须自己快照）。
 > **P4a 已实施（2026-10-10，见下"最新一轮"）**：两个产品口径已定（无部门全局管理员**显式指定**目标公司；草稿转正**取草稿创建时**）。
-> 仍差：**P4a 的 owner + 发布/排期**（历史归属的人工确认、滚动部署检查），然后按 `P4a 验收 → P1 → #3 COMPANY 授权 → #5 数据范围` 推进。
+> **P1-a 已实施（2026-10-10）**：真实后端契约已接进生成链路（见下"最新一轮"）——契约构建期导出并提交、两侧门禁、5 处手写 `FormDefinition` 清零、H3 基线归零。**P1-b（设计器逐字段配置分派迁移）另开方案，本轮未动。**
+> 仍差：**P4a 的 owner + 发布/排期**（历史归属的人工确认、滚动部署检查），然后按 `P4a 验收 → P1-b → #3 COMPANY 授权 → #5 数据范围` 推进。
 
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-10T10:15:00+08:00`
+- **更新时间：** `2026-10-10T12:10:00+08:00`
 - **分支：** `master`（= `a8c6790`，本轮改动**未提交**）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
+
+---
+
+## 最新一轮：P1-a——真实后端契约接进生成链路，消掉手写 FormDefinition
+
+**五条交付标准全达成**：① 真实契约可复现（构建期导出、提交、带门禁）；② 全部生成文件可对账；
+③ 生成声明确实受类型检查；④ 5 处页面按**各自端点**用生成类型；⑤ H3 基线归零。
+
+| 变更 | 内容 |
+| --- | --- |
+| `backend/.../openapi/ApiContractSnapshotTest.java`（新） | boot 一次上下文，`MockMvc` GET `/v3/api-docs`，归一化后与提交的 `frontend/config/antflow-api.json` **逐字比对**。`-Dantflow.openapi.write=true` 才写文件（**默认不写工作区**） |
+| `frontend/config/antflow-api.json`（新，提交） | 163 条 `/api/` 路径、11170 行。递归按键排序 + 2 空格缩进 + LF + 结尾换行 + `servers` 归一成 `[]`（字段留着） |
+| `frontend/scripts/{antflow-openapi.options.mjs,openapi-antflow.mjs}`（新） | 生成/检查**共用一份配置**；`--write` 生成到 `src/services/antflow/`（await 完成）；`--check` 生成到临时目录，比**文件集合 + 逐文件内容** |
+| `frontend/tsconfig.openapi.json`（新）+ `npm run tsc:openapi` | `skipLibCheck: false`、`types: []`，范围只有生成的声明文件 |
+| `pages/{admin/FormList,approval/FormManagementList,approval/FormManagementWizard,designer/form/FormDesigner,designer/process/ProcessDesigner}` | 5 处手写 `FormDefinition` 全删，按端点换成 `AntFlowAPI.{Summary,FormDefinition,SaveBody}` |
+| `scripts/health-metrics.mjs` | H3 改准（排除 `src/services/`、区分"独立对象定义"与"派生别名"），`--self-test` 加 7 条断言 |
+| `.github/workflows/ci.yml` | frontend job 加 `Type-check generated declarations` + `Contract client up to date` |
+
+**五个实测推翻直觉的点（都已写进 `D-20261010-contract-client-gated-on-both-sides-per-endpoint-types`）：**
+
+1. **不能直接用 `npm run openapi`。** umi 插件那条①遍历 `openAPI` 数组每一条，模板那条没设 `projectName`
+   → 按 `package.json` name 再生成一个目录，与既有 `src/services/ant-design-pro/` 的全局 `declare namespace API`
+   **声明合并冲突**；②`openAPIConfig.map((item) => genAllFiles(item))` **没有 await**，当门禁是竞态。
+2. **`git diff --exit-code` 不够当门禁**：它比工作树与索引，**覆盖不到新增的未跟踪文件**——"漏提交一个新生成的服务文件"
+   正是它抓不到的漏。所以 `--check` 自己比三个方向（新增 / 遗留 / 内容不一致）。
+3. **`skipLibCheck: true` 让生成的 `.d.ts` 其实不被检查**。取证：往声明里塞 `NoSuchTypeAtAll`，
+   `tsc:openapi` 红（TS2304）而 `npm run tsc` **退出码 0** —— 这条检查不是多余的。
+4. **契约里属性全是可选的**（后端零注解）。所以 `id`/`version` 是 `number | undefined`：**一律显式分支**
+   （`FormList` 的行操作没 id 就 `return null`、`handleExport`/`handleImport` 缺字段就早返回），
+   **没有用 `as`/`!`/`NonNullable`**。`status` 只用于显示 → 保留未知值兜底（`statusMap` 加索引签名 + `?? 兜底`）。
+5. **H3 的旧正则会"接通契约"读成变差**：它扫 `\.ts$` 把生成的 `typings.d.ts` 也算了进来，还把派生别名
+   （`= AntFlowAPI.X`）与独立对象体混着数。分类抽成纯函数后才守得住。
+
+**稳定性实测（§0 实验，本轮落地时做的）：** 两个**独立 JVM** 导出逐字相同（md5 `e3bcdf1993fa449ce91c6f7c16db6422`，
+163 条 `/api/` 路径）→ **数组不需要归一化**（`parameters`/`required`/`tags` 故意不动，结论写在
+`normalized()` 的注释里）。springdoc 原样吐的 `servers` 是
+`[{"url":"http://localhost","description":"Generated server url"}]`——**从请求推导**的，钉成 `[]`。
+**上下文启动时间（先前只有估算，现已实测）**：单跑该类 ~17.4–17.9s（含 11.8–12.3s 上下文 +
+~2.3s springdoc 初始化）；整包 `mvn test` 里它是第二次上下文启动，实测该次仅 **5.3s**，CI 时间不是问题。
+
+**验证**：后端 `mvn -B test` **601 绿**（基线 600，+1 = `ApiContractSnapshotTest`；探针库 `antflow_p4a_probe`
+**全新重建**后跑 V1–V54）、前端 `npx vitest run` **314 绿**、`npm run tsc` / `npm run biome:lint`
+（4 条既有 warning、0 error）/ `npm run check:boundaries` / `npm run tsc:openapi` / `npm run openapi:check`
+全干净、`node scripts/health-metrics.mjs`（含 `--self-test`）绿且 **H3 = 0**、移动端 `npx vitest run` **362 绿**。
+
+守护取证（四条门禁都对着**真实的错实现**跑红过，改动全部已还原）：
+后端加一个 `/contract-probe` 端点 → `ApiContractSnapshotTest` 红，消息给出"提交 163 条 /api/ 路径，当前 164 条"
++ 重写命令；前端 `--check` 三个方向分别红（新增 `roleController.ts` / 遗留 `zzz.ts` / 内容不一致 `menuController.ts`，
+均 exit 1）；往声明塞类型错误 → `tsc:openapi` 红而 `tsc` 绿；加回一份手写副本 →
+`health-metrics.mjs` 报 `H3 手写 FormDefinition 副本 0 → 1`。
+
+**踩坑（省下一轮的时间）**：① 本机跑 `mvn -B test` **必须先在探针库上重建一次**——库是脏的会连报
+`t_user_username_key` / `t_option_data_source_code_key` 重复键与 V54 重放，看着像回归其实不是；
+`MakeProbeDb.java` 在 `%LOCALAPPDATA%\Temp\p4a\`，跑法见下"验证基线"。
+② 前端全量 vitest 与后端 `mvn test` **同时**跑会让 `src/app.test.tsx`（happy-dom 里 fetch `localhost:3000`）
+超时假红——它会自愈，但别把它当回归；同理移动端并发跑会假掉到 152/46。
+
+**没做（要说清）**：① 模板那条 `openAPI` 配置仍没设 `projectName`——一旦有人跑文档里写的 `npm run openapi`，
+会生成 `src/services/antflow-frontend/` 并与既有目录声明合并、把 `tsc` 打红。补 `projectName: 'ant-design-pro'`
+即原地重生成、行为不变，**是独立的一行修复，未在本轮做**。② 本轮生成的 client **没有消费方接入**
+（页面仍用 `request()`，只是换了类型）——生成物是有门禁的契约投影，不是自动接管调用。③ **P1-b** 未动。
 
 ---
 
@@ -555,7 +617,7 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
 
 ## 验证基线
 
-后端 `mvn -B test` **563 绿**（带 `ANTFLOW_TEST_POSTGRES_URL` 指向本机 `antflow_probe`，含真库集成用例；不给它那批会走 Testcontainers，而本机 Docker Desktop 起 `ryuk` 会挂住 —— 见下）、前端 `npm test` **288**、移动 `npx vitest run` **351**；前端 `biome lint` 3 warnings（既有）+ `tsc` 干净；`npx antd lint ./src` 44 deprecated + 45 usage（见遗留）。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
+后端 `mvn -B test` **601 绿**（带 `ANTFLOW_TEST_POSTGRES_URL` 指向本机 `antflow_p4a_probe`，含真库集成用例；不给它那批会走 Testcontainers，而本机 Docker Desktop 起 `ryuk` 会挂住 —— 见下）、前端 `npx vitest run` **314**、移动 `npx vitest run` **362**；前端 `biome lint` 4 warnings（既有）+ `tsc`/`tsc:openapi`/`openapi:check`/`check:boundaries` 全干净，`node scripts/health-metrics.mjs` 绿（**H3 = 0**）；`npx antd lint ./src` 44 deprecated + 45 usage（见遗留）。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
 
 > **移动端 `npx vitest run` 会带出一条 unhandled error**（`unmountComponentAtNode is not a function`，来自 antd-mobile 的 Popup/rc-util 与 React 19 的卸载路径）。单独跑 `fields.test.tsx` 或 `files.api.test.ts` 都没有 —— 是既有测试之间的干扰，与本轮改动无关，别误判成回归。
 

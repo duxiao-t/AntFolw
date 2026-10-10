@@ -403,7 +403,7 @@
 
 ## D-20261009-real-openapi-contract-generate-at-build-time-not-runtime
 
-- **状态：** accepted（**取法已定；产物并入 P1**）
+- **状态：** accepted（**产物已落地**，见 `D-20261010-contract-client-gated-on-both-sides-per-endpoint-types`）
 - **背景：** 审计报告说桌面 codegen"复用已接通的 OpenAPI"——核验后那句是错的：`frontend/config/config.ts` 的 `schemaPath` 指向 `frontend/config/oneapi.json`，其 `info.title` 是 **"Ant Design Pro"**，即模板脚手架契约，业务契约从未接通。实测：活栈后端容器内 `GET /v3/api-docs` 返回 **200、118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），契约**确实存在且可确定性产出**。
 - **决策：** 真实契约**必须构建期导出并提交**，不能让前端运行时去 fetch 后端：
   - 经 web（:7070）取 `/v3/api-docs` 拿到的是 **SPA 首页 HTML**（nginx 没代理，0 条 `/api/` 路径）。
@@ -583,3 +583,42 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
   每次运行都会**移除已过时的行**，但**不会自动加入新行**，所以必须手工补）。其余两条规则未动。
 - **影响：** 以后凡是改了会出现在违规行文本里的签名，都要按同样办法补行——**先确认没有真的新增跨包依赖**，
   再补文本。存盘文件里会长期同时存在旧/新签名形态的行，这是该机制的常态，不是脏数据。
+
+## D-20261010-contract-client-gated-on-both-sides-per-endpoint-types
+
+- **状态：** accepted（P1-a 落地；`D-20261009-real-openapi-contract-generate-at-build-time-not-runtime` 的"产物并入 P1"到此兑现）
+- **背景：** 真源后端、消费方前端。没有门禁的生成物一定会变成谎话（`frontend/config/oneapi.json`
+  就是躺了两年的模板契约）。同时 H3「手写重复业务 DTO」= 5，5 处**全是同一个 `FormDefinition` envelope 的副本**。
+- **决策（四件，都是被实测推翻过直觉之后才这么定的）：**
+  1. **不直接用 `npm run openapi`。** umi 插件那条命令①遍历 `openAPI` 数组的每一条，模板那条没设
+     `projectName` → 按 `package.json` 的 name 再生成一个目录，与既有 `src/services/ant-design-pro/`
+     的全局 `declare namespace API` **声明合并冲突**；②`openAPIConfig.map((item) => genAllFiles(item))`
+     **没有 await**，当门禁是竞态。改用 `scripts/openapi-antflow.mjs` 直接调已装的同一个生成器
+     （`@umijs/openapi` 的 `generateService`，返回 Promise）并 await，配置与检查共用
+     `scripts/antflow-openapi.options.mjs`。**命名空间换 `AntFlowAPI`**：生成的 `typings.d.ts` 是
+     全局 `declare namespace`，与模板那份必须分开；顺带页面写 `AntFlowAPI.X` 不用 import，不碰导入边界门禁。
+  2. **前端门禁比"文件集合 + 逐文件内容"，不是 `git diff --exit-code`。** 后者比的是工作树与索引，
+     **覆盖不到新增的未跟踪文件**——"漏提交一个新生成的服务文件"正是它抓不到的漏。`--check` 生成到
+     临时目录，报**新增 / 遗留（生成不出来）/ 内容不一致**三个方向，都红。
+  3. **`skipLibCheck: true` 意味着生成的 `.d.ts` 其实不被检查**（只有"被引用处"受检查）。
+     另加 `frontend/tsconfig.openapi.json`（`skipLibCheck: false`、`types: []`、范围只有生成的声明文件）
+     + `npm run tsc:openapi`。**取证**：往声明里塞一个 `NoSuchTypeAtAll`，`tsc:openapi` 红（TS2304）
+     而 `npm run tsc` **退出码 0** —— 证明这条检查不是多余的。生成器模板自带 `// @ts-ignore`
+     （在 `api.ts` 里），所以受控检查**只针对声明文件**（那里没有这句），应用侧 `tsc` 照旧把关。
+  4. **五处副本按端点各自取类型，不用断言把三个角色捏成一个**：列表 → `Summary`（**不含**
+     `schema`/`settings`，列表端点不返回）、详情 → `FormDefinition`（`schema`/`settings` 线上是**字符串**）、
+     保存体 → `SaveBody`（`schema`/`settings` 是**对象**）。生成类型里属性**全是可选的**（后端没加注解），
+     所以 `id`/`version` 是 `number | undefined`：**一律显式分支**（缺了就早返回/禁用），
+     **不许 `as`/`!`/`NonNullable<...>` 假装已完成运行时校验**。`status` 只用于显示映射时**保留未知值兜底**
+     （`statusMap` 加索引签名 + `?? 兜底`），真正驱动发布这类动作时才检查允许值。
+- **H3 指标必须一起改准**（否则归零也守不住）：旧版是逐行正则，①扫到 `src/services/`——那里的声明
+  是**从契约生成的**（不是副本），不排除的话"接通契约"会被判成变差；②把**派生别名**
+  （`= AntFlowAPI.X`）与**独立对象体**混在一起数。改成：排除 `frontend/src/services/`，
+  且分类抽成纯函数 `classifyFormDefinition()`，`--self-test` 钉住四类分类 + 两个方向
+  （新增独立副本必须红 / 多一个派生别名不算变差）。**基线 5 → 0**，并实测加回一份副本会红。
+- **影响：** 后端改契约（改 controller 签名/字段/路径）→ `ApiContractSnapshotTest` 红，消息给
+  **路径数对比** + 重写命令 `mvn -B test -Dtest=ApiContractSnapshotTest -Dantflow.openapi.write=true`
+  （**默认不写工作区**）。前端改契约后忘了重生成/提交 → `npm run openapi:check` 红。四条门禁都在
+  CI 的 frontend job 里。**仍未做**：模板那条 `openAPI` 配置没设 `projectName`（一旦有人跑文档里写的
+  `npm run openapi` 就会撞名打红 `tsc`）——补 `projectName: 'ant-design-pro'` 即原地重生成、行为不变，
+  属独立的一行修复，未在本轮做。P1-b（设计器逐字段配置分派迁移）另开方案。
