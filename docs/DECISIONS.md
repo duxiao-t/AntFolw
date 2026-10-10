@@ -500,14 +500,57 @@
     的主题类型加 `COMPANY`（它已有 USER/ROLE 两种，加第三种最省）。**没有这一步，全局共享就等于"所有公司都能用所有表单"。**
   - **#6 调岗/部门改归属不改历史归属** —— 由 #4 的快照直接保证，零额外成本。
   - **#2 发布版本不可变保持现状**（`V31` 版本表已经这么做）。
-- **仍未定（实现前必须回答）**：**`started_dept_id IS NULL` 的历史实例怎么算**——seed 的 admin
-  `dept_id` 就是 NULL（`V2:9-19`），它发起的实例回溯不出公司。两条定量的只读查询（**本轮未在生产执行**）：
-  ```sql
-  SELECT count(*) FROM t_process_instance WHERE started_dept_id IS NULL;
-  SELECT d.company_id, count(*) FROM t_process_instance pi
-    JOIN t_department d ON d.id = pi.started_dept_id GROUP BY 1 ORDER BY 2 DESC;
-  ```
-  另需 **P4 的 owner + 排期**。
-- **影响：** 决策已定，但**本轮不动任何 schema**。P4（公司隔离实施，报告估 15–25 天）的实现顺序应是
-  #4 的快照（含回填）→ #3 的 COMPANY 授权主题 → #5 的数据范围收敛；三者的共同前提是上面那条 NULL 归属口径。
+### P4a「公司归属快照」——历史口径与写路径清点（2026-10-10）
+
+**历史归属口径（已采纳）**：**无法证明归属的历史记录保留 `company_id = NULL`，表示"待确认"**——
+不自动归给公司 1，也不按发起人**今天**的部门去猜。P4 隔离启用后，这些记录**不向公司管理员开放**，
+只保留全局管理员的确认入口。
+
+**为什么"回填"不能承诺天然精确（我先前说错了）**：`V20:88-94` 当年就是这么回填 `started_dept_id` 的——
+`SET started_dept_id = u.dept_id FROM t_user u WHERE u.id = pi.started_by`，用的是**迁移当时**的用户部门。
+所以已有数据里 `started_dept_id` 本身就是当年的**推断值**，不是发起时的事实。正确说法是：
+**"在能确认归属未发生变化的范围内可准确回填"**，而不是"今天回填一定精确"。
+
+历史记录分三类：① 有 `started_dept_id` 且部门仍在 → 按 `dept→company` 映射回填，**标注为推断值**；
+② `started_dept_id IS NULL`（seed admin 的 `dept_id` 就是 NULL，`V2:9-19`；以及系统发起）→ **保持 NULL**；
+③ 无实例的 `t_form_data`（见下）→ **没有部门快照可依，保持 NULL**。
+定量仍是两条只读查询（**本轮未在生产执行**，所以本文不写任何历史数字）：
+
+```sql
+SELECT count(*) FROM t_process_instance WHERE started_dept_id IS NULL;
+SELECT d.company_id, count(*) FROM t_process_instance pi
+  JOIN t_department d ON d.id = pi.started_dept_id GROUP BY 1 ORDER BY 2 DESC;
+```
+
+**写路径清点（这是"P4a 不只是加一列"的实证）**：
+
+| 记录 | 写入口 | 归属来源 |
+| --- | --- | --- |
+| `t_process_instance` | **只有一处**：`ProcessEngine.java:133`（`started_by`/`started_dept_id` 在 `:121-124` 写）。两个调用方都是有身份的：`POST /api/instances/start`、`POST /api/mobile/instances`。**没有任何调度/作业/导入会建实例** | 创建时快照 |
+| `t_form_data`（引擎路径） | `ProcessEngine.java:111`，与实例同一个 `@Transactional` | **从实例继承** |
+| `t_form_data`（**无流程提交 / 草稿**） | `FormDataService.java:105`（桌面）与 `MobileDraftService.java:51`（移动草稿）——**不建实例**，form_data 自己就是权威归属 | **必须自己快照**（无实例可继承） |
+| `t_task` | 5 处（`ProcessEngine.java:564/781/1178`、`ApprovalHandler.java:117`、`CcHandler.java:53`、`TaskOperationService.java:85/128/179`、`WorkflowRuntimeV2.java:538/819`） | **一律从 `proc_inst_id` 继承**，不按人推算 |
+| `t_workflow_job` | `WorkflowJobService.java:46/90`、`WorkflowRuntimeV2.java:189/848` | 同上，继承 |
+
+`PrincipalHolder` 只有 `userId` + `departmentId`（`auth/PrincipalHolder.java:9-11`），**没有 companyId** ——
+公司在新路径上要由 `dept_id → t_department.company_id` 解析（或让 principal 带上）。
+
+**两个必须回答的口径（P4a 实现前）**：
+1. **无部门的全局管理员**发起时目标公司是谁——必须显式指定，**不能静默落一个未知归属**。
+2. **草稿建好之后、跨公司调岗、再提交**：按"创建时快照"的口径，应取**草稿创建时**的公司。
+   现有代码不会让**别人**提交你的草稿（`MobileDraftService.requireOwnedDraft` 拒绝
+   `created_by != userId`，两条提交路径都过这道闸），所以这个场景只能是**同一人先建草稿再调岗**。
+
+**P4a 的验收**：组织变化不改旧归属；新写入不漏快照；无公司的新记录**不存在**（要么有明确公司，要么显式待确认）。
+本片**不改读权限**，但**也不能称为"完全不变行为"**——写路径上多了一列与一次解析。
+
+**仍未定**：P4a 的 owner（含历史归属的人工确认与上线验收）+ 排期；上面两个口径的产品答复。
+
+- **影响：** 决策已定，**本轮仍不动任何 schema**。P4 的实现顺序：#4 的快照（= P4a）→ #3 的 COMPANY 授权主题 → #5 的数据范围收敛。
+
+  **#3 的理由要更正**（我先前说"没有 COMPANY 就等于所有公司都能用所有表单"，这是错的）：
+  `AuthorizationService.hasFormGrant`（`:246-274`）**已经**按 `USER` / `ROLE` / `DEPARTMENT` 三种主题授权，
+  没有 COMPANY **不等于**默认全开。COMPANY 的价值是**直接表达"公司级开放范围"**。
+  后续还要明确它是**新增一种授予方式**，还是**必须通过的公司门槛**——只加一个 OR 分支，
+  **不会**自动限制已有的全局 ROLE 授权。
 
