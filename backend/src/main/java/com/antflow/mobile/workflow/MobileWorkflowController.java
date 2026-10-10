@@ -39,7 +39,8 @@ public class MobileWorkflowController {
     public Long createDraft(@RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
         return auditService.execute(
-            () -> draftService.create(request.formCode(), request.data(), principal.userId()),
+            () -> draftService.create(request.formCode(), request.data(), request.companyId(),
+                principal.userId()),
             id -> auditService.success("form.draft.create", "FORM_DRAFT", id,
                 AuditService.RiskLevel.NORMAL,
                 Map.of("changedFields", dataFields(request.data())),
@@ -52,7 +53,8 @@ public class MobileWorkflowController {
                                       @RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
         return auditService.execute(() -> draftService.get(
-                draftService.update(id, request.data(), principal.userId()).getId(),
+                draftService.update(id, request.data(), request.companyId(),
+                    principal.userId()).getId(),
                 principal.userId()),
             updated -> auditService.success("form.draft.update", "FORM_DRAFT", id,
                 AuditService.RiskLevel.NORMAL,
@@ -126,7 +128,8 @@ public class MobileWorkflowController {
         long userId = principal().userId();
         FormDataService.SubmitResult result = formDataService.submit(request.formCode(),
             request.status(), request.data(), userId,
-            request.files() == null ? List.of() : request.files(), request.draftId());
+            request.files() == null ? List.of() : request.files(), request.draftId(),
+            request.companyId());
         // 草稿没有业务单号（businessNo 为 null），Map.of 不接受 null 会抛 NPE → 500。照桌面端用可变 Map。
         Map<String, Object> response = new java.util.LinkedHashMap<>();
         response.put("dataId", result.dataId());
@@ -135,7 +138,9 @@ public class MobileWorkflowController {
     }
 
     public record DirectSubmitRequest(String formCode, String status, Object data,
-                                      List<MobileFileRef> files, Long draftId) { }
+                                      List<MobileFileRef> files, Long draftId,
+                                      // P4a：同上，带 draftId 时不读，归属取草稿快照。
+                                      Long companyId) { }
 
     @GetMapping("/instances")
     @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_READ + "')")

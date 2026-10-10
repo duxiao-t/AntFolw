@@ -78,6 +78,9 @@ class ProcessEngineTreeTest {
 
     private final ConditionEvaluator evaluator = new ConditionEvaluator();
 
+    /** P4a：引擎要求调用方给出**已解析**的归属；树遍历与归属无关，给个常量即可。 */
+    private static final long TEST_COMPANY_ID = 1L;
+
     private final AtomicLong fakeTaskId = new AtomicLong(0L);
     private final AtomicLong fakeFormDataId = new AtomicLong(0L);
     private final AtomicLong fakeInstanceId = new AtomicLong(0L);
@@ -201,6 +204,17 @@ class ProcessEngineTreeTest {
 
     // ---------- 1. single approval ----------
     @Test
+    void start_failsClosedWhenTheCallerDidNotResolveACompany() {
+        // P4a：引擎不再自己解析归属（它分不清"用户显式选的"与"从草稿继承的"），
+        // 只保留这最后一道——绝不让一条无归属的记录静默落库。
+        assertThatThrownBy(() ->
+            engine().start(new StartCmd("F1", Map.of("k", "v"), null, null), 7L))
+            .isInstanceOfSatisfying(BizException.class,
+                error -> assertThat(error.getCode()).isEqualTo("BAD_COMPANY"));
+        Mockito.verifyNoInteractions(formDataMapper, processInstanceMapper);
+    }
+
+    @Test
     void start_rejectsFormWithoutUsageGrant() {
         String processJson = """
             {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
@@ -213,7 +227,7 @@ class ProcessEngineTreeTest {
             .requireFormUse(1L);
 
         assertThatThrownBy(() ->
-            engine().start(new StartCmd("F1", Map.of("k", "v"), null), 7L))
+            engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L))
             .isInstanceOf(HiddenResourceException.class);
     }
 
@@ -227,7 +241,7 @@ class ProcessEngineTreeTest {
         stubFormAndPd("F1", processJson);
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
 
-        Map<String, Object> res = engine().start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        Map<String, Object> res = engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         assertThat(res.get("instanceId")).isEqualTo(1L);
         assertThat(res.get("formDataId")).isEqualTo(1L);
@@ -258,7 +272,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L, 43L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         // Two PENDING tasks on a1 (ids 1, 2). First assigned 42, second 43.
         // Make selectById return 42's task; selectList for siblings return 43's.
@@ -339,7 +353,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("amount", 1, "name", "x"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("amount", 1, "name", "x"), null, TEST_COMPANY_ID), 7L);
 
         Mockito.when(taskMapper.selectById(1L))
             .thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
@@ -390,7 +404,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("amount", 1, "name", "x"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("amount", 1, "name", "x"), null, TEST_COMPANY_ID), 7L);
 
         Mockito.when(taskMapper.selectById(1L))
             .thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
@@ -426,7 +440,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("amount", 1), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("amount", 1), null, TEST_COMPANY_ID), 7L);
 
         Mockito.when(taskMapper.selectById(1L))
             .thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
@@ -468,7 +482,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L, 43L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         // 42 approves first — sibling 43 still PENDING.
         Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
@@ -542,9 +556,9 @@ class ProcessEngineTreeTest {
 
         ProcessEngine eng = engine();
         Map<String, Object> high = eng.start(
-            new StartCmd("F1", Map.of("amount", 6000), null), 7L);
+            new StartCmd("F1", Map.of("amount", 6000), null, TEST_COMPANY_ID), 7L);
         Map<String, Object> low = eng.start(
-            new StartCmd("F1", Map.of("amount", 100), null), 8L);
+            new StartCmd("F1", Map.of("amount", 100), null, TEST_COMPANY_ID), 8L);
 
         TaskEntity tx = firstTaskFromInsert();
         assertThat(tx.getNodeId()).isEqualTo("x");
@@ -572,7 +586,7 @@ class ProcessEngineTreeTest {
         stubFormAndPd("F1", processJson);
         Mockito.when(assigneeResolver.resolve(eq("chosen"), any())).thenReturn(List.of(7L));
 
-        engine().start(new StartCmd("F1", Map.of("kind", "one"), null), 7L);
+        engine().start(new StartCmd("F1", Map.of("kind", "one"), null, TEST_COMPANY_ID), 7L);
 
         assertThat(capturesOfTaskInsert()).extracting(TaskEntity::getNodeId)
             .containsExactly("chosen");
@@ -594,7 +608,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("branchApproval"), any())).thenReturn(List.of(7L));
         Mockito.when(assigneeResolver.resolve(eq("joinApproval"), any())).thenReturn(List.of(8L));
         ProcessEngine engine = engine();
-        engine.start(new StartCmd("F1", Map.of("kind", "one"), null), 7L);
+        engine.start(new StartCmd("F1", Map.of("kind", "one"), null, TEST_COMPANY_ID), 7L);
         Mockito.when(taskMapper.selectById(1L))
             .thenReturn(taskWithId(1L, "branchApproval", 7L, "PENDING"));
         Mockito.when(taskMapper.selectList(any())).thenReturn(List.of());
@@ -634,7 +648,7 @@ class ProcessEngineTreeTest {
         stubFormAndPd("F1", processJson);
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
 
-        engine().start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         ArgumentCaptor<TaskEntity> cap = ArgumentCaptor.forClass(TaskEntity.class);
         Mockito.verify(taskMapper, Mockito.atLeast(2)).insert(cap.capture());
@@ -663,7 +677,7 @@ class ProcessEngineTreeTest {
             .thenThrow(new NoAssigneeFoundException("a1", "no users"));
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(42L));
 
-        engine().start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         // Only a2 should have a PENDING task created.
         List<TaskEntity> tasks = new ArrayList<>();
@@ -696,7 +710,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         // Task id=1 belongs to 42, PENDING on a1.
         Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
@@ -758,7 +772,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(99L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> {
             TaskEntity current = taskWithId(1L, "a2", 99L, "PENDING");
@@ -827,7 +841,7 @@ class ProcessEngineTreeTest {
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(99L));
 
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         Mockito.when(taskMapper.selectById(1L)).thenAnswer(inv -> taskWithId(1L, "a1", 42L, "PENDING"));
         Mockito.when(taskMapper.selectList(any())).thenAnswer(inv -> List.of());

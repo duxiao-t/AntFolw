@@ -24,6 +24,13 @@ public class ProcessInstance {
     @Version private Integer version;
     private Long startedBy;
     private Long startedDeptId;
+    /**
+     * P4a 归属快照：发起时钉住的公司。**可空**——V54 迁移前的历史记录里，
+     * 能按 `started_dept_id` 推出的是"推断值"（{@code companyInferred=true}），推不出的保持 NULL（待确认）。
+     * 隔离判断不能只看这一列非空，必须一并看 {@link #companyInferred}。
+     */
+    private Long companyId;
+    private Boolean companyInferred;
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime startedAt;
     private java.time.OffsetDateTime finishedAt;
 

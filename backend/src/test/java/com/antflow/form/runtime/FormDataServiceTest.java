@@ -11,6 +11,7 @@ import com.antflow.engine.BizException;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.antflow.mobile.workflow.MobileFileLinkService;
+import com.antflow.mobile.workflow.MobileDraftDto;
 import com.antflow.mobile.workflow.MobileDraftService;
 import com.antflow.process.DefinitionVersionRepository;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -42,6 +43,10 @@ class FormDataServiceTest {
     private MobileDraftService draftService;
     private AuthorizationService authorizationService;
     private com.antflow.form.options.OptionRuntimeService optionRuntime;
+    private com.antflow.org.CompanyAttribution companyAttribution;
+
+    /** 本类不验归属解析（那是 CompanyAttributionTest 的事），给个固定值即可。 */
+    private static final long TEST_COMPANY_ID = 1L;
 
     @BeforeEach
     void setUp() {
@@ -56,9 +61,11 @@ class FormDataServiceTest {
         draftService = Mockito.mock(MobileDraftService.class);
         authorizationService = Mockito.mock(AuthorizationService.class);
         optionRuntime = Mockito.mock(com.antflow.form.options.OptionRuntimeService.class);
+        companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
+        Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(TEST_COMPANY_ID);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
             formalNumberService, authorizationService, userMapper, departmentMapper,
-            optionRuntime, fileLinkService, draftService);
+            optionRuntime, fileLinkService, draftService, companyAttribution);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(authorizationService.currentUserId()).thenReturn(7L);
@@ -137,11 +144,17 @@ class FormDataServiceTest {
     @Test
     void directSubmitConsumesItsSourceDraftInTheSubmissionTransaction() {
         Mockito.when(formDefinitionMapper.selectOne(any())).thenReturn(publishedNoWorkflowForm());
+        Mockito.when(draftService.companySnapshotForSubmit(101L, 10L, 7L)).thenReturn(42L);
+        Mockito.when(companyAttribution.forDraft(42L, null)).thenReturn(42L);
 
         service.submit("expense", "SUBMITTED",
             Map.of("applicant", "张三", "reason", "报销"), 7L, List.of(), 101L);
 
         Mockito.verify(draftService).deleteAfterSubmit(101L, 10L, 7L);
+        // P4a 核心口径：转正**只认草稿行里的快照**（42L），绝不按当前身份重新解析——
+        // 否则"A 公司建草稿、调岗到 B"会被改归属。
+        Mockito.verify(companyAttribution).forDraft(42L, null);
+        Mockito.verify(companyAttribution, Mockito.never()).resolve(any());
     }
 
     @Test

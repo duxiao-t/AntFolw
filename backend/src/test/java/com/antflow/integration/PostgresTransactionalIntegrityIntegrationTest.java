@@ -250,7 +250,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             PrincipalHolder.set(new PrincipalHolder.Principal(starter, "admin", List.of("admin")));
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(
-                new StartCmd(code, Map.of(), Map.of()), starter);
+                new StartCmd(code, Map.of(), Map.of(), anyCompanyId()), starter);
             final long instanceId = ((Number) started.get("instanceId")).longValue();
             createdInstance = instanceId;
             long dataId = jdbcTemplate.queryForObject(
@@ -333,6 +333,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
         long draftId = insertDraft(formId, adminId);
+        // P4a：这条草稿要能转正，得有归属快照（V54 之前的历史草稿按口径是阻断转正的）。
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
+            anyCompanyId(), draftId);
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {
             formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
@@ -342,6 +345,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
 
             long invalidDraftId = insertDraft(formId, adminId);
+            jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
+                anyCompanyId(), invalidDraftId);
             assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
                 List.of(), invalidDraftId)).isInstanceOf(BizException.class);
             assertThat(jdbcTemplate.queryForObject(
@@ -350,6 +355,190 @@ class PostgresTransactionalIntegrityIntegrationTest {
         } finally {
             PrincipalHolder.clear();
         }
+    }
+
+    /**
+     * P4a 核心回归：**在 A 公司建的草稿，人调到 B 公司之后提交，仍然归 A**。
+     *
+     * <p>归属是"创建时快照"，不是"提交时按当前部门重算"——否则一次调岗就会把已经填好的单
+     * 改到别的公司名下（或者因为新部门没有归属而莫名被拒）。
+     */
+    @Test
+    void draftSubmittedAfterTheAuthorTransferredKeepsTheDraftCompany() {
+        long companyA = insertCompany("P4a 甲 " + UUID.randomUUID());
+        long companyB = insertCompany("P4a 乙 " + UUID.randomUUID());
+        long deptA = insertDepartment(companyA, "甲部");
+        long deptB = insertDepartment(companyB, "乙部");
+        long author = insertUser("p4a-transfer-" + UUID.randomUUID());
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+            VALUES (?, 'USER', ?, ?)
+            """, formId, author, userId("admin"));
+        try {
+            assignRole(author, roleId("employee"));
+            moveUserToDepartment(author, deptA);
+            setPrincipal(author);
+
+            long draftId = mobileDraftService.create(code, flowJson.createObjectNode(), null,
+                author);
+            assertThat(companyOfFormData(draftId)).isEqualTo(companyA);
+
+            moveUserToDepartment(author, deptB);
+            authorizationService.evict(author);
+            setPrincipal(author);
+
+            FormDataService.SubmitResult submitted = formDataService.submit(code, "SUBMITTED",
+                Map.of("subject", "after transfer"), author, List.of(), draftId);
+
+            assertThat(companyOfFormData(submitted.dataId())).isEqualTo(companyA);
+            assertThat(companyInferredOf(submitted.dataId())).isFalse();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", author);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", author);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id IN (?, ?)", deptA, deptB);
+            jdbcTemplate.update("DELETE FROM t_company WHERE id IN (?, ?)", companyA, companyB);
+        }
+    }
+
+    /**
+     * P4a：V54 之前建的草稿没有归属快照——**保留草稿、阻断转正**。
+     * 提交时绝不按今天的部门猜一个公司出来。
+     */
+    @Test
+    void legacyDraftWithoutCompanySnapshotIsBlockedAndKept() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long draftId = insertDraft(formId, adminId);   // 直接 SQL：company_id 为 NULL
+        setPrincipal(adminId);
+        try {
+            assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED",
+                Map.of("subject", "legacy"), adminId, List.of(), draftId))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("COMPANY_PENDING"));
+
+            // 草稿还在，也没有留下半条正式记录（创建失败要整笔回滚）。
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId))
+                .isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE form_def_id = ? AND status = 'SUBMITTED'",
+                Long.class, formId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    /**
+     * P4a：归属是**事实快照**，后续审批不该改写它（审批只可能写表单字段值，不碰归属列）。
+     */
+    @Test
+    void approvingATaskDoesNotRewriteTheRecordedCompany() {
+        long adminId = userId("admin");
+        long approver = userId("bob");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "DRAFT", approvalFlow(approver));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long companyId = anyCompanyId();
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            publishService.publish(formId, processId);
+            Map<String, Object> started = processEngine.start(
+                new StartCmd(code, Map.of("subject", "company stays"), Map.of(), companyId),
+                adminId);
+            long instanceId = ((Number) started.get("instanceId")).longValue();
+            long dataId = ((Number) started.get("formDataId")).longValue();
+            long taskId = ((List<?>) started.get("firstTaskIds")).stream()
+                .map(Number.class::cast).mapToLong(Number::longValue).findFirst().orElseThrow();
+
+            setPrincipal(approver);
+            processEngine.approve(new CompleteCmd(taskId, "APPROVE", "ok", null), approver);
+
+            assertThat(companyOfFormData(dataId)).isEqualTo(companyId);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT company_id FROM t_process_instance WHERE id = ?", Long.class, instanceId))
+                .isEqualTo(companyId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    /**
+     * P4a 迁移自查：**一份 form_data 被多个实例引用**时"归属该跟哪条"无从判定，
+     * V54 必须停下来把问题报出来，而不是随便挑一条回填。
+     */
+    @Test
+    void migrationV54RefusesToBackfillWhenOneFormDataIsSharedByTwoInstances() throws Exception {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(adminId));
+        long dataId = insertSubmittedData(formId, adminId);
+        jdbcTemplate.update("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
+            VALUES (?, ?, 'RUNNING', ?), (?, ?, 'RUNNING', ?)
+            """, processId, dataId, adminId, processId, dataId, adminId);
+
+        assertThatThrownBy(() -> jdbcTemplate.execute(migrationV54Sql()))
+            .hasMessageContaining("被多个实例引用");
+    }
+
+    /**
+     * P4a 历史回填：**按这条记录自己的 {@code started_dept_id} 快照映射**，
+     * 绝不按发起人**今天**的部门去猜（那样调过岗的单会被改归属）。
+     *
+     * <p>做法：造一条"V54 之前"形态的旧记录（{@code company_id} 为空、发起部门是甲），
+     * 而发起人今天在乙公司；再把迁移重放一遍（迁移本身是幂等的），看它落哪家。
+     */
+    @Test
+    void migrationV54BackfillsFromTheRowOwnDepartmentSnapshotNotTheAuthorsCurrentOne()
+        throws Exception {
+        long companyA = insertCompany("P4a 回填甲 " + UUID.randomUUID());
+        long companyB = insertCompany("P4a 回填乙 " + UUID.randomUUID());
+        long deptA = insertDepartment(companyA, "回填甲部");
+        long deptB = insertDepartment(companyB, "回填乙部");
+        long author = insertUser("p4a-backfill-" + UUID.randomUUID());
+        moveUserToDepartment(author, deptB);          // 他**今天**在乙公司
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(author));
+        long dataId = insertSubmittedData(formId, author);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                                           started_dept_id)
+            VALUES (?, ?, 'RUNNING', ?, ?) RETURNING id
+            """, Long.class, processId, dataId, author, deptA);
+
+        jdbcTemplate.execute(migrationV54Sql());
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_process_instance WHERE id = ?", Long.class, instanceId))
+            .isEqualTo(companyA);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_form_data WHERE id = ?", Long.class, dataId))
+            .isEqualTo(companyA);
+        // 而且必须标成"推断"：这是从同样由推断得来的 started_dept_id 推的，不是事实。
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_inferred FROM t_process_instance WHERE id = ?", Boolean.class,
+            instanceId)).isTrue();
+    }
+
+    /** 迁移文件本身就是被测对象：重放一遍看它在真实库上的行为（`ADD COLUMN IF NOT EXISTS` 等是幂等的）。 */
+    private static String migrationV54Sql() throws IOException {
+        return new String(new org.springframework.core.io.ClassPathResource(
+            "db/migration/V54__company_attribution_snapshot.sql").getInputStream().readAllBytes(),
+            StandardCharsets.UTF_8);
     }
 
     @Test
@@ -387,6 +576,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long allowedForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long deniedForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long deniedDraft = insertDraft(deniedForm, userId);
+        // P4a：非管理员必须有部门才谈得上归属（无部门非管理员按口径一律拒建）。
+        long dept = insertDepartment(anyCompanyId(), "直提部");
+        moveUserToDepartment(userId, dept);
         assignRole(userId, roleId("employee"));
         jdbcTemplate.update("""
             INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
@@ -425,6 +617,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 allowedForm, deniedForm);
             jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
             jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", dept);
         }
     }
 
@@ -1399,7 +1592,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(
-                new StartCmd(code, Map.of("subject", "versioned"), Map.of()), adminId);
+                new StartCmd(code, Map.of("subject", "versioned"), Map.of(), anyCompanyId()),
+                adminId);
             long instanceId = ((Number) started.get("instanceId")).longValue();
             long firstTaskId = ((List<?>) started.get("firstTaskIds")).stream()
                 .map(Number.class::cast).mapToLong(Number::longValue).findFirst().orElseThrow();
@@ -1454,7 +1648,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(new StartCmd(code,
-                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of()), adminId);
+                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of(), anyCompanyId()), adminId);
 
             assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM t_form_definition_version
@@ -1495,10 +1689,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             String first = String.valueOf(processEngine.start(
-                new StartCmd(code, Map.of("subject", "first"), Map.of()), adminId)
+                new StartCmd(code, Map.of("subject", "first"), Map.of(), anyCompanyId()), adminId)
                 .get("businessNo"));
             String second = String.valueOf(processEngine.start(
-                new StartCmd(code, Map.of("subject", "second"), Map.of()), adminId)
+                new StartCmd(code, Map.of("subject", "second"), Map.of(), anyCompanyId()), adminId)
                 .get("businessNo"));
 
             assertThat(first).matches("ITNUM-[0-9]{8}-0001");
@@ -1840,7 +2034,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             assertThatThrownBy(() -> processEngine.start(
-                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of()), adminId))
+                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of(), anyCompanyId()),
+                adminId))
                 .isInstanceOfSatisfying(BizException.class,
                     error -> assertThat(error.getCode()).isEqualTo("FALLBACK_UNAVAILABLE"));
             assertThat(jdbcTemplate.queryForObject("""
@@ -3822,7 +4017,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> result = processEngine.start(
-                new StartCmd(code, Map.of("subject", "v2"), Map.of()), starterId);
+                new StartCmd(code, Map.of("subject", "v2"), Map.of(), anyCompanyId()), starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());
         } finally {
@@ -3848,7 +4043,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 WHERE process_definition_id = ?
                 """, compatibleLegacyFlow, compatibleLegacyFlow, processId);
             Map<String, Object> result = processEngine.start(
-                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of()), starterId);
+                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of(), anyCompanyId()),
+                starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());
         } finally {
@@ -3941,6 +4137,36 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     private void setPrincipal(long userId) {
         PrincipalHolder.set(authorizationService.principalForRequest(userId, null).orElseThrow());
+    }
+
+    private long insertCompany(String name) {
+        return jdbcTemplate.queryForObject(
+            "INSERT INTO t_company(name) VALUES (?) RETURNING id", Long.class, name);
+    }
+
+    private void moveUserToDepartment(long userId, long departmentId) {
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", departmentId, userId);
+        // 身份是从 t_user 读出来并缓存的：调岗后不 evict 的话，下一次 setPrincipal 还是旧部门。
+        authorizationService.evict(userId);
+    }
+
+    private Long companyOfFormData(long dataId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_form_data WHERE id = ?", Long.class, dataId);
+    }
+
+    private Boolean companyInferredOf(long dataId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT company_inferred FROM t_form_data WHERE id = ?", Boolean.class, dataId);
+    }
+
+    /**
+     * P4a：引擎现在要求调用方给出**已解析**的归属（{@code company_id} 有外键，不能随便塞数字）。
+     * 这些用例验的是别的东西，随便取一个存在的公司即可。
+     */
+    private long anyCompanyId() {
+        return jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
     }
 
     /**

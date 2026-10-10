@@ -84,6 +84,12 @@ public class ProcessEngine {
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
+        // P4a：归属由**调用方**解析好（它才分得清"用户显式选的"与"从草稿继承的"），
+        // 引擎只做 fail-closed 检查——绝不让一条无归属的记录静默落库。
+        Long companyId = cmd.companyId();
+        if (companyId == null) {
+            throw new BizException("BAD_COMPANY", "发起时必须确定公司归属");
+        }
         FormDefinition fd = formDefinitionService.getByCode(cmd.formCode());
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + cmd.formCode());
@@ -108,6 +114,8 @@ public class ProcessEngine {
         fd2.setData(writeJson(visibleData));
         fd2.setStatus("SUBMITTED");
         fd2.setCreatedBy(userId);
+        fd2.setCompanyId(companyId);
+        fd2.setCompanyInferred(false);
         formDataMapper.insert(fd2);
 
         ProcessInstance pi = new ProcessInstance();
@@ -123,6 +131,9 @@ public class ProcessEngine {
             .filter(principal -> principal.userId() == userId)
             .ifPresent(principal -> pi.setStartedDeptId(principal.departmentId()));
         pi.setStartedAt(OffsetDateTime.now());
+        // 与 fd2 同一个值（同一次解析、同一个事务）。
+        pi.setCompanyId(companyId);
+        pi.setCompanyInferred(false);
         if (runtimeV2 != null) {
             WorkflowRuntimeV2.StartState state = runtimeV2.prepareStart(fd2, pd, userId);
             pi.setEngineVersion(2);

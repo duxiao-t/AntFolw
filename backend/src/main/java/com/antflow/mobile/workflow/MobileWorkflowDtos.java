@@ -8,7 +8,10 @@ import com.antflow.process.ApprovalCommentPresets;
 
 record StartMobileInstanceRequest(String formCode, JsonNode data,
                                   Map<String, List<Long>> selfSelected,
-                                  Long draftId, List<MobileFileRef> files) {
+                                  Long draftId, List<MobileFileRef> files,
+                                  // P4a：无部门的全局管理员在这里显式选公司；有部门的忽略它（由身份推导）。
+                                  // 带 draftId 时**不读这个字段**——归属取草稿行的快照。
+                                  Long companyId) {
 }
 
 record MobileStartResult(Long instanceId, Long formDataId, String businessNo,
@@ -41,7 +44,7 @@ record MobileTaskActionRequest(String comment, JsonNode data, String rejectToNod
     }
 }
 
-record MobileDraftRequest(String formCode, JsonNode data) {
+record MobileDraftRequest(String formCode, JsonNode data, Long companyId) {
 }
 
 record MobileTaskDto(Long id, Long instanceId, String nodeId, String formCode, String formName,

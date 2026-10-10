@@ -43,6 +43,8 @@ public class FormDataService {
     private final com.antflow.form.options.OptionRuntimeService optionRuntime;
     private final MobileFileLinkService fileLinkService;
     private final MobileDraftService draftService;
+    /** P4a：无流程提交/草稿没有实例可继承归属，这两条路径必须自己解析。 */
+    private final com.antflow.org.CompanyAttribution companyAttribution;
     /** 可选注入：老的单测直接 new 本类，不给它传这个依赖。 */
     @Autowired(required = false)
     private DefinitionVersionRepository versions;
@@ -65,6 +67,12 @@ public class FormDataService {
     @Transactional
     public SubmitResult submit(String formCode, String status, Object data, Long userId,
                        List<MobileFileRef> files, Long draftId) {
+        return submit(formCode, status, data, userId, files, draftId, null);
+    }
+
+    @Transactional
+    public SubmitResult submit(String formCode, String status, Object data, Long userId,
+                       List<MobileFileRef> files, Long draftId, Long explicitCompanyId) {
         FormDefinition fd = formDefinitionService.getByCode(formCode);
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
@@ -88,6 +96,16 @@ public class FormDataService {
             throw new BizException("FORM_HAS_PROCESS",
                 "该表单已启用审批流程，请从发起入口提交");
         }
+        // P4a 归属：转正**取草稿行的快照**（绝不按当前部门重解析，否则调岗会改归属）；
+        // 新提交才按身份解析。解析放在 insert 之前，失败不留半条记录。
+        Long companyId;
+        if (draftId == null) {
+            companyId = companyAttribution.resolve(explicitCompanyId);
+        } else {
+            companyId = companyAttribution.forDraft(
+                draftService.companySnapshotForSubmit(draftId, fd.getId(), userId),
+                explicitCompanyId);
+        }
         formDefinitionService.validateSubmission(fd.getSchema(), data);
         Object storedData = "DRAFT".equals(normalizedStatus)
             ? data
@@ -102,8 +120,11 @@ public class FormDataService {
         fd2.setData(writeJson(storedData));
         fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
+        fd2.setCompanyId(companyId);
+        fd2.setCompanyInferred(false);
         mapper.insert(fd2);
         fileLinkService.append(fd2.getId(), files, userId);
+        // 删草稿必须在 insert **成功之后**：创建失败要连草稿一起回滚，不能人财两空。
         if (draftId != null) draftService.deleteAfterSubmit(draftId, fd.getId(), userId);
         return new SubmitResult(fd2.getId(), fd2.getBusinessNo());
     }

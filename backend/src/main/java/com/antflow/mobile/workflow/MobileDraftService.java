@@ -7,6 +7,7 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.org.CompanyAttribution;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -34,27 +35,34 @@ public class MobileDraftService {
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    private final CompanyAttribution companyAttribution;
     @Autowired(required = false)
     private ProcessDefinitionService processDefinitionService;
 
     @Transactional(rollbackFor = Exception.class)
-    public Long create(String formCode, JsonNode data, long userId) {
+    public Long create(String formCode, JsonNode data, Long explicitCompanyId, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
         authorizationService.requireFormUse(formDefinition.getId());
+        // 草稿行自己落归属快照（口径：取**草稿创建时**）。提交时不再重新解析。
+        Long companyId = companyAttribution.resolve(explicitCompanyId);
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setStatus(DRAFT_STATUS);
         draft.setCreatedBy(userId);
+        draft.setCompanyId(companyId);
+        draft.setCompanyInferred(false);
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.insert(draft);
         return draft.getId();
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public FormData update(long draftId, JsonNode data, long userId) {
+    public FormData update(long draftId, JsonNode data, Long explicitCompanyId, long userId) {
         FormData draft = requireOwnedDraft(draftId, userId);
+        // 已有草稿的归属不可修改：请求带了**不一致**的公司就拒，而不是偷偷覆盖快照。
+        companyAttribution.forDraft(draft.getCompanyId(), explicitCompanyId);
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
         authorizationService.requireFormUse(formDefinition.getId());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
@@ -113,6 +121,19 @@ public class MobileDraftService {
             ? formId -> true   // 管理员：不过滤
             : formId -> granted.get().contains(formId);
         return new DraftContext(forms, usable, processes);
+    }
+
+    /**
+     * 草稿转正式前取**该草稿自己的归属快照**（顺带校验所有者/表单/状态）。
+     * 只回 {@code Long} 而不是整个 DTO：调用方在 {@code form} 包，返回 DTO 会让领域反向依赖
+     * 手机端适配层的类型（{@code ArchitectureBoundaryTest} 当场红）。
+     */
+    public Long companySnapshotForSubmit(long draftId, long formDefId, long userId) {
+        FormData draft = requireOwnedDraft(draftId, userId);
+        if (!Objects.equals(draft.getFormDefId(), formDefId)) {
+            throw new BizException("BAD_DRAFT", "draft does not belong to requested form");
+        }
+        return draft.getCompanyId();
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -175,6 +196,8 @@ public class MobileDraftService {
             formDefinitionService.projectStarterData(draft.getData(), schema, process),
             formDefinitionService.projectStarterSchema(schema, process),
             readOnly,
+            draft.getCompanyId(),
+            draft.getCompanyInferred(),
             draft.getCreatedAt(),
             draft.getUpdatedAt()
         );

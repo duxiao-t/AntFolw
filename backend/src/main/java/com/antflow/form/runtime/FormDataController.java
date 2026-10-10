@@ -93,7 +93,7 @@ public class FormDataController {
             body.data(),
             p.userId(),
             body.files() == null ? List.of() : body.files(),
-            body.draftId());
+            body.draftId(), body.companyId());
         Map<String, Object> response = new java.util.LinkedHashMap<>();
         response.put("dataId", result.dataId());
         response.put("businessNo", result.businessNo());
@@ -132,5 +132,7 @@ public class FormDataController {
     }
 
     public record SubmitRequest(String formCode, String status, Object data,
-                                List<MobileFileRef> files, Long draftId) { }
+                                List<MobileFileRef> files, Long draftId,
+                                // P4a：仅无部门的全局管理员该用它；带 draftId 时忽略（取草稿快照）。
+                                Long companyId) { }
 }

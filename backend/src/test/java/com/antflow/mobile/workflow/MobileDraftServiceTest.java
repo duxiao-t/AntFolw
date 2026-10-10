@@ -27,15 +27,21 @@ class MobileDraftServiceTest {
     private FormDataMapper formDataMapper;
     private FormDefinitionService formDefinitionService;
     private AuthorizationService authorizationService;
+    private com.antflow.org.CompanyAttribution companyAttribution;
     private MobileDraftService service;
+
+    /** 归属解析本身由 CompanyAttributionTest 验；这里只验"草稿有没有落快照"。 */
+    private static final long TEST_COMPANY_ID = 1L;
 
     @BeforeEach
     void setUp() {
         formDataMapper = Mockito.mock(FormDataMapper.class);
         formDefinitionService = Mockito.mock(FormDefinitionService.class);
         authorizationService = Mockito.mock(AuthorizationService.class);
+        companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
+        Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(TEST_COMPANY_ID);
         service = new MobileDraftService(formDataMapper, formDefinitionService, objectMapper,
-            authorizationService);
+            authorizationService, companyAttribution);
         Mockito.when(formDefinitionService.canonicalizeStarterData(
                 Mockito.anyString(), Mockito.any(), Mockito.nullable(Object.class)))
             .thenAnswer(invocation -> objectMapper.convertValue(
@@ -66,7 +72,7 @@ class MobileDraftServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
 
-        Long id = service.create("leave", data, 7L);
+        Long id = service.create("leave", data, null, 7L);
 
         assertThat(id).isEqualTo(100L);
         ArgumentCaptor<FormData> captor = ArgumentCaptor.forClass(FormData.class);
@@ -76,6 +82,9 @@ class MobileDraftServiceTest {
         assertThat(saved.getFormDefVersion()).isEqualTo(3);
         assertThat(saved.getStatus()).isEqualTo("DRAFT");
         assertThat(saved.getCreatedBy()).isEqualTo(7L);
+        // P4a：草稿**创建时**就落归属快照（含 company_inferred=false）——提交时不再重新解析。
+        assertThat(saved.getCompanyId()).isEqualTo(TEST_COMPANY_ID);
+        assertThat(saved.getCompanyInferred()).isFalse();
         assertThat(objectMapper.readTree(saved.getData()).path("days").asInt()).isEqualTo(2);
         Mockito.verify(authorizationService).requireFormUse(10L);
     }
@@ -87,7 +96,7 @@ class MobileDraftServiceTest {
             .when(authorizationService).requireFormUse(10L);
 
         assertThatThrownBy(() -> service.create("leave",
-            objectMapper.createObjectNode(), 7L))
+            objectMapper.createObjectNode(), null, 7L))
             .isInstanceOf(HiddenResourceException.class);
         Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
     }
@@ -98,7 +107,7 @@ class MobileDraftServiceTest {
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
         JsonNode data = objectMapper.createObjectNode().put("days", 5);
 
-        FormData updated = service.update(101L, data, 7L);
+        FormData updated = service.update(101L, data, null, 7L);
 
         assertThat(updated.getId()).isEqualTo(101L);
         assertThat(objectMapper.readTree(updated.getData()).path("days").asInt()).isEqualTo(5);
@@ -110,7 +119,7 @@ class MobileDraftServiceTest {
     void updateRejectsSecondUser() {
         Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
 
-        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), 8L))
+        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), null, 8L))
             .isInstanceOf(AccessDeniedException.class);
     }
 
@@ -120,7 +129,7 @@ class MobileDraftServiceTest {
         Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
             .thenReturn(Map.of(10L, form("leave", "DEPRECATED")));
 
-        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), 7L))
+        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), null, 7L))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("Form not published");
 

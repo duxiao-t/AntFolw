@@ -12,6 +12,7 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.org.CompanyAttribution;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
 import com.antflow.process.DefinitionVersionRepository;
@@ -61,6 +62,7 @@ public class MobileWorkflowService {
     private final MobileFileLinkService fileLinkService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    private final CompanyAttribution companyAttribution;
     @Autowired(required = false)
     private DefinitionVersionRepository definitionVersions;
 
@@ -88,6 +90,8 @@ public class MobileWorkflowService {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
         }
         authorizationService.requireFormUse(currentForm.getId());
+        // P4a：带草稿时**归属取草稿行的快照**（调岗后重提也不改归属）；新发起才按身份解析。
+        Long companyId;
         if (request.draftId() != null) {
             MobileDraftDto draft = draftService.get(request.draftId(), userId);
             if (!Objects.equals(draft.formCode(), request.formCode())) {
@@ -100,12 +104,15 @@ public class MobileWorkflowService {
                 throw new BizException("DRAFT_VERSION_MISMATCH",
                     "表单已改版，请基于新版本重新填写");
             }
+            companyId = companyAttribution.forDraft(draft.companyId(), request.companyId());
+        } else {
+            companyId = companyAttribution.resolve(request.companyId());
         }
 
         Map<String, List<Long>> selfSelected = request.selfSelected() == null
             ? Map.of() : request.selfSelected();
-        Map<String, Object> result = engine.start(new StartCmd(request.formCode(), data, selfSelected),
-            userId);
+        Map<String, Object> result = engine.start(
+            new StartCmd(request.formCode(), data, selfSelected, companyId), userId);
         Long formDataId = asLong(result.get("formDataId"));
         Long instanceId = asLong(result.get("instanceId"));
         String businessNo = Objects.toString(result.get("businessNo"), null);

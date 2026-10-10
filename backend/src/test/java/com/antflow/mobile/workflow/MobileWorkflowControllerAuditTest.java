@@ -52,7 +52,7 @@ class MobileWorkflowControllerAuditTest {
     void startAuditsFieldNamesAndCountsWithoutFormValues() throws Exception {
         JsonNode data = new ObjectMapper().readTree("{\"salary\":\"private-value\"}");
         StartMobileInstanceRequest request = new StartMobileInstanceRequest(
-            "leave", data, Map.of(), null, List.of());
+            "leave", data, Map.of(), null, List.of(), null);
         when(workflowService.start(request, 7L)).thenReturn(
             new MobileStartResult(41L, 51L, "PRIVATE-BUSINESS-NO", List.of(61L)));
 
