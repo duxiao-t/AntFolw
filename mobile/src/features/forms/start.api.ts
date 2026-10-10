@@ -51,12 +51,14 @@ export async function startMobileInstance({
   values,
   selfSelected,
   draftId,
+  companyId,
   idempotencyKey,
 }: {
   formCode: string;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
   draftId: number | null;
+  companyId: number | null;
   idempotencyKey: string;
 }) {
   return apiRequest<StartResult>('/api/mobile/instances', {
@@ -67,6 +69,7 @@ export async function startMobileInstance({
       data: values,
       selfSelected,
       draftId,
+      companyId,
       files: collectMobileFileRefs(values),
     }),
   });
@@ -76,10 +79,12 @@ export async function submitMobileFormData({
   formCode,
   values,
   draftId,
+  companyId,
 }: {
   formCode: string;
   values: MobileFormValues;
   draftId: number | null;
+  companyId: number | null;
 }) {
   // 移动端专用入口：桌面端提交走 /api/forms/data，移动端走 /api/mobile/submissions
   return apiRequest<DirectSubmitResult>('/api/mobile/submissions', {
@@ -89,6 +94,7 @@ export async function submitMobileFormData({
       status: 'SUBMITTED',
       data: values,
       draftId,
+      companyId,
       files: collectMobileFileRefs(values),
     }),
   });

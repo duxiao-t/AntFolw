@@ -21,6 +21,8 @@ const AUTH_USER: MobileUser = {
   username: 'zhangsan',
   displayName: '张三',
   roles: ['user'],
+  // 有部门 → 归属由服务端按身份推导，填写页不出现公司选择器（P4a）。
+  deptId: 20,
 };
 
 const FORM_WITHOUT_SELF_SELECT = {

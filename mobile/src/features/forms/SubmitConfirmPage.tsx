@@ -53,8 +53,8 @@ export function SubmitConfirmPage() {
           idempotencyKeyForPayload(currentPayload()));
         return { mode: "workflow" as const, id: result.instanceId, businessNo: result.businessNo };
       }
-      if (!workflowEnabled) { const result = await submitMobileFormData({ formCode: flow.formCode ?? code, values: flow.values, draftId: flow.draftId }); return { mode: "direct" as const, id: result.dataId, businessNo: result.businessNo }; }
-      const result = await startMobileInstance({ formCode: flow.formCode ?? code, values: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, idempotencyKey: idempotencyKeyForPayload(currentPayload()) });
+      if (!workflowEnabled) { const result = await submitMobileFormData({ formCode: flow.formCode ?? code, values: flow.values, draftId: flow.draftId, companyId: flow.companyId }); return { mode: "direct" as const, id: result.dataId, businessNo: result.businessNo }; }
+      const result = await startMobileInstance({ formCode: flow.formCode ?? code, values: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, companyId: flow.companyId, idempotencyKey: idempotencyKeyForPayload(currentPayload()) });
       return { mode: "workflow" as const, id: result.instanceId, businessNo: result.businessNo };
     },
     onSuccess(result) {
@@ -95,7 +95,8 @@ export function SubmitConfirmPage() {
     </AppPage>
   );
 
-  function currentPayload() { return JSON.stringify({ formCode: flow.formCode ?? code, data: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, reworkTaskId: flow.reworkTaskId }); }
+  // companyId 必须进幂等 payload：换了公司再重试要是一次新请求，不能命中旧键拿到上一次的结果。
+  function currentPayload() { return JSON.stringify({ formCode: flow.formCode ?? code, data: flow.values, selfSelected: flow.selfSelected, draftId: flow.draftId, reworkTaskId: flow.reworkTaskId, companyId: flow.companyId }); }
   function editPath() { const base = `/forms/${encodeURIComponent(code)}`; return flow.reworkTaskId == null ? base : `${base}?reworkTaskId=${flow.reworkTaskId}`; }
 }
 
