@@ -546,7 +546,12 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
 **P4a 的验收**：组织变化不改旧归属；新写入不漏快照；无公司的新记录**不存在**（要么有明确公司，要么显式待确认）。
 本片**不改读权限**，但**也不能称为"完全不变行为"**——写路径上多了一列与一次解析。
 
-**仍未定**：P4a 的 owner（含历史归属的人工确认与上线验收）+ 排期；上面两个口径的产品答复。
+**仍未定**：P4a 的 owner（含历史归属的人工确认与上线验收）+ **发布窗口**；上面两个口径的产品答复。
+
+> **已定（2026-10-10）**：发布方式与历史 NULL 的口径见
+> `D-20261010-p4a-rollout-is-a-maintenance-window-and-null-has-two-sources`；
+> 上面原文（本文与 `HANDOFF.md`）提到的"**滚动部署检查**（迁移先上、应用后上）"**是错的**，
+> 已由该条目更正——本仓做不到那个顺序，也不存在新旧混跑。
 
 - **影响：** 决策已定，**本轮仍不动任何 schema**。P4 的实现顺序：#4 的快照（= P4a）→ #3 的 COMPANY 授权主题 → #5 的数据范围收敛。
 
@@ -622,3 +627,42 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
   CI 的 frontend job 里。**仍未做**：模板那条 `openAPI` 配置没设 `projectName`（一旦有人跑文档里写的
   `npm run openapi` 就会撞名打红 `tsc`）——补 `projectName: 'ant-design-pro'` 即原地重生成、行为不变，
   属独立的一行修复，未在本轮做。P1-b（设计器逐字段配置分派迁移）另开方案。
+
+## D-20261010-p4a-rollout-is-a-maintenance-window-and-null-has-two-sources
+
+- **状态：** accepted（发布步骤落地为 `docs/p4a-rollout-runbook.md`；owner / 窗口仍未定）
+- **背景：** P4a 的代码早已落地，差的只是上线闭环。原本把这件事描述成"滚动部署检查（迁移先上、
+  应用后上）"（`HANDOFF.md`、本文上文）——**这句话是错的**，而且错得会让人去试一条不可行的路。
+- **决策一：本仓的发布**就是**维护窗口内停机重启**，不是滚动发布。实测依据：
+  `compose.yaml:41-86` 只有一个 `backend` 服务（全仓 grep 不到 `replicas`/`--scale`/`deploy:`）；
+  `infra/docker/nginx.conf:24-52` 是 `proxy_pass http://backend:8080`，**没有 `upstream` 块**；
+  且 **Flyway 在应用容器启动时跑**（`application.yml:26-29`），`deploy.sh`/`Dockerfile*`/CI 里
+  **没有**独立迁移步骤。⇒ 迁移与应用**必然同时生效**，新旧版本**不可能同时在线**。
+  **"旧实例长期混跑、写出没有 `company_id` 的新记录"这个风险在本仓不存在**——不是被缓解了，
+  而是原始条件不成立。
+- **决策二：`company_id IS NULL` 有两种来源，而库层分不出。** V54 没有 trigger、没有 CHECK、
+  没有 DEFAULT、索引也不是 partial（只有 `company_inferred BOOLEAN NOT NULL DEFAULT false`，
+  `V54:21,23`），所以"历史待确认"的新旧两行**逐字节无法区分**。挡住误写的**只有应用层**的
+  fail-closed（`ProcessEngine.java:89-92` 的 `BAD_COMPANY`），数据库本身不管。⇒ 上线后必须靠
+  **`company_id IS NULL AND started_at > 上线时刻` 必须为 0** 来兜（`started_at` 是
+  `TIMESTAMPTZ NOT NULL`，`V1__init.sql:99`）。这条**上线前跑没有意义**。
+- **决策三（实测，本条的地基）：V54 在 Flyway 真实路径下是原子的**，失败 = **整体回滚**。
+  用 `%LOCALAPPDATA%\Temp\p4a\V54Rehearsal.java` 在两个一次性探针库上跑（`target=53` 建库 →
+  造 fixture → 放开跑）：触发 pre-flight 时 V54 失败并抛 `P4a: 存在被多个实例引用的 t_form_data…`，
+  而 **4 个新列 0/4、2 个索引 0/2、`flyway_schema_history` 里连"失败行"都没有、业务数据完好**；
+  干净库则 4/4、2/2、1 行 `success=true`。Flyway 自己的日志：`Changes successfully rolled back.`
+  **为什么必须重证一遍**：`PostgresTransactionalIntegrityIntegrationTest:490-495` 早就断言过
+  guard 会抛，但它走 `jdbcTemplate.execute(sql)`——那是**驱动层**的多语句隐式事务，
+  **不是**上线时跑 V54 的 Flyway 路径。
+- **决策四：由此把恢复手段排序反过来。** **首要动作是"修好再起"或"回退旧镜像"**——失败时库与
+  迁移前逐字节相同，而 `company_id` 全为 NULL、**旧代码根本不读这两列**，所以旧镜像配 V53 schema
+  照常能跑。**不需要 `flyway repair`**（失败路径下历史表一行都没有，下次启动干净重试 V54）——
+  这条要紧，因为仓库规矩是 forward-only、禁止用 repair 掩盖状态（`D-20260917-flyway-forward-only`）。
+  **整库备份从"主要恢复手段"降级为最后兜底**，它只对"迁移成功、随后发现业务问题"有用（那时回退
+  镜像也撤销不了已回填的值）。
+- **决策五：历史 `company_id IS NULL` 接受长期保持。** 不自动归属、不按发起人今天的部门猜——
+  否则就是把 `started_dept_id` 那次"用迁移当时的部门推断"的错误再来一遍。
+- **影响：** 剩下的真实风险只有**停机时长**（= 回填 `UPDATE` + 两个索引的耗时），
+  而**那个数只能在生产量级的副库上量**，runbook 不给估算值。§1 那条重复 `form_data_id`
+  检查的价值因此被**重新定位**：不是"防损坏"（V54 损坏不了），而是**别在停机窗口里才发现**。
+  **仍未定**：owner、发布窗口。
