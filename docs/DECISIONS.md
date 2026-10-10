@@ -640,29 +640,49 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
   **没有**独立迁移步骤。⇒ 迁移与应用**必然同时生效**，新旧版本**不可能同时在线**。
   **"旧实例长期混跑、写出没有 `company_id` 的新记录"这个风险在本仓不存在**——不是被缓解了，
   而是原始条件不成立。
-- **决策二：`company_id IS NULL` 有两种来源，而库层分不出。** V54 没有 trigger、没有 CHECK、
-  没有 DEFAULT、索引也不是 partial（只有 `company_inferred BOOLEAN NOT NULL DEFAULT false`，
-  `V54:21,23`），所以"历史待确认"的新旧两行**逐字节无法区分**。挡住误写的**只有应用层**的
+- **决策二：`company_id IS NULL` 有两种来源，而库层分不出。** `company_id` **没有** DEFAULT、
+  **没有** CHECK、**没有** trigger，索引也不是 partial；`company_inferred` 只有
+  `DEFAULT false`（`V54:21,23`）。所以旧 schema 下"新写入漏了归属"与历史"待确认"两种行写出来
+  都是 `(NULL, false)`，**库层分不出来**。挡住误写的**只有应用层**的
   fail-closed（`ProcessEngine.java:89-92` 的 `BAD_COMPANY`），数据库本身不管。⇒ 上线后必须靠
   **`company_id IS NULL AND started_at > 上线时刻` 必须为 0** 来兜（`started_at` 是
-  `TIMESTAMPTZ NOT NULL`，`V1__init.sql:99`）。这条**上线前跑没有意义**。
+  `TIMESTAMPTZ NOT NULL`，`V1__init.sql:99`），它用时间把"上线前就存在的 NULL"排除掉。
+  这条**上线前跑没有意义**——而且那时 `company_id` 这一列**还不存在**，查它会报列不存在。
 - **决策三（实测，本条的地基）：V54 在 Flyway 真实路径下是原子的**，失败 = **整体回滚**。
   用 `%LOCALAPPDATA%\Temp\p4a\V54Rehearsal.java` 在两个一次性探针库上跑（`target=53` 建库 →
   造 fixture → 放开跑）：触发 pre-flight 时 V54 失败并抛 `P4a: 存在被多个实例引用的 t_form_data…`，
   而 **4 个新列 0/4、2 个索引 0/2、`flyway_schema_history` 里连"失败行"都没有、业务数据完好**；
   干净库则 4/4、2/2、1 行 `success=true`。Flyway 自己的日志：`Changes successfully rolled back.`
+  **准确表述**：回滚保证的是**逻辑状态与迁移前一致**（结构、数据、迁移历史三样），
+  不是"物理字节相同"。
   **为什么必须重证一遍**：`PostgresTransactionalIntegrityIntegrationTest:490-495` 早就断言过
   guard 会抛，但它走 `jdbcTemplate.execute(sql)`——那是**驱动层**的多语句隐式事务，
   **不是**上线时跑 V54 的 Flyway 路径。
-- **决策四：由此把恢复手段排序反过来。** **首要动作是"修好再起"或"回退旧镜像"**——失败时库与
-  迁移前逐字节相同，而 `company_id` 全为 NULL、**旧代码根本不读这两列**，所以旧镜像配 V53 schema
-  照常能跑。**不需要 `flyway repair`**（失败路径下历史表一行都没有，下次启动干净重试 V54）——
-  这条要紧，因为仓库规矩是 forward-only、禁止用 repair 掩盖状态（`D-20260917-flyway-forward-only`）。
-  **整库备份从"主要恢复手段"降级为最后兜底**，它只对"迁移成功、随后发现业务问题"有用（那时回退
-  镜像也撤销不了已回填的值）。
-- **决策五：历史 `company_id IS NULL` 接受长期保持。** 不自动归属、不按发起人今天的部门猜——
+- **决策四（先前漏了的一格）：V54 成功之后旧镜像能不能起，是另一回事。**
+  `%LOCALAPPDATA%\Temp\p4a\RollbackRehearsal.java`：库跑到 V54（`history: 53=true 54=true`、4/4 列）
+  后，把 Flyway 的 locations 换成**只有 V1..V53** 的目录（模拟旧镜像）→ `validate()` OK、
+  `migrate()` OK `migrationsExecuted=0`。⇒ 历史表里那条解析不出的 V54，**Flyway 10 按
+  "future migration" 容忍，不硬失败**。
+  **先前给的理由是错的**：本文草稿写过"旧代码不读这两列所以回退安全"——那压根没检查 Flyway，
+  而 Flyway 才是启动期的硬门。已按实测结论替换。**仍未实测的一格**：
+  `spring.jpa.hibernate.ddl-auto: validate`（旧实体没有这两列映射，`validate` 只查"映射到的表/列
+  在不在"、不查多余列，**预期通过但是推理不是实测**）——窗口前用上一个镜像 tag 配 V54 库副本起一次补掉。
+- **决策五：由此把恢复手段排序反过来。** **首要动作是"修好再起"或"回退旧镜像"**——`V54 失败`时
+  库的逻辑状态与迁移前一致（决策三），旧镜像配 V53 schema 当然能跑；`V54 成功之后`回退旧镜像也
+  已经实测能起（决策四）。**不需要 `flyway repair`**（失败路径下历史表一行都没有，下次启动干净
+  重试 V54）——这条要紧，因为仓库规矩是 forward-only、禁止用 repair 掩盖状态
+  （`D-20260917-flyway-forward-only`）。**整库备份从"主要恢复手段"降级为最后兜底**，它只对
+  "迁移成功、随后发现业务问题"有用（那时回退镜像也撤销不了已回填的值）。
+  **但两个场景的库状态不同，别混**：`V54 失败` → 库仍是 V53；`V54 成功、应用随后没起来` →
+  库是 V54。后者回退旧镜像虽可行，代价是**旧代码写出的实例 `company_id` 为 NULL ⇒ 归因暂停**
+  （上线后那条 `started_at > 上线时刻` 的检查会开始非 0，那是本次回退的直接后果，不是 bug），
+  所以那种情况优先"修好再起新镜像"而不是回退。
+- **决策六：历史 `company_id IS NULL` 接受长期保持。** 不自动归属、不按发起人今天的部门猜——
   否则就是把 `started_dept_id` 那次"用迁移当时的部门推断"的错误再来一遍。
-- **影响：** 剩下的真实风险只有**停机时长**（= 回填 `UPDATE` + 两个索引的耗时），
-  而**那个数只能在生产量级的副库上量**，runbook 不给估算值。§1 那条重复 `form_data_id`
+- **影响：** 剩下的真实风险只有**停机时长**。它**不等于**回填 `UPDATE` 的耗时——窗口里还有
+  4 个 `ALTER TABLE`（各取 ACCESS EXCLUSIVE，要等长事务让路）、外键校验、以及 2 个
+  **非 `CONCURRENTLY`** 的 `CREATE INDEX`（取 SHARE 锁，建索引期间表不可写，大表上常比回填更贵）。
+  所以副库计时必须掐**完整的 `Flyway migrate`** 并记锁等待，且**镜像构建要移出窗口**。
+  **那个数只能在生产量级的副库上量**，runbook 不给估算值。§1 那条重复 `form_data_id`
   检查的价值因此被**重新定位**：不是"防损坏"（V54 损坏不了），而是**别在停机窗口里才发现**。
   **仍未定**：owner、发布窗口。
