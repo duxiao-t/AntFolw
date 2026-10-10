@@ -115,20 +115,39 @@ function h2() {
 }
 
 // ── H3 手写重复业务 DTO：独立声明的 FormDefinition 副本数 ──────────────────────
+//
+// 只数**独立对象定义**（`type FormDefinition = { ... }` / `interface FormDefinition {`）——
+// 那才是"本可以引用契约、却自己又写了一遍"。另外两类**不算**：
+//   1. 生成目录（`frontend/src/services/`）：那里的声明是从契约真源生成的，**它就是契约**；
+//      不排除的话，本指标会把"接通契约"读成变差。（旧版逐行正则扫 `\.ts$`，把
+//      `typings.d.ts` 也算了进来。）
+//   2. **派生别名**（`= AntFlowAPI.FormDefinition` / `Pick<...>` / `X & {...}`）：它引用生成
+//      类型，没有重复定义任何字段。旧版把这两类混在一起数，于是"改名成派生"和"删掉"分不清。
+//
+// 分类规则抽成纯函数，`--self-test` 里直接钉住，免得以后又混回去。
+function classifyFormDefinition(line) {
+  const decl = /^\s*(?:export\s+)?(interface|type)\s+FormDefinition\b(.*)$/.exec(line);
+  if (!decl) return null;
+  const [, keyword, rest] = decl;
+  if (keyword === 'interface') return 'independent';
+  return rest.replace(/^\s*=\s*/, '').startsWith('{') ? 'independent' : 'derived';
+}
+
 function h3() {
   const files = [
     ...walk(p('frontend', 'src'), (n) => /\.(ts|tsx)$/.test(n)),
     ...walk(p('mobile', 'src'), (n) => /\.(ts|tsx)$/.test(n)),
-  ];
+  ].filter((file) => !rel(file).startsWith('frontend/src/services/'));
   const declarations = [];
+  const derived = [];
   for (const file of files) {
     readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
-      if (/^\s*(?:export\s+)?(?:interface|type)\s+FormDefinition\b/.test(line)) {
-        declarations.push(`${rel(file)}:${i + 1}`);
-      }
+      const kind = classifyFormDefinition(line);
+      if (kind === 'independent') declarations.push(`${rel(file)}:${i + 1}`);
+      else if (kind === 'derived') derived.push(`${rel(file)}:${i + 1}`);
     });
   }
-  return { declarations: declarations.sort() };
+  return { declarations: declarations.sort(), derived: derived.sort() };
 }
 
 // ── H4 可写运行时实现数：legacy 与 V2 两套都在写 ───────────────────────────────
@@ -235,6 +254,43 @@ if (process.argv.includes('--self-test')) {
     }).length > 0,
     `分维度丢失渠道必须报变差（${dimension}）`,
   );
+  // H3 分类：独立对象定义才算副本；引用生成类型的派生别名不算。
+  assert(
+    classifyFormDefinition('type FormDefinition = {') === 'independent',
+    'H3：对象体声明算独立副本',
+  );
+  assert(
+    classifyFormDefinition('interface FormDefinition {') === 'independent',
+    'H3：interface 算独立副本',
+  );
+  assert(
+    classifyFormDefinition('type FormDefinition = AntFlowAPI.FormDefinition;') === 'derived',
+    'H3：生成类型派生不算副本',
+  );
+  assert(
+    classifyFormDefinition('type FormDefinition = Pick<AntFlowAPI.Summary, "id">;') === 'derived',
+    'H3：Pick 派生不算副本',
+  );
+  assert(classifyFormDefinition('const x = 1;') === null, 'H3：非声明返回 null');
+  assert(
+    !current.H3.declarations.some((d) => d.startsWith('frontend/src/services/')),
+    'H3：生成目录（src/services）不计入副本',
+  );
+  // 方向：加回一份独立副本必须报变差；多一个派生别名不算变差。
+  assert(
+    compare(current, {
+      ...current,
+      H3: { ...current.H3, declarations: [...current.H3.declarations, 'frontend/src/x.ts:1'] },
+    }).length > 0,
+    'H3 新增独立副本必须报变差',
+  );
+  assert(
+    compare(current, {
+      ...current,
+      H3: { ...current.H3, derived: [...current.H3.derived, 'frontend/src/x.ts:1'] },
+    }).length === 0,
+    'H3 派生别名不判变差',
+  );
   process.exit(0);
 }
 
@@ -270,7 +326,7 @@ const h2breakdown = Object.entries(current.H2.byDimension)
 console.log(
   `健康指标 OK：H1 缺口 桌面 ${current.H1.missingDesktop.length}/移动 ${current.H1.missingMobile.length}、` +
     `H2 渠道并集 ${current.H2.union.length}/${current.H2.declared.length}（${h2breakdown}）、` +
-    `H3 ${current.H3.declarations.length} 份副本、` +
+    `H3 ${current.H3.declarations.length} 份手写副本（另有 ${current.H3.derived.length} 个派生别名）、` +
     `H4 ${current.H4.writableRuntimes} 套运行时、H5 Java ${current.H5.javaGates}/TS ${current.H5.tsGates} 类门禁、` +
     `H6 预算 ${current.H6.entryBudgetKiB}/${current.H6.lazyBudgetKiB} KiB${h4note}`,
 );

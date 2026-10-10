@@ -36,13 +36,8 @@
     }
   },
   "H3": {
-    "declarations": [
-      "frontend/src/pages/admin/FormList/index.tsx:13",
-      "frontend/src/pages/approval/FormManagementList.tsx:18",
-      "frontend/src/pages/approval/FormManagementWizard.tsx:49",
-      "frontend/src/pages/designer/form/FormDesigner.tsx:244",
-      "frontend/src/pages/designer/process/ProcessDesigner.tsx:55"
-    ]
+    "declarations": [],
+    "derived": []
   },
   "H4": {
     "writableRuntimes": 2,

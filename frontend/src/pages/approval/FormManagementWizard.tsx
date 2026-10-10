@@ -46,17 +46,6 @@ import FormGrantUserPicker, {
 import MobileFormPreview from './MobileFormPreview';
 import BusinessNumberEditor from './BusinessNumberEditor';
 
-type FormDefinition = {
-  id: number;
-  code: string;
-  name: string;
-  status: string;
-  version: number;
-  description?: string;
-  schema?: any[] | string;
-  settings?: Record<string, any> | string;
-};
-
 type ProcessDefinition = {
   id: number;
   formDefId: number;
@@ -311,9 +300,10 @@ export default function FormManagementWizard() {
   // 能打开 /designer/form/new，一路填完，最后 POST /api/forms/definitions 才 403——"存不了"。
   const canCreateForm = isAdmin || hasCapability(currentUser, CAPABILITY.formDefinitionManage);
 
-  const { data: definition } = useQuery<FormDefinition>({
+  const { data: definition } = useQuery<AntFlowAPI.FormDefinition>({
     queryKey: ['form-management-definition', formId],
-    queryFn: () => request<FormDefinition>(`/api/forms/definitions/${formId}`),
+    queryFn: () =>
+      request<AntFlowAPI.FormDefinition>(`/api/forms/definitions/${formId}`),
     enabled: !!formId,
   });
 
@@ -557,7 +547,7 @@ export default function FormManagementWizard() {
 
   useEffect(() => {
     if (definition && syncedDefinitionId.current !== definition.id) {
-      syncedDefinitionId.current = definition.id;
+      syncedDefinitionId.current = definition.id ?? null;
       form.setFieldsValue({
         code: definition.code,
         name: definition.name,
@@ -626,16 +616,17 @@ export default function FormManagementWizard() {
         workflowEnabled: !!values.workflowEnabled,
         businessNumber: values.businessNumber,
       };
-      const saved = await request<FormDefinition>('/api/forms/definitions', {
-        method: 'POST',
-        data: {
-          id: formId,
-          code: values.code,
-          name: values.name,
-          schema,
-          settings,
-        },
-      });
+      const body: AntFlowAPI.SaveBody = {
+        id: formId ?? undefined,
+        code: values.code,
+        name: values.name,
+        schema,
+        settings,
+      };
+      const saved = await request<AntFlowAPI.FormDefinition>(
+        '/api/forms/definitions',
+        { method: 'POST', data: body },
+      );
       if (!isNew || !canManageGrants) return saved;
 
       try {
@@ -772,16 +763,17 @@ export default function FormManagementWizard() {
   const saveDraft = useMutation({
     mutationFn: () => {
       if (!definition) throw new Error('请先保存表单属性');
-      return request<FormDefinition>('/api/forms/definitions', {
+      const body: AntFlowAPI.SaveBody = {
+        id: definition.id,
+        code: definition.code,
+        name: definition.name,
+        description: definition.description ?? '',
+        schema,
+        settings: parseJsonValue(definition.settings, {}),
+      };
+      return request<AntFlowAPI.FormDefinition>('/api/forms/definitions', {
         method: 'POST',
-        data: {
-          id: definition.id,
-          code: definition.code,
-          name: definition.name,
-          description: definition.description ?? '',
-          schema,
-          settings: parseJsonValue(definition.settings, {}),
-        },
+        data: body,
       });
     },
     onSuccess: () => {
@@ -825,17 +817,18 @@ export default function FormManagementWizard() {
       if (!formId) throw new Error('请先保存表单属性');
       // 先落库再发布：不然画布上没保存的改动会连同发布一起被丢掉，而且"已发布的表单再点发布"
       // 在后端是空操作——用户会以为发布成功了，其实什么都没发生。
-      const saved = await request<FormDefinition>('/api/forms/definitions', {
-        method: 'POST',
-        data: {
-          id: formId,
-          code: definition?.code,
-          name: definition?.name,
-          description: definition?.description ?? '',
-          schema,
-          settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
-        },
-      });
+      const body: AntFlowAPI.SaveBody = {
+        id: formId,
+        code: definition?.code,
+        name: definition?.name,
+        description: definition?.description ?? '',
+        schema,
+        settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
+      };
+      const saved = await request<AntFlowAPI.FormDefinition>(
+        '/api/forms/definitions',
+        { method: 'POST', data: body },
+      );
       // 内容没变时后端会原样返回 PUBLISHED。但**流程**可能还有未发布的草稿改动，这时不能
       // 直接返回——否则"只改了流程"的发布会永远停在草稿，界面却提示发布成功。
       if (saved?.status === 'PUBLISHED'

@@ -241,15 +241,6 @@ function CanvasDrop({
   );
 }
 
-type FormDefinition = {
-  id: number;
-  code: string;
-  name: string;
-  description?: string;
-  schema?: any[] | string;
-  settings?: Record<string, any> | string;
-};
-
 function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
   if (typeof value !== 'string') return value ?? fallback;
   try {
@@ -266,7 +257,7 @@ export function FormDesignerSurface({
 }: {
   formId?: string | number;
   embedded?: boolean;
-  onSaved?: (form: FormDefinition) => void;
+  onSaved?: (form: AntFlowAPI.FormDefinition) => void;
 }) {
   const routeParams = useParams();
   const id = String(formId ?? routeParams.id ?? 'new');
@@ -285,7 +276,8 @@ export function FormDesignerSurface({
     undo,
   } =
     useFormDesignerStore();
-  const [definition, setDefinition] = useState<FormDefinition | null>(null);
+  const [definition, setDefinition] =
+    useState<AntFlowAPI.FormDefinition | null>(null);
   // 同一张表单只从服务端取一次属性。
   const fetchedFormId = useRef<string | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
@@ -396,7 +388,9 @@ export function FormDesignerSurface({
     fetchedFormId.current = String(id);
     (async () => {
       try {
-        const fd = await request<FormDefinition>(`/api/forms/definitions/${id}`);
+        const fd = await request<AntFlowAPI.FormDefinition>(
+          `/api/forms/definitions/${id}`,
+        );
         // 请求期间路由可能已经切到另一张表单：这份响应已过期，落地会把 A 的属性/schema
         // 写到 B 身上（或盖掉 B 还没保存的编辑）。
         if (fetchedFormId.current !== String(id)) return;
@@ -414,22 +408,25 @@ export function FormDesignerSurface({
     mutationFn: () => {
       // 属性没加载完就别保存：下面那些 `?? 兜底` 会把真实的 name/settings 覆盖成编造值。
       if (!definition) throw new Error('表单属性还没加载完，请刷新后重试');
-      return request('/api/forms/definitions', {
+      const body: AntFlowAPI.SaveBody = {
+        id: id === 'new' ? undefined : Number(id),
+        code: definition.code,
+        name: definition.name,
+        description: definition.description ?? '',
+        schema,
+        settings: parseJsonValue(definition.settings, {}),
+      };
+      return request<AntFlowAPI.FormDefinition>('/api/forms/definitions', {
         method: 'POST',
-        data: {
-          id: id === 'new' ? null : Number(id),
-          code: definition.code,
-          name: definition.name,
-          description: definition.description ?? '',
-          schema,
-          settings: parseJsonValue(definition.settings, {}),
-        },
+        data: body,
       });
     },
-    onSuccess: (res: any) => {
+    onSuccess: (res: AntFlowAPI.FormDefinition) => {
       setDefinition(res);
       onSaved?.(res);
-      if (id === 'new' && !embedded) navigate(`/approval/forms/${res.id}/wizard?step=designer`);
+      if (id === 'new' && !embedded && res.id !== undefined) {
+        navigate(`/approval/forms/${res.id}/wizard?step=designer`);
+      }
       message.success('已保存草稿');
     },
   });
