@@ -67,7 +67,10 @@
 `t_user_username_key` / `t_option_data_source_code_key` 重复键与 V54 重放，看着像回归其实不是；
 `MakeProbeDb.java` 在 `%LOCALAPPDATA%\Temp\p4a\`，跑法见下"验证基线"。
 ② 前端全量 vitest 与后端 `mvn test` **同时**跑会让 `src/app.test.tsx`（happy-dom 里 fetch `localhost:3000`）
-超时假红——它会自愈，但别把它当回归；同理移动端并发跑会假掉到 152/46。
+超时假红——重跑即绿，别把它当回归。③ **移动端全量偶发只收集到 23/46 个文件**（`Test Files 23 passed (23)` /
+`Tests 152 passed (152)` + 23 条 unhandled error），重跑回到 362。**原因未查明**（三次里坏一次，好坏两次
+都在后端 `mvn test` 并发下，所以别急着归因成"并发"）；本轮 `git diff -- mobile` 为空，与本轮改动无关。
+看清 `/46` 这个分母再判断是不是回归。
 
 **没做（要说清）**：① 模板那条 `openAPI` 配置仍没设 `projectName`——一旦有人跑文档里写的 `npm run openapi`，
 会生成 `src/services/antflow-frontend/` 并与既有目录声明合并、把 `tsc` 打红。补 `projectName: 'ant-design-pro'`
