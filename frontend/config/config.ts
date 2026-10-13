@@ -227,6 +227,10 @@ export default defineConfig({
       // 或者使用在线的版本
       // schemaPath: "https://gw.alipayobjects.com/os/antfincdn/M%24jrzTTYJN/oneapi.json"
       schemaPath: join(__dirname, 'oneapi.json'),
+      // 必须写死：插件的默认值是 package.json 的 name（现在是 antflow-frontend），
+      // 生成目录会变成 src/services/antflow-frontend/，与既有 ant-design-pro/ 的全局
+      // `declare namespace API` 声明合并 → 跑 `npm run openapi` 会把 tsc 打红。
+      projectName: 'ant-design-pro',
       mock: false,
     },
   ],

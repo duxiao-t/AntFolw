@@ -624,9 +624,17 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
 - **影响：** 后端改契约（改 controller 签名/字段/路径）→ `ApiContractSnapshotTest` 红，消息给
   **路径数对比** + 重写命令 `mvn -B test -Dtest=ApiContractSnapshotTest -Dantflow.openapi.write=true`
   （**默认不写工作区**）。前端改契约后忘了重生成/提交 → `npm run openapi:check` 红。四条门禁都在
-  CI 的 frontend job 里。**仍未做**：模板那条 `openAPI` 配置没设 `projectName`（一旦有人跑文档里写的
-  `npm run openapi` 就会撞名打红 `tsc`）——补 `projectName: 'ant-design-pro'` 即原地重生成、行为不变，
-  属独立的一行修复，未在本轮做。P1-b（设计器逐字段配置分派迁移）另开方案。
+  CI 的 frontend job 里。P1-b（设计器逐字段配置分派迁移）另开方案。
+- **补齐（2026-10-13）**：模板那条 `openAPI` 没设 `projectName`，插件默认取 `package.json` 的 name
+  （现在是 `antflow-frontend`）⇒ 跑 `npm run openapi` 会生成 `src/services/antflow-frontend/`，
+  与既有 `ant-design-pro/` 的全局 `declare namespace API` **声明合并**打红 `tsc`。
+  已补 `projectName: 'ant-design-pro'`（`frontend/config/config.ts`），实测**不再生成新目录**、碰撞消失。
+  **但先前这条写的"原地重生成、行为不变"是错的**：实测重生成并非内容中立 —— 当前生成器把 tag 拆成了
+  独立文件，于是多出 `src/services/ant-design-pro/rule.ts`，而 `api.ts` 少了 77 行、
+  `pages/table-list/` 里 4 个文件仍从 `api` 里 import `rule`/`addRule`/`updateRule`/`removeRule` ⇒
+  `tsc` 反而红。所以**这一行只修掉了命名空间碰撞**；`npm run openapi` 目前仍会打红 `tsc`
+  （第二个、独立的成因：生成器按 tag 拆文件，与两年没重生成的存量输出不一致）。
+  要让那条命令真正变成 no-op，得把重生成产物一并提交并改 `pages/table-list/` 那 4 处 import。
 
 ## D-20261010-p4a-rollout-is-a-maintenance-window-and-null-has-two-sources
 
