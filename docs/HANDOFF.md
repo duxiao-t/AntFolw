@@ -5,8 +5,11 @@
 > **先做 P4a（归属快照），做完再回 P1**。历史口径已定：**无法证明归属的保留 `company_id = NULL`（待确认）**，不自动归属、不按今天部门猜；写路径清点见该决策条目（实例只有 1 个写入口，无流程/草稿的 `t_form_data` 必须自己快照）。
 > **P4a 已实施（2026-10-10，见下"最新一轮"）**：两个产品口径已定（无部门全局管理员**显式指定**目标公司；草稿转正**取草稿创建时**）。
 > **P1-a 已实施（2026-10-10）**：真实后端契约已接进生成链路（见下"最新一轮"）——契约构建期导出并提交、两侧门禁、5 处手写 `FormDefinition` 清零、H3 基线归零。**P1-b（设计器逐字段配置分派迁移）另开方案，本轮未动。**
-> 仍差：**P4a 的 owner + 发布窗口**（历史归属的人工确认 + 上线验收；**发布步骤已落地**，见
-> `docs/p4a-rollout-runbook.md`），然后按 `P4a 验收 → P1-b → #3 COMPANY 授权 → #5 数据范围` 推进。
+> **P4a 发布窗口已定：2026-10-15 02:00（+08:00）开始、预计 30 分钟**，owner / draft handler 均为 `admin`
+> （30 分钟为初值，待生产量级预演校正）。**发布步骤已落地**，见 `docs/p4a-rollout-runbook.md`。
+> 之后按 `P4a 验收 → P1-b → #3 COMPANY 授权 → #5 数据范围` 推进。
+> **P4a 验收记录（2026-10-14）见 `docs/p4a-acceptance-record.md`**：口径 1/2/3 四层均有证据 ⇒
+> **代码与规则部分验收通过**；剩余是运维动作（窗口上线 + 历史草稿回填）。
 
 # 任务交接
 
@@ -114,9 +117,11 @@
 真库回填用例红（`expected 2L but was 3L`）；去掉引擎 null 检查 → 报 `FORM_NOT_PUBLISHED` 而非 `BAD_COMPANY`；
 把 `deleteAfterSubmit` 提前到 insert 之前 → 真库 `legacyDraftWithoutCompanySnapshotIsBlockedAndKept` 红（`DRAFT_NOT_FOUND`）。
 
-**没做（要说清）**：① 活栈手点（浏览器里点选择器）——本机 docker 栈要重建镜像才能带上这轮改动，
-未做；规则层与真库层已覆盖。② **发布动作未做**，已落成 `docs/p4a-rollout-runbook.md`。
-③ P4a 的 owner + 窗口仍未定。
+**没做（要说清）**：① 活栈手点（浏览器里点选择器）——**已于 2026-10-14 补做**：无部门管理员能选公司
+（`id=44 company_id=1 inferred=false`）、普通用户自动推导（`id=43 company_id=1 by=3 dept=4`，客户端发
+`companyId:null`）、草稿刷新后归属固定不丢（草稿 52 reload 后显示「归属已固定」）。② **发布动作未做**，
+已落成 `docs/p4a-rollout-runbook.md`。③ P4a 的发布窗口已定：2026-10-15 02:00（+08:00）、预计 30 分钟
+（初值，待生产量级预演校正）。
 
 > **更正（2026-10-10）**：上面原文写的"**滚动部署检查**（迁移先上、应用后上）"是**错的**——
 > 本仓单实例、Flyway 在应用容器启动时跑，"先迁移后上应用"做不到，也不存在新旧混跑。
@@ -623,6 +628,19 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
   想收它得先解决"React 延后渲染活过 happy-dom 拆卸"（本机复现不出来）。
 - 视频积压时**没有进度 UI**（只能靠客户端轮询等）——队列语义已经是"永久排队不失败"，但用户看不到
   "排在第几位"。真正的解是任务进度，记在这里。
+- **公司 / 部门归属没有可用的管理入口**（2026-10-14 活栈调研发现；留给 P4 的 COMPANY 授权 / 数据范围那步）：
+  *建公司*——后端有 `POST /api/companies`（`CompanyController.java:28-38`，`system:company:manage`，
+  **无 PUT/DELETE**），但活前端不调它：已注册的 `/settings/company`（`frontend/src/pages/settings/Company.tsx`）
+  只 GET、保存是 `message.info('保存成功（演示）')`；真实现 create 的
+  `frontend/src/pages/admin/Company/index.tsx` **未注册**（不在 `config/routes.ts` / `pages/registry.ts`），是死代码。
+  库里唯一一条公司来自 `V12__seed_default_company.sql`。*归属配置*——链是
+  `t_user.dept_id → t_department.company_id` 一跳（`CompanyAttribution.java:34-60`，**不沿 `parentId` 上溯**）；
+  `company_id` 只在建部门时写入（`DepartmentService.create`），`DepartmentController.updateDepartment:179-199`
+  **不认 `companyId`** ⇒ 部门建完改不了所属公司；通讯录 `/org/contacts` 建部门时把 `companyId` 写死
+  `companies[0].id ?? 1`（`Contacts.tsx:74`），UI 无公司选择器；成员编辑弹窗无部门字段
+  （`Contacts.components.tsx:344-421`），建人时靠"当前选中树节点"隐含定部门（`Contacts.tsx:374`）——
+  后端其实接受 `deptId`（`UserService.update:536-543`、`UserController.toUser:261-263`），只是前端没给入口。
+  ⇒ 今天只有 1 家公司所以没暴露；要支持多公司必须先补这些入口。
 
 ## 验证基线
 
