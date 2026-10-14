@@ -1,5 +1,5 @@
 import { CheckCircleOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Input, Radio, Typography } from 'antd';
+import { Button, Input, Radio, Typography } from 'antd';
 import { useEffect, useRef } from 'react';
 import { AuthenticatedMedia } from './MediaPreview';
 import { MediaUploadControl } from './MediaUploadControl';
@@ -227,20 +227,4 @@ export const ChecklistField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <input
-        value={node.label ?? ''}
-        onChange={(e) => onChange({ ...node, label: e.target.value })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }}
-      />
-      <Checkbox
-        checked={node.props?.allowDescription !== false}
-        onChange={(e) => onChange({ ...node, props: { ...node.props, allowDescription: e.target.checked } })}
-      >
-        允许填写图文描述
-      </Checkbox>
-    </div>
-  ),
 };

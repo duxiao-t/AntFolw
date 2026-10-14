@@ -1,4 +1,4 @@
-import { Input, Switch } from 'antd';
+import { Switch } from 'antd';
 import type { FieldType } from '../../registry/types';
 
 /** 开关：值是 boolean，**只有 `=== true` 算开**（与移动端 `SwitchField.tsx` 同一判据）。 */
@@ -30,20 +30,4 @@ export const SwitchField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-      <div>开状态文案</div>
-      <Input
-        value={node.props?.checkedText ?? '是'}
-        onChange={(e) => onChange({ ...node, props: { ...node.props, checkedText: e.target.value } })}
-      />
-      <div>关状态文案</div>
-      <Input
-        value={node.props?.uncheckedText ?? '否'}
-        onChange={(e) => onChange({ ...node, props: { ...node.props, uncheckedText: e.target.value } })}
-      />
-    </div>
-  ),
 };

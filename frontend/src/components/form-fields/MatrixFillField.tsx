@@ -360,6 +360,5 @@ export const MatrixFillField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: () => null,
   validate: (value, props) => validateMatrixValue(value, props, '矩阵'),
 };

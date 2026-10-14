@@ -120,11 +120,4 @@ export const TableListField: FieldType = {
       </fieldset>
     );
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>明细表标题</div>
-      <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-    </div>
-  ),
 };

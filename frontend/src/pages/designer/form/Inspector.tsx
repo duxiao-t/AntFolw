@@ -778,8 +778,8 @@ function renderComponentSettings(
         </Space>
       );
     // radio/checkbox 是「用按钮组呈现的下拉」：选项编辑复用同一个 SelectOptionsEditor
-    // （它按 {...option, ...patch} 改单项，保留 hidden/disabled/color，数值也不会被字符串化成
-    // SelectField.ConfigPanel 那种 textarea 的毛病）。它们没有下拉的 allowClear/搜索/最多选择数。
+    // （它按 {...option, ...patch} 改单项，保留 hidden/disabled/color，数值也不会被字符串化）。
+    // 它们没有下拉的 allowClear/搜索/最多选择数。
     case 'radio':
     case 'checkbox':
       return (

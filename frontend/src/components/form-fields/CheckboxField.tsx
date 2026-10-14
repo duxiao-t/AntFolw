@@ -1,7 +1,6 @@
 import { Checkbox } from 'antd';
 import type { FieldType } from '../../registry/types';
 import { choiceOptions, choiceReadonlyText, optionColor } from './choiceFieldOptions';
-import { SelectField } from './SelectField';
 
 /** 多选：值是选中项 `value` 的数组，与移动端 `CheckboxField.tsx` 同义。 */
 export const CheckboxField: FieldType = {
@@ -45,6 +44,4 @@ export const CheckboxField: FieldType = {
       </div>
     );
   },
-  // 同 RadioField：真正的选项编辑器在 Inspector 的 `case 'checkbox'` 分支。
-  ConfigPanel: SelectField.ConfigPanel,
 };

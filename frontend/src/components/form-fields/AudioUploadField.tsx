@@ -150,7 +150,6 @@ export const AudioUploadField: FieldType = {
   type: 'audio_upload', label: '录音', icon: 'audio',
   defaultProps: { required: false, maxCount: 3, maxDuration: 60 },
   Component: AudioInput,
-  ConfigPanel: () => null,
   validate(value, props) {
     if (hasPendingAudioUpload(value)) return '仍有录音未完成上传';
     const files = Array.isArray(value) ? value : [];

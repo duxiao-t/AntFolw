@@ -1,4 +1,4 @@
-import { Input, TimePicker } from 'antd';
+import { TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import type { FieldType } from '../../registry/types';
 
@@ -45,15 +45,4 @@ export const TimeField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-      <div>占位</div>
-      <Input
-        value={node.props?.placeholder ?? ''}
-        onChange={(e) => onChange({ ...node, props: { ...node.props, placeholder: e.target.value } })}
-      />
-    </div>
-  ),
 };

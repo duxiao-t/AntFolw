@@ -42,6 +42,5 @@ export type FieldType<TProps = any, TValue = any> = {
   icon: string;
   defaultProps: TProps;
   Component: React.FC<FieldComponentProps<TProps, TValue>>;
-  ConfigPanel: React.FC<{ node: SchemaNode; onChange: (n: SchemaNode) => void }>;
   validate?(value: TValue, props: TProps): string | null;
 };

@@ -10,16 +10,58 @@
 > 之后按 `P4a 验收 → P1-b → #3 COMPANY 授权 → #5 数据范围` 推进。
 > **P4a 验收记录（2026-10-14）见 `docs/p4a-acceptance-record.md`**：口径 1/2/3 四层均有证据 ⇒
 > **代码与规则部分验收通过**；剩余是运维动作（窗口上线 + 历史草稿回填）。
+> **P1-b 已起步（2026-10-14）**：B0 = 清掉 26 份零渲染点的 `ConfigPanel`（**只清理、不接线**）——
+> 集中式 `Inspector.renderComponentSettings()` 仍是唯一配置入口，逐字段迁移**尚未开始**。
 
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-10T12:10:00+08:00`
-- **分支：** `master`（= `a8c6790`，本轮改动**未提交**）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
+- **更新时间：** `2026-10-14T15:10:00+08:00`
+- **分支：** `master`（本轮含 B0 提交；上一轮 P4a 文档见 `6785add`）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
 
 ---
 
-## 最新一轮：P1-a——真实后端契约接进生成链路，消掉手写 FormDefinition
+## 最新一轮：P1-b / B0——清掉 26 份零渲染点的 `ConfigPanel`
+
+**这一轮只清理、不接线。** 注册表原先声称每个字段都有配置面板，实际零渲染点——把这份"看起来已经迁完"
+的假象删掉，集中式 `renderComponentSettings()` 仍是唯一配置入口。逐字段迁移（把 switch 的 case 搬进各字段）
+**尚未开始**；下一批首次迁移字段时，再同时引入可选面板接口、Inspector 分派与对应行为测试。
+
+| 变更 | 内容 |
+| --- | --- |
+| `frontend/src/registry/types.ts` | `FieldType` 去掉必填的 `ConfigPanel` |
+| `frontend/src/components/form-fields/*.tsx`（**26 个**） | 删掉各自的 `ConfigPanel`：4 个 `() => null` stub、3 个 `= SelectField.ConfigPanel` 别名、19 个内联手写面板 |
+| 同批的孤儿 import | **只清本次删除造成的**：`CheckboxField`/`RadioField`/`MultiSelectField` 的 `SelectField`（只为别名而存在），`SwitchField`/`TimeField` 的 `Input`、`ChecklistField` 的 `Checkbox`（后三个由 `biome:lint` 报出，不是预设） |
+| `Inspector.tsx:780-782`、`InspectorChoiceFields.test.tsx:7-8` | 注释改成不再指名已删的字段；**测试断言一行未改** |
+
+**为什么敢删**：设计器真正的入口是 `Inspector.tsx:347` 调用的 `renderComponentSettings()`
+（`Inspector.tsx:571-1430`，23 个 `case`），全仓 `grep ConfigPanel` 零渲染点——这一点
+`docs/architecture-review-2026-10-09.md:336-338` 与 `InspectorChoiceFields.test.tsx` 的 docstring 两处独立记载过。
+而且这些死实现**劣于** switch：`SelectField` 那个用 `value|label` 文本域编选项，会 stringify 数值、
+丢掉 hidden/disabled/color（`Inspector.tsx:782` 早有点出）。
+
+**验证（本轮实测，非历史数）**：`grep -rn ConfigPanel frontend/src` → 1 处（只剩上面那句历史说明）；
+`npm run tsc` exit 0；`biome:lint` **4 warnings**（=改前基线）；`npm run check:boundaries` exit 0
+（存量 8 条、无新增）；`npm run test` exit 0、**64 文件 / 314 通过**；`node scripts/health-metrics.mjs` exit 0
+（H1 桌面 0/移动 0、H3 0）。
+
+**部署产物验收（重建镜像后，与上一轮 dev server 验收区分）**：`Dockerfile.local` 的 web stage 只
+`COPY frontend/dist/`（`Dockerfile.local:26`），**不在容器里构建** ⇒ 流程必须是
+`npm run build`（宿主机）→ `docker compose --env-file .env.docker.local build web` → `up -d web`。
+只有先重跑 `npm run build` 才带上 B0（当时 `frontend/dist` 还是 11:04 的旧包，里面仍留着已删面板的字符串）。
+结果：web `200`、backend `{"status":"UP"}`、容器内 `grep ConfigPanel` 为 **0**。
+在部署后的页面对**测试表单导入**（含 text/select/checklist）各改一个配置、保存、重开，
+读回一致（`maxLength 300` / `验收-选项1` / `验收-检查项1` 都落进 `t_form_definition.schema`），
+验收后按 `t_form_definition_version` v3 快照把该表单的 `schema` 与 `status` 还原。
+
+**这一轮踩到的坑（值得记住）**：设计器的 `保存草稿` 会把表单定义从 `PUBLISHED` 翻成 `DRAFT`，
+而第 4 步的发布按钮会被一条与本轮无关的检查挡住（`审批流程已配置 / 请配置找不到审批人时的转交对象`）
+⇒ **UI 上回不去**，只能从已发布的版本快照还原。以后拿线上表单做验收，要么挑本来就是 `DRAFT` 的表单，
+要么先把还原 SQL 备好。
+
+---
+
+## 上一轮：P1-a——真实后端契约接进生成链路，消掉手写 FormDefinition
 
 **五条交付标准全达成**：① 真实契约可复现（构建期导出、提交、带门禁）；② 全部生成文件可对账；
 ③ 生成声明确实受类型检查；④ 5 处页面按**各自端点**用生成类型；⑤ H3 基线归零。
@@ -83,7 +125,7 @@
 
 ---
 
-## 最新一轮：P4a——公司归属快照（V54 + 写路径 + 两端选择器）
+## 上一轮：P4a——公司归属快照（V54 + 写路径 + 两端选择器）
 
 **只锁归属，不动读权限**（公司隔离是 P4 的事）。三态：`(非空,false)` 已确认快照 / `(非空,true)` 历史推断 /
 `(NULL,false)` 待确认——**`NULL` 行的 `false` 不代表"已确认"**。

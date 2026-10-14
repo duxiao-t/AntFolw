@@ -47,19 +47,4 @@ export const FileUploadField: FieldType = {
       />
     </div>;
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <div>accept 过滤（如 image/*,.pdf，留空=不限）</div>
-      <input value={node.props?.accept ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, accept: e.target.value } })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <label>
-        <input type="checkbox" checked={!!node.props?.multiple}
-          onChange={(e) => onChange({ ...node, props: { ...node.props, multiple: e.target.checked } })} />
-        {' '}允许多文件
-      </label>
-    </div>
-  ),
 };

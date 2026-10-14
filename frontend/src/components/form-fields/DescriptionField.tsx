@@ -10,15 +10,4 @@ export const DescriptionField: FieldType = {
       {node.label ?? '说明'}
     </div>
   ),
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>说明内容</div>
-      <textarea
-        rows={3}
-        value={node.label ?? ''}
-        style={{ width: '100%', padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }}
-        onChange={(e) => onChange({ ...node, label: e.target.value })}
-      />
-    </div>
-  ),
 };

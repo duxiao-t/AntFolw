@@ -4,10 +4,9 @@ import { Inspector } from './Inspector';
 import { useFormDesignerStore } from './useFormDesignerStore';
 
 /**
- * 审计指出：给组件写 `ConfigPanel` 并**不会**让设计器出现选项编辑器——`Inspector` 走的是自己的
- * 集中式 `renderComponentSettings()`，根本不读注册字段的 `ConfigPanel`（`grep` 证实 `ConfigPanel`
- * 在 `frontend/src` 里零渲染点）。所以 radio/checkbox 能配选项，靠的是 Inspector 里新加的
- * `case 'radio'/'checkbox'` 分支。这条用例就是那条接线的验收。
+ * 设计器走 `Inspector` 自己的集中式 `renderComponentSettings()`。早期各字段还各写了一份
+ * `ConfigPanel`，但它从来没有渲染点（B0 已把这些死实现删掉），所以 radio/checkbox 能配选项，
+ * 靠的一直是 Inspector 里的 `case 'radio'/'checkbox'` 分支。这条用例就是那条接线的验收。
  */
 beforeEach(() => {
   useFormDesignerStore.setState({

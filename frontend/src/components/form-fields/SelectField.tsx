@@ -135,33 +135,6 @@ export const SelectField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: ({ node, onChange }) => {
-    const opts = normalizeSelectOptions(node.props?.options);
-    const updateOpts = (next: any[]) => onChange({ ...node, props: { ...node.props, options: next } });
-    return (
-      <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-        <div>标签</div>
-        <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-        <div>选项（每行一条：value|label，多行）</div>
-        <textarea
-          rows={5}
-          value={opts.map((o) => `${o.value}|${o.label}`).join('\n')}
-          style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }}
-          onChange={(e) => {
-            const next = e.target.value
-              .split('\n')
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .map((line) => {
-                const [v, l] = line.split('|');
-                return { value: v ?? '', label: l ?? v ?? '' };
-              });
-            updateOpts(next);
-          }}
-        />
-      </div>
-    );
-  },
 };
 
 function DynamicSelect({ node, mode, value, onChange, values, optionContext }: any) {

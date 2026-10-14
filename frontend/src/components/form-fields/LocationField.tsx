@@ -45,5 +45,4 @@ function LocationInput({ node, mode, value, onChange }: FieldComponentProps) {
 export const LocationField: FieldType = {
   type: 'location', label: '定位', icon: 'environment', defaultProps: { required: false },
   Component: LocationInput,
-  ConfigPanel: () => null,
 };

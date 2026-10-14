@@ -1,7 +1,6 @@
 import { Radio } from 'antd';
 import type { FieldType } from '../../registry/types';
 import { choiceOptions, choiceReadonlyText, optionColor } from './choiceFieldOptions';
-import { SelectField } from './SelectField';
 
 /** 单选：值是该选项的 `value`（字符串或数字），与移动端 `RadioField.tsx` 同义。 */
 export const RadioField: FieldType = {
@@ -39,8 +38,4 @@ export const RadioField: FieldType = {
       </div>
     );
   },
-  // 设计器不读 ConfigPanel（Inspector 走自己的 renderComponentSettings），真正的选项编辑器在
-  // Inspector 的 `case 'radio'` 分支里。这里给一个是为了满足 FieldType 的必填字段，与
-  // MultiSelectField.tsx 复用 SelectField.ConfigPanel 是同一个先例。
-  ConfigPanel: SelectField.ConfigPanel,
 };

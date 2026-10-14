@@ -8,17 +8,6 @@ export const TextField: FieldType = {
   icon: 'field-text',
   defaultProps: { required: false, maxLength: 255, placeholder: '请输入' },
   Component: (props) => <LinkedTextField {...props} />,
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-      <div>占位</div>
-      <Input value={node.props?.placeholder ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, placeholder: e.target.value } })} />
-      <div>最大长度</div>
-      <Input type="number" value={node.props?.maxLength ?? 255} onChange={(e) => onChange({ ...node, props: { ...node.props, maxLength: Number(e.target.value) } })} />
-      <label><input type="checkbox" checked={!!node.props?.required} onChange={(e) => onChange({ ...node, props: { ...node.props, required: e.target.checked } })} /> 必填</label>
-    </div>
-  ),
 };
 
 function LinkedTextField(props: FieldComponentProps) {
