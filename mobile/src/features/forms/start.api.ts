@@ -31,17 +31,19 @@ export function fetchApprovalPreview({
   values,
   selfSelected,
   reworkTaskId,
+  draftId,
 }: {
   formCode: string;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
   reworkTaskId: number | null;
+  draftId?: number | null;
 }) {
   return apiRequest<ApprovalPreview>(
     `/api/mobile/forms/${encodeURIComponent(formCode)}/approval-preview`,
     {
       method: 'POST',
-      body: JSON.stringify({ data: values, selfSelected, reworkTaskId }),
+      body: JSON.stringify({ data: values, selfSelected, reworkTaskId, ...(draftId != null ? { draftId } : {}) }),
     },
   );
 }

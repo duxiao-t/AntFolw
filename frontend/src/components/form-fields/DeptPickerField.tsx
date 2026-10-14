@@ -1,3 +1,5 @@
+import { Space, Checkbox, InputNumber, Typography } from 'antd';
+import { PanelField } from './panelField';
 import { TreeSelect } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { request, useModel } from '@umijs/max';
@@ -16,6 +18,61 @@ export const DeptPickerField: FieldType = {
     companyId: 1,
     selectableParent: true,
     leafOnly: false,
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <Checkbox
+          checked={!!props.multiple}
+          onChange={(event) => updateProps({ multiple: event.target.checked })}
+        >
+          允许多选
+        </Checkbox>
+        <PanelField label="最多选择数">
+          <InputNumber
+            min={1}
+            disabled={!props.multiple}
+            style={{ width: '100%' }}
+            value={props.maxCount}
+            onChange={(value) => updateProps({ maxCount: value })}
+          />
+        </PanelField>
+        <PanelField label="根部门 ID">
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            value={props.rootDeptId}
+            onChange={(value) => updateProps({ rootDeptId: value })}
+          />
+        </PanelField>
+        <Checkbox
+          checked={props.defaultToCurrent === true}
+          onChange={(event) =>
+            updateProps({ defaultToCurrent: event.target.checked })
+          }
+        >
+          默认填充当前部门
+        </Checkbox>
+        <Checkbox
+          checked={props.selectableParent !== false}
+          onChange={(event) =>
+            updateProps({ selectableParent: event.target.checked })
+          }
+        >
+          允许选择父级部门
+        </Checkbox>
+        <Checkbox
+          checked={!!props.leafOnly}
+          onChange={(event) => updateProps({ leafOnly: event.target.checked })}
+        >
+          只允许选择末级部门
+        </Checkbox>
+        <Typography.Text type="secondary">
+          根部门 ID 为空时展示全部部门树。
+        </Typography.Text>
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange }) => {
     const [companyId] = useState<number>(node.props?.companyId ?? 1);

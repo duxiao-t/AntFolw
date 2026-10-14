@@ -42,9 +42,9 @@ public class MobileDraftService {
     @Transactional(rollbackFor = Exception.class)
     public Long create(String formCode, JsonNode data, Long explicitCompanyId, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
-        authorizationService.requireFormUse(formDefinition.getId());
         // 草稿行自己落归属快照（口径：取**草稿创建时**）。提交时不再重新解析。
         Long companyId = companyAttribution.resolve(explicitCompanyId);
+        authorizationService.requireFormUse(formDefinition.getId(), companyId);
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
@@ -64,7 +64,7 @@ public class MobileDraftService {
         // 已有草稿的归属不可修改：请求带了**不一致**的公司就拒，而不是偷偷覆盖快照。
         companyAttribution.forDraft(draft.getCompanyId(), explicitCompanyId);
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
-        authorizationService.requireFormUse(formDefinition.getId());
+        authorizationService.requireFormUse(formDefinition.getId(), draft.getCompanyId());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.updateById(draft);
@@ -99,7 +99,7 @@ public class MobileDraftService {
      * （表单定义 / 使用授权 / 已发布流程），草稿列表有多长就乘多少条 SQL。
      */
     private record DraftContext(Map<Long, FormDefinition> forms,
-                                java.util.function.Predicate<Long> usable,
+                                java.util.function.Predicate<FormData> usable,
                                 Map<Long, Object> processes) { }
 
     private DraftContext contextFor(List<FormData> drafts, long userId) {
@@ -113,13 +113,15 @@ public class MobileDraftService {
                 .forEach((formId, definition) -> processes.put(formId, definition.getProcess()));
         }
         // canUseForm = 运行时能力 + 使用授权；能力这维一次问清，授权这维一次查全。
-        java.util.Optional<java.util.Set<Long>> granted =
+        java.util.Optional<Map<Long, java.util.Set<Long>>> granted =
             authorizationService.hasPermission(userId, PermissionCodes.FORM_RUNTIME_READ)
-                ? authorizationService.usableFormIds(userId)
-                : java.util.Optional.of(java.util.Set.of());
-        java.util.function.Predicate<Long> usable = granted.isEmpty()
-            ? formId -> true   // 管理员：不过滤
-            : formId -> granted.get().contains(formId);
+                ? authorizationService.usableFormIdsByCompany(userId)
+                : java.util.Optional.of(Map.of());
+        java.util.function.Predicate<FormData> usable = granted.isEmpty()
+            ? draft -> true
+            : draft -> draft.getCompanyId() != null
+                && granted.get().getOrDefault(draft.getCompanyId(), java.util.Set.of())
+                .contains(draft.getFormDefId());
         return new DraftContext(forms, usable, processes);
     }
 
@@ -134,6 +136,13 @@ public class MobileDraftService {
             throw new BizException("BAD_DRAFT", "draft does not belong to requested form");
         }
         return draft.getCompanyId();
+    }
+
+    public Long requireUsableDraft(long draftId, long formDefId, long userId) {
+        Long companyId = companyAttribution.forDraft(
+            companySnapshotForSubmit(draftId, formDefId, userId), null);
+        authorizationService.requireFormUse(formDefId, companyId);
+        return companyId;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -184,7 +193,7 @@ public class MobileDraftService {
         FormDefinition formDefinition = context.forms().get(draft.getFormDefId());
         boolean readOnly = formDefinition == null
             || !PUBLISHED_STATUS.equals(formDefinition.getStatus())
-            || !context.usable().test(draft.getFormDefId());
+            || !context.usable().test(draft);
         Object process = formDefinition == null ? null : context.processes().get(draft.getFormDefId());
         JsonNode schema = readJsonArray(formDefinition == null ? null : formDefinition.getSchema());
         return new MobileDraftDto(

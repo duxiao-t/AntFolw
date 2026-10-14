@@ -1,3 +1,5 @@
+import { Space } from 'antd';
+import { SelectOptionsEditor } from './SelectOptionsEditor';
 import { Radio } from 'antd';
 import type { FieldType } from '../../registry/types';
 import { choiceOptions, choiceReadonlyText, optionColor } from './choiceFieldOptions';
@@ -13,6 +15,24 @@ export const RadioField: FieldType = {
       { value: 'a', label: '选项 A' },
       { value: 'b', label: '选项 B' },
     ],
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <SelectOptionsEditor
+          value={props.options}
+          multiple={node.type === 'checkbox'}
+          defaultValue={props.defaultValue}
+          enableColors={props.enableOptionColor === true}
+          onChange={(options) => updateProps({ options })}
+          onDefaultChange={(defaultValue) => updateProps({ defaultValue })}
+          onEnableColorsChange={(enableOptionColor, options) =>
+            updateProps({ enableOptionColor, options })
+          }
+        />
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange }) => {
     const options = choiceOptions(node);

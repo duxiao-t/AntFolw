@@ -1,3 +1,5 @@
+import { Space, InputNumber, Checkbox, Input, Select, Typography } from 'antd';
+import { PanelField } from './panelField';
 import { Button, Card, Table } from 'antd';
 import { FormRenderer } from '../FormRenderer/FormRenderer';
 import type { FieldType } from '../../registry/types';
@@ -14,6 +16,73 @@ export const TableListField: FieldType = {
     allowDelete: true,
     addButtonText: '新增一行',
     mobileMode: 'card',
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="默认行数">
+          <InputNumber
+            min={0}
+            style={{ width: '100%' }}
+            value={props.defaultRows ?? props.minRows ?? 1}
+            onChange={(value) => updateProps({ defaultRows: value ?? 0 })}
+          />
+        </PanelField>
+        <PanelField label="最小行数">
+          <InputNumber
+            min={0}
+            style={{ width: '100%' }}
+            value={props.minRows ?? 1}
+            onChange={(value) => updateProps({ minRows: value ?? 1 })}
+          />
+        </PanelField>
+        <PanelField label="最大行数">
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            value={props.maxRows ?? 50}
+            onChange={(value) => updateProps({ maxRows: value ?? 50 })}
+          />
+        </PanelField>
+        <Checkbox
+          checked={props.allowAdd !== false}
+          onChange={(event) => updateProps({ allowAdd: event.target.checked })}
+        >
+          允许新增行
+        </Checkbox>
+        <Checkbox
+          checked={props.allowDelete !== false}
+          onChange={(event) =>
+            updateProps({ allowDelete: event.target.checked })
+          }
+        >
+          允许删除行
+        </Checkbox>
+        <PanelField label="新增按钮文案">
+          <Input
+            value={props.addButtonText ?? ''}
+            placeholder="新增一行"
+            onChange={(event) =>
+              updateProps({ addButtonText: event.target.value })
+            }
+          />
+        </PanelField>
+        <PanelField label="移动端展示">
+          <Select
+            value={props.mobileMode ?? 'card'}
+            options={[
+              { label: '卡片式', value: 'card' },
+              { label: '表格式', value: 'table' },
+            ]}
+            onChange={(mobileMode) => updateProps({ mobileMode })}
+          />
+        </PanelField>
+        <Typography.Text type="secondary">
+          明细表子字段设计将在容器字段设计能力完成后开放。
+        </Typography.Text>
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange, fieldModes, optionContext }) => {
     const createDefaultRows = () =>

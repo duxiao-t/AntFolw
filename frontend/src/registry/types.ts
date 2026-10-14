@@ -36,11 +36,17 @@ export type FieldComponentProps<_TProps = any, TValue = any> = {
   scopeSchema?: SchemaNode[];
 };
 
+export type FieldConfigPanelProps = {
+  node: SchemaNode;
+  updateProps: (patch: Record<string, any>) => void;
+};
+
 export type FieldType<TProps = any, TValue = any> = {
   type: string;
   label: string;
   icon: string;
   defaultProps: TProps;
   Component: React.FC<FieldComponentProps<TProps, TValue>>;
+  ConfigPanel?: React.FC<FieldConfigPanelProps>;
   validate?(value: TValue, props: TProps): string | null;
 };

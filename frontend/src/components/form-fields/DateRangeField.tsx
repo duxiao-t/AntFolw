@@ -1,3 +1,4 @@
+import { DateField } from './DateField';
 import { DatePicker } from 'antd';
 import type { FieldType } from '../../registry/types';
 
@@ -6,6 +7,7 @@ export const DateRangeField: FieldType = {
   label: '日期范围',
   icon: 'calendar',
   defaultProps: { required: false, format: 'YYYY-MM-DD' },
+  ConfigPanel: DateField.ConfigPanel,
   Component: ({ node, mode, value, onChange }) => {
     const v = Array.isArray(value) ? value : [];
     const dayjs = (window as any).dayjs;

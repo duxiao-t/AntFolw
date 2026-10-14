@@ -736,3 +736,32 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
   `docker save` 是**可选加强**（防 `docker image prune`），**不是 tag 的替代**。
 - **影响：** tag 与 image ID 都要进发布记录。同一条约束也决定了 `ddl-auto: validate` 那格
   能不能做权威验证（runbook §5.2(b)）：**没有 `pre-v54` tag 就只能做机制代理，不能下结论**。
+
+## D-20261014-designer-config-panels-migrate-per-field
+
+- **状态：** accepted（P1-b / B1 首批落地）。
+- **决策：** `FieldType.ConfigPanel` 为可选成员，接收 `node` 与 `updateProps(patch)`；Inspector 有面板时渲染注册表实现，否则回退原 switch。迁移字段同时删除旧 case，每个字段只维护一份组件配置。首批只迁 text / textarea。
+- **边界：** 标题、必填、校验、显示逻辑和外部数据联动继续由 Inspector 管理；只搬组件配置，不改运行时渲染器与 store 合并语义。PanelField 放 components/form-fields 共用，字段不反向 import pages。
+- **取舍：** 迁移期间两种分派并存，但同一字段不存在两份配置实现；逐批验收、可单独回滚。当前完成首批，不代表完整 P1-b 已完成。
+- **验证：** B1 行为测试覆盖面板写回及未迁移 number 回退；停用注册表分派使新面板用例失败，恢复后通过。完整数字与本地部署验收见 HANDOFF 的 B1 小节。
+
+## D-20261014-company-form-use-is-a-gate
+
+- **状态：** accepted，按本轮用户确认的三条口径实施。
+- **决策：** 非全局管理员使用表单须同时满足运行时能力、COMPANY 门槛和 USER/ROLE/DEPARTMENT 任一主体授权；COMPANY 不是 OR 授权。模板维护与已提交业务数据读取继续独立裁决。
+- **兼容：** V55 只前滚，向迁移时未删除的存量表单补已有公司门槛，保留旧主体授权；以后新建公司不自动获准。新表单由全局管理员显式选公司。旧 grants 请求省略或传 null 的 companyIds 时保留原值，显式空数组撤销门槛；非全局管理员不得传公司清单。
+- **草稿：** 本人调岗后的旧草稿按固定公司校验门槛，不按新公司重判。读取表单和审批预览用经所有者/表单校验的 draftId，移动缓存区分草稿/重提上下文；外部选项用 dataId，草稿查询额外检查原公司门槛。保存/提交仍保留 NULL 待确认阻断、版本检查及提交成功后删草稿的事务约束。
+- **管理与审计：** 复用 grants 接口、authz_version 乐观锁和既有行锁；仅全局管理员设置公司，公司不存在则拒绝。公司清单与候选标签进入真实契约生成链路；高风险授权审计记录 companyIds 变更与数量。
+- **边界：** 本片完成 P4 #3，不实施 #5 公司业务数据隔离、公司管理入口及 BI 隔离。P4a 生产上线和历史草稿人工确认仍按原 runbook 执行，不能把仓内 V55 读成生产已上线。
+
+### P1-b 收口（同轮）
+
+剩余 21 个旧 case 原样迁入注册表，删除 Inspector 组件配置 switch；选项/矩阵编辑器移到 components 供字段共用，局部检查项和人员范围编辑器随所属字段迁移。23 类有面板，3 类无专属配置保持可选。未知属性、默认值和运行时组件保留；旧字段共用 case 对应共用面板。行为测试、类型与导入边界验证见 HANDOFF 最新记录。
+
+## D-20261014-mobile-session-and-overlay-use-shared-entrypoints
+
+- **状态：** accepted，实测修复并部署到本机栈。
+- **弹层：** 将 main.tsx 已有的 React 19 `unstableSetRender` 注册原样移到 shared/ui/antdMobileRenderer；main 和测试 setup 都导入它。保留 createRoot 复用及卸载时序，用真实 Toast 和重复使用容器两条用例守护。原全量测试的旧卸载 API 异常已消失。
+- **会话：** applySession 优先取 mobileBootstrap.user，缺 bootstrap 时保持 payload.user 回退。登录响应基础 user 没有 deptId，完整 bootstrap 有；先前普通用户被误判为无部门、保存草稿按钮禁用。登录、恢复、刷新三条回归统一覆盖这条解析规则。
+- **授权界面：** employee 只由“已授权公司内全部员工”开关管理，从“指定角色”候选移除，避免该角色在保存时被开关的关闭值移除。
+- **验证：** 后端 610 条零失败（2 skipped），桌面 338 条、移动 368 条，三套退出码均为 0；本机 V55、健康 UP、真实浏览器双公司/调岗草稿及弹层验收通过，页面异常 0。发布记录见 `docs/local-release-2026-10-14.md`。

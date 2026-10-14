@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MatrixAxisEditor } from './MatrixAxisEditor';
+import { MatrixAxisEditor } from '../../../components/form-fields/MatrixAxisEditor';
 
 describe('MatrixAxisEditor', () => {
   it('keeps existing ids by position during batch editing', () => {

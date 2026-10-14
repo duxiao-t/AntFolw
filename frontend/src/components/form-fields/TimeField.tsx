@@ -1,3 +1,4 @@
+import { SearchField } from './SearchField';
 import { TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import type { FieldType } from '../../registry/types';
@@ -24,6 +25,7 @@ export const TimeField: FieldType = {
   label: '时间',
   icon: 'time',
   defaultProps: { required: false, placeholder: '请选择时间' },
+  ConfigPanel: SearchField.ConfigPanel,
   Component: ({ node, mode, value, onChange }) => {
     const text = typeof value === 'string' ? value : '';
     return (

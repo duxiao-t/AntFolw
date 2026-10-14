@@ -24,7 +24,11 @@ record MobileFormDto(String code, String name, Integer version, JsonNode schema,
 }
 
 record ApprovalPreviewRequest(JsonNode data, Map<String, List<Long>> selfSelected,
-                              Long reworkTaskId) {
+                              Long reworkTaskId, Long draftId) {
+    ApprovalPreviewRequest(JsonNode data, Map<String, List<Long>> selfSelected,
+                           Long reworkTaskId) {
+        this(data, selfSelected, reworkTaskId, null);
+    }
 }
 
 record ApprovalPreviewDto(List<ApprovalPreviewNodeDto> nodes) {

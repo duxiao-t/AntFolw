@@ -1,3 +1,5 @@
+import { Space, Select, InputNumber, Checkbox, Input, Typography } from 'antd';
+import { PanelField } from './panelField';
 import { VideoCameraOutlined } from '@ant-design/icons';
 import { MediaUploadControl } from './MediaUploadControl';
 import { ReadonlyMediaList, mediaSummary } from './MediaPreview';
@@ -19,6 +21,56 @@ export const VideoUploadField: FieldType = {
     watermarkText: 'AntFlow',
     maxSizeMB: 100,
     accept: DEFAULT_ACCEPT,
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="视频来源">
+          <Select
+            value={props.source ?? 'both'}
+            options={[
+              { label: '仅拍摄', value: 'camera' },
+              { label: '仅从相册选择', value: 'album' },
+              { label: '拍摄或相册', value: 'both' },
+            ]}
+            onChange={(source) => updateProps({ source })}
+          />
+        </PanelField>
+        <PanelField label="最长时长(秒)">
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            value={props.maxDuration ?? 60}
+            onChange={(value) => updateProps({ maxDuration: value ?? 60 })}
+          />
+        </PanelField>
+        <PanelField label="单文件大小限制(MB)">
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            value={props.maxSizeMB ?? 100}
+            onChange={(value) => updateProps({ maxSizeMB: value })}
+          />
+        </PanelField>
+        <Checkbox
+          checked={!!props.watermark}
+          onChange={(event) => updateProps({ watermark: event.target.checked })}
+        >
+          上传时添加水印
+        </Checkbox>
+        <PanelField label="水印文字">
+          <Input
+            value={props.watermarkText ?? 'AntFlow'}
+            disabled={!props.watermark}
+            onChange={(event) => updateProps({ watermarkText: event.target.value })}
+          />
+        </PanelField>
+        <Typography.Text type="secondary">
+          超过最长时长的视频将无法选择；水印由服务端处理后存储。
+        </Typography.Text>
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange }) => {
     const maxDuration = node.props?.maxDuration ?? 60;

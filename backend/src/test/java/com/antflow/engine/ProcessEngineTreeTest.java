@@ -224,7 +224,7 @@ class ProcessEngineTreeTest {
         stubFormAndPd("F1", processJson);
         Mockito.doThrow(new HiddenResourceException("form not found"))
             .when(authorizationService)
-            .requireFormUse(1L);
+            .requireFormUse(1L, TEST_COMPANY_ID);
 
         assertThatThrownBy(() ->
             engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L))

@@ -201,6 +201,239 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private com.antflow.mobile.workflow.MobileFileMapper mobileFileMapper;
     @Autowired private com.antflow.mobile.workflow.MobileFileLinkService mobileFileLinkService;
 
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void companyGateIsRequiredForUserRoleAndDepartmentGrantsAndMatchesTheCatalog() {
+        long companyA = insertCompany("gate-a-" + UUID.randomUUID());
+        long companyB = insertCompany("gate-b-" + UUID.randomUUID());
+        long departmentA = insertDepartment(companyA, "gate-a");
+        long departmentB = insertDepartment(companyB, "gate-b");
+        long userA = insertUser("gate-a-" + UUID.randomUUID());
+        long userB = insertUser("gate-b-" + UUID.randomUUID());
+        long employee = roleId("employee");
+        assignRole(userA, employee);
+        assignRole(userB, employee);
+        moveUserToDepartment(userA, departmentA);
+        moveUserToDepartment(userB, departmentB);
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                VALUES (?, 'ROLE', ?)
+                """, formId, employee);
+            assertThat(authorizationService.hasFormGrant(formId, userA)).isFalse();
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                VALUES (?, 'COMPANY', ?)
+                """, formId, companyA);
+            for (String subject : List.of("USER", "ROLE", "DEPARTMENT")) {
+                jdbcTemplate.update("""
+                    DELETE FROM t_form_resource_grant
+                    WHERE form_def_id = ? AND subject_type <> 'COMPANY'
+                    """, formId);
+                if ("ROLE".equals(subject)) {
+                    jdbcTemplate.update("""
+                        INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                        VALUES (?, 'ROLE', ?)
+                        """, formId, employee);
+                } else {
+                    long first = "USER".equals(subject) ? userA : departmentA;
+                    long second = "USER".equals(subject) ? userB : departmentB;
+                    jdbcTemplate.update("""
+                        INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                        VALUES (?, ?, ?), (?, ?, ?)
+                        """, formId, subject, first, formId, subject, second);
+                }
+                assertThat(authorizationService.canUseForm(formId, userA)).isTrue();
+                assertThat(authorizationService.canUseForm(formId, userB)).isFalse();
+                assertThat(authorizationService.usableFormIds(userA).orElseThrow()).contains(formId);
+                assertThat(authorizationService.usableFormIds(userB).orElseThrow()).doesNotContain(formId);
+                assertThat(mobileAppService.list(userA, null, null)).extracting("formId").contains(formId);
+                assertThat(mobileAppService.list(userB, null, null)).extracting("formId").doesNotContain(formId);
+                setPrincipal(userB);
+                assertThatThrownBy(() -> authorizationService.requireFormUse(formId))
+                    .isInstanceOf(HiddenResourceException.class);
+                PrincipalHolder.clear();
+            }
+            jdbcTemplate.update("""
+                DELETE FROM t_form_resource_grant
+                WHERE form_def_id = ? AND subject_type <> 'COMPANY'
+                """, formId);
+            assertThat(authorizationService.canUseForm(formId, userA)).isFalse();
+            moveUserToDepartment(userA, departmentB);
+            assertThat(authorizationService.usableFormIds(userA).orElseThrow()).doesNotContain(formId);
+            jdbcTemplate.update("UPDATE t_user SET dept_id = NULL WHERE id = ?", userA);
+            authorizationService.evict(userA);
+            assertThat(authorizationService.hasFormGrant(formId, userA)).isFalse();
+            setPrincipal(userId("admin"));
+            assertThatCode(() -> authorizationService.requireFormUse(formId)).doesNotThrowAnyException();
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(userA);
+            authorizationService.evict(userB);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void companyGrantsPreserveOldRequestsAndUseTheSharedVersion() {
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long companyId = anyCompanyId();
+        long admin = userId("admin");
+        setPrincipal(admin);
+        try {
+            var before = formGrantService.get(formId);
+            var granted = formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(before.version(), Set.of(admin),
+                    Set.of(), Set.of(), Set.of(companyId)));
+            assertThat(granted.companyIds()).containsExactly(companyId);
+            assertThat(granted.companies()).extracting(FormGrantService.GrantCompany::id)
+                .containsExactly(companyId);
+            var legacy = formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(granted.version(), Set.of(admin),
+                    Set.of(), Set.of()));
+            assertThat(legacy.companyIds()).containsExactly(companyId);
+            var cleared = formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(legacy.version(), Set.of(admin),
+                    Set.of(), Set.of(), Set.of()));
+            assertThat(cleared.companyIds()).isEmpty();
+            assertThat(formGrantService.candidates(formId).companies())
+                .extracting(FormGrantService.GrantCompany::id).contains(companyId);
+            assertThatThrownBy(() -> formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(legacy.version(), Set.of(admin),
+                    Set.of(), Set.of(), Set.of(companyId))))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("FORM_GRANT_VERSION_CONFLICT"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void onlyGlobalAdministratorsCanChangeCompanyGrants() {
+        long actor = insertUser("gate-maintainer-" + UUID.randomUUID());
+        long department = insertDepartment(anyCompanyId(), "gate-maintainer");
+        moveUserToDepartment(actor, department);
+        long role = insertRole("gate-maintainer-" + UUID.randomUUID());
+        jdbcTemplate.update("""
+            INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+            VALUES (?, 'form:authorization:manage', 'ALL')
+            """, role);
+        assignRole(actor, role);
+        long form = insertForm("DRAFT", VALID_SCHEMA);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+            VALUES (?, ?, ?)
+            """, form, actor, userId("admin"));
+        setPrincipal(actor);
+        try {
+            var before = formGrantService.get(form);
+            assertThat(formGrantService.candidates(form).companies()).isEmpty();
+            assertThatThrownBy(() -> formGrantService.replace(form,
+                new FormGrantService.FormGrantWriteRequest(before.version(),
+                    Set.of(), Set.of(), Set.of(), Set.of())))
+                .isInstanceOf(com.antflow.authz.AuthorizationFailureException.class);
+            assertThat(formGrantService.get(form).companyIds()).isEqualTo(before.companyIds());
+            setPrincipal(userId("admin"));
+            assertThatThrownBy(() -> formGrantService.replace(form,
+                new FormGrantService.FormGrantWriteRequest(before.version(),
+                    Set.of(), Set.of(), Set.of(), Set.of(Long.MAX_VALUE))))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("COMPANY_NOT_FOUND"));
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(actor);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void transferredDraftUsesItsOriginalCompanyForReadSaveAndRevocation() throws Exception {
+        long companyA = insertCompany("draft-gate-a-" + UUID.randomUUID());
+        long companyB = insertCompany("draft-gate-b-" + UUID.randomUUID());
+        long departmentA = insertDepartment(companyA, "draft-a");
+        long departmentB = insertDepartment(companyB, "draft-b");
+        long author = insertUser("draft-gate-" + UUID.randomUUID());
+        assignRole(author, roleId("employee"));
+        moveUserToDepartment(author, departmentA);
+        long source = insertOptionSource("draft_gate_" + UUID.randomUUID().toString().replace("-", ""));
+        jdbcTemplate.update("""
+            INSERT INTO t_option_data_source_row(version_id, row_no, data)
+            VALUES (?, 1, '{"col":"a"}'::jsonb), (?, 2, '{"col":"b"}'::jsonb)
+            """, optionSourceVersionId(source), optionSourceVersionId(source));
+        long formId = insertForm("PUBLISHED", boundOptionSchema(source, optionSourceVersionId(source)));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+            VALUES (?, 'USER', ?), (?, 'COMPANY', ?)
+            """, formId, author, formId, companyA);
+        setPrincipal(author);
+        try {
+            long draft = mobileDraftService.create(code, flowJson.createObjectNode(), null, author);
+            moveUserToDepartment(author, departmentB);
+            setPrincipal(author);
+            assertThat(authorizationService.canUseForm(formId, author)).isFalse();
+            assertThat(mobileDraftService.get(draft, author).readOnly()).isFalse();
+            assertThat(mobileDraftService.requireUsableDraft(draft, formId, author)).isEqualTo(companyA);
+            mobileDraftService.update(draft, flowJson.createObjectNode().put("subject", "saved"), null, author);
+            assertThat(companyOfFormData(draft)).isEqualTo(companyA);
+            assertThat(queryOptionsByDataId(draft, "dept")).hasSize(2);
+            long otherForm = insertForm("PUBLISHED", VALID_SCHEMA);
+            assertThatThrownBy(() -> mobileDraftService.requireUsableDraft(draft, otherForm, author))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("BAD_DRAFT"));
+            jdbcTemplate.update("""
+                DELETE FROM t_form_resource_grant
+                WHERE form_def_id = ? AND subject_type = 'COMPANY'
+                """, formId);
+            assertThat(mobileDraftService.get(draft, author).readOnly()).isTrue();
+            assertThatThrownBy(() -> mobileDraftService.requireUsableDraft(draft, formId, author))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThatThrownBy(() -> queryOptionsByDataId(draft, "dept"))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draft)).isEqualTo(1);
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(author);
+        }
+    }
+
+    @Test
+    void v55PreservesExistingGrantsAndDoesNotAuthorizeCompaniesCreatedLater() {
+        String schema = "company_gate_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "54");
+            long form = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, status, created_by) "
+                + "VALUES ('gate_existing', 'existing', '[]'::jsonb, 'PUBLISHED', 1) RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_resource_grant(form_def_id, subject_type, subject_id) "
+                + "VALUES (?, 'USER', 1), (?, 'ROLE', 1)", form, form);
+            var before = jdbcTemplate.queryForList("SELECT form_def_id, subject_type, subject_id FROM "
+                + schema + ".t_form_resource_grant ORDER BY form_def_id, subject_type, subject_id");
+            migrateTo(schema, "55");
+            assertThat(jdbcTemplate.queryForList("SELECT form_def_id, subject_type, subject_id FROM "
+                + schema + ".t_form_resource_grant WHERE subject_type <> 'COMPANY' "
+                + "ORDER BY form_def_id, subject_type, subject_id")).isEqualTo(before);
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM "
+                + schema + ".t_form_resource_grant WHERE form_def_id = ? AND subject_type = 'COMPANY'",
+                Long.class, form)).isEqualTo(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".t_company", Long.class));
+            long newCompany = jdbcTemplate.queryForObject(
+                "INSERT INTO " + schema + ".t_company(name) VALUES ('later') RETURNING id", Long.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
+                + ".t_form_resource_grant WHERE subject_type = 'COMPANY' AND subject_id = ?",
+                Long.class, newCompany)).isZero();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
     /**
      * 隐藏字段的选项可见性必须按"调用者自己所处的节点"判，而不是只看发起人。
      * 三条路径（instanceId / dataId / selectedValues 回查）共用同一套判据，这里走前两条。
@@ -377,6 +610,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
             VALUES (?, 'USER', ?, ?)
             """, formId, author, userId("admin"));
+        grantCompany(formId, companyA);
         try {
             assignRole(author, roleId("employee"));
             moveUserToDepartment(author, deptA);
@@ -576,6 +810,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long allowedForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long deniedForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long deniedDraft = insertDraft(deniedForm, userId);
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
+            anyCompanyId(), deniedDraft);
         // P4a：非管理员必须有部门才谈得上归属（无部门非管理员按口径一律拒建）。
         long dept = insertDepartment(anyCompanyId(), "直提部");
         moveUserToDepartment(userId, dept);
@@ -629,6 +865,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
             + UUID.randomUUID().toString().replace("-", ""));
         long firstForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long secondForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long departmentId = insertDepartment(anyCompanyId(), "catalog-company");
+        moveUserToDepartment(grantedUser, departmentId);
+        moveUserToDepartment(ungrantedUser, departmentId);
         try {
             jdbcTemplate.update("""
                 INSERT INTO t_role_permission(role_id, permission_code)
@@ -658,6 +897,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
             jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)",
                 grantedUser, ungrantedUser);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", departmentId);
             authorizationService.evict(grantedUser);
             authorizationService.evict(ungrantedUser);
         }
@@ -3982,12 +4222,25 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     private long insertForm(String status, String schema, long creatorId) {
         String code = "IT_" + UUID.randomUUID().toString().replace("-", "");
-        return jdbcTemplate.queryForObject("""
+        long formId = jdbcTemplate.queryForObject("""
             INSERT INTO t_form_definition(code, name, version, schema, settings, status,
                                           created_by, deleted)
             VALUES (?, 'Integration form', 1, ?::jsonb, '{}'::jsonb, ?, ?, 0)
             RETURNING id
             """, Long.class, code, schema, status, creatorId);
+        // Existing fixtures model forms predating the company gate; dedicated gate tests replace these rows.
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+            SELECT ?, 'COMPANY', id FROM t_company
+            """, formId);
+        return formId;
+    }
+
+    private void grantCompany(long formId, long companyId) {
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+            VALUES (?, 'COMPANY', ?) ON CONFLICT DO NOTHING
+            """, formId, companyId);
     }
 
     private long insertSubmittedData(long formId, long creatorId) {

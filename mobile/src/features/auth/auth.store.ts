@@ -24,7 +24,7 @@ export interface AuthState {
 }
 
 function applySession(set: (partial: Partial<AuthState>) => void, payload: SessionPayload): void {
-  set({ status: 'authenticated', accessToken: payload.accessToken, user: payload.user,
+  set({ status: 'authenticated', accessToken: payload.accessToken, user: payload.mobileBootstrap?.user ?? payload.user,
     mobileBootstrap: payload.mobileBootstrap ?? null });
 }
 

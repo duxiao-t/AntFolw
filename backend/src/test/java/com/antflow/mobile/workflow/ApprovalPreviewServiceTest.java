@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -48,12 +49,14 @@ class ApprovalPreviewServiceTest {
     private final AuthorizationService authorization = Mockito.mock(AuthorizationService.class);
     private final ObjectMapper json = new ObjectMapper();
     private ApprovalPreviewService service;
+    private final MobileDraftService drafts = Mockito.mock(MobileDraftService.class);
 
     @BeforeEach
     void setUp() {
         service = new ApprovalPreviewService(forms, processes, formDataMapper, instanceMapper,
             taskMapper, userMapper, assignees, runtime, new ConditionEvaluator(), json,
             authorization);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "draftService", drafts);
         when(processes.normalizeConditionValues(anyString(), anyString()))
             .thenAnswer(invocation -> invocation.getArgument(0));
         when(forms.canonicalizeStarterSubmission(anyString(), any(), any()))
@@ -86,6 +89,30 @@ class ApprovalPreviewServiceTest {
             ((Collection<?>) invocation.getArgument(0)).stream()
                 .map(value -> user(((Number) value).longValue()))
                 .toList());
+    }
+
+    @Test
+    void draftPreviewUsesTheOwnedDraftCompanyAndRejectsRevokedAccess() throws Exception {
+        stubNewFlow("""
+            {"id":"root","type":"ROOT","children":null}
+            """);
+        service.preview("leave", new ApprovalPreviewRequest(
+            json.createObjectNode(), Map.of(), null, 101L), 7L);
+        Mockito.verify(drafts).requireUsableDraft(101L, 10L, 7L);
+        Mockito.verify(authorization, Mockito.never()).requireFormUse(Mockito.anyLong());
+        Mockito.doThrow(new com.antflow.authz.HiddenResourceException("draft not found"))
+            .when(drafts).requireUsableDraft(101L, 10L, 7L);
+        assertThatThrownBy(() -> service.preview("leave",
+            new ApprovalPreviewRequest(json.createObjectNode(), Map.of(), null, 101L), 7L))
+            .isInstanceOf(com.antflow.authz.HiddenResourceException.class);
+    }
+
+    @Test
+    void rejectsAmbiguousDraftAndReworkPreviewContext() {
+        assertThatThrownBy(() -> service.preview("leave",
+            new ApprovalPreviewRequest(json.createObjectNode(), Map.of(), 401L, 101L), 7L))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+        Mockito.verifyNoInteractions(drafts, taskMapper, forms);
     }
 
     @Test

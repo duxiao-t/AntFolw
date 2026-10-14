@@ -67,11 +67,27 @@ public class MobileWorkflowService {
     private DefinitionVersionRepository definitionVersions;
 
     public MobileFormDto getMobileForm(String code) {
+        return getMobileForm(code, null, null);
+    }
+
+    public MobileFormDto getMobileForm(String code, Long draftId, Long reworkTaskId) {
         FormDefinition form = formDefinitionService.getByCode(code);
         if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
-        authorizationService.requireFormUse(form.getId());
+        if (draftId != null && reworkTaskId != null) {
+            throw new BizException("BAD_REQUEST", "choose a draft or a rework task");
+        }
+        if (draftId != null) {
+            draftService.requireUsableDraft(draftId, form.getId(), authorizationService.currentUserId());
+        } else if (reworkTaskId != null) {
+            ReworkTaskDto rework = getReworkTask(reworkTaskId, authorizationService.currentUserId());
+            if (!Objects.equals(rework.formCode(), code)) {
+                throw new BizException("BAD_REQUEST", "rework task does not belong to form");
+            }
+        } else {
+            authorizationService.requireFormUse(form.getId());
+        }
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         JsonNode processTree = readJsonObject(
             process == null ? null : process.getProcess(), "BAD_FLOW_JSON");
@@ -89,7 +105,6 @@ public class MobileWorkflowService {
         if (currentForm == null || !PUBLISHED_STATUS.equals(currentForm.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
         }
-        authorizationService.requireFormUse(currentForm.getId());
         // P4a：带草稿时**归属取草稿行的快照**（调岗后重提也不改归属）；新发起才按身份解析。
         Long companyId;
         if (request.draftId() != null) {
@@ -108,6 +123,7 @@ public class MobileWorkflowService {
         } else {
             companyId = companyAttribution.resolve(request.companyId());
         }
+        authorizationService.requireFormUse(currentForm.getId(), companyId);
 
         Map<String, List<Long>> selfSelected = request.selfSelected() == null
             ? Map.of() : request.selfSelected();

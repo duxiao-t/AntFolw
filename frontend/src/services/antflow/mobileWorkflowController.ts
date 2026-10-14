@@ -81,7 +81,9 @@ export async function form(
   const { code: param0, ...queryParams } = params;
   return request<AntFlowAPI.MobileFormDto>(`/api/mobile/forms/${param0}`, {
     method: "GET",
-    params: { ...queryParams },
+    params: {
+      ...queryParams,
+    },
     ...(options || {}),
   });
 }

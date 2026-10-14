@@ -21,6 +21,19 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AuthorizationService {
     private final JdbcTemplate jdbcTemplate;
+    private static final String FORM_SUBJECT_MATCH = """
+        ((grant_row.subject_type = 'USER' AND grant_row.subject_id = ?)
+         OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
+             SELECT ur.role_id FROM t_user_role ur
+             JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
+             WHERE ur.user_id = ?))
+         OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
+             SELECT 1 FROM t_user grant_user
+             JOIN t_department user_department ON user_department.id = grant_user.dept_id
+             JOIN t_department grant_department ON grant_department.id = grant_row.subject_id
+             WHERE grant_user.id = ?
+               AND user_department.path <@ grant_department.path)))
+        """;
     private final Map<Long, CachedSnapshot> cache = new ConcurrentHashMap<>();
     /** 全局授权失效代次：evictAll 递增，用来识破"清空与回填"的竞态。 */
     private final java.util.concurrent.atomic.AtomicLong epoch =
@@ -248,29 +261,30 @@ public class AuthorizationService {
         if (snapshot.admin()) {
             return true;
         }
+        return hasFormGrant(formId, userId, companyOf(snapshot));
+    }
+
+    /** companyId must come from the authenticated department or an owned draft snapshot. */
+    public boolean hasFormGrant(long formId, long userId, Long companyId) {
+        if (snapshot(userId).admin()) return true;
+        if (companyId == null) return false;
         Long count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*)
-            FROM t_form_resource_grant grant_row
-            WHERE grant_row.form_def_id = ?
-              AND (
-                (grant_row.subject_type = 'USER' AND grant_row.subject_id = ?)
-                OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
-                    SELECT ur.role_id
-                    FROM t_user_role ur
-                    JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
-                    WHERE ur.user_id = ?
-                ))
-                OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
-                    SELECT 1
-                    FROM t_user grant_user
-                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
-                    JOIN t_department grant_department ON grant_department.id = grant_row.subject_id
-                    WHERE grant_user.id = ?
-                      AND user_department.path <@ grant_department.path
-                ))
-              )
-            """, Long.class, formId, userId, userId, userId);
+            SELECT COUNT(*) FROM t_form_resource_grant grant_row
+            WHERE grant_row.form_def_id = ? AND
+            """ + FORM_SUBJECT_MATCH + """
+             AND EXISTS (
+                 SELECT 1 FROM t_form_resource_grant company_grant
+                 WHERE company_grant.form_def_id = grant_row.form_def_id
+                   AND company_grant.subject_type = 'COMPANY'
+                   AND company_grant.subject_id = ?)
+            """, Long.class, formId, userId, userId, userId, companyId);
         return count != null && count > 0;
+    }
+
+    private Long companyOf(AuthzSnapshot snapshot) {
+        if (snapshot.departmentId() == null) return null;
+        return jdbcTemplate.query("SELECT company_id FROM t_department WHERE id = ?",
+            rs -> rs.next() ? nullableLong(rs, "company_id") : null, snapshot.departmentId());
     }
 
     /**
@@ -278,28 +292,40 @@ public class AuthorizationService {
      * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"一个都没有"。
      */
     public Optional<Set<Long>> usableFormIds(long userId) {
-        if (snapshot(userId).admin()) {
+        AuthzSnapshot snapshot = snapshot(userId);
+        if (snapshot.admin()) {
             return Optional.empty();
         }
-        // 与 hasFormGrant 同一套判定，只是去掉了 form_def_id 这一维。
+        Long companyId = companyOf(snapshot);
+        if (companyId == null) return Optional.of(Set.of());
         return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
-            SELECT grant_row.form_def_id
+            SELECT DISTINCT grant_row.form_def_id FROM t_form_resource_grant grant_row
+            WHERE
+            """ + FORM_SUBJECT_MATCH + """
+             AND EXISTS (
+                 SELECT 1 FROM t_form_resource_grant company_grant
+                 WHERE company_grant.form_def_id = grant_row.form_def_id
+                   AND company_grant.subject_type = 'COMPANY'
+                   AND company_grant.subject_id = ?)
+            """, Long.class, userId, userId, userId, companyId)));
+    }
+
+    /** Batch draft authorization uses each stored company, rather than today's department. */
+    public Optional<Map<Long, Set<Long>>> usableFormIdsByCompany(long userId) {
+        if (snapshot(userId).admin()) return Optional.empty();
+        Map<Long, Set<Long>> result = new HashMap<>();
+        jdbcTemplate.query("""
+            SELECT DISTINCT company_grant.subject_id AS company_id, grant_row.form_def_id
             FROM t_form_resource_grant grant_row
-            WHERE (grant_row.subject_type = 'USER' AND grant_row.subject_id = ?)
-               OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
-                    SELECT ur.role_id
-                    FROM t_user_role ur
-                    JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
-                    WHERE ur.user_id = ?))
-               OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
-                    SELECT 1
-                    FROM t_user grant_user
-                    JOIN t_department user_department ON user_department.id = grant_user.dept_id
-                    JOIN t_department grant_department
-                      ON grant_department.id = grant_row.subject_id
-                    WHERE grant_user.id = ?
-                      AND user_department.path <@ grant_department.path))
-            """, Long.class, userId, userId, userId)));
+            JOIN t_form_resource_grant company_grant
+              ON company_grant.form_def_id = grant_row.form_def_id
+             AND company_grant.subject_type = 'COMPANY'
+            WHERE
+            """ + FORM_SUBJECT_MATCH, rs -> {
+                result.computeIfAbsent(rs.getLong("company_id"), key -> new LinkedHashSet<>())
+                    .add(rs.getLong("form_def_id"));
+            }, userId, userId, userId);
+        return Optional.of(result);
     }
 
     /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
@@ -310,6 +336,15 @@ public class AuthorizationService {
         }
         requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         if (!hasFormGrant(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    public void requireFormUse(long formId, Long companyId) {
+        PrincipalHolder.Principal principal = principal();
+        if (principal.isAdmin()) return;
+        requirePermission(PermissionCodes.FORM_RUNTIME_READ);
+        if (!hasFormGrant(formId, principal.userId(), companyId)) {
             throw new HiddenResourceException("form not found");
         }
     }

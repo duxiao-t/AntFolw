@@ -46,7 +46,7 @@ import {
   SELECT_OPTION_COLORS,
   type SelectOption,
   type SelectOptionValue,
-} from '../../../registry/selectOptions';
+} from '../../registry/selectOptions';
 
 type SelectOptionsEditorProps = {
   value?: unknown;

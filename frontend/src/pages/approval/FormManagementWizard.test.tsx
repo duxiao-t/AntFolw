@@ -119,7 +119,7 @@ describe('FormManagementWizard permission settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '保存使用范围' }));
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/10/grants', {
-      method: 'PUT', data: { userIds: [3], roleIds: [], departmentIds: [], version: 7 },
+      method: 'PUT', data: { userIds: [3], roleIds: [], departmentIds: [], companyIds: [], version: 7 },
     }));
     await waitFor(() => expect(permissionVersion).toBe(8));
 
@@ -160,7 +160,7 @@ describe('FormManagementWizard permission settings', () => {
       </QueryClientProvider>,
     );
 
-    const toggle = screen.getByRole('switch', { name: '全公司可见' });
+    const toggle = screen.getByRole('switch', { name: '已授权公司内全部员工' });
     // 先等候选角色到位（开关在拿到 employee 角色之前是禁用的），否则点了不会生效。
     await waitFor(() => expect(toggle).toBeEnabled());
     expect(toggle).not.toBeChecked();
@@ -179,5 +179,36 @@ describe('FormManagementWizard permission settings', () => {
     });
     expect(toggle).toBeChecked();
     expect(screen.getByText('有未保存的修改')).toBeInTheDocument();
+  });
+
+  it('keeps company selections across refetch and saves them with the grant version', async () => {
+    request.mockImplementation(async (url: string, options?: { method?: string; data?: any }) => {
+      if (url === '/api/forms/definitions/10') {
+        return { id: 10, code: 'leave', name: '申请', version: 1, status: 'DRAFT', schema: [], settings: {} };
+      }
+      if (url === '/api/forms/10/grants/candidates') {
+        return { roles: [{ id: 2, code: 'employee', name: '员工' }], departments: [], companies: [{ id: 20, name: '甲公司' }, { id: 30, name: '乙公司' }] };
+      }
+      if (url === '/api/forms/10/grants') {
+        return { version: options?.method === 'PUT' ? 8 : 7,
+          userIds: [3], roleIds: [], departmentIds: [], companyIds: options?.data?.companyIds ?? [20],
+          users: [], roles: [], departments: [], companies: [{ id: 20, name: '甲公司' }] };
+      }
+      if (url === '/api/forms/10/maintainers') return { version: 7, userIds: [5], users: [] };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><FormManagementWizard /></QueryClientProvider>);
+    const selector = await screen.findByLabelText('允许使用的公司');
+    await waitFor(() => expect(screen.getByText('甲公司')).toBeInTheDocument());
+    fireEvent.mouseDown(selector);
+    fireEvent.click(await screen.findByText('乙公司'));
+    fireEvent.click(screen.getByRole('switch', { name: '已授权公司内全部员工' }));
+    await waitFor(() => expect(screen.getByText('有未保存的修改')).toBeInTheDocument());
+    await client.invalidateQueries({ queryKey: ['form-management-grant'] });
+    fireEvent.click(screen.getByRole('button', { name: '保存使用范围' }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/10/grants', {
+      method: 'PUT', data: { userIds: [3], roleIds: [2], departmentIds: [], companyIds: [20, 30], version: 7 },
+    }));
   });
 });

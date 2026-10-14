@@ -147,6 +147,10 @@
           "data" : {
             "$ref" : "#/components/schemas/JsonNode"
           },
+          "draftId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
           "reworkTaskId" : {
             "format" : "int64",
             "type" : "integer"
@@ -939,6 +943,12 @@
       },
       "FormGrantCandidates" : {
         "properties" : {
+          "companies" : {
+            "items" : {
+              "$ref" : "#/components/schemas/GrantCompany"
+            },
+            "type" : "array"
+          },
           "departments" : {
             "items" : {
               "$ref" : "#/components/schemas/GrantDepartment"
@@ -956,6 +966,19 @@
       },
       "FormGrantDto" : {
         "properties" : {
+          "companies" : {
+            "items" : {
+              "$ref" : "#/components/schemas/GrantCompany"
+            },
+            "type" : "array"
+          },
+          "companyIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
           "departmentIds" : {
             "items" : {
               "format" : "int64",
@@ -1004,6 +1027,14 @@
       },
       "FormGrantWriteRequest" : {
         "properties" : {
+          "companyIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "array",
+            "uniqueItems" : true
+          },
           "departmentIds" : {
             "items" : {
               "format" : "int64",
@@ -1146,6 +1177,18 @@
           "withdrawn" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "GrantCompany" : {
+        "properties" : {
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "name" : {
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -6979,6 +7022,24 @@
             "required" : true,
             "schema" : {
               "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "draftId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "reworkTaskId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
             }
           }
         ],

@@ -5,7 +5,10 @@ export const queryKeys = {
   branding: ['branding'] as const,
   bootstrap: ['mobile', 'bootstrap'] as const,
   apps: (filters: AppFilters) => ['mobile', 'apps', filters] as const,
-  form: (code: string) => ['mobile', 'forms', code] as const,
+  form: (code: string, draftId?: number | null, reworkTaskId?: number | null) =>
+    draftId == null && reworkTaskId == null
+      ? ['mobile', 'forms', code] as const
+      : ['mobile', 'forms', code, { draftId: draftId ?? null, reworkTaskId: reworkTaskId ?? null }] as const,
   approvalPreview: (code: string, payload: string) =>
     ['mobile', 'forms', code, 'approval-preview', payload] as const,
   drafts: ['mobile', 'drafts'] as const,

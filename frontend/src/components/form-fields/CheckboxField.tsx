@@ -1,3 +1,4 @@
+import { RadioField } from './RadioField';
 import { Checkbox } from 'antd';
 import type { FieldType } from '../../registry/types';
 import { choiceOptions, choiceReadonlyText, optionColor } from './choiceFieldOptions';
@@ -14,6 +15,7 @@ export const CheckboxField: FieldType = {
       { value: 'b', label: '选项 B' },
     ],
   },
+  ConfigPanel: RadioField.ConfigPanel,
   Component: ({ node, mode, value, onChange }) => {
     const options = choiceOptions(node);
     const selected = Array.isArray(value)

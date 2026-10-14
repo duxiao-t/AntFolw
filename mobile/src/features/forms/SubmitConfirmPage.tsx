@@ -22,7 +22,7 @@ export function SubmitConfirmPage() {
   const resetFlow = useSubmitFlowStore((state) => state.reset);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(true);
-  const formQuery = useQuery({ queryKey: queryKeys.form(code), queryFn: () => fetchMobileForm(code), enabled: code.length > 0, retry: 0 });
+  const formQuery = useQuery({ queryKey: queryKeys.form(code, flow.draftId, flow.reworkTaskId), queryFn: () => fetchMobileForm(code, flow.draftId, flow.reworkTaskId), enabled: code.length > 0, retry: 0 });
   const formName = formQuery.data?.name ?? "申请";
   const workflowEnabled = formQuery.data?.settings?.workflowEnabled !== false;
   const formSchema = formSchemaWithoutSelfSelectRules(formQuery.data?.schema ?? []);
@@ -30,7 +30,8 @@ export function SubmitConfirmPage() {
     data: flow.values,
     selfSelected: flow.selfSelected,
     reworkTaskId: flow.reworkTaskId,
-  }), [flow.reworkTaskId, flow.selfSelected, flow.values]);
+    draftId: flow.draftId,
+  }), [flow.draftId, flow.reworkTaskId, flow.selfSelected, flow.values]);
   const previewQuery = useQuery({
     queryKey: queryKeys.approvalPreview(code, previewPayload),
     queryFn: () => fetchApprovalPreview({
@@ -38,6 +39,7 @@ export function SubmitConfirmPage() {
       values: flow.values,
       selfSelected: flow.selfSelected,
       reworkTaskId: flow.reworkTaskId,
+      draftId: flow.draftId,
     }),
     enabled: formQuery.isSuccess && workflowEnabled,
     retry: 0,

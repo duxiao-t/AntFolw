@@ -1,3 +1,5 @@
+import { Space } from 'antd';
+import { PanelField } from './panelField';
 import { Input } from 'antd';
 import type { FieldType } from '../../registry/types';
 
@@ -7,6 +9,19 @@ export const SearchField: FieldType = {
   label: '搜索',
   icon: 'search',
   defaultProps: { required: false, placeholder: '搜索' },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="占位提示">
+          <Input
+            value={props.placeholder ?? ''}
+            onChange={(event) => updateProps({ placeholder: event.target.value })}
+          />
+        </PanelField>
+      </Space>
+    );
+  },
   Component: ({ node, mode, value, onChange }) => {
     const text = typeof value === 'string' ? value : value == null ? '' : String(value);
     return (

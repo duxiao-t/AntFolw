@@ -1,3 +1,5 @@
+import { Space, Input } from 'antd';
+import { PanelField } from './panelField';
 import { Switch } from 'antd';
 import type { FieldType } from '../../registry/types';
 
@@ -7,6 +9,25 @@ export const SwitchField: FieldType = {
   label: '开关',
   icon: 'switch',
   defaultProps: { required: false, checkedText: '是', uncheckedText: '否' },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="开状态文案">
+          <Input
+            value={props.checkedText ?? '是'}
+            onChange={(event) => updateProps({ checkedText: event.target.value })}
+          />
+        </PanelField>
+        <PanelField label="关状态文案">
+          <Input
+            value={props.uncheckedText ?? '否'}
+            onChange={(event) => updateProps({ uncheckedText: event.target.value })}
+          />
+        </PanelField>
+      </Space>
+    );
+  },
   Component: ({ node, mode, value, onChange }) => {
     const checked = value === true;
     const checkedText = String(node.props?.checkedText ?? '是');

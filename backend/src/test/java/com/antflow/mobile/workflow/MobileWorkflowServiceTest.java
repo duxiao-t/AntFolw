@@ -105,6 +105,7 @@ class MobileWorkflowServiceTest {
         Mockito.when(processDefinitionService.commentPresets(Mockito.any(), Mockito.anyString()))
             .thenReturn(ApprovalCommentPresets.empty());
         companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
+        Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(1L);
         service = new MobileWorkflowService(engine, draftService, workflowMapper,
             formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
             taskMapper, historyMapper, new MobileFileLinkService(workflowMapper, fileMapper),
@@ -168,13 +169,26 @@ class MobileWorkflowServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.doThrow(new HiddenResourceException("form not found"))
             .when(authorizationService)
-            .requireFormUse(10L);
+            .requireFormUse(10L, 1L);
 
         assertThatThrownBy(() -> service.start(
             new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of(), null), 7L))
             .isInstanceOf(HiddenResourceException.class);
         Mockito.verify(engine, Mockito.never()).start(Mockito.any(StartCmd.class),
             Mockito.anyLong());
+    }
+
+    @Test
+    void formReadUsesTheValidatedDraftContextInsteadOfTodaysCompany() {
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
+        Mockito.when(authorizationService.currentUserId()).thenReturn(7L);
+        service.getMobileForm("leave", 101L, null);
+        Mockito.verify(draftService).requireUsableDraft(101L, 10L, 7L);
+        Mockito.verify(authorizationService, Mockito.never()).requireFormUse(Mockito.anyLong());
+        Mockito.doThrow(new HiddenResourceException("draft not found"))
+            .when(draftService).requireUsableDraft(102L, 10L, 7L);
+        assertThatThrownBy(() -> service.getMobileForm("leave", 102L, null))
+            .isInstanceOf(HiddenResourceException.class);
     }
 
     @Test

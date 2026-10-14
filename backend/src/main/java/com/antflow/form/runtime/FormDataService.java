@@ -80,7 +80,6 @@ public class FormDataService {
         if (userId == null || authorizationService.currentUserId() != userId) {
             throw new AccessDeniedException("submission user does not match current principal");
         }
-        authorizationService.requireFormUse(fd.getId());
         String normalizedStatus = status == null ? "SUBMITTED" : status;
         // status 是客户端传进来的：`t_form_data.status` 只有 DRAFT/SUBMITTED 两个合法值
         // （APPROVED/REJECTED 是 **t_process_instance** 的状态，引擎推进实例时写的）。不拦的话
@@ -106,6 +105,7 @@ public class FormDataService {
                 draftService.companySnapshotForSubmit(draftId, fd.getId(), userId),
                 explicitCompanyId);
         }
+        authorizationService.requireFormUse(fd.getId(), companyId);
         formDefinitionService.validateSubmission(fd.getSchema(), data);
         Object storedData = "DRAFT".equals(normalizedStatus)
             ? data

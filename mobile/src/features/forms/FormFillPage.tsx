@@ -65,8 +65,8 @@ export function FormFillPage() {
   const needsCompany = user != null && user.deptId == null && reworkTaskId == null;
 
   const formQuery = useQuery({
-    queryKey: queryKeys.form(code),
-    queryFn: () => fetchMobileForm(code),
+    queryKey: queryKeys.form(code, initialDraftId, reworkTaskId),
+    queryFn: () => fetchMobileForm(code, initialDraftId, reworkTaskId),
     enabled: code.length > 0,
     retry: 0,
   });
@@ -324,6 +324,7 @@ export function FormFillPage() {
           values={values}
           optionContext={reworkTaskId != null
             ? { instanceId: reworkQuery.data?.instanceId }
+            : draftId != null ? { dataId: draftId }
             : { formCode: code, formVersion: formQuery.data?.version }}
           mode={fieldMode}
           modeOverride={starterModeOverride}

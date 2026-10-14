@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,11 +56,16 @@ public class ApprovalPreviewService {
     private final ConditionEvaluator conditionEvaluator;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    @Autowired
+    private MobileDraftService draftService;
 
     @Transactional(readOnly = true)
     public ApprovalPreviewDto preview(String code, ApprovalPreviewRequest request, long userId) {
         ApprovalPreviewRequest safeRequest = request == null
             ? new ApprovalPreviewRequest(null, Map.of(), null) : request;
+        if (safeRequest.draftId() != null && safeRequest.reworkTaskId() != null) {
+            throw new BizException("BAD_REQUEST", "choose a draft or a rework task");
+        }
         PreviewContext context = safeRequest.reworkTaskId() == null
             ? newSubmission(code, safeRequest, userId)
             : rework(code, safeRequest, userId);
@@ -97,7 +103,11 @@ public class ApprovalPreviewService {
         if (form == null || !PUBLISHED.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
-        authorizationService.requireFormUse(form.getId());
+        if (request.draftId() == null) {
+            authorizationService.requireFormUse(form.getId());
+        } else {
+            draftService.requireUsableDraft(request.draftId(), form.getId(), userId);
+        }
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         if (process == null) return null;
         processDefinitionService.requireNodeFallbackPolicy(process.getProcess());

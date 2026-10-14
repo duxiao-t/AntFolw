@@ -23,7 +23,7 @@ import {
   createMatrixAxisId,
   type MatrixAxis,
   type MatrixAxisItem,
-} from '../../../components/form-fields/matrixFill';
+} from './matrixFill';
 
 type MatrixAxisEditorProps = {
   axis: MatrixAxis;

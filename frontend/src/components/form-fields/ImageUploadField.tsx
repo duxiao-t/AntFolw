@@ -1,3 +1,5 @@
+import { Space, Select, InputNumber, Checkbox, Input, Typography } from 'antd';
+import { PanelField } from './panelField';
 import { PictureOutlined } from '@ant-design/icons';
 import { MediaUploadControl } from './MediaUploadControl';
 import { ReadonlyMediaList, mediaSummary } from './MediaPreview';
@@ -18,6 +20,57 @@ export const ImageUploadField: FieldType = {
     watermarkText: 'AntFlow',
     maxSizeMB: 10,
     accept: DEFAULT_ACCEPT,
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="图片来源">
+          <Select
+            value={props.source ?? 'both'}
+            options={[
+              { label: '仅拍照', value: 'camera' },
+              { label: '仅从相册选择', value: 'album' },
+              { label: '拍照或相册', value: 'both' },
+            ]}
+            onChange={(source) => updateProps({ source })}
+          />
+        </PanelField>
+        <PanelField label="最多上传数量">
+          <InputNumber
+            min={1}
+            max={20}
+            style={{ width: '100%' }}
+            value={props.maxCount ?? 20}
+            onChange={(value) => updateProps({ maxCount: value ?? 20 })}
+          />
+        </PanelField>
+        <PanelField label="单张大小限制(MB)">
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            value={props.maxSizeMB}
+            onChange={(value) => updateProps({ maxSizeMB: value })}
+          />
+        </PanelField>
+        <Checkbox
+          checked={!!props.watermark}
+          onChange={(event) => updateProps({ watermark: event.target.checked })}
+        >
+          上传时添加水印
+        </Checkbox>
+        <PanelField label="水印文字">
+          <Input
+            value={props.watermarkText ?? 'AntFlow'}
+            disabled={!props.watermark}
+            onChange={(event) => updateProps({ watermarkText: event.target.value })}
+          />
+        </PanelField>
+        <Typography.Text type="secondary">
+          水印将叠加拍摄/上传时间，由服务端处理后存储。
+        </Typography.Text>
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange }) => {
     const maxCount = node.props?.maxCount ?? 20;

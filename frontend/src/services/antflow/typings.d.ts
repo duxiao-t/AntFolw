@@ -68,6 +68,7 @@ declare namespace AntFlowAPI {
 
   type ApprovalPreviewRequest = {
     data?: JsonNode;
+    draftId?: number;
     reworkTaskId?: number;
     selfSelected?: Record<string, any>;
   };
@@ -571,11 +572,14 @@ declare namespace AntFlowAPI {
   };
 
   type FormGrantCandidates = {
+    companies?: GrantCompany[];
     departments?: GrantDepartment[];
     roles?: GrantRole[];
   };
 
   type FormGrantDto = {
+    companies?: GrantCompany[];
+    companyIds?: number[];
     departmentIds?: number[];
     departments?: GrantDepartment[];
     roleIds?: number[];
@@ -586,6 +590,7 @@ declare namespace AntFlowAPI {
   };
 
   type FormGrantWriteRequest = {
+    companyIds?: number[];
     departmentIds?: number[];
     roleIds?: number[];
     userIds?: number[];
@@ -605,6 +610,8 @@ declare namespace AntFlowAPI {
 
   type formParams = {
     code: string;
+    draftId?: number;
+    reworkTaskId?: number;
   };
 
   type FormRef = {
@@ -649,6 +656,11 @@ declare namespace AntFlowAPI {
 
   type getParams = {
     id: number;
+  };
+
+  type GrantCompany = {
+    id?: number;
+    name?: string;
   };
 
   type GrantDepartment = {

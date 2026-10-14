@@ -1,5 +1,6 @@
-import { Input } from 'antd';
+import { Checkbox, Input, InputNumber, Space } from 'antd';
 import type { FieldType } from '../../registry/types';
+import { PanelField } from './panelField';
 
 export const TextareaField: FieldType = {
   type: 'textarea',
@@ -22,4 +23,34 @@ export const TextareaField: FieldType = {
       />
     </div>
   ),
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="行数">
+          <InputNumber
+            min={2}
+            max={12}
+            style={{ width: '100%' }}
+            value={props.rows ?? 4}
+            onChange={(value) => updateProps({ rows: value ?? 4 })}
+          />
+        </PanelField>
+        <PanelField label="最大长度">
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            value={props.maxLength ?? 2000}
+            onChange={(value) => updateProps({ maxLength: value ?? 2000 })}
+          />
+        </PanelField>
+        <Checkbox
+          checked={!!props.showCount}
+          onChange={(event) => updateProps({ showCount: event.target.checked })}
+        >
+          显示字数统计
+        </Checkbox>
+      </Space>
+    );
+  },
 };

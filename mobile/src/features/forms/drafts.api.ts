@@ -37,8 +37,12 @@ export async function fetchCompanies() {
   return apiRequest<CompanyOption[]>('/api/companies');
 }
 
-export async function fetchMobileForm(code: string) {
-  return apiRequest<MobileFormDetail>(`/api/mobile/forms/${encodeURIComponent(code)}`);
+export async function fetchMobileForm(code: string, draftId?: number | null, reworkTaskId?: number | null) {
+  const context = new URLSearchParams();
+  if (draftId != null) context.set('draftId', String(draftId));
+  if (reworkTaskId != null) context.set('reworkTaskId', String(reworkTaskId));
+  const query = context.size ? `?${context}` : '';
+  return apiRequest<MobileFormDetail>(`/api/mobile/forms/${encodeURIComponent(code)}${query}`);
 }
 
 export async function fetchMobileDraft(id: number) {

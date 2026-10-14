@@ -4,24 +4,121 @@
 > **公司归属政策已拍板**（`D-20261009-company-attribution-policy`，2026-10-10）：模板全局共享、实例归属**创建时快照 `company_id`**、公司管理员只收敛数据范围。
 > **先做 P4a（归属快照），做完再回 P1**。历史口径已定：**无法证明归属的保留 `company_id = NULL`（待确认）**，不自动归属、不按今天部门猜；写路径清点见该决策条目（实例只有 1 个写入口，无流程/草稿的 `t_form_data` 必须自己快照）。
 > **P4a 已实施（2026-10-10，见下"最新一轮"）**：两个产品口径已定（无部门全局管理员**显式指定**目标公司；草稿转正**取草稿创建时**）。
-> **P1-a 已实施（2026-10-10）**：真实后端契约已接进生成链路（见下"最新一轮"）——契约构建期导出并提交、两侧门禁、5 处手写 `FormDefinition` 清零、H3 基线归零。**P1-b（设计器逐字段配置分派迁移）另开方案，本轮未动。**
+> **P1-a 已实施（2026-10-10）**：真实后端契约已接进生成链路——契约构建期导出并提交、两侧门禁、5 处手写 `FormDefinition` 清零、H3 基线归零。**P1-b 已收口，当前进度见下。**
 > **P4a 发布窗口已定：2026-10-15 02:00（+08:00）开始、预计 30 分钟**，owner / draft handler 均为 `admin`
 > （30 分钟为初值，待生产量级预演校正）。**发布步骤已落地**，见 `docs/p4a-rollout-runbook.md`。
 > 之后按 `P4a 验收 → P1-b → #3 COMPANY 授权 → #5 数据范围` 推进。
 > **P4a 验收记录（2026-10-14）见 `docs/p4a-acceptance-record.md`**：口径 1/2/3 四层均有证据 ⇒
 > **代码与规则部分验收通过**；剩余是运维动作（窗口上线 + 历史草稿回填）。
-> **P1-b 已起步（2026-10-14）**：B0 = 清掉 26 份零渲染点的 `ConfigPanel`（**只清理、不接线**）——
-> 集中式 `Inspector.renderComponentSettings()` 仍是唯一配置入口，逐字段迁移**尚未开始**。
+> **P1-b 已收口，P4 #3 已实施（2026-10-14）**：组件配置全部走注册表；COMPANY 是公司门槛，
+> 存量补迁移时已有公司、旧草稿按原公司。**本机已部署 V55 并通过浏览器验收**，生产未部署；
+> 下一片 #5-1 的执行方案见 `docs/p4-next-step-plan.md`。
 
 # 任务交接
 
 - **State:** active
-- **更新时间：** `2026-10-14T15:10:00+08:00`
-- **分支：** `master`（本轮含 B0 提交；上一轮 P4a 文档见 `6785add`）。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
+- **更新时间：** `2026-10-14T18:10:00+08:00`
+- **分支：** `master`；本轮提交包含 P1-b、COMPANY 门槛及移动端修复（实现起点 `2f61ecb`，具体提交见 `git log`）。P4a 文档见 `6785add`。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
 
 ---
 
-## 最新一轮：P1-b / B0——清掉 26 份零渲染点的 `ConfigPanel`
+## 最新一轮：移动端修复、V55 本机部署与浏览器验收
+
+**本机已部署并验收，生产未动。** 本轮包含此前的 P1-b/COMPANY 工作区改动，原改动保留。
+
+移动端卸载异常根因是测试 setup 没有加载 main.tsx 的 React 19 适配，落回旧卸载 API。
+已将既有注册原样移到共享模块，main/setup 共用，新增真实 Toast 和容器重复使用测试。
+修复前 46 文件 / 363 用例通过但退出 1；修复后加两条为 365/365、退出 0。
+
+真实浏览器进一步发现登录基础 user 缺 deptId，而完整数据在 mobileBootstrap.user。
+普通用户因此被当作无部门、保存按钮禁用；在 applySession 改一行优先采用 bootstrap user，
+增加登录/恢复/刷新三条回归。授权页 employee 从指定角色候选移除，只由全员工开关管理，补充保存测试。
+
+**最终串行验证**：后端 **610 条、0 失败、0 错误、2 skipped，退出 0**；桌面 **65 文件 / 338 用例，退出 0**；
+移动 **47 文件 / 368 用例，退出 0、无 unhandled errors**。并发跑两端曾令一个既有交互用例触及
+5 秒超时，串行重跑通过；没有放宽超时或加入忽略错误。两端构建、类型、契约检查、lint、
+移动体积预算、导入边界及健康指标通过，既有 lint warnings 保持桌面 4 / 移动 10。
+
+**本机发布**：旧镜像在 build 前留 tag；数据库备份在仓外，并恢复到独立库验证 44 实例 / 47 填报记录。
+构建 JAR、桌面 dist 与移动 dist → compose build backend/web → 更新两个容器，Flyway V54→V55 成功，
+backend health UP。仅本机 `127.0.0.1:7070`，不作为生产上线证明。
+
+**真实浏览器（独立 Chrome/Playwright，无 API mock）**：Toast 显示/卸载/重新显示、单选/多选弹层关闭；
+设计器 text maxLength=300 / trim=true 保存刷新、未知属性保留；公司选择与全员工授权保存刷新；
+未授权公司直开/建草稿被拒；用户调岗后原公司草稿保存、确认、提交成功。
+数据库核对新提交 54 的 company_id=8、company_inferred=false。页面异常 0。
+验收账号已停用，验收发布表单已下线，专用配置草稿保留；未修改原有已发布业务表单。
+
+取证与镜像信息见 `docs/local-release-2026-10-14.md`。下一步执行
+`docs/p4-next-step-plan.md` 的 #5-1，公司完整业务数据隔离另属 #5-2。
+
+---
+
+## 上一轮：P1-b 收口 + P4 #3 COMPANY 公司门槛
+
+**实现完成，未部署。** 本轮在既有 B1 工作区上继续改动，不覆盖先前改动。
+
+P1-b：剩余 21 个 case 全迁移，Inspector 不再保留组件配置 switch。23 类字段注册可选面板，
+description / scan_code / location 保持无专属配置。选项/矩阵编辑器移到 components；人员范围、
+检查项编辑器随所属字段迁移。迁移脚本断言运行时 Component 不变；新增行为覆盖保存写回、
+未知属性保留、重新打开、可选面板以及检查项结果，既有选项/矩阵测试继续使用原编辑器。
+
+P4 #3：V55 扩展现有授权表，加 COMPANY **门槛**，与现有 USER/ROLE/DEPARTMENT 并集相交；
+单项与批量判权复用主体匹配 SQL。迁移为存量表单补当前公司，不改变旧主体授权；新公司/新表单
+无默认公司门槛。只有全局管理员可修改 companyIds；省略保留、空数组撤销，沿用 CAS、锁和审计。
+授权页面增加公司选择，“全公司可见”更名为“已授权公司内全部员工”。
+
+草稿：批量按行内公司判 readOnly；读取表单/预览接收 draftId 并验证所有者、表单；新提交按身份，
+草稿保存/转正按快照，引擎再次检查已解析公司门槛。填写/确认缓存区分 draft/rework，上下文贯穿预览，
+外部选项使用 dataId 并检查草稿门槛。既有重提按任务授权，已提交历史数据不依赖公司使用门槛。
+
+**实测**：后端全量 610 条（0 失败、0 错误、2 skipped）退出 0；前端全量 65 文件 / 338 用例退出 0；
+移动端最终全量 46 文件 / 363 用例全部通过，但既有 `unmountComponentAtNode` unhandled error
+令退出码为 1，不能称全量门禁干净；新增后提交链路 21/21、退出 0。
+两端类型检查/构建、契约生成/检查、生成声明类型检查、lint、导入边界和健康指标通过
+（桌面 4 条、移动 10 条既有 lint warnings）。真库新增公司门槛三主体负向矩阵、目录一致、
+旧请求兼容、CAS、非管理员拒绝及调岗草稿/撤销验证。
+**最终补充真库 2/2、退出 0**：V54→V55 保留旧主体授权、存量补公司、后来新建公司零授权；
+原公司草稿的外部选项可查，撤销公司授权后查询被拒绝且草稿保留。补充时修正夹具的缺 schema、
+选项版本有 row_count 但无实际行两个缺项，没有调整产品判权来迎合测试。
+
+**未做/风险**：P4 #5 数据范围、公司管理入口、BI 隔离、生产量级预演、P4a 生产部署与人工草稿回填。
+V55 兼容回填不会主动收窄存量公司范围，要收窄需全局管理员显式修改。生产部署需同时发布后端与两端，
+现有生产窗口记录仅覆盖 V54，不能直接当成 V55 的发布验收。
+本轮发布步骤与验收点见 `docs/company-gate-rollout.md`；V55 生产发布窗口未定。
+
+---
+
+## 上一轮：P1-b / B1——text、textarea 配置接入注册表
+
+**首批真实迁移完成，尚未完成整个 P1-b。** 可选 `FieldType.ConfigPanel` 接收 `node` 与
+`updateProps(patch)`；Inspector 优先渲染注册面板，未迁移字段仍走原 switch。两条旧 case 已删除，
+text / textarea 各只维护一份组件配置。基础设置、校验、显示逻辑与联动仍由 Inspector 管理。
+
+- `registry/types.ts`：新增 `FieldConfigPanelProps` 与可选面板成员。
+- `components/form-fields/panelField.tsx`：原样搬出标签包装，Inspector 与字段面板共用；字段不反向依赖 pages。
+- `TextField.tsx` / `TextareaField.tsx`：原样搬入面板。语法树对比确认面板 JSX（忽略缩进）、运行时渲染器与其余 switch 分支不变。
+- `InspectorFieldPanels.test.tsx`：新增 5 条用例，覆盖两面板写回、属性保留、重新挂载读回、默认值及清空回退、number 旧路径。
+
+**本轮实测**：前端全量 **65 文件 / 319 用例，退出码 0**（基线 64 / 314，+1 文件、+5 用例）；
+`npm run tsc` exit 0；`biome:lint` 4 条既有 warnings、0 error；导入边界存量 8 条、无新增；
+健康指标通过且基线未变。测试日志仍有既有 iframe 请求中止信息，未导致本轮失败。
+**守护取证**：临时停用 Inspector 注册表分派 → 新文件 4 条失败、number 1 条通过，退出码 1；
+恢复后新文件 5/5 通过。修改已还原。
+
+**部署与浏览器验收**：宿主机 `npm --prefix frontend run build` → compose build web → 更新 web 容器。
+compose 启动请求曾卡在 Created；结束卡住的客户端请求后 `docker start antflow-local-web-1` 成功，
+web HTTP 200、backend health UP。Chrome DevTools 共享 profile 被占用，改用仓内已有 Playwright 的
+独立 Chrome 会话（真实部署页面、未 mock API），创建专用 **DRAFT** 验收表单，修改并保存：
+text 输入类型 number / maxLength 300 / trim true；textarea rows 6 / maxLength 2500 / showCount true。
+服务端 schema 与刷新后的 UI 均一致，placeholder / required 保留、状态仍 DRAFT，页面未捕获错误 0。
+验收草稿保留在本地栈，未修改任何已发布表单。
+
+**未做**：其余字段迁移；后端与移动端本轮全量回归（本轮产品代码仅 frontend）；P4a 生产量级预演与上线验收。
+
+---
+
+## 上一轮：P1-b / B0——清掉 26 份零渲染点的 `ConfigPanel`
 
 **这一轮只清理、不接线。** 注册表原先声称每个字段都有配置面板，实际零渲染点——把这份"看起来已经迁完"
 的假象删掉，集中式 `renderComponentSettings()` 仍是唯一配置入口。逐字段迁移（把 switch 的 case 搬进各字段）
@@ -643,6 +740,7 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
 ## 已知遗留（八轮累计）
 
 - **`npx antd lint ./src` 不是干净的，而且短期清不掉**：清理后是 44 deprecated + 45 usage。其中
+  （44 是当时统计；2026-10-14 本轮实测为 47 deprecated + 45 usage，退出 0，检查结果仍是 warnings。）
   **Select 的 `onSearch`/`filterOption`（13 处）在当前依赖里没有安全改法**——`showSearch={{…}}` 这个对象
   形式是空操作（antd 6.5.3 + rc-select 14.1.18 只把 `showSearch` 当布尔用），改了会把搜索静默改坏；
   `Space direction`（28）与 `Drawer width`（3）是布局语义变化，要做必须配视觉验证；静态
@@ -686,9 +784,10 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
 
 ## 验证基线
 
-后端 `mvn -B test` **601 绿**（带 `ANTFLOW_TEST_POSTGRES_URL` 指向本机 `antflow_p4a_probe`，含真库集成用例；不给它那批会走 Testcontainers，而本机 Docker Desktop 起 `ryuk` 会挂住 —— 见下）、前端 `npx vitest run` **314**、移动 `npx vitest run` **362**（**601 的来历**：P4a 那轮的 600 + P1-a 新增的 `ApiContractSnapshotTest`。本文档里 `600` 也出现过一次——那是 **P4a 那一轮自己的**数字，不是当前基线；别把两处读混）、前端 `biome lint` 4 warnings（既有）+ `tsc`/`tsc:openapi`/`openapi:check`/`check:boundaries` 全干净，`node scripts/health-metrics.mjs` 绿（**H3 = 0**）；`npx antd lint ./src` 44 deprecated + 45 usage（见遗留）。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
+后端 `mvn -B test` **610 绿**（带 `ANTFLOW_TEST_POSTGRES_URL` 指向本轮全新独立 `antflow_company_probe_*`，含真库集成用例；不给它那批会走 Testcontainers，而本机 Docker Desktop 起 `ryuk` 会挂住 —— 见下）、前端 `npm run test` **338**（65 文件）、移动 `npx vitest run` **368**（47 文件、退出 0；本轮修复弹层卸载异常并补 5 条回归）（**610 的来历**：P4a 那轮的 600 + P1-a 的 `ApiContractSnapshotTest` = 601，再 + P1-b / #3 的 9 条 = 610。本文档里 `600` / `601` / `362` 都是**各自那一轮的当时数字**，不是当前基线；别把几处读混）、前端 `biome lint` 4 warnings（既有）+ `tsc`/`tsc:openapi`/`openapi:check`/`check:boundaries` 全干净，`node scripts/health-metrics.mjs` 绿（**H3 = 0**）；`npx antd lint ./src` 44 deprecated + 45 usage（见遗留）。**CI 只跑 `biome lint`（不含格式化与导入排序）——别用 `biome check --write` 全量刷**。新加的守护用例都验过"去掉修复即失败"（ALL 范围漏人、`submitterKeyword` 空集合、报表三种范围、导出范围收窄、部门名搜含下级、台账按版本解释、外链选项名、缺 ffmpeg 的可读报错、非图片字节被拒、媒体值形状是 `id`+`contentType` 的 DTO、上传中/处理中挡住提交；媒体健壮性那轮：删掉 ④⑤ 的修复代码后 `MobileFileServiceTest`/`MobileFileLinkServiceTest` 挂 9 条、真库 `deleteRefusesAFileThatIsStillBeingProcessed` 与 `sameFileInTwoFieldsIsLinkedOnceWithTheAuthoritativeField`（复现出原主键冲突 `DuplicateKey`）也挂；**最新两轮**：去掉 `FOR UPDATE` → 真库 `uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked` 挂；去掉 `exists` 判断/真实大小检查 → 3 个单测挂；把 `@Transactional` 加回 `upload` → `imageWatermarkRunsOutsideTheTransactionWhileInsertRunsInside` 挂；闸门写死回 2 → 串行那条挂；去掉移动端 `failureReason` 透传 / 关掉 `setFailedFiles` → 两条移动用例挂）。
 
-> **移动端 `npx vitest run` 会带出一条 unhandled error**（`unmountComponentAtNode is not a function`，来自 antd-mobile 的 Popup/rc-util 与 React 19 的卸载路径）。单独跑 `fields.test.tsx` 或 `files.api.test.ts` 都没有 —— 是既有测试之间的干扰，与本轮改动无关，别误判成回归。
+> **已修复（2026-10-14 晚间）**：移动端 `unmountComponentAtNode` unhandled error 来自测试入口未加载应用的 React 19 弹层适配。
+> main/setup 已共用适配，最终 47 文件 / 368 用例、退出 0。本段原先的“测试之间干扰”只是当时观察，不是最终根因。
 
 > **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法（比之前简单）：本机 5432 的 PostgreSQL 里 `CREATE DATABASE antflow_probe`（宿主没有 `psql`，用 postgres JDBC 驱动跑几行 Java 最省事），`ANTFLOW_TEST_POSTGRES_URL='jdbc:postgresql://127.0.0.1:5432/antflow_probe'` + `ANTFLOW_TEST_POSTGRES_USERNAME=postgres` + `ANTFLOW_TEST_POSTGRES_PASSWORD=Tao@1234`（`sslmode`/`stringtype` 不用加，测试自己补 `stringtype`）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建——**一次失败留下的行会让下一轮出现假回归**（本次就撞了 `employee_no`/`option_data_source.code` 唯一键）。
 >

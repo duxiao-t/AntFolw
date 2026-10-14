@@ -86,10 +86,12 @@ public class MobileWorkflowController {
 
     @GetMapping("/forms/{code}")
     @PreAuthorize("@authz.capability('" + PermissionCodes.FORM_RUNTIME_READ + "')")
-    public MobileFormDto form(@PathVariable String code) {
+    public MobileFormDto form(@PathVariable String code,
+                              @RequestParam(required = false) Long draftId,
+                              @RequestParam(required = false) Long reworkTaskId) {
         principal();
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
-        return workflowService.getMobileForm(code);
+        return workflowService.getMobileForm(code, draftId, reworkTaskId);
     }
 
     @PostMapping("/forms/{code}/approval-preview")

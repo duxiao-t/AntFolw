@@ -4,9 +4,8 @@ import { Inspector } from './Inspector';
 import { useFormDesignerStore } from './useFormDesignerStore';
 
 /**
- * 设计器走 `Inspector` 自己的集中式 `renderComponentSettings()`。早期各字段还各写了一份
- * `ConfigPanel`，但它从来没有渲染点（B0 已把这些死实现删掉），所以 radio/checkbox 能配选项，
- * 靠的一直是 Inspector 里的 `case 'radio'/'checkbox'` 分支。这条用例就是那条接线的验收。
+ * Inspector 分派到注册表 ConfigPanel，选择字段共用选项编辑器。
+ * 改标签必须保留原值及未知属性，保存并重新打开后结果不变。
  */
 beforeEach(() => {
   useFormDesignerStore.setState({

@@ -78,6 +78,19 @@ describe('useAuthStore', () => {
     expect(document.cookie.includes('mem-token')).toBe(false);
   });
 
+  it.each(['login', 'restore', 'refresh'] as const)('keeps the bootstrap department during %s so ordinary users can save forms', async (action) => {
+    const user = { ...SAMPLE_USER, deptId: 20, department: '验收部门', employeeNo: '000007' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse(200, {
+      accessToken: 'department-token',
+      user: SAMPLE_USER,
+      mobileBootstrap: { ...SAMPLE_BOOTSTRAP, user },
+    })));
+    if (action === 'login') await useAuthStore.getState().login('test', 'test-password');
+    else await useAuthStore.getState()[action]();
+    expect(useAuthStore.getState().user).toEqual(user);
+    expect(useAuthStore.getState().user?.deptId).toBe(20);
+  });
+
   it('sends cookie credentials on restore and refresh', async () => {
     const fetchMock = vi
       .fn()

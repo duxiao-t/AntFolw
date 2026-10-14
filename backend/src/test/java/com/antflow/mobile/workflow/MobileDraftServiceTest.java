@@ -40,6 +40,8 @@ class MobileDraftServiceTest {
         authorizationService = Mockito.mock(AuthorizationService.class);
         companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
         Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(TEST_COMPANY_ID);
+        Mockito.when(companyAttribution.forDraft(Mockito.any(), Mockito.any()))
+            .thenAnswer(invocation -> invocation.getArgument(0));
         service = new MobileDraftService(formDataMapper, formDefinitionService, objectMapper,
             authorizationService, companyAttribution);
         Mockito.when(formDefinitionService.canonicalizeStarterData(
@@ -63,7 +65,7 @@ class MobileDraftServiceTest {
         }).when(formDataMapper).insert(any(FormData.class));
         // 列表改走批量判定：usableFormIds 返回空 = 不过滤（管理员口径），默认放行。
         Mockito.when(authorizationService.hasPermission(Mockito.anyLong(), Mockito.anyString())).thenReturn(true);
-        Mockito.when(authorizationService.usableFormIds(Mockito.anyLong()))
+        Mockito.when(authorizationService.usableFormIdsByCompany(Mockito.anyLong()))
             .thenReturn(java.util.Optional.empty());
     }
 
@@ -86,14 +88,14 @@ class MobileDraftServiceTest {
         assertThat(saved.getCompanyId()).isEqualTo(TEST_COMPANY_ID);
         assertThat(saved.getCompanyInferred()).isFalse();
         assertThat(objectMapper.readTree(saved.getData()).path("days").asInt()).isEqualTo(2);
-        Mockito.verify(authorizationService).requireFormUse(10L);
+        Mockito.verify(authorizationService).requireFormUse(10L, TEST_COMPANY_ID);
     }
 
     @Test
     void createRejectsFormWithoutUsageGrant() {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
         Mockito.doThrow(new HiddenResourceException("form not found"))
-            .when(authorizationService).requireFormUse(10L);
+            .when(authorizationService).requireFormUse(10L, TEST_COMPANY_ID);
 
         assertThatThrownBy(() -> service.create("leave",
             objectMapper.createObjectNode(), null, 7L))
@@ -112,7 +114,7 @@ class MobileDraftServiceTest {
         assertThat(updated.getId()).isEqualTo(101L);
         assertThat(objectMapper.readTree(updated.getData()).path("days").asInt()).isEqualTo(5);
         Mockito.verify(formDataMapper).updateById(updated);
-        Mockito.verify(authorizationService).requireFormUse(10L);
+        Mockito.verify(authorizationService).requireFormUse(10L, TEST_COMPANY_ID);
     }
 
     @Test
@@ -158,14 +160,32 @@ class MobileDraftServiceTest {
         Mockito.when(formDataMapper.selectById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
         Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
             .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
-        Mockito.when(authorizationService.usableFormIds(7L))
-            .thenReturn(java.util.Optional.of(java.util.Set.of()));
+        Mockito.when(authorizationService.usableFormIdsByCompany(7L))
+            .thenReturn(java.util.Optional.of(Map.of()));
 
         MobileDraftDto dto = service.get(101L, 7L);
 
         assertThat(dto.readOnly()).isTrue();
         service.delete(101L, 7L);
         Mockito.verify(formDataMapper).deleteById(101L);
+    }
+
+    @Test
+    void draftReadOnlyFlagUsesEachSnapshotCompanyInTheSameBatch() {
+        FormData first = draft(101L, 7L, "DRAFT");
+        first.setCompanyId(20L);
+        FormData second = draft(102L, 7L, "DRAFT");
+        second.setCompanyId(30L);
+        FormData pending = draft(103L, 7L, "DRAFT");
+        pending.setCompanyId(null);
+        Mockito.when(formDataMapper.selectMyDrafts(7L)).thenReturn(List.of(first, second, pending));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+        Mockito.when(authorizationService.usableFormIdsByCompany(7L))
+            .thenReturn(java.util.Optional.of(Map.of(20L, java.util.Set.of(10L))));
+        assertThat(service.list(7L)).extracting(MobileDraftDto::readOnly)
+            .containsExactly(false, true, true);
+        Mockito.verify(authorizationService).usableFormIdsByCompany(7L);
     }
 
     @Test
@@ -222,6 +242,7 @@ class MobileDraftServiceTest {
         draft.setData("{\"days\":1}");
         draft.setStatus(status);
         draft.setCreatedBy(createdBy);
+        draft.setCompanyId(TEST_COMPANY_ID);
         return draft;
     }
 }
