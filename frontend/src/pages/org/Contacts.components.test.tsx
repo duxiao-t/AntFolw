@@ -130,6 +130,10 @@ describe('Contacts components', () => {
           onCancel={vi.fn()}
           managerOptions={[{ value: 2, label: '张经理（000002）' }]}
           onManagerSearch={vi.fn()}
+          companies={[{ value: 1, label: '甲公司' }]}
+          canChangeCompany={false}
+          onCompanyChange={vi.fn()}
+          departments={[{ id: 2, pId: 0, value: 2, title: '技术部', selectable: true }]}
         />
       );
     }

@@ -12,7 +12,7 @@ export async function all1(options?: { [key: string]: any }) {
 
 /** 此处后端没有提供注释 POST /api/companies */
 export async function create6(
-  body: AntFlowAPI.Company,
+  body: AntFlowAPI.CreateCompanyRequest,
   options?: { [key: string]: any }
 ) {
   return request<AntFlowAPI.Company>("/api/companies", {

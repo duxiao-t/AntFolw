@@ -258,6 +258,10 @@ declare namespace AntFlowAPI {
     id: string;
   };
 
+  type CreateCompanyRequest = {
+    name?: string;
+  };
+
   type CreateRequest = {
     agentId?: number;
     endsAt?: string;
@@ -359,6 +363,10 @@ declare namespace AntFlowAPI {
 
   type departments1Params = {
     keyword?: string;
+  };
+
+  type departmentsParams = {
+    companyId?: number;
   };
 
   type DeptRow = {
@@ -513,6 +521,7 @@ declare namespace AntFlowAPI {
     userIds?: number[];
     scopeType?: string;
     format?: string;
+    companyId?: number;
   };
 
   type FavoriteAppsRequest = {
@@ -819,6 +828,7 @@ declare namespace AntFlowAPI {
     position?: string;
     userIds?: number[];
     scopeType?: string;
+    companyId?: number;
   };
 
   type LocalTime = {
@@ -1251,6 +1261,7 @@ declare namespace AntFlowAPI {
     keyword?: string;
     deptId?: number;
     includeDescendants?: boolean;
+    companyId?: number;
   };
 
   type PageSummary = {
@@ -1338,6 +1349,13 @@ declare namespace AntFlowAPI {
       | "CUSTOM"
       | "ALL"
     )[];
+  };
+
+  type PickerDepartment = {
+    companyId?: number;
+    id?: number;
+    name?: string;
+    parentId?: number;
   };
 
   type PickerRoleDto = {

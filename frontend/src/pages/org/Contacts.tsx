@@ -1,6 +1,6 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { request, useAccess } from '@umijs/max';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useIsMutating } from '@tanstack/react-query';
 import {
   Input, Tree, Button, Dropdown, Modal, Form, Select, App,
 } from 'antd';
@@ -45,6 +45,44 @@ interface UserPage { records?: UserItem[]; total?: number; }
 interface ManagerCandidate { id: number; displayName: string; employeeNo: string; deptId: number; }
 
 export default function ContactsPage() {
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number>();
+  const [busy, setBusy] = useState(false);
+  const mutations = useIsMutating();
+  const companies = useQuery({
+    queryKey: ['companies'],
+    queryFn: () => request<AntFlowAPI.Company[]>('/api/companies'),
+  });
+  const options = (companies.data ?? []).flatMap((company) => company.id == null ? []
+    : [{ value: company.id, label: company.name ?? `公司 ${company.id}` }]);
+  const companyId = options.some((option) => option.value === selectedCompanyId)
+    ? selectedCompanyId : options.length === 1 ? options[0].value : undefined;
+  return (
+    <PageContainer breadcrumbRender={false}>
+      <Select
+        aria-label="通讯录公司"
+        placeholder="请选择公司"
+        value={companyId}
+        options={options}
+        loading={companies.isFetching}
+        disabled={busy || mutations > 0}
+        onChange={setSelectedCompanyId}
+        style={{ width: 280, marginBottom: 12 }}
+      />
+      {companies.isError && <Button onClick={() => companies.refetch()}>公司加载失败，点击重试</Button>}
+      {companyId == null ? (
+        <div className="ct-empty">{options.length ? '请先选择公司' : '暂无可访问的公司'}</div>
+      ) : (
+        <CompanyContacts key={companyId} companyId={companyId} companies={options} onBusyChange={setBusy} />
+      )}
+    </PageContainer>
+  );
+}
+
+function CompanyContacts({ companyId, companies, onBusyChange }: {
+  companyId: number;
+  companies: { value: number; label: string }[];
+  onBusyChange: (busy: boolean) => void;
+}) {
   const access = useAccess();
   const [selDeptId, setSelDeptId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
@@ -70,46 +108,48 @@ export default function ContactsPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // --- data ---
-  const { data: companies } = useQuery({ queryKey: ['companies'], queryFn: () => request('/api/companies') });
-  const companyId = (companies as any[])?.[0]?.id ?? 1;
-
-  const { data: deptList = [] } = useQuery({
+  const { data: deptList = [], isError: departmentsError, refetch: refetchDepartments } = useQuery<Dept[]>({
     queryKey: ['depts', companyId],
     queryFn: () => request(`/api/departments?companyId=${companyId}`),
     enabled: !!companyId,
   });
 
   const { data: memberResult } = useQuery<UserPage>({
-    queryKey: ['users-page', selDeptId, memberPage],
+    queryKey: ['users-page', companyId, selDeptId, memberPage],
     queryFn: () => request('/api/users/page', { params: {
-      page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
+      companyId, page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
     } }),
     enabled: !!selDeptId,
   });
 
-  // 搜索框双用：同一个词既过滤左树，也去后端搜人（跨部门；后端按姓名/账号/工号 LIKE，
-  // 非 admin 仍会被收窄到"可管部门 ∪ 本人"）。不传 deptId 才是全范围。
+  // 同一个词过滤左树并在当前公司内跨部门搜人；后端继续叠加能力数据范围。
   const trimmedSearch = search.trim();
   const [searchPage, setSearchPage] = useState(1);
   useEffect(() => setSearchPage(1), [trimmedSearch]);
   const { data: searchResult, isFetching: searchLoading } = useQuery<UserPage>({
-    queryKey: ['users-search', trimmedSearch, searchPage],
+    queryKey: ['users-search', companyId, trimmedSearch, searchPage],
     queryFn: () => request('/api/users/page', { params: {
-      page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
+      companyId, page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
     } }),
     enabled: !!trimmedSearch,
   });
   const paneMode = contactsPaneMode(search, selDeptId);
 
   const { data: leaderResult } = useQuery<UserPage>({
-    queryKey: ['leader-users'],
-    queryFn: () => request('/api/users/page', { params: { page: 1, size: 100 } }),
+    queryKey: ['leader-users', companyId],
+    queryFn: () => request('/api/users/page', { params: { companyId, page: 1, size: 100 } }),
     enabled: leaderOpen,
   });
 
-  const managerDepartmentId = memberEdit?.deptId ?? selDeptId;
+  const memberCompanyId = Form.useWatch('companyId', { form: memberForm, preserve: true }) ?? companyId;
+  const managerDepartmentId = Form.useWatch('deptId', { form: memberForm, preserve: true });
+  const memberDepartments = useQuery<Dept[]>({
+    queryKey: ['depts', memberCompanyId],
+    queryFn: () => request('/api/departments', { params: { companyId: memberCompanyId } }),
+    enabled: memberOpen,
+  });
   const { data: managerCandidates = [], isFetching: managerCandidatesLoading } = useQuery<ManagerCandidate[]>({
-    queryKey: ['manager-candidates', managerDepartmentId, memberEdit?.id, managerKeyword],
+    queryKey: ['manager-candidates', memberCompanyId, managerDepartmentId, memberEdit?.id, managerKeyword],
     queryFn: () => request('/api/users/manager-candidates', { params: {
       deptId: managerDepartmentId,
       excludeUserId: memberEdit?.id,
@@ -131,6 +171,11 @@ export default function ContactsPage() {
     }
     return options;
   }, [managerCandidates, memberEdit]);
+
+  const refreshMembers = async () => {
+    await Promise.all(['users-page', 'users-search', 'leader-users', 'manager-candidates']
+      .map((key) => qc.invalidateQueries({ queryKey: [key] })));
+  };
 
   // --- tree data ---
   const treeData = useMemo(() => {
@@ -234,15 +279,15 @@ export default function ContactsPage() {
   // --- member CRUD ---
   const memberCreate = useMutation({
     mutationFn: (body: any) => request('/api/users', { method: 'POST', data: body }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['users-page'] }); msg.success('添加成功'); },
+    onSuccess: async () => { await refreshMembers(); msg.success('添加成功'); },
   });
   const memberUpdate = useMutation({
     mutationFn: ({ id, ...body }: any) => request(`/api/users/${id}`, { method: 'PUT', data: body }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['users-page'] }); msg.success('已更新'); },
+    onSuccess: async () => { await refreshMembers(); msg.success('已更新'); },
   });
   const memberRemove = useMutation({
     mutationFn: (id: number) => request(`/api/users/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['users-page'] }); msg.success('已删除'); },
+    onSuccess: async () => { await refreshMembers(); msg.success('已删除'); },
   });
   const memberPasswordReset = useMutation({
     mutationFn: ({ id, newPassword }: { id: number; newPassword: string }) =>
@@ -369,9 +414,10 @@ export default function ContactsPage() {
   const handleMemberOk = async () => {
     try {
       const v = await memberForm.validateFields();
-      const { confirmPassword: _confirmPassword, ...payload } = v;
+      const { confirmPassword: _confirmPassword, companyId: _companyId, ...payload } = v;
+      payload.managerId = payload.managerId ?? null;
       if (memberEdit) await memberUpdate.mutateAsync({ id: memberEdit.id, ...payload });
-      else await memberCreate.mutateAsync({ ...payload, deptId: selDeptId });
+      else await memberCreate.mutateAsync(payload);
       setMemberOpen(false); setMemberEdit(null); memberForm.resetFields();
     } catch (error: any) {
       if (error?.errorFields) return;
@@ -396,16 +442,21 @@ export default function ContactsPage() {
   const handleBulkMemberRemove = async () => {
     const ids = selectedMemberIds.map(Number);
     if (!ids.length) return;
-    const results = await Promise.allSettled(
-      ids.map((id) => request(`/api/users/${id}`, { method: 'DELETE' })),
-    );
-    const { successCount, failedCount } = summarizeSettledResults(results);
-    if (successCount) {
-      setSelectedMemberIds([]);
-      qc.invalidateQueries({ queryKey: ['users-page'] });
+    onBusyChange(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map((id) => request(`/api/users/${id}`, { method: 'DELETE' })),
+      );
+      const { successCount, failedCount } = summarizeSettledResults(results);
+      if (successCount) {
+        setSelectedMemberIds([]);
+        await refreshMembers();
+      }
+      if (failedCount) msg.error(`批量删除完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
+      else msg.success(`已删除 ${successCount} 名成员`);
+    } finally {
+      onBusyChange(false);
     }
-    if (failedCount) msg.error(`批量删除完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
-    else msg.success(`已删除 ${successCount} 名成员`);
   };
 
   // 导出走后端（同一条 listAuthorized：含下级部门、行级数据范围也在），以前只把**当前页**
@@ -414,7 +465,7 @@ export default function ContactsPage() {
     if (!selDeptId) { msg.warning('请先选择部门'); return; }
     try {
       const blob = await request('/api/users/export', {
-        params: { deptId: selDeptId, includeDescendants: true, format: 'csv' },
+        params: { companyId, deptId: selDeptId, includeDescendants: true, format: 'csv' },
         responseType: 'blob',
         skipErrorHandler: true,
       });
@@ -436,6 +487,7 @@ export default function ContactsPage() {
     event.target.value = '';
     if (!file || !selDeptId) return;
 
+    onBusyChange(true);
     try {
       const result = parseMembersCsv(await file.text(), selDeptId);
       if (result.errors.length) {
@@ -448,7 +500,7 @@ export default function ContactsPage() {
         successCount: number; failedCount: number; passwordResetRequired: boolean;
       }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
       const { successCount, failedCount } = imported;
-      if (successCount) qc.invalidateQueries({ queryKey: ['users-page'] });
+      if (successCount) await refreshMembers();
       // 只要建成了账号就得提醒重置密码：后端给的是随机且不返回的密码，这些人自己登不上。
       // 部分成功时以前只报失败数，把这条盖掉了。
       const resetHint = successCount ? '；请由管理员为新账号重置密码' : '';
@@ -459,6 +511,8 @@ export default function ContactsPage() {
       }
     } catch (_error) {
       msg.error('批量导入失败');
+    } finally {
+      onBusyChange(false);
     }
   };
 
@@ -478,7 +532,8 @@ export default function ContactsPage() {
   }, [deptEditOpen, editDeptName, deptForm]);
 
   return (
-    <PageContainer breadcrumbRender={false}>
+    <>
+      {departmentsError && <Button onClick={() => refetchDepartments()}>部门加载失败，点击重试</Button>}
       <div className="ct-layout">
         {/* ===== LEFT ===== */}
         <aside className="ct-left">
@@ -549,8 +604,8 @@ export default function ContactsPage() {
               importInputRef={importInputRef}
               onSelectedMemberIdsChange={setSelectedMemberIds}
               onPageChange={setMemberPage}
-              onAdd={() => { setMemberEdit(null); setManagerKeyword(''); memberForm.resetFields(); setMemberOpen(true); }}
-              onEdit={(member) => { setMemberEdit(member); setManagerKeyword(''); setMemberOpen(true); memberForm.setFieldsValue({ ...member, gender: normalizeGender(member.gender) }); }}
+              onAdd={() => { setMemberEdit(null); setManagerKeyword(''); memberForm.resetFields(); memberForm.setFieldsValue({ companyId, deptId: selDeptId }); setMemberOpen(true); }}
+              onEdit={(member) => { setMemberEdit(member); setManagerKeyword(''); setMemberOpen(true); memberForm.setFieldsValue({ ...member, companyId, gender: normalizeGender(member.gender) }); }}
               onRemove={(id) => memberRemove.mutate(id)}
               onBulkRemove={handleBulkMemberRemove}
               onExport={handleExportMembers}
@@ -579,6 +634,7 @@ export default function ContactsPage() {
         destroyOnHidden
       >
         <Form form={deptForm} layout="vertical" preserve={false}>
+          <Form.Item label="所属公司"><Input value={companies.find((company) => company.value === companyId)?.label} disabled /></Form.Item>
           <Form.Item label="部门名称" name="name" rules={[{ required: true, message: '请输入' }]}>
             <Input autoFocus />
           </Form.Item>
@@ -603,6 +659,7 @@ export default function ContactsPage() {
       >
         <Form form={deptForm} layout="vertical" preserve={false}
           initialValues={{ name: editDeptName }}>
+          <Form.Item label="所属公司"><Input value={companies.find((company) => company.value === companyId)?.label} disabled /></Form.Item>
           <Form.Item label="部门名称" name="name" rules={[{ required: true }]}>
             <Input autoFocus />
           </Form.Item>
@@ -641,6 +698,14 @@ export default function ContactsPage() {
         managerOptions={managerOptions}
         managerLoading={managerCandidatesLoading}
         onManagerSearch={setManagerKeyword}
+        companies={companies}
+        canChangeCompany={!!access.canAdmin && !!memberEdit && !memberEdit.wecomMapped}
+        onCompanyChange={() => { memberForm.setFieldValue('deptId', undefined); setManagerKeyword(''); }}
+        departments={(memberDepartments.data ?? []).map((department) => ({
+          id: department.id, pId: department.parentId ?? 0, value: department.id, title: department.name,
+          selectable: !department.contextOnly && !!department.canManageUsers,
+        }))}
+        departmentsLoading={memberDepartments.isFetching}
         canResetPassword={!!access.canAdmin}
         onResetPassword={() => {
           if (!memberEdit) return;
@@ -680,6 +745,6 @@ export default function ContactsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </PageContainer>
+    </>
   );
 }

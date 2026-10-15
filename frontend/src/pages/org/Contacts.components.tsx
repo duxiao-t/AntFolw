@@ -3,7 +3,7 @@ import {
   DeleteOutlined, DownloadOutlined, EditOutlined, ImportOutlined, KeyOutlined,
   LockOutlined, UnlockOutlined, UserAddOutlined,
 } from '@ant-design/icons';
-import { Button, Form, Grid, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd';
+import { Button, Form, Grid, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip, TreeSelect } from 'antd';
 import type { FormInstance } from 'antd';
 import type { ChangeEvent, Key, RefObject } from 'react';
 import { useMemo, useState } from 'react';
@@ -353,6 +353,11 @@ export function MemberFormModal({
   managerOptions,
   managerLoading,
   onManagerSearch,
+  companies,
+  canChangeCompany,
+  onCompanyChange,
+  departments,
+  departmentsLoading,
 }: {
   open: boolean;
   editing: MemberListItem | null;
@@ -365,6 +370,11 @@ export function MemberFormModal({
   managerOptions: Array<{ value: number; label: string }>;
   managerLoading?: boolean;
   onManagerSearch: (keyword: string) => void;
+  companies: Array<{ value: number; label: string }>;
+  canChangeCompany: boolean;
+  onCompanyChange: () => void;
+  departments: Array<{ id: number; pId: number; value: number; title: string; selectable: boolean }>;
+  departmentsLoading?: boolean;
 }) {
   return (
     <Modal
@@ -379,6 +389,14 @@ export function MemberFormModal({
       <Form className="ct-member-form" form={form} layout="vertical" preserve={false}
         initialValues={editing ? { ...editing, gender: normalizeGender(editing.gender) } : undefined}>
         <div className="ct-member-form__grid">
+          <Form.Item label="所属公司" name="companyId" rules={[{ required: true }]}
+            extra={editing?.wecomMapped ? '企微成员的跨公司归属请在企业微信维护；部门调整可能被同步覆盖' : undefined}>
+            <Select options={companies} disabled={!canChangeCompany} onChange={onCompanyChange} />
+          </Form.Item>
+          <Form.Item label="所属部门" name="deptId" rules={[{ required: true, message: '请选择所属部门' }]}>
+            <TreeSelect treeData={departments} treeDataSimpleMode loading={departmentsLoading}
+              showSearch={{ treeNodeFilterProp: 'title' }} placeholder="请选择所属部门" />
+          </Form.Item>
           <Form.Item label="姓名" name="displayName" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item label="工号" name="employeeNo" rules={[{ pattern: /^\S{1,64}$/, message: '工号必须为 1 至 64 位且不能包含空白字符' }]} extra="留空时自动生成；企业微信成员使用企微账号"><Input maxLength={64} /></Form.Item>
           <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input disabled={!!editing} /></Form.Item>

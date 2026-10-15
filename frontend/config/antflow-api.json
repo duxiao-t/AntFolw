@@ -514,6 +514,14 @@
         },
         "type" : "object"
       },
+      "CreateCompanyRequest" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "CreateRequest" : {
         "properties" : {
           "agentId" : {
@@ -2799,6 +2807,26 @@
         },
         "type" : "object"
       },
+      "PickerDepartment" : {
+        "properties" : {
+          "companyId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "parentId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PickerRoleDto" : {
         "properties" : {
           "code" : {
@@ -4821,7 +4849,7 @@
           "content" : {
             "application/json" : {
               "schema" : {
-                "$ref" : "#/components/schemas/Company"
+                "$ref" : "#/components/schemas/CreateCompanyRequest"
               }
             }
           },
@@ -8623,13 +8651,24 @@
     "/api/pickers/departments" : {
       "get" : {
         "operationId" : "departments",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "companyId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
               "*/*" : {
                 "schema" : {
                   "items" : {
-                    "$ref" : "#/components/schemas/MobilePickerDepartmentDto"
+                    "$ref" : "#/components/schemas/PickerDepartment"
                   },
                   "type" : "array"
                 }
@@ -10629,6 +10668,15 @@
             "schema" : {
               "type" : "string"
             }
+          },
+          {
+            "in" : "query",
+            "name" : "companyId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
           }
         ],
         "responses" : {
@@ -10757,6 +10805,15 @@
             "schema" : {
               "default" : "csv",
               "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "companyId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
             }
           }
         ],
@@ -10907,6 +10964,15 @@
             "schema" : {
               "default" : false,
               "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "companyId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
             }
           }
         ],

@@ -178,6 +178,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private DataSource dataSource;
     @Autowired private ProcessEngine processEngine;
     @Autowired private UserService userService;
+    @Autowired private com.antflow.org.DepartmentService departmentService;
+    @Autowired private com.antflow.org.DepartmentController departmentController;
+    @Autowired private com.antflow.org.CompanyController companyController;
     @Autowired private AuditService auditService;
     @Autowired private FormProcessPublishService publishService;
     @Autowired private ProcessInstanceMapper processInstanceMapper;
@@ -2551,7 +2554,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {
             assertThat(roleAdminService.roles()).isNotEmpty();
-            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20).getRecords())
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20, null).getRecords())
                 .isNotEmpty();
             assertThat(formDefinitionMapper.selectSummaryPage(Page.of(1, 20), null, null,
                 adminId, true).getRecords())
@@ -2855,10 +2858,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void allScopeUserSearchAlsoReturnsMembersWithoutADepartment() {
-        // ALL 范围不能被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
-        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里 admin/bob 就是）挡在外面，
-        // 而单条的 inCurrentDataScope 对 ALL 是放行的——两条路径口径不一致，通讯录搜人时会直接看出来。
+    void allScopeUserWithoutCompanyCannotEnumerateDirectory() {
+        // 组织管理的 ALL 仍需有效公司；无归属账号不能枚举通讯录。
         long userId = insertUser("all-scope-people-" + UUID.randomUUID());
         long roleId = insertRole("all_scope_people_" + UUID.randomUUID().toString().replace("-", ""));
         long deptless = jdbcTemplate.queryForObject(
@@ -2870,9 +2871,130 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 + "VALUES (?, 'org:user:read', 'ALL')", roleId);
             setPrincipal(userId);
 
-            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100).getRecords())
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100, null).getRecords())
                 .extracting(User::getId)
-                .contains(deptless);
+                .isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void organizationEndpointsIntersectAllAndCustomWithCompanyAndRollbackBadMoves() {
+        long companyA = insertCompany("org-a-" + UUID.randomUUID());
+        long companyB = insertCompany("org-b-" + UUID.randomUUID());
+        long deptA = insertDepartment(companyA, "甲部门");
+        long deptB = insertDepartment(companyB, "乙部门");
+        long operator = insertUser("org-operator-" + UUID.randomUUID());
+        long memberA = insertUser("org-a-" + UUID.randomUUID());
+        long memberB = insertUser("org-b-" + UUID.randomUUID());
+        long role = insertRole("org_" + UUID.randomUUID().toString().replace("-", ""));
+        moveUserToDepartment(operator, deptA);
+        moveUserToDepartment(memberA, deptA);
+        moveUserToDepartment(memberB, deptB);
+        assignRole(operator, role);
+        for (String permission : List.of("console:entry:access", "org:company:read",
+            "org:department:read", "org:department:manage", "org:user:read", "org:user:manage")) {
+            // 非 scopeable 能力不接受范围覆盖。
+            var catalog = com.antflow.authz.PermissionCatalog.require(permission);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, ?, ?)
+                """, role, permission, catalog.scopeable() ? "ALL" : null);
+        }
+        setPrincipal(operator);
+        try {
+            assertThat(companyController.all()).extracting(com.antflow.org.Company::getId)
+                .containsExactly(companyA);
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100, null).getRecords())
+                .extracting(User::getId).contains(operator, memberA).doesNotContain(memberB);
+            assertThat(userService.listAuthorized(UserService.UserQuery.of(
+                null, null, null, null, null, null))).extracting(User::getId).doesNotContain(memberB);
+            assertThatThrownBy(() -> departmentController.tree(companyB)).isInstanceOf(HiddenResourceException.class);
+            assertThatThrownBy(() -> userService.update(memberB, Map.of("displayName", "不能修改")))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThatThrownBy(() -> userService.update(memberA, Map.of("deptId", deptB)))
+                .isInstanceOf(HiddenResourceException.class);
+            jdbcTemplate.update("""
+                UPDATE t_role_permission SET scope_override = 'CUSTOM'
+                WHERE role_id = ? AND permission_code = 'org:user:read'
+                """, role);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission_department(role_id, permission_code, department_id)
+                VALUES (?, 'org:user:read', ?)
+                """, role, deptB);
+            authorizationService.evict(operator);
+            setPrincipal(operator);
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100, null).getRecords()).isEmpty();
+            setPrincipal(userId("admin"));
+            assertThatThrownBy(() -> departmentController.update(deptA,
+                Map.of("parentId", deptB, "name", "不应保留", "leaderIds", List.of(memberA))))
+                .isInstanceOf(BizException.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT name FROM t_department WHERE id = ?",
+                String.class, deptA)).isEqualTo("甲部门");
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_department_leader WHERE department_id = ?",
+                Long.class, deptA)).isZero();
+            assertThatThrownBy(() -> departmentController.update(deptA, Map.of("companyId", companyB)))
+                .isInstanceOf(BizException.class);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void departmentRootOrderingAndMemberTransferKeepCompanyBoundaries() {
+        setPrincipal(userId("admin"));
+        long companyA = insertCompany("root-a-" + UUID.randomUUID());
+        long companyB = insertCompany("root-b-" + UUID.randomUUID());
+        com.antflow.org.Department first = new com.antflow.org.Department();
+        first.setName("甲根一"); first.setCompanyId(companyA);
+        first = departmentService.create(first);
+        com.antflow.org.Department other = new com.antflow.org.Department();
+        other.setName("乙根"); other.setCompanyId(companyB);
+        other = departmentService.create(other);
+        com.antflow.org.Department second = new com.antflow.org.Department();
+        second.setName("甲根二"); second.setCompanyId(companyA);
+        second = departmentService.create(second);
+        long deptA = first.getId(), deptB = other.getId(), secondId = second.getId();
+        try {
+            assertThat(first.getSortOrder()).isEqualTo(1);
+            assertThat(other.getSortOrder()).isEqualTo(1);
+            assertThat(second.getSortOrder()).isEqualTo(2);
+            departmentService.moveOrder(secondId, "UP");
+            assertThat(jdbcTemplate.queryForObject("SELECT sort_order FROM t_department WHERE id = ?",
+                Integer.class, deptB)).isEqualTo(1);
+            assertThatThrownBy(() -> departmentService.movePosition(deptA, deptB, "AFTER"))
+                .isInstanceOf(BizException.class);
+            long member = insertUser("transfer-" + UUID.randomUUID());
+            moveUserToDepartment(member, deptA);
+            long manager = insertUser("transfer-manager-" + UUID.randomUUID());
+            moveUserToDepartment(manager, deptA);
+            userService.update(member, Map.of("managerId", manager));
+            departmentService.setLeaders(deptA, List.of(member));
+            assertThatThrownBy(() -> userService.update(member, Map.of("deptId", deptB)))
+                .isInstanceOf(BizException.class);
+            departmentService.setLeaders(deptA, List.of());
+            assertThat(jdbcTemplate.queryForObject("SELECT leader_id FROM t_department WHERE id = ?",
+                Long.class, deptA)).isNull();
+            long version = jdbcTemplate.queryForObject("SELECT authz_version FROM t_user WHERE id = ?",
+                Long.class, member);
+            java.util.Map<String, Object> transfer = new java.util.HashMap<>();
+            transfer.put("deptId", deptB);
+            transfer.put("managerId", null);
+            userService.update(member, transfer);
+            assertThat(jdbcTemplate.queryForObject("SELECT manager_id FROM t_user WHERE id = ?",
+                Long.class, member)).isNull();
+            setPrincipal(member);
+            assertThat(PrincipalHolder.current().orElseThrow().departmentId()).isEqualTo(deptB);
+            assertThat(PrincipalHolder.current().orElseThrow().authzVersion()).isGreaterThan(version);
+            setPrincipal(userId("admin"));
+            jdbcTemplate.update("""
+                INSERT INTO t_wecom_user_mapping(company_id, wecom_user_id, user_id) VALUES (?, ?, ?)
+                """, companyB, "mapped-" + member, member);
+            assertThatThrownBy(() -> userService.update(member, Map.of("deptId", deptA)))
+                .isInstanceOf(BizException.class).hasMessageContaining("企微");
+            assertThat(jdbcTemplate.queryForObject("SELECT dept_id FROM t_user WHERE id = ?",
+                Long.class, member)).isEqualTo(deptB);
         } finally {
             PrincipalHolder.clear();
         }
@@ -2914,7 +3036,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             "员工" + keyword, nameMember);
         try {
             PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
-            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords()
+            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50, null).getRecords()
                 .stream().map(User::getId).collect(java.util.stream.Collectors.toSet());
             assertThat(found).contains(childMember, nameMember);
             assertThat(found).doesNotContain(unrelatedMember);
@@ -2922,11 +3044,12 @@ class PostgresTransactionalIntegrityIntegrationTest {
             // 新增的 OR 分支不能把数据范围冲掉：受限账号搜同一个词，命中的部门成员一个都不该漏进来。
             jdbcTemplate.update("UPDATE t_user SET display_name = ? WHERE id = ?",
                 "受限" + keyword, scopedUser);
+            moveUserToDepartment(scopedUser, unrelatedDept);
             jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override)"
                 + " VALUES (?, 'org:user:read', 'SELF')", scopedRole);
             assignRole(scopedUser, scopedRole);
             setPrincipal(scopedUser);
-            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords())
+            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50, null).getRecords())
                 .extracting(User::getId).containsExactly(scopedUser);
         } finally {
             PrincipalHolder.clear();
@@ -2970,7 +3093,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             WecomService wecomTarget = AopTestUtils.getTargetObject(wecomService);
             List<User> users = userService.listAuthorizedPage(
-                null, departmentId, false, 1, 20).getRecords();
+                null, departmentId, false, 1, 20, null).getRecords();
             assertThat(users).extracting(User::getId).containsExactly(leaderId, memberId);
             assertThat(users.get(0).getDepartmentLeader()).isTrue();
             assertThat(users.get(0).getWecomStatus()).isEqualTo(4);
