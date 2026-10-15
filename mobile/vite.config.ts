@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, searchForWorkspaceRoot } from 'vite';
 
 const outputPath = process.env.ANTFLOW_OUTPUT_PATH || 'dist';
 
@@ -7,6 +8,9 @@ export default defineConfig({
   base: '/mobile/',
   plugins: [react()],
   server: {
+    fs: {
+      allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL('../shared', import.meta.url))],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8080',

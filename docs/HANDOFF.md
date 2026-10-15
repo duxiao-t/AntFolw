@@ -18,6 +18,27 @@
 
 # 任务交接
 
+**当前权威状态（2026-10-15 11:14 +08:00）：** 全路线 P4→P2→P3→P5 已完成实现、统一本机 V58
+部署和真实浏览器验收，分支 `feat/architecture-completion`、基线 `c14f055`，提交见 `git log`。
+下面早期“待确认/尚未实现/master”的记录均为历史，不覆盖本段。
+
+本轮：业务公司快照隔离及明确本人/参与者例外；26 类共享校验与服务端媒体时长；状态/轮次/操作者守卫、
+必需 V2；企微租约恢复与失租停写；事务消息失败列表/单条重放；附件/草稿/组织能力上移、两端契约同源。
+无新依赖，新增 V56–V58，历史迁移未改。
+
+最终后端 710（2 既有 skip）/桌面 420/移动 443，0 失败；类型、构建、真实契约、生成物、导入边界、
+体积与健康门禁通过。桌面 4 / 移动 10 条既有 lint warnings，antd 47 deprecated / 43 usage。
+真实 Chrome 八组检查通过、页面异常 0；跨公司审批完成、重复审批拒绝，失败消息原 UUID 重放为 DELIVERED。
+数据库及附件独立恢复验证通过，旧镜像已保留，health UP。
+
+证据见 `docs/local-release-architecture-2026-10-15.md`，
+生产预检/迁移/回退包见 `docs/architecture-release-runbook.md`，
+统一计划见 `docs/architecture-completion-plan.md`。
+仍未执行生产发布、历史归属人工确认和真实企微/OIDC 企业账号联调；V1 保留待生产零存量证据，
+H4=2、生产活跃 V1 数仍 null。BI 只供全局可信账号，公司管理员使用应用报表。
+
+以下为上一轮交接记录：
+
 - **State:** active
 - **更新时间：** `2026-10-15T09:13:00+08:00`
 - **分支：** `master`；最新一轮为 P4 #5-1 公司与人员归属管理（实现起点 `c6e9c3a`，具体提交见 `git log`）。此前 P1-b、COMPANY 门槛及移动端修复见 `c6e9c3a`，P4a 文档见 `6785add`。前几轮都已合并：**PR #2** = 实测反馈 17 条、**PR #3** = 选项数据源按 demo 重排、**PR #4** = 历史遗留清理、**PR #5** = build.sh 挂载 frontend/config。
@@ -58,6 +79,8 @@ manager_id=NULL。验收账号已停用、表单 36 已下线。取证与回退�
 
 **下一步：** 只推进 #5-2 的规则确认与接口负向矩阵；业务读取、附件、作业、BI 完整隔离、
 生产部署与历史草稿人工确认尚未完成。方案见 `docs/p4-next-step-plan.md`。
+2026-10-15 已核对实际调用链并新增 `docs/p4-company-isolation-matrix.md`；
+跨公司参与者和调岗后本人历史访问仍待用户确认，当前仅文档变更，运行时/部署保持 `c14f055`。
 
 ---
 
@@ -828,7 +851,7 @@ anon 峰值 1.16GB —— 与修复前一致（视频路径没动，属回归确
 > **已修复（2026-10-14 晚间）**：移动端 `unmountComponentAtNode` unhandled error 来自测试入口未加载应用的 React 19 弹层适配。
 > main/setup 已共用适配，最终 47 文件 / 368 用例、退出 0。本段原先的“测试之间干扰”只是当时观察，不是最终根因。
 
-> **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法（比之前简单）：本机 5432 的 PostgreSQL 里 `CREATE DATABASE antflow_probe`（宿主没有 `psql`，用 postgres JDBC 驱动跑几行 Java 最省事），`ANTFLOW_TEST_POSTGRES_URL='jdbc:postgresql://127.0.0.1:5432/antflow_probe'` + `ANTFLOW_TEST_POSTGRES_USERNAME=postgres` + `ANTFLOW_TEST_POSTGRES_PASSWORD=Tao@1234`（`sslmode`/`stringtype` 不用加，测试自己补 `stringtype`）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建——**一次失败留下的行会让下一轮出现假回归**（本次就撞了 `employee_no`/`option_data_source.code` 唯一键）。
+> **后端集成用例要在干净库上跑**：`PostgresTransactionalIntegrityIntegrationTest` 里有几条用固定用户名/数据源代码插数据，同一个库跑第二遍会撞唯一键（看着像回归，其实是残留）。本轮的跑法（比之前简单）：本机 5432 的 PostgreSQL 里 `CREATE DATABASE antflow_probe`（宿主没有 `psql`，用 postgres JDBC 驱动跑几行 Java 最省事），`ANTFLOW_TEST_POSTGRES_URL='jdbc:postgresql://127.0.0.1:5432/antflow_probe'` + `ANTFLOW_TEST_POSTGRES_USERNAME=postgres` + `ANTFLOW_TEST_POSTGRES_PASSWORD=<从仓外凭据读取>`（`sslmode`/`stringtype` 不用加，测试自己补 `stringtype`）。每轮先 `DROP DATABASE ... WITH (FORCE)` 重建——**一次失败留下的行会让下一轮出现假回归**（本次就撞了 `employee_no`/`option_data_source.code` 唯一键）。
 >
 > **别不给这三个变量就 `mvn test`**：那样这个类会退到 Testcontainers，本机 Docker Desktop 起
 > `testcontainers/ryuk` 会**卡在 "Container ... is starting" 不动**（socket 那一套在这台机器上不灵），

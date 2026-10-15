@@ -26,7 +26,7 @@ export async function submit(
   body: AntFlowAPI.SubmitRequest,
   options?: { [key: string]: any }
 ) {
-  return request<Record<string, any>>("/api/forms/data", {
+  return request<AntFlowAPI.SubmitResult>("/api/forms/data", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -120,7 +120,7 @@ public class InstanceController {
             result.put("instance", summaryInstance(pi));
             result.put("tasks", tasks.stream().map(InstanceController::summaryTask).toList());
         } else {
-            var formData = formDataMapper.selectById(pi.getFormDataId());
+            var formData = formDataMapper.selectRuntimeById(pi.getFormDataId());
             var form = formData == null ? null : formDefinitionService.getById(formData.getFormDefId());
             result.put("instance", pi);
             result.put("tasks", tasks);

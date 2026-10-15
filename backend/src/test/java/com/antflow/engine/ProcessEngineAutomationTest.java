@@ -63,7 +63,7 @@ class ProcessEngineAutomationTest {
         when(instances.selectForUpdate(9L)).thenReturn(instance);
         FormData data = new FormData();
         data.setData("{}");
-        when(formDataMapper.selectById(3L)).thenReturn(data);
+        when(formDataMapper.selectRuntimeById(3L)).thenReturn(data);
 
         WorkflowJob job = new WorkflowJob();
         job.setId(5L);
@@ -89,7 +89,7 @@ class ProcessEngineAutomationTest {
             new TaskMapperExt(instances), histories, handlers,
             mock(NotificationPublisher.class), json, mock(FormalNumberService.class), jobs,
             mock(AuthorizationService.class)
-        );
+        , org.mockito.Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
 
         assertThat(engine.completeAutomation(5L)).isTrue();
         assertThat(engine.completeAutomation(5L)).isFalse();
@@ -127,7 +127,7 @@ class ProcessEngineAutomationTest {
             new TaskMapperExt(instances), histories, List.of(),
             mock(NotificationPublisher.class), new ObjectMapper(),
             mock(FormalNumberService.class), jobs, mock(AuthorizationService.class)
-        );
+        , org.mockito.Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
 
         assertThat(engine.completeAutomation(6L)).isTrue();
         assertThat(job.getStatus()).isEqualTo("SUCCEEDED");
@@ -160,7 +160,7 @@ class ProcessEngineAutomationTest {
         when(instances.selectForUpdate(9L)).thenReturn(instance);
         FormData data = new FormData();
         data.setData("{}");
-        when(formDataMapper.selectById(3L)).thenReturn(data);
+        when(formDataMapper.selectRuntimeById(3L)).thenReturn(data);
         WorkflowJob first = blockingJob(5L, "delay-1");
         WorkflowJob second = blockingJob(6L, "delay-2");
         when(jobs.selectById(5L)).thenReturn(first);
@@ -187,7 +187,7 @@ class ProcessEngineAutomationTest {
             new TaskMapperExt(instances), histories,
             List.of(new EmptyHandler(), new ApprovalHandler(resolver, tasks, histories)),
             notifier, json, mock(FormalNumberService.class), jobs,
-            mock(AuthorizationService.class));
+            mock(AuthorizationService.class), org.mockito.Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
 
         assertThat(engine.completeAutomation(5L)).isTrue();
         assertThat(inserted).isEmpty();

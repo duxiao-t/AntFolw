@@ -242,6 +242,7 @@ export default defineConfig({
     exclude: ['mock/requestRecord.mock.js'],
   },
   utoopack: {
+    root: join(__dirname, '../..'),
     module: {
       rules: {
         '*.md': {

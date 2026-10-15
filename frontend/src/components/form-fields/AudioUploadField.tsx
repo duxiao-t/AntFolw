@@ -182,11 +182,4 @@ export const AudioUploadField: FieldType = {
     );
   },
   Component: AudioInput,
-  validate(value, props) {
-    if (hasPendingAudioUpload(value)) return '仍有录音未完成上传';
-    const files = Array.isArray(value) ? value : [];
-    if (props.required && files.length === 0) return '请完成录音';
-    if (files.length > numberProp(props.maxCount, 3, 1, 10)) return `最多录制 ${numberProp(props.maxCount, 3, 1, 10)} 段`;
-    return null;
-  },
 };

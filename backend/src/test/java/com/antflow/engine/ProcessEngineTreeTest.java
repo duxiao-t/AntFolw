@@ -94,13 +94,27 @@ class ProcessEngineTreeTest {
             new com.antflow.engine.handler.CcHandler(taskMapper, historyMapper),
             new com.antflow.engine.handler.ConditionsHandler(evaluator)
         );
-        return new ProcessEngine(
+        return TreeRuntimeFixture.withRequiredV2(new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
             historyMapper, handlers, notifier,
             json, formalNumberService, workflowJobMapper,
             authorizationService
-        );
+        , org.mockito.Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class)));
+    }
+
+    @Test
+    void applicationCannotStartWithoutRequiredV2Runtime() {
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+            .withBean(ProcessEngine.class, this::engine)
+            .run(context -> assertThat(context).hasFailed());
+        ProcessEngine missingRuntime = engine();
+        org.springframework.test.util.ReflectionTestUtils.setField(missingRuntime, "runtimeV2", null);
+        assertThatThrownBy(() -> missingRuntime.start(
+            new StartCmd("FORM", Map.of(), Map.of(), TEST_COMPANY_ID), 1L))
+            .isInstanceOfSatisfying(com.antflow.engine.BizException.class,
+                error -> assertThat(error.getCode()).isEqualTo("RUNTIME_REQUIRED"));
+        Mockito.verify(formDataMapper, Mockito.never()).insert(any(FormData.class));
     }
 
     @BeforeEach void setup() {
@@ -289,7 +303,7 @@ class ProcessEngineTreeTest {
             pi.setCurrentNodeId("a1");
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");
@@ -364,7 +378,7 @@ class ProcessEngineTreeTest {
             pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"amount\":1,\"name\":\"x\"}");
             return fd;
@@ -415,7 +429,7 @@ class ProcessEngineTreeTest {
             pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"amount\":1,\"name\":\"x\"}");
             return fd;
@@ -451,7 +465,7 @@ class ProcessEngineTreeTest {
             pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"amount\":1}");
             return fd;
@@ -503,7 +517,7 @@ class ProcessEngineTreeTest {
             pi.setStartedBy(7L); pi.setCurrentNodeId("a1");
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setData("{\"k\":\"v\"}");
             return fd;
@@ -618,7 +632,7 @@ class ProcessEngineTreeTest {
             instance.setStatus("RUNNING"); instance.setProcessSnapshot(processJson);
             return instance;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData data = new FormData();
             data.setId(1L); data.setFormDefId(1L); data.setData("{\"kind\":\"one\"}");
             return data;
@@ -722,7 +736,7 @@ class ProcessEngineTreeTest {
             pi.setStartedBy(7L); pi.setCurrentNodeId("a1"); pi.setFormDataId(1L);
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData data = new FormData();
             data.setId(1L);
             data.setData("{\"k\":\"v\"}");
@@ -791,7 +805,7 @@ class ProcessEngineTreeTest {
             pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a2");
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setData("{\"k\":\"v\"}");
             return fd;
@@ -853,7 +867,7 @@ class ProcessEngineTreeTest {
             pi.setFormDataId(1L);
             return pi;
         });
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setData("{\"k\":\"v\"}");
             return fd;
@@ -897,7 +911,7 @@ class ProcessEngineTreeTest {
         pi.setProcessSnapshot(processJson); pi.setProcessDefVersion(1);
         pi.setStatus("RUNNING"); pi.setStartedBy(7L); pi.setCurrentNodeId("a2");
         Mockito.when(processInstanceMapper.selectById(1L)).thenReturn(pi);
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setData("{\"k\":\"v\"}");
             return fd;
@@ -948,7 +962,7 @@ class ProcessEngineTreeTest {
         Mockito.when(taskMapper.selectList(any())).thenReturn(List.of(pending, cc));
         FormData formData = new FormData();
         formData.setId(1L); formData.setStatus("SUBMITTED");
-        Mockito.when(formDataMapper.selectById(1L)).thenReturn(formData);
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenReturn(formData);
 
         engine().withdraw(1L, 7L);
 

@@ -962,6 +962,7 @@ declare namespace AntFlowAPI {
   type MobileFileDto = {
     contentType?: string;
     contentUrl?: string;
+    durationSeconds?: number;
     failureReason?: string;
     id?: string;
     name?: string;
@@ -1207,6 +1208,31 @@ declare namespace AntFlowAPI {
   type OrderItem = {
     asc?: boolean;
     column?: string;
+  };
+
+  type OutboxEvent = {
+    attempts?: number;
+    createdAt?: string;
+    deliveredAt?: string;
+    error?: string;
+    eventType?: string;
+    id?: string;
+    instanceId?: number;
+    nextAttemptAt?: string;
+    status?: string;
+  };
+
+  type OutboxPage = {
+    page?: number;
+    records?: OutboxEvent[];
+    size?: number;
+    total?: number;
+  };
+
+  type outboxParams = {
+    status?: string;
+    page?: number;
+    size?: number;
   };
 
   type overrideParams = {
@@ -1543,6 +1569,10 @@ declare namespace AntFlowAPI {
     jobId: number;
   };
 
+  type retryOutboxParams = {
+    id: string;
+  };
+
   type revokeSessionParams = {
     id: string;
   };
@@ -1666,6 +1696,24 @@ declare namespace AntFlowAPI {
     ids: number[];
   };
 
+  type SessionPayload = {
+    accessToken?: string;
+    authzVersion?: number;
+    mobileBootstrap?: MobileBootstrapDto;
+    permissions?: string[];
+    user?: SessionUser;
+  };
+
+  type SessionUser = {
+    authzVersion?: number;
+    displayName?: string;
+    email?: string;
+    id?: number;
+    permissions?: string[];
+    roles?: string[];
+    username?: string;
+  };
+
   type setLoginAccessParams = {
     id: number;
   };
@@ -1780,6 +1828,11 @@ declare namespace AntFlowAPI {
     files?: MobileFileRef[];
     formCode?: string;
     status?: string;
+  };
+
+  type SubmitResult = {
+    businessNo?: string;
+    dataId?: number;
   };
 
   type Summary = {

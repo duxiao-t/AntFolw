@@ -25,7 +25,7 @@ class WorkflowOutboxDispatcherTest {
         NotificationListener failing = event -> {
             throw new IllegalStateException("channel down");
         };
-        NotificationPublisher publisher = new NotificationPublisher(events, List.of(failing));
+        NotificationPublisher publisher = new NotificationPublisher(events, List.of(failing), jdbc);
         WorkflowOutboxDispatcher dispatcher = new WorkflowOutboxDispatcher(
             jdbc, new ObjectMapper(), publisher);
         UUID eventId = UUID.randomUUID();

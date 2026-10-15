@@ -8,12 +8,24 @@
     {
       "id": "free-text-is-not-carried-by-the-ledger",
       "intent": "自由文本（text/textarea/search）不在台账类型白名单内：Java 显示原文，台账两列都是 NULL。这是脱敏契约，不是遗漏。",
-      "schema": [{ "id": "memo", "type": "text", "label": "备注" }],
-      "data": { "memo": "原文" },
+      "schema": [
+        {
+          "id": "memo",
+          "type": "text",
+          "label": "备注"
+        }
+      ],
+      "data": {
+        "memo": "原文"
+      },
       "fieldId": "memo",
       "expect": {
         "java": "原文",
-        "sql": { "row": true, "label": null, "text": null }
+        "sql": {
+          "row": true,
+          "label": null,
+          "text": null
+        }
       }
     },
     {
@@ -26,17 +38,29 @@
           "label": "类型",
           "props": {
             "options": [
-              { "value": "a", "label": "甲" },
-              { "value": "b", "label": "乙" }
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
             ]
           }
         }
       ],
-      "data": { "kind": "a" },
+      "data": {
+        "kind": "a"
+      },
       "fieldId": "kind",
       "expect": {
         "java": "甲",
-        "sql": { "row": true, "label": "甲", "text": "a" }
+        "sql": {
+          "row": true,
+          "label": "甲",
+          "text": "a"
+        }
       }
     },
     {
@@ -49,17 +73,35 @@
           "label": "标签",
           "props": {
             "options": [
-              { "value": "a", "label": "甲" },
-              { "value": "b", "label": "乙" }
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
             ]
           }
         }
       ],
-      "data": { "tags": ["a", "b"] },
+      "data": {
+        "tags": [
+          "a",
+          "b"
+        ]
+      },
       "fieldId": "tags",
       "expect": {
         "java": "甲、乙",
-        "sql": { "row": true, "label": "甲、乙", "textJson": ["a", "b"] }
+        "sql": {
+          "row": true,
+          "label": "甲、乙",
+          "textJson": [
+            "a",
+            "b"
+          ]
+        }
       }
     },
     {
@@ -70,14 +112,27 @@
           "id": "kind",
           "type": "select",
           "label": "类型",
-          "props": { "options": [{ "value": "a", "label": "甲" }] }
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              }
+            ]
+          }
         }
       ],
-      "data": { "kind": "old" },
+      "data": {
+        "kind": "old"
+      },
       "fieldId": "kind",
       "expect": {
         "java": "old",
-        "sql": { "row": true, "label": null, "text": "old" }
+        "sql": {
+          "row": true,
+          "label": null,
+          "text": "old"
+        }
       }
     },
     {
@@ -88,24 +143,82 @@
           "id": "kind",
           "type": "select",
           "label": "类型",
-          "props": { "options": [{ "value": "a", "label": "甲" }] }
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              }
+            ]
+          }
         }
       ],
-      "data": { "kind": null },
+      "data": {
+        "kind": null
+      },
       "fieldId": "kind",
       "expect": {
         "java": "",
-        "sql": { "row": true, "label": null, "text": null }
+        "sql": {
+          "row": true,
+          "label": null,
+          "text": null
+        }
       }
     },
     {
       "id": "missing-field-produces-no-ledger-row",
       "intent": "数据里压根没有这个字段：台账**没有行**（不是「有行但列为空」）。Java 侧同样不该在 values() 里出现，所以这条不写 java 期望。",
-      "schema": [{ "id": "memo", "type": "text", "label": "备注" }],
+      "schema": [
+        {
+          "id": "memo",
+          "type": "text",
+          "label": "备注"
+        }
+      ],
       "data": {},
       "fieldId": "memo",
       "expect": {
-        "sql": { "row": false }
+        "sql": {
+          "row": false
+        }
+      }
+    },
+    {
+      "id": "checkbox-resolves-each-selected-label",
+      "intent": "checkbox stores an array; both projections resolve labels while BI preserves the original array text.",
+      "schema": [
+        {
+          "id": "checks",
+          "type": "checkbox",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "checks": [
+          "b",
+          "a"
+        ]
+      },
+      "fieldId": "checks",
+      "expect": {
+        "java": "乙、甲",
+        "sql": {
+          "row": true,
+          "label": "乙、甲",
+          "textJson": ["b", "a"]
+        }
       }
     }
   ]

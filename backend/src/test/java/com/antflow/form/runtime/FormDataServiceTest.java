@@ -10,9 +10,9 @@ import com.antflow.form.FormDefinitionService;
 import com.antflow.engine.BizException;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
-import com.antflow.mobile.workflow.MobileFileLinkService;
-import com.antflow.mobile.workflow.MobileDraftDto;
-import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.attachment.MobileFileLinkService;
+import com.antflow.form.runtime.MobileDraftDto;
+import com.antflow.form.runtime.MobileDraftService;
 import com.antflow.process.DefinitionVersionRepository;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,7 +24,7 @@ import org.mockito.Mockito;
 import java.util.Map;
 import java.util.List;
 import java.util.UUID;
-import com.antflow.mobile.workflow.MobileFileRef;
+import com.antflow.attachment.MobileFileRef;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -65,7 +65,7 @@ class FormDataServiceTest {
         Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(TEST_COMPANY_ID);
         service = new FormDataService(formDataMapper, formDefinitionService, json,
             formalNumberService, authorizationService, userMapper, departmentMapper,
-            optionRuntime, fileLinkService, draftService, companyAttribution);
+            optionRuntime, fileLinkService, Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class), draftService, companyAttribution);
 
         Mockito.when(formalNumberService.businessNo()).thenReturn("000000000001");
         Mockito.when(authorizationService.currentUserId()).thenReturn(7L);

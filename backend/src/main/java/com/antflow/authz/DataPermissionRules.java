@@ -38,7 +38,7 @@ public final class DataPermissionRules {
         true,
         // MyBatis-Plus 的 selectPage 内部执行的是 selectList（本人提交已用独立方法 +
         // @InterceptorIgnore 排除，见 FormDataMapper.selectMySubmissions）
-        Set.of("com.antflow.form.runtime.FormDataMapper.selectList"),
+        Set.of("com.antflow.form.runtime.FormDataMapper.select"),
         "created_by",
         "(EXISTS (SELECT 1 FROM t_process_instance scope_pi"
             + " WHERE scope_pi.form_data_id = {alias}.id"

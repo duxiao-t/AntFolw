@@ -17,8 +17,9 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         """;
 
     String FULL_VISIBLE = """
-        (#{admin}
-          OR pi.started_by = #{userId}
+        (#{admin} OR (
+          pi.company_id IS NOT NULL AND pi.company_inferred = false AND (
+          pi.started_by = #{userId}
           OR (#{canReadTasks} AND (
             EXISTS (
               SELECT 1 FROM t_task task
@@ -33,6 +34,12 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
             )
           ))
           OR (#{canReadInstances}
+            AND EXISTS (
+              SELECT 1 FROM t_user company_viewer
+              JOIN t_department company_department ON company_department.id = company_viewer.dept_id
+              WHERE company_viewer.id = #{userId}
+                AND company_department.company_id = pi.company_id
+            )
             AND EXISTS (
               SELECT 1 FROM t_user_role user_role
               JOIN t_role role ON role.id = user_role.role_id AND role.enabled = true
@@ -61,7 +68,7 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
                       AND scope_department.department_id = pi.started_dept_id
                   )))
             ))
-        )
+        )))
         """;
 
     @Select("SELECT * FROM t_process_instance WHERE id = #{id} FOR UPDATE")
@@ -89,6 +96,7 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         <choose>
           <when test="scope == 'mine'">
             pi.started_by = #{userId}
+            AND (#{admin} OR (pi.company_id IS NOT NULL AND pi.company_inferred = false))
             <!-- 「驳回待改」的单据 current_node_id 就是 '__rework__'，平时列表要把它隐掉（另有入口），
                  但按 status=REWORK 筛时不能隐，否则那条筛选恒为空——发起人永远看不到自己待修改的单据。 -->
             <if test="status != 'REWORK'">

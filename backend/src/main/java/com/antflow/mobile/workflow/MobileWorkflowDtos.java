@@ -1,5 +1,8 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.attachment.MobileFileRef;
+import com.antflow.attachment.MobileFileDto;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.OffsetDateTime;
 import java.util.List;

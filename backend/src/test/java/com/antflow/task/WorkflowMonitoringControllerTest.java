@@ -34,7 +34,8 @@ class WorkflowMonitoringControllerTest {
     private WorkflowMonitoringController controller() {
         lenient().when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
         lenient().when(jdbc.queryForMap(anyString(), any(Object[].class))).thenReturn(Map.of());
-        return new WorkflowMonitoringController(jdbc, authorization);
+        return new WorkflowMonitoringController(jdbc, authorization,
+            org.mockito.Mockito.mock(com.antflow.audit.AuditService.class));
     }
 
     private List<String> issuedSql() {
@@ -48,7 +49,7 @@ class WorkflowMonitoringControllerTest {
     void everyQueryIsScopedToTheCallersOwnOrDepartmentInstances() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, true, 7L, Set.of(10L, 11L))));
+                false, false, true, 7L, Set.of(10L, 11L), 1L)));
 
         controller().overview(50);
 
@@ -60,7 +61,7 @@ class WorkflowMonitoringControllerTest {
     void aScopeWithNeitherSelfNorDepartmentsBecomesAFalsePredicate() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, false, 7L, Set.of())));
+                false, false, false, 7L, Set.of(), 1L)));
 
         controller().overview(50);
 
@@ -73,7 +74,7 @@ class WorkflowMonitoringControllerTest {
     void adminAndAllScopeAreNotFiltered() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                true, true, false, 7L, Set.of())));
+                true, true, false, 7L, Set.of(), 1L)));
 
         controller().overview(50);
 
@@ -82,10 +83,21 @@ class WorkflowMonitoringControllerTest {
     }
 
     @Test
+    void nonAdminAllScopeIsRestrictedToConfirmedCompanySnapshots() {
+        when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
+            .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
+                false, true, false, 7L, Set.of(), 2L)));
+        controller().overview(50);
+        assertThat(issuedSql()).allSatisfy(sql -> assertThat(sql)
+            .contains("instance.company_id = ?", "instance.company_inferred = false")
+            .doesNotContain("1 = 1"));
+    }
+
+    @Test
     void outboxIsJoinedToInstancesAndOtherAggregateTypesAreExcluded() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, true, 7L, Set.of())));
+                false, false, true, 7L, Set.of(), 1L)));
 
         controller().overview(50);
 

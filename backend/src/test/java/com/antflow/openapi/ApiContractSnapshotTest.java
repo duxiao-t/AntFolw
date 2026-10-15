@@ -1,7 +1,7 @@
 package com.antflow.openapi;
 
-import com.antflow.mobile.workflow.FileStorage;
-import com.antflow.mobile.workflow.StoredObject;
+import com.antflow.attachment.FileStorage;
+import com.antflow.attachment.StoredObject;
 import com.fasterxml.jackson.core.util.DefaultIndenter;
 import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
 import com.fasterxml.jackson.databind.JsonNode;

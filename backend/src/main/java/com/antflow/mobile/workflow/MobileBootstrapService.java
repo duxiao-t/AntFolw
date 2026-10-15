@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftService;
+
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
 import com.antflow.org.DepartmentMapper;
@@ -30,15 +32,12 @@ public class MobileBootstrapService {
     public MobileBootstrapDto bootstrap(long userId, Collection<String> roles) {
         User user = userMapper.selectById(userId);
         if (user == null) throw new AccessDeniedException("authenticated user no longer exists");
-        Long pendingCount = taskMapper.selectCount(new QueryWrapper<TaskEntity>()
-            .eq("assignee_id", userId)
-            .and(query -> query.eq("status", "PENDING")
-                .or(cc -> cc.eq("status", "CC").isNull("read_at"))));
+        long pendingCount = taskMapper.countPendingInbox(userId);
         return new MobileBootstrapDto(
             new MobileUserDto(user.getId(), user.getUsername(), user.getDisplayName(),
                 departmentName(user), user.getDeptId(), user.getEmployeeNo(),
                 List.copyOf(roles)),
-            pendingCount.intValue() + Math.toIntExact(workflowMapper.countUnreadCc(userId)),
+            Math.toIntExact(pendingCount + workflowMapper.countUnreadCc(userId)),
             draftService == null ? 0 : Math.toIntExact(draftService.count(userId)),
             Math.toIntExact(workflowMapper.countUnreadNotifications(userId)),
             mobileAppService.favorites(userId),

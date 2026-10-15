@@ -17,7 +17,6 @@ import {
   normalizeMatrixValue,
   removeMatrixAxis,
   setMatrixCell,
-  validateMatrixValue,
   type MatrixAxis,
   type MatrixAxisItem,
 } from './matrixFill';
@@ -467,5 +466,4 @@ export const MatrixFillField: FieldType = {
       </div>
     );
   },
-  validate: (value, props) => validateMatrixValue(value, props, '矩阵'),
 };

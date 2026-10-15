@@ -9,9 +9,9 @@ import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.org.UserMapper;
-import com.antflow.mobile.workflow.MobileFileLinkService;
-import com.antflow.mobile.workflow.MobileFileRef;
-import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.attachment.MobileFileLinkService;
+import com.antflow.attachment.MobileFileRef;
+import com.antflow.form.runtime.MobileDraftService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +42,7 @@ public class FormDataService {
     /** 台账里外链下拉的选项名要去选项行取（schema 里只有列映射与版本号）。 */
     private final com.antflow.form.options.OptionRuntimeService optionRuntime;
     private final MobileFileLinkService fileLinkService;
+    private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
     private final MobileDraftService draftService;
     /** P4a：无流程提交/草稿没有实例可继承归属，这两条路径必须自己解析。 */
     private final com.antflow.org.CompanyAttribution companyAttribution;
@@ -123,6 +124,7 @@ public class FormDataService {
         fd2.setCompanyId(companyId);
         fd2.setCompanyInferred(false);
         mapper.insert(fd2);
+        if ("SUBMITTED".equals(normalizedStatus)) mediaValidator.validate(fd2.getId());
         fileLinkService.append(fd2.getId(), files, userId);
         // 删草稿必须在 insert **成功之后**：创建失败要连草稿一起回滚，不能人财两空。
         if (draftId != null) draftService.deleteAfterSubmit(draftId, fd.getId(), userId);
@@ -237,7 +239,7 @@ public class FormDataService {
     }
 
     public FormData getById(Long id) {
-        FormData data = mapper.selectById(id);
+        FormData data = mapper.selectRuntimeById(id);
         if (data == null) {
             throw new BizException("FORM_DATA_NOT_FOUND", "Form data not found: " + id);
         }

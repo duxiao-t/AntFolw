@@ -42,8 +42,9 @@ public class TaskOperationService {
     private final TaskHistoryMapper historyMapper;
     private final ProcessInstanceMapper instanceMapper;
     private final NotificationPublisher notifier;
+    private final com.antflow.authz.AuthorizationService authorizationService;
 
-    @Autowired(required = false)
+    @Autowired
     private WorkflowRuntimeV2 runtimeV2;
 
     /**
@@ -60,6 +61,8 @@ public class TaskOperationService {
         if (!java.util.Objects.equals(parent.getAssigneeId(), p.userId())) {
             throw new AccessDeniedException("only current assignee can transfer");
         }
+        requireApproval(parent);
+        if (runtimeV2 != null) runtimeV2.requireActiveAssignee(targetUserId);
         // 关父任务
         parent.setStatus("SKIPPED");
         parent.setComment(comment);
@@ -106,6 +109,8 @@ public class TaskOperationService {
         if (!java.util.Objects.equals(parent.getAssigneeId(), p.userId())) {
             throw new AccessDeniedException("only current assignee can delegate");
         }
+        requireApproval(parent);
+        if (runtimeV2 != null) runtimeV2.requireActiveAssignee(targetUserId);
         TaskEntity existing = findPendingChild(parent, targetUserId, false);
         if (existing != null) return existing.getId();
         TaskEntity child = new TaskEntity();
@@ -152,6 +157,11 @@ public class TaskOperationService {
         if (!java.util.Objects.equals(parent.getAssigneeId(), p.userId())) {
             throw new AccessDeniedException("only current assignee can add reviewer");
         }
+        requireApproval(parent);
+        if (!"BEFORE".equals(position) && !"AFTER".equals(position)) {
+            throw new BizException("BAD_POSITION", "加签位置必须为 BEFORE 或 AFTER");
+        }
+        if (runtimeV2 != null) runtimeV2.requireActiveAssignee(targetUserId);
         TaskEntity existing = findPendingChild(parent, targetUserId, true);
         if (existing != null) return existing.getId();
         TaskEntity child = new TaskEntity();
@@ -195,6 +205,9 @@ public class TaskOperationService {
         if (!java.util.Objects.equals(child.getAssigneeId(), p.userId())) {
             throw new AccessDeniedException("only child assignee can recall");
         }
+        if (child.getParentTaskId() == null) {
+            throw new BizException("BAD_RECALL_STATE", "仅能撤回转交、委托或加签子任务");
+        }
         child.setStatus("SKIPPED");
         child.setComment(comment);
         updateOrConflict(child);
@@ -204,12 +217,16 @@ public class TaskOperationService {
         TaskEntity parent = child.getParentTaskId() == null
             ? null
             : lockTask(child.getParentTaskId());
+        if (runtimeV2 != null && child.getNodeInstanceId() != null) {
+            runtimeV2.recallChild(child, parent);
+        }
         if (parent != null
             && "SKIPPED".equals(parent.getStatus())
             && java.util.Objects.equals(parent.getNodeId(), child.getNodeId())) {
             parent.setStatus("PENDING");
             parent.setComment(null);
             updateOrConflict(parent);
+            notifyAssigned(parent);
         }
 
 
@@ -218,12 +235,6 @@ public class TaskOperationService {
 
 
 
-        if (child.getParentTaskId() == null) {
-            // 原始任务没有父任务可恢复，继续写撤回历史。
-        }
-        if (parent == null) {
-            // 父任务不存在时无需恢复，仅记录撤回历史。
-        }
         historyMapper.insert(historyRow(child.getProcInstId(),
             child.getId(), null, child.getNodeId(), child.getNodeId(),
             "RECALL_CHILD", p.userId(), comment));
@@ -271,10 +282,23 @@ public class TaskOperationService {
         TaskEntity initial = taskMapper.selectById(taskId);
         if (initial == null) throw new BizException("TASK_NOT_PENDING", "task not pending");
         var instance = instanceMapper.selectForUpdate(initial.getProcInstId());
-        if (instance == null) return initial; // legacy unit-test mocks do not stub the lock query
+        authorizationService.requireConfirmedInstance(initial.getProcInstId());
+        if (instance == null) throw new BizException("NOT_FOUND", "instance not found");
         TaskEntity locked = taskMapper.selectForUpdate(taskId);
-        if (locked == null) throw new BizException("TASK_NOT_PENDING", "task not pending");
+        if (locked == null || !java.util.Objects.equals(locked.getProcInstId(), instance.getId())) {
+            throw new BizException("TASK_NOT_PENDING", "task not pending");
+        }
+        if (!"RUNNING".equals(instance.getStatus())) {
+            throw new BizException("BAD_INSTANCE_STATE", "终态流程不能继续处理任务");
+        }
+        if (runtimeV2 != null) runtimeV2.requireActiveTask(locked, instance);
         return locked;
+    }
+
+    private static void requireApproval(TaskEntity task) {
+        if (!"APPROVAL".equals(task.getTaskType())) {
+            throw new BizException("BAD_TASK_TYPE", "仅审批任务支持转交、委托和加签");
+        }
     }
 
     private TaskEntity findPendingChild(TaskEntity parent, long targetUserId, boolean additional) {

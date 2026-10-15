@@ -268,7 +268,7 @@ export async function submitDirect(
   body: AntFlowAPI.DirectSubmitRequest,
   options?: { [key: string]: any }
 ) {
-  return request<Record<string, any>>("/api/mobile/submissions", {
+  return request<AntFlowAPI.SubmitResult>("/api/mobile/submissions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

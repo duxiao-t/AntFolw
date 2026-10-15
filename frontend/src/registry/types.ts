@@ -14,6 +14,7 @@ export type SchemaNode = {
   type: string;
   label?: string;
   props?: SchemaNodeProps;
+  rules?: Record<string, unknown>;
   children?: SchemaNode[];
 };
 
@@ -48,5 +49,4 @@ export type FieldType<TProps = any, TValue = any> = {
   defaultProps: TProps;
   Component: React.FC<FieldComponentProps<TProps, TValue>>;
   ConfigPanel?: React.FC<FieldConfigPanelProps>;
-  validate?(value: TValue, props: TProps): string | null;
 };

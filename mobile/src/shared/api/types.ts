@@ -1,3 +1,7 @@
+import type { AntFlowAPI } from '../../../../shared/api.generated';
+
+export type Contract<T, K extends keyof T> = T & Required<Pick<T, K>>;
+
 export interface PublicBranding {
   version: string;
   appName: string;
@@ -9,70 +13,44 @@ export interface PublicBranding {
   footerText: string;
 }
 
-export interface MobileUser {
-  id: number;
-  username: string;
-  displayName: string;
-  department?: string;
-  /** 部门 id：部门选择"默认填充当前部门"要用（显示名 `department` 无法反查）。 */
-  deptId?: number;
-  employeeNo?: string;
-  avatarUrl?: string;
-  roles: string[];
-}
+export type MobileUser = Contract<
+  AntFlowAPI.MobileUserDto,
+  'id' | 'username' | 'displayName' | 'roles'
+> & { avatarUrl?: string };
 
-export interface DeviceSession {
-  id: string;
-  deviceName: string;
-  platform: 'browser' | 'wecom';
-  lastActiveAt: string;
-  isCurrent: boolean;
-}
+export type DeviceSession = Contract<
+  AntFlowAPI.DeviceSessionDto,
+  'id' | 'deviceName' | 'platform' | 'lastActiveAt' | 'isCurrent'
+>;
 
-export interface MobileApp {
-  formId: number;
-  code: string;
-  name: string;
-  iconUrl?: string;
-  category?: string;
-  categoryLabel?: string;
-  description?: string;
-}
+export type MobileApp = Contract<
+  AntFlowAPI.MobileAppDto,
+  'formId' | 'code' | 'name'
+>;
 
-export interface RecentProcess {
-  instanceId: number;
-  formCode: string;
-  formTitle: string;
-  status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
-  startedAt?: string;
-  updatedAt: string;
-}
+export type RecentProcess = Contract<
+  AntFlowAPI.RecentProcessDto,
+  'instanceId' | 'formCode' | 'formTitle' | 'status' | 'updatedAt'
+> & { startedAt?: string };
 
-export interface MobileBootstrap {
+export type MobileBootstrap = Contract<
+  Omit<
+    AntFlowAPI.MobileBootstrapDto,
+    'user' | 'favoriteApps' | 'recentProcesses'
+  >,
+  'pendingCount' | 'brandingVersion'
+> & {
   user: MobileUser;
-  pendingCount: number;
-  draftCount?: number;
-  unreadNotificationCount?: number;
   favoriteApps: MobileApp[];
   recentProcesses: RecentProcess[];
-  brandingVersion: string;
-}
+};
 
 export interface AppFilters {
   keyword?: string;
   category?: string;
 }
 
-export interface MobileFile {
-  id: string;
-  name: string;
-  contentUrl: string;
-  contentType: string;
-  size: number;
-  url?: string;
-  sizeBytes?: number;
-  status?: 'PROCESSING' | 'READY' | 'FAILED';
-  /** 服务端只在 FAILED 时给：失败原因，可直接展示给用户。 */
-  failureReason?: string;
-  durationSeconds?: number;
-}
+export type MobileFile = Contract<
+  AntFlowAPI.MobileFileDto,
+  'id' | 'name' | 'contentUrl' | 'contentType' | 'size'
+> & { url?: string; sizeBytes?: number };

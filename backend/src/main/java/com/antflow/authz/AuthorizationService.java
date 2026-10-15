@@ -190,18 +190,18 @@ public class AuthorizationService {
         AuthzSnapshot snapshot = currentSnapshot();
         if (snapshot.admin()) {
             return Optional.of(new DataScopeFilter(true, true, false,
-                snapshot.userId(), Set.of()));
+                snapshot.userId(), Set.of(), null));
         }
         List<RoleGrant> grants = snapshot.permissionRoles().getOrDefault(permissionCode, List.of());
         boolean all = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.ALL);
         boolean self = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.SELF);
         Set<Long> departments = all ? Set.of() : manageableDepartments(snapshot, permissionCode);
         return Optional.of(new DataScopeFilter(false, all, self,
-            snapshot.userId(), departments));
+            snapshot.userId(), departments, companyOf(snapshot)));
     }
 
     public record DataScopeFilter(boolean admin, boolean unrestricted, boolean selfAllowed,
-                                  long userId, Set<Long> departmentIds) {
+                                  long userId, Set<Long> departmentIds, Long companyId) {
     }
 
     public boolean inCurrentDataScope(String permission, Long ownerId, Long departmentId) {
@@ -451,16 +451,20 @@ public class AuthorizationService {
             return InstanceVisibility.NONE;
         }
         AuthzSnapshot snapshot = snapshot(userId);
-        if (snapshot.admin() || Objects.equals(resource.startedBy(), userId)) {
+        if (snapshot.admin()) {
             return InstanceVisibility.FULL;
         }
+        if (resource.companyId() == null || resource.companyInferred()) {
+            return InstanceVisibility.NONE;
+        }
+        if (Objects.equals(resource.startedBy(), userId)) return InstanceVisibility.FULL;
         if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_TASK_READ)
             && isReadableTaskAssignee(instanceId, userId)) {
             return InstanceVisibility.FULL;
         }
         if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_INSTANCE_READ)
-            && inDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
-                resource.startedBy(), resource.startedDepartmentId())) {
+            && inCompanyDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
+                resource.startedBy(), resource.startedDepartmentId(), resource.companyId())) {
             return InstanceVisibility.FULL;
         }
         return isParticipant(instanceId, userId)
@@ -495,8 +499,8 @@ public class AuthorizationService {
         }
         requirePermission(permission);
         AuthzSnapshot snapshot = snapshot(principal.userId());
-        if (!inDataScope(snapshot, permission, resource.startedBy(),
-                resource.startedDepartmentId())) {
+        if (!inCompanyDataScope(snapshot, permission, resource.startedBy(),
+                resource.startedDepartmentId(), resource.companyId())) {
             throw new AccessDeniedException("instance is outside your management scope");
         }
     }
@@ -514,12 +518,30 @@ public class AuthorizationService {
             return false;
         }
         AuthzSnapshot snapshot = snapshot(userId);
-        if (snapshot.admin() || Objects.equals(resource.createdBy(), userId)) {
+        if (snapshot.admin()) {
             return true;
         }
+        if (resource.companyId() == null || resource.companyInferred()) return false;
+        if (Objects.equals(resource.createdBy(), userId)) return true;
         return snapshot.permissions().contains(PermissionCodes.FORM_DATA_READ)
-            && inDataScope(snapshot, PermissionCodes.FORM_DATA_READ,
-                resource.createdBy(), resource.startedDepartmentId());
+            && inCompanyDataScope(snapshot, PermissionCodes.FORM_DATA_READ,
+                resource.createdBy(), resource.startedDepartmentId(), resource.companyId());
+    }
+
+    private boolean inCompanyDataScope(AuthzSnapshot snapshot, String permission,
+                                       Long ownerId, Long departmentId, Long companyId) {
+        return companyId != null && companyId.equals(companyOf(snapshot))
+            && inDataScope(snapshot, permission, ownerId, departmentId);
+    }
+
+    /** Assigned actions retain their existing actor checks, but cannot operate on uncertain attribution. */
+    public void requireConfirmedInstance(long instanceId) {
+        if (PrincipalHolder.current().isEmpty()) return; // Explicit internal worker context.
+        InstanceAccess access = instanceAccess(instanceId);
+        if (access == null || (!isAdmin()
+            && (access.companyId() == null || access.companyInferred()))) {
+            throw new HiddenResourceException("instance not found");
+        }
     }
 
     public boolean inDataScope(AuthzSnapshot snapshot, String permission,
@@ -573,6 +595,11 @@ public class AuthorizationService {
                 case CUSTOM -> result.addAll(grant.customDepartmentIds());
                 case SELF -> { }
             }
+        }
+        if (!result.isEmpty()) {
+            Long companyId = companyOf(snapshot);
+            result.retainAll(companyId == null ? Set.of() : jdbcTemplate.queryForList(
+                "SELECT id FROM t_department WHERE company_id = ?", Long.class, companyId));
         }
         return result;
     }
@@ -629,17 +656,18 @@ public class AuthorizationService {
 
     InstanceAccess instanceAccess(long instanceId) {
         return jdbcTemplate.query("""
-            SELECT pi.started_by, pi.started_dept_id
+            SELECT pi.started_by, pi.started_dept_id, pi.company_id, pi.company_inferred
             FROM t_process_instance pi
             WHERE pi.id = ?
             """, rs -> rs.next() ? new InstanceAccess(
                 nullableLong(rs, "started_by"),
-                nullableLong(rs, "started_dept_id")) : null, instanceId);
+                nullableLong(rs, "started_dept_id"),
+                nullableLong(rs, "company_id"), rs.getBoolean("company_inferred")) : null, instanceId);
     }
 
     private FormDataAccess formDataAccess(long formDataId) {
         return jdbcTemplate.query("""
-            SELECT data.created_by, pi.started_dept_id,
+            SELECT data.created_by, data.company_id, data.company_inferred, pi.started_dept_id,
                    submitter.dept_id AS submitter_dept_id
             FROM t_form_data data
             LEFT JOIN t_process_instance pi ON pi.form_data_id = data.id
@@ -651,7 +679,8 @@ public class AuthorizationService {
                 nullableLong(rs, "created_by"),
                 nullableLong(rs, "started_dept_id") != null
                     ? nullableLong(rs, "started_dept_id")
-                    : nullableLong(rs, "submitter_dept_id")) : null, formDataId);
+                    : nullableLong(rs, "submitter_dept_id"),
+                nullableLong(rs, "company_id"), rs.getBoolean("company_inferred")) : null, formDataId);
     }
 
     private AuthzSnapshot loadSnapshot(UserState user) {
@@ -764,8 +793,10 @@ public class AuthorizationService {
     // 与 GrantRow 一样放宽到包内可见：AuthorizationServiceTest 需要构造它们来复现缓存竞态。
     record UserState(long userId, String username, String displayName, String status,
                              long authzVersion, Long departmentId) { }
-    record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
-    private record FormDataAccess(Long createdBy, Long startedDepartmentId) { }
+    record InstanceAccess(Long startedBy, Long startedDepartmentId, Long companyId,
+                          boolean companyInferred) { }
+    private record FormDataAccess(Long createdBy, Long startedDepartmentId, Long companyId,
+                                  boolean companyInferred) { }
 
     public record RoleGrant(long roleId, String code, DataScope dataScope,
                             Set<Long> customDepartmentIds) { }

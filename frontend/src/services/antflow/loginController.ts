@@ -9,7 +9,7 @@ export async function login(
   body: AntFlowAPI.LoginReq,
   options?: { [key: string]: any }
 ) {
-  return request<Record<string, any>>("/api/auth/login", {
+  return request<AntFlowAPI.SessionPayload>("/api/auth/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -44,7 +44,7 @@ export async function refresh(
   params: AntFlowAPI.refreshParams,
   options?: { [key: string]: any }
 ) {
-  return request<Record<string, any>>("/api/auth/refresh", {
+  return request<AntFlowAPI.SessionPayload>("/api/auth/refresh", {
     method: "POST",
     params: {
       ...params,

@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftService;
+
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.engine.BizException;
@@ -130,7 +132,8 @@ public class ApprovalPreviewService {
         }
         ProcessInstance instance = instanceMapper.selectById(task.getProcInstId());
         if (instance == null) throw new BizException("NOT_FOUND", "instance not found");
-        FormData formData = formDataMapper.selectById(instance.getFormDataId());
+        authorizationService.requireConfirmedInstance(instance.getId());
+        FormData formData = formDataMapper.selectRuntimeById(instance.getFormDataId());
         if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
         if (form == null || !Objects.equals(form.getCode(), code)) {

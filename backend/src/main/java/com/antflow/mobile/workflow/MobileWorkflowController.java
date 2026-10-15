@@ -1,5 +1,11 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftDto;
+
+import com.antflow.form.runtime.MobileDraftService;
+
+import com.antflow.attachment.MobileFileRef;
+
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthenticatedOnly;
 import com.antflow.authz.AuthorizationService;
@@ -125,18 +131,13 @@ public class MobileWorkflowController {
      */
     @PostMapping("/submissions")
     @PreAuthorize("@authz.capability('" + PermissionCodes.FORM_RUNTIME_READ + "')")
-    public Map<String, Object> submitDirect(@RequestBody DirectSubmitRequest request) {
+    public FormDataService.SubmitResult submitDirect(@RequestBody DirectSubmitRequest request) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         long userId = principal().userId();
-        FormDataService.SubmitResult result = formDataService.submit(request.formCode(),
+        return formDataService.submit(request.formCode(),
             request.status(), request.data(), userId,
             request.files() == null ? List.of() : request.files(), request.draftId(),
             request.companyId());
-        // 草稿没有业务单号（businessNo 为 null），Map.of 不接受 null 会抛 NPE → 500。照桌面端用可变 Map。
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("dataId", result.dataId());
-        response.put("businessNo", result.businessNo());
-        return response;
     }
 
     public record DirectSubmitRequest(String formCode, String status, Object data,

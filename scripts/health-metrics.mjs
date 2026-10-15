@@ -92,6 +92,14 @@ const H2_DIMENSIONS = {
       sql: ['backend/src/test/java/com/antflow/integration'],
     },
   },
+  validation: {
+    fixture: 'fixtures/field-semantics/validation.json',
+    consumers: {
+      desktop: ['frontend/src/registry'],
+      mobile: ['mobile/src/features/forms/schema'],
+      java: ['backend/src/test/java/com/antflow/form'],
+    },
+  },
 };
 
 function h2() {
@@ -102,7 +110,7 @@ function h2() {
     for (const [channel, dirs] of Object.entries(spec.consumers)) {
       const hit = dirs.some((dir) => {
         const files = walk(p(dir), (n) => /\.(ts|tsx|java)$/.test(n));
-        return referencing(files, 'field-semantics').length > 0;
+        return referencing(files, spec.fixture.split('/').at(-1)).length > 0;
       });
       if (hit) {
         wired.push(channel);

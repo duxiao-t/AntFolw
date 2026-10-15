@@ -1,5 +1,14 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftDto;
+
+import com.antflow.form.runtime.MobileDraftService;
+
+import com.antflow.attachment.MobileFile;
+import com.antflow.attachment.MobileFileLinkService;
+import com.antflow.attachment.MobileFileRef;
+import com.antflow.attachment.MobileFileDto;
+
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.authz.PermissionCodes;
@@ -53,6 +62,7 @@ public class MobileWorkflowService {
     private final ProcessEngine engine;
     private final MobileDraftService draftService;
     private final MobileWorkflowMapper workflowMapper;
+    private final com.antflow.attachment.FormDataFileMapper fileLinks;
     private final FormDefinitionService formDefinitionService;
     private final ProcessDefinitionService processDefinitionService;
     private final FormDataMapper formDataMapper;
@@ -310,6 +320,7 @@ public class MobileWorkflowService {
             return;
         }
         TaskEntity task = requireExistingTask(taskId);
+        authorizationService.requireConfirmedInstance(task.getProcInstId());
         if (!Objects.equals(task.getAssigneeId(), userId)) {
             throw new AccessDeniedException("not your task");
         }
@@ -385,6 +396,7 @@ public class MobileWorkflowService {
 
     private TaskEntity requireOwnedReworkTask(Long taskId, long userId) {
         TaskEntity task = requireExistingTask(taskId);
+        authorizationService.requireConfirmedInstance(task.getProcInstId());
         if (!"PENDING".equals(task.getStatus()) || !"REWORK".equals(task.getTaskType())) {
             throw new BizException("TASK_NOT_PENDING", "待修改任务已处理");
         }
@@ -399,7 +411,14 @@ public class MobileWorkflowService {
         if (request == null) {
             throw new BizException("BAD_REQUEST", "表单内容不能为空");
         }
-        ProcessInstance instance = requireExistingInstance(task.getProcInstId());
+        ProcessInstance instance = instanceMapper.selectForUpdate(task.getProcInstId());
+        TaskEntity current = taskMapper.selectForUpdate(task.getId());
+        if (instance == null || !"RUNNING".equals(instance.getStatus())
+            || current == null || !Objects.equals(current.getProcInstId(), instance.getId())
+            || !"PENDING".equals(current.getStatus()) || !"REWORK".equals(current.getTaskType())
+            || !Objects.equals(current.getAssigneeId(), userId)) {
+            throw new BizException("BAD_REWORK_STATE", "待修改任务已失效，请刷新");
+        }
         FormData formData = requireFormData(instance.getFormDataId());
         JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
@@ -446,7 +465,7 @@ public class MobileWorkflowService {
     }
 
     private FormData requireFormData(Long formDataId) {
-        FormData formData = formDataMapper.selectById(formDataId);
+        FormData formData = formDataMapper.selectRuntimeById(formDataId);
         if (formData == null) {
             throw new BizException("NOT_FOUND", "form data not found");
         }
@@ -621,7 +640,7 @@ public class MobileWorkflowService {
     }
 
     private List<MobileFileDto> files(Long formDataId) {
-        return workflowMapper.selectFilesByFormDataId(formDataId).stream()
+        return fileLinks.selectFilesByFormDataId(formDataId).stream()
             .map(MobileWorkflowService::toFileDto)
             .toList();
     }
@@ -629,13 +648,13 @@ public class MobileWorkflowService {
     private List<MobileFileDto> starterFiles(Long formDataId, JsonNode processSnapshot) {
         Map<String, String> modes = formDefinitionService.starterFieldModes(processSnapshot);
         Set<UUID> visibleFileIds = new LinkedHashSet<>();
-        for (MobileWorkflowMapper.FormDataFileLink link
-                : workflowMapper.selectFileLinks(formDataId)) {
+        for (com.antflow.attachment.FormDataFileMapper.FormDataFileLink link
+                : fileLinks.selectFileLinks(formDataId)) {
             if (!"HIDDEN".equals(modes.get(link.fieldId()))) {
                 visibleFileIds.add(link.fileId());
             }
         }
-        return workflowMapper.selectFilesByFormDataId(formDataId).stream()
+        return fileLinks.selectFilesByFormDataId(formDataId).stream()
             .filter(file -> visibleFileIds.contains(file.getId()))
             .map(MobileWorkflowService::toFileDto)
             .toList();

@@ -1,0 +1,258 @@
+package com.antflow.form.runtime;
+
+import com.antflow.engine.BizException;
+import com.antflow.authz.AuthorizationService;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.form.FormDefinition;
+import com.antflow.form.FormDefinitionService;
+import com.antflow.form.runtime.FormData;
+import com.antflow.form.runtime.FormDataMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+import org.springframework.security.access.AccessDeniedException;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+
+class MobileDraftServiceTest {
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private FormDataMapper formDataMapper;
+    private FormDefinitionService formDefinitionService;
+    private AuthorizationService authorizationService;
+    private com.antflow.org.CompanyAttribution companyAttribution;
+    private MobileDraftService service;
+
+    /** 归属解析本身由 CompanyAttributionTest 验；这里只验"草稿有没有落快照"。 */
+    private static final long TEST_COMPANY_ID = 1L;
+
+    @BeforeEach
+    void setUp() {
+        formDataMapper = Mockito.mock(FormDataMapper.class);
+        formDefinitionService = Mockito.mock(FormDefinitionService.class);
+        authorizationService = Mockito.mock(AuthorizationService.class);
+        companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
+        Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(TEST_COMPANY_ID);
+        Mockito.when(companyAttribution.forDraft(Mockito.any(), Mockito.any()))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        service = new MobileDraftService(formDataMapper, formDefinitionService, objectMapper,
+            authorizationService, companyAttribution);
+        Mockito.when(formDefinitionService.canonicalizeStarterData(
+                Mockito.anyString(), Mockito.any(), Mockito.nullable(Object.class)))
+            .thenAnswer(invocation -> objectMapper.convertValue(
+                invocation.getArgument(1), Map.class));
+        Mockito.when(formDefinitionService.projectStarterSchema(
+                Mockito.any(), Mockito.nullable(Object.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        Mockito.when(formDefinitionService.projectStarterData(
+                Mockito.any(), Mockito.any(), Mockito.nullable(Object.class)))
+            .thenAnswer(invocation -> {
+                Object value = invocation.getArgument(0);
+                return value instanceof String text
+                    ? objectMapper.readTree(text) : objectMapper.valueToTree(value);
+            });
+        Mockito.doAnswer(invocation -> {
+            FormData draft = invocation.getArgument(0);
+            draft.setId(100L);
+            return 1;
+        }).when(formDataMapper).insert(any(FormData.class));
+        // 列表改走批量判定：usableFormIds 返回空 = 不过滤（管理员口径），默认放行。
+        Mockito.when(authorizationService.hasPermission(Mockito.anyLong(), Mockito.anyString())).thenReturn(true);
+        Mockito.when(authorizationService.usableFormIdsByCompany(Mockito.anyLong()))
+            .thenReturn(java.util.Optional.empty());
+    }
+
+    @Test
+    void createStoresDraftForPublishedForm() throws Exception {
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
+        JsonNode data = objectMapper.createObjectNode().put("days", 2);
+
+        Long id = service.create("leave", data, null, 7L);
+
+        assertThat(id).isEqualTo(100L);
+        ArgumentCaptor<FormData> captor = ArgumentCaptor.forClass(FormData.class);
+        Mockito.verify(formDataMapper).insert(captor.capture());
+        FormData saved = captor.getValue();
+        assertThat(saved.getFormDefId()).isEqualTo(10L);
+        assertThat(saved.getFormDefVersion()).isEqualTo(3);
+        assertThat(saved.getStatus()).isEqualTo("DRAFT");
+        assertThat(saved.getCreatedBy()).isEqualTo(7L);
+        // P4a：草稿**创建时**就落归属快照（含 company_inferred=false）——提交时不再重新解析。
+        assertThat(saved.getCompanyId()).isEqualTo(TEST_COMPANY_ID);
+        assertThat(saved.getCompanyInferred()).isFalse();
+        assertThat(objectMapper.readTree(saved.getData()).path("days").asInt()).isEqualTo(2);
+        Mockito.verify(authorizationService).requireFormUse(10L, TEST_COMPANY_ID);
+    }
+
+    @Test
+    void createRejectsFormWithoutUsageGrant() {
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
+        Mockito.doThrow(new HiddenResourceException("form not found"))
+            .when(authorizationService).requireFormUse(10L, TEST_COMPANY_ID);
+
+        assertThatThrownBy(() -> service.create("leave",
+            objectMapper.createObjectNode(), null, 7L))
+            .isInstanceOf(HiddenResourceException.class);
+        Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
+    }
+
+    @Test
+    void updateRequiresDraftOwnerAndPublishedTemplate() throws Exception {
+        Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+        Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
+        JsonNode data = objectMapper.createObjectNode().put("days", 5);
+
+        FormData updated = service.update(101L, data, null, 7L);
+
+        assertThat(updated.getId()).isEqualTo(101L);
+        assertThat(objectMapper.readTree(updated.getData()).path("days").asInt()).isEqualTo(5);
+        Mockito.verify(formDataMapper).updateById(updated);
+        Mockito.verify(authorizationService).requireFormUse(10L, TEST_COMPANY_ID);
+    }
+
+    @Test
+    void updateRejectsSecondUser() {
+        Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+
+        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), null, 8L))
+            .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void updateRejectsUnpublishedTemplateButGetRemainsReadable() {
+        Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "DEPRECATED")));
+
+        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), null, 7L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("Form not published");
+
+        MobileDraftDto dto = service.get(101L, 7L);
+        assertThat(dto.readOnly()).isTrue();
+        assertThat(dto.formCode()).isEqualTo("leave");
+    }
+
+    @Test
+    void listReturnsOnlyOwnedDraftsWithReadOnlyFlag() {
+        Mockito.when(formDataMapper.selectMyDrafts(7L))
+            .thenReturn(List.of(draft(101L, 7L, "DRAFT"), draft(102L, 7L, "DRAFT")));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+
+        List<MobileDraftDto> drafts = service.list(7L);
+
+        assertThat(drafts).hasSize(2);
+        assertThat(drafts).allSatisfy(draft -> assertThat(draft.readOnly()).isFalse());
+        assertThat(drafts.get(0).schema().get(1).path("id").asText()).isEqualTo("days");
+        Mockito.verify(formDataMapper).selectMyDrafts(7L);
+    }
+
+    @Test
+    void revokedUsageGrantKeepsDraftDeletableButMarksItReadOnly() {
+        Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+        Mockito.when(authorizationService.usableFormIdsByCompany(7L))
+            .thenReturn(java.util.Optional.of(Map.of()));
+
+        MobileDraftDto dto = service.get(101L, 7L);
+
+        assertThat(dto.readOnly()).isTrue();
+        service.delete(101L, 7L);
+        Mockito.verify(formDataMapper).deleteById(101L);
+    }
+
+    @Test
+    void draftReadOnlyFlagUsesEachSnapshotCompanyInTheSameBatch() {
+        FormData first = draft(101L, 7L, "DRAFT");
+        first.setCompanyId(20L);
+        FormData second = draft(102L, 7L, "DRAFT");
+        second.setCompanyId(30L);
+        FormData pending = draft(103L, 7L, "DRAFT");
+        pending.setCompanyId(null);
+        Mockito.when(formDataMapper.selectMyDrafts(7L)).thenReturn(List.of(first, second, pending));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+        Mockito.when(authorizationService.usableFormIdsByCompany(7L))
+            .thenReturn(java.util.Optional.of(Map.of(20L, java.util.Set.of(10L))));
+        assertThat(service.list(7L)).extracting(MobileDraftDto::readOnly)
+            .containsExactly(false, true, true);
+        Mockito.verify(authorizationService).usableFormIdsByCompany(7L);
+    }
+
+    @Test
+    void countUsesCurrentUserAndDraftStatus() {
+        Mockito.when(formDataMapper.countMyDrafts(7L)).thenReturn(3L);
+
+        assertThat(service.count(7L)).isEqualTo(3L);
+
+        Mockito.verify(formDataMapper).countMyDrafts(7L);
+    }
+
+    @Test
+    void uncertainDraftRemainsVisibleWithoutItsBodyAndCannotBeSaved() {
+        FormData pending = draft(101L, 7L, "DRAFT");
+        pending.setCompanyId(null);
+        Mockito.when(formDataMapper.selectMyDrafts(7L)).thenReturn(List.of(pending));
+        Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
+            .thenReturn(Map.of(10L, form("leave", "PUBLISHED")));
+        MobileDraftDto result = service.list(7L).get(0);
+        assertThat(result.readOnly()).isTrue();
+        assertThat(result.data().isEmpty()).isTrue();
+        assertThat(result.schema().isEmpty()).isTrue();
+        assertThat(pending.getData()).isEqualTo("{\"days\":1}");
+    }
+
+    @Test
+    void deleteRequiresDraftOwner() {
+        Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+
+        service.delete(101L, 7L);
+
+        Mockito.verify(formDataMapper).deleteById(101L);
+        assertThatThrownBy(() -> service.delete(101L, 8L))
+            .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void deleteAfterSubmitDeletesOnlyOwnedDraft() {
+        Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
+
+        service.deleteAfterSubmit(101L, 10L, 7L);
+
+        Mockito.verify(formDataMapper).deleteById(101L);
+        assertThatThrownBy(() -> service.deleteAfterSubmit(101L, 11L, 7L))
+            .isInstanceOf(BizException.class).hasMessageContaining("requested form");
+    }
+
+    private static FormDefinition form(String code, String status) {
+        FormDefinition form = new FormDefinition();
+        form.setId(10L);
+        form.setCode(code);
+        form.setName("请假申请");
+        form.setVersion(3);
+        form.setSchema("[{\"id\":\"reason\",\"type\":\"text\"},{\"id\":\"days\",\"type\":\"number\"}]");
+        form.setStatus(status);
+        return form;
+    }
+
+    private static FormData draft(Long id, Long createdBy, String status) {
+        FormData draft = new FormData();
+        draft.setId(id);
+        draft.setFormDefId(10L);
+        draft.setFormDefVersion(3);
+        draft.setData("{\"days\":1}");
+        draft.setStatus(status);
+        draft.setCreatedBy(createdBy);
+        draft.setCompanyId(TEST_COMPANY_ID);
+        return draft;
+    }
+}

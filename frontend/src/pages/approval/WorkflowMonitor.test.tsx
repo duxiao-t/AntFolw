@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import WorkflowMonitor from './WorkflowMonitor';
 
 const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
-vi.mock('@umijs/max', () => ({ request: requestMock }));
+vi.mock('@umijs/max', () => ({ request: requestMock, useAccess: () => ({ can: () => false }) }));
 
 describe('WorkflowMonitor', () => {
   it('renders stuck, overdue, rejection and outbox data', async () => {

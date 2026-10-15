@@ -1760,6 +1760,10 @@
           "contentUrl" : {
             "type" : "string"
           },
+          "durationSeconds" : {
+            "format" : "double",
+            "type" : "number"
+          },
           "failureReason" : {
             "type" : "string"
           },
@@ -2429,6 +2433,67 @@
           },
           "column" : {
             "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "OutboxEvent" : {
+        "properties" : {
+          "attempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deliveredAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "error" : {
+            "type" : "string"
+          },
+          "eventType" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "instanceId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "nextAttemptAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "OutboxPage" : {
+        "properties" : {
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "records" : {
+            "items" : {
+              "$ref" : "#/components/schemas/OutboxEvent"
+            },
+            "type" : "array"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "total" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -3442,6 +3507,66 @@
         ],
         "type" : "object"
       },
+      "SessionPayload" : {
+        "properties" : {
+          "accessToken" : {
+            "type" : "string"
+          },
+          "authzVersion" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "mobileBootstrap" : {
+            "$ref" : "#/components/schemas/MobileBootstrapDto"
+          },
+          "permissions" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array",
+            "uniqueItems" : true
+          },
+          "user" : {
+            "$ref" : "#/components/schemas/SessionUser"
+          }
+        },
+        "type" : "object"
+      },
+      "SessionUser" : {
+        "properties" : {
+          "authzVersion" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "permissions" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array",
+            "uniqueItems" : true
+          },
+          "roles" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "username" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "Settings" : {
         "properties" : {
           "enabled" : {
@@ -3751,6 +3876,18 @@
           },
           "status" : {
             "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "SubmitResult" : {
+        "properties" : {
+          "businessNo" : {
+            "type" : "string"
+          },
+          "dataId" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -4671,10 +4808,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "additionalProperties" : {
-                    "type" : "object"
-                  },
-                  "type" : "object"
+                  "$ref" : "#/components/schemas/SessionPayload"
                 }
               }
             },
@@ -4759,10 +4893,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "additionalProperties" : {
-                    "type" : "object"
-                  },
-                  "type" : "object"
+                  "$ref" : "#/components/schemas/SessionPayload"
                 }
               }
             },
@@ -5188,10 +5319,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "additionalProperties" : {
-                    "type" : "object"
-                  },
-                  "type" : "object"
+                  "$ref" : "#/components/schemas/SubmitResult"
                 }
               }
             },
@@ -7554,10 +7682,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "additionalProperties" : {
-                    "type" : "object"
-                  },
-                  "type" : "object"
+                  "$ref" : "#/components/schemas/SubmitResult"
                 }
               }
             },
@@ -11202,6 +11327,81 @@
                 }
               }
             },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "workflow-monitoring-controller"
+        ]
+      }
+    },
+    "/api/workflow-monitor/outbox" : {
+      "get" : {
+        "operationId" : "outbox",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "status",
+            "required" : false,
+            "schema" : {
+              "default" : "DEAD",
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "page",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "size",
+            "required" : false,
+            "schema" : {
+              "default" : 20,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OutboxPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "workflow-monitoring-controller"
+        ]
+      }
+    },
+    "/api/workflow-monitor/outbox/{id}/retry" : {
+      "post" : {
+        "operationId" : "retryOutbox",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "uuid",
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
             "description" : "OK"
           }
         },

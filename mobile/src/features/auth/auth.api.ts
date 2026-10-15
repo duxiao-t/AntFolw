@@ -1,12 +1,16 @@
 import { ApiError } from '../../shared/api/errors';
 import { apiRequest } from '../../shared/api/http';
 import type { MobileBootstrap, MobileUser } from '../../shared/api/types';
+import type { Contract } from '../../shared/api/types';
+import type { AntFlowAPI } from '../../../../shared/api.generated';
 
-export interface SessionPayload {
-  accessToken: string;
+export type SessionPayload = Omit<
+  Contract<AntFlowAPI.SessionPayload, 'accessToken'>,
+  'user' | 'mobileBootstrap'
+> & {
   user: MobileUser;
   mobileBootstrap?: MobileBootstrap;
-}
+};
 
 export const authApi = {
   async login(username: string, password: string): Promise<SessionPayload> {

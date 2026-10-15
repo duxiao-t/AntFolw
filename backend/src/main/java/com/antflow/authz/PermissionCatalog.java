@@ -66,6 +66,7 @@ public final class PermissionCatalog {
         entry(PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE, "紧急干预审批", Risk.CRITICAL,
             DataScope.ALL),
         entry(PermissionCodes.WORKFLOW_MONITOR_READ, "查看流程监控", Risk.HIGH, DataScope.ALL),
+        entry(PermissionCodes.WORKFLOW_OUTBOX_RETRY, "重放失败事务消息", Risk.HIGH, DataScope.SELF),
         // 名称只描述"看到被指派给我的任务"这一实际用法；裁决在 AuthorizationService.instanceVisibility，
         // 靠"能力存在 + 我是被指派人"授予可见性，与数据范围无关，不得改成按范围过滤。
         entry(PermissionCodes.WORKFLOW_TASK_READ, "查看被指派任务", Risk.NORMAL),

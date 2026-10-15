@@ -1,4 +1,6 @@
 import type { DisplayCondition, SchemaNode } from './types';
+import { basicFieldError, validationProps } from '../../../shared/form-validation';
+import { validateMatrixValue } from '../components/form-fields/matrixFill';
 
 /** 上传类字段：提交前要确认没有"还在传"或"服务端还没处理完"的文件。 */
 const MEDIA_FIELD_TYPES = new Set(['image_upload', 'video_upload', 'file_upload', 'audio_upload']);
@@ -113,6 +115,7 @@ function checklistError(node: SchemaNode, value: unknown): string | null {
 /** 明细表：行数上下限 + **逐行**校验（只算该行可见的字段，口径照移动端 `validateTableList`）。 */
 function tableListError(node: SchemaNode, value: unknown): string | null {
   if (hasPendingUpload(value)) return '表格里仍有文件未完成上传';
+  if (value != null && !Array.isArray(value)) return `${node.label ?? node.id}格式不正确`;
   const rows = Array.isArray(value) ? value : [];
   // 0 行交给上面的通用必填判断（选填的明细表不该因为 `minRows` 的默认值 1 就永远提交不了）；
   // 这里管的是"填了一半"与"填多了"。
@@ -295,11 +298,21 @@ function firstVisibleValidationErrorIn(
   values: Record<string, any>,
   visibleIds: ReadonlySet<string>,
 ): string | null {
-  for (const node of nodes) {
+  for (const sourceNode of nodes) {
+    const node = { ...sourceNode, props: validationProps(sourceNode) };
     if (!visibleIds.has(node.id)) continue;
     if (node.children?.length && node.type !== 'table_list') {
       const childError = firstVisibleValidationErrorIn(node.children, values, visibleIds);
       if (childError) return childError;
+      continue;
+    }
+    if (node.type === 'description') continue;
+    if (node.type === 'matrix_fill') {
+      if (values[node.id] != null && (typeof values[node.id] !== 'object'
+        || Array.isArray(values[node.id]))) return `${node.label ?? node.id}格式不正确`;
+      const error = validateMatrixValue(values[node.id], node.props, node.label);
+      if (error) return error;
+      continue;
     }
     if (node.props?.required && isEmptyValue(values[node.id] ?? node.props.defaultValue)) {
       return String(node.props.validationMessage ?? `请填写${node.label ?? node.id}`);
@@ -326,17 +339,10 @@ function firstVisibleValidationErrorIn(
     if (node.type === 'table_list') {
       const error = tableListError(node, value);
       if (error) return error;
+      continue;
     }
-    if ((node.type === 'number' || node.type === 'money') && !isEmptyValue(value)) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return `${node.label ?? node.id}必须是数字`;
-      if (typeof node.props?.min === 'number' && number < node.props.min) {
-        return `${node.label ?? node.id}不能小于${node.props.min}`;
-      }
-      if (typeof node.props?.max === 'number' && number > node.props.max) {
-        return `${node.label ?? node.id}不能大于${node.props.max}`;
-      }
-    }
+    const common = basicFieldError(node, value);
+    if (common) return common;
   }
   return null;
 }

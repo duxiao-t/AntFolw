@@ -1,5 +1,7 @@
 package com.antflow.integration;
 
+import com.antflow.form.runtime.MobileDraftDto;
+
 import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.FormGrantService;
@@ -20,12 +22,12 @@ import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
-import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.form.runtime.MobileDraftService;
 import com.antflow.mobile.workflow.MobileAppService;
 import com.antflow.navigation.MenuService;
 import com.antflow.report.ReportService;
-import com.antflow.mobile.workflow.FileStorage;
-import com.antflow.mobile.workflow.StoredObject;
+import com.antflow.attachment.FileStorage;
+import com.antflow.attachment.StoredObject;
 import com.antflow.org.User;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
@@ -176,6 +178,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
     @Autowired private ProcessEngine processEngine;
     @Autowired private UserService userService;
     @Autowired private com.antflow.org.DepartmentService departmentService;
@@ -185,6 +188,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private FormProcessPublishService publishService;
     @Autowired private ProcessInstanceMapper processInstanceMapper;
     @Autowired private TaskMapper taskMapper;
+    @Autowired private com.antflow.task.TaskOperationService taskOperations;
     @Autowired private FormGrantService formGrantService;
     @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
     @Autowired private AuthorizationService authorizationService;
@@ -200,9 +204,374 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private WecomService wecomService;
     @Autowired private OptionSourceService optionSourceService;
     @Autowired private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
-    @Autowired private com.antflow.mobile.workflow.MobileFileService mobileFileService;
-    @Autowired private com.antflow.mobile.workflow.MobileFileMapper mobileFileMapper;
-    @Autowired private com.antflow.mobile.workflow.MobileFileLinkService mobileFileLinkService;
+    @Autowired private com.antflow.attachment.MobileFileService mobileFileService;
+    @Autowired private com.antflow.attachment.MobileFileMapper mobileFileMapper;
+    @Autowired private com.antflow.attachment.MobileFileLinkService mobileFileLinkService;
+    @Autowired private WorkflowMonitoringController workflowMonitoring;
+    @Autowired private com.antflow.notify.NotificationPublisher notifications;
+
+    @Test
+    void wecomSyncLosesLeaseWithoutWritingAndRestartsIdempotentlyFromUpstream() {
+        com.antflow.integration.wecom.WecomSyncLeaseFixture.verifyRecovery(
+            jdbcTemplate, new TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)));
+    }
+
+    @Test
+    void failedOutboxReplayKeepsEventIdentityHidesPayloadAndEnforcesState() {
+        StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_workflow_outbox(id, aggregate_type, aggregate_id, event_type, status,
+                attempts, payload, last_error, locked_by, locked_at)
+            VALUES (?, 'PROCESS_INSTANCE', ?, 'TASK_ASSIGNED', 'DEAD', 10,
+                '{"secret":"never-return-payload"}'::jsonb, 'https://secret.example/credential', 'old', now())
+            """, id, started.instanceId());
+        setPrincipal(userId("admin"));
+        try {
+            WorkflowMonitoringController.OutboxPage page = workflowMonitoring.outbox("DEAD", 1, 100);
+            assertThat(page.records()).extracting(WorkflowMonitoringController.OutboxEvent::id).contains(id);
+            assertThat(page.records().toString()).doesNotContain("never-return-payload", "secret.example");
+            workflowMonitoring.retryOutbox(id);
+            assertThat(jdbcTemplate.queryForMap("""
+                SELECT id, status, attempts, locked_by, locked_at, last_error
+                FROM t_workflow_outbox WHERE id = ?
+                """, id)).containsEntry("id", id).containsEntry("status", "PENDING")
+                .containsEntry("attempts", 0).containsEntry("locked_by", null)
+                .containsEntry("locked_at", null).containsEntry("last_error", null);
+            assertThatThrownBy(() -> workflowMonitoring.retryOutbox(id))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("OUTBOX_STATE_CONFLICT"));
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM t_audit_event
+                WHERE action = 'workflow.outbox.retry' AND resource_id = ?
+                """, Long.class, String.valueOf(started.instanceId()))).isEqualTo(1);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void legacyNotificationIsStoredWithItsTransactionAndRollbackDoesNotDeliver() {
+        StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
+        long before = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_workflow_outbox WHERE aggregate_id = ?", Long.class, started.instanceId());
+        TransactionTemplate tx = new TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        tx.executeWithoutResult(status -> {
+            notifications.publish(new com.antflow.notify.NotificationEvent(
+                this, "TASK_RETURNED", started.instanceId(), null, userId("admin"), "退回修改"));
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_workflow_outbox WHERE aggregate_id = ?", Long.class,
+                started.instanceId())).isEqualTo(before + 1);
+            status.setRollbackOnly();
+        });
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_workflow_outbox WHERE aggregate_id = ?", Long.class, started.instanceId()))
+            .isEqualTo(before);
+    }
+
+    @Test
+    void globalBiRoleReadsOnlyTheFiveApprovedViewsAndCannotEscalate() throws Exception {
+        String role = "bi_probe_" + UUID.randomUUID().toString().replace("-", "");
+        String script = Files.readString(Path.of("../infra/sql/bi-readonly-role.sql"))
+            .replaceAll("(?m)^\\\\set[^\\r\\n]*", "").replace("antflow_bi", role);
+        try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            connection.setAutoCommit(false);
+            try {
+                statement.execute(script);
+                statement.execute("SET SESSION AUTHORIZATION " + role);
+                try (var result = statement.executeQuery("SELECT current_user, session_user")) {
+                    assertThat(result.next()).isTrue();
+                    assertThat(result.getString(1)).isEqualTo(role);
+                    assertThat(result.getString(2)).isEqualTo(role);
+                }
+                for (String view : List.of("v_form_ledger", "v_form_field_catalog",
+                    "v_form_option_catalog", "v_user_catalog", "v_department_catalog")) {
+                    try (var result = statement.executeQuery("SELECT count(*) FROM " + view)) {
+                        assertThat(result.next()).isTrue();
+                    }
+                }
+                for (String denied : List.of("SELECT * FROM t_user", "SELECT * FROM t_form_data",
+                    "UPDATE v_form_ledger SET data_status = 'DRAFT'", "CREATE TABLE public.bi_leak(id int)",
+                    "SET ROLE postgres")) {
+                    var savepoint = connection.setSavepoint();
+                    assertThatThrownBy(() -> statement.execute(denied)).as(denied)
+                        .isInstanceOf(java.sql.SQLException.class);
+                    connection.rollback(savepoint);
+                }
+            } finally {
+                connection.rollback();
+            }
+        }
+    }
+
+    @Test
+    void forgedMediaDurationRollsBackSubmissionAndKeepsOriginalDraft() {
+        long owner = userId("admin");
+        UUID file = UUID.randomUUID();
+        long form = insertForm("PUBLISHED",
+            "[{\"id\":\"clip\",\"type\":\"audio_upload\",\"props\":{\"maxDuration\":10}}]");
+        long draft = insertDraft(form, owner);
+        confirmFixtureCompany(form, anyCompanyId());
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                size_bytes, sha256, status, duration_seconds)
+            VALUES (?, ?, 'clip.wav', ?, 'audio/wav', 100, ?, 'READY', 20)
+            """, file, owner, "audio/" + file, "a".repeat(64));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, form);
+        setPrincipal(owner);
+        try {
+            assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED",
+                Map.of("clip", List.of(Map.of("id", file.toString(), "durationSeconds", 1))),
+                owner, List.of(new com.antflow.attachment.MobileFileRef(file, "clip", 0)),
+                draft, null)).isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("FORM_DATA_INVALID"));
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_form_data WHERE form_def_id = ?", Long.class, form))
+                .isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_form_data WHERE id = ?", String.class, draft)).isEqualTo("DRAFT");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_form_data_file WHERE file_id = ?", Long.class, file)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void terminalInstancesRejectResidualPendingTasksWithoutAnySideEffects() {
+        long admin = userId("admin");
+        long approver = userId("bob");
+        StartedV2 started = startV2(approvalFlow(approver), admin);
+        long task = jdbcTemplate.queryForObject("""
+            SELECT id FROM t_task WHERE proc_inst_id = ? AND status = 'PENDING'
+            """, Long.class, started.instanceId());
+        long history = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class, started.instanceId());
+        setPrincipal(approver);
+        try {
+            for (String terminal : List.of("APPROVED", "REJECTED", "WITHDRAWN")) {
+                jdbcTemplate.update("UPDATE t_process_instance SET status = ? WHERE id = ?",
+                    terminal, started.instanceId());
+                sqlSession.clearCache();
+                assertThatThrownBy(() -> processEngine.approve(
+                    new CompleteCmd(task, "APPROVE", "invalid", null), approver))
+                    .isInstanceOfSatisfying(BizException.class,
+                        error -> assertThat(error.getCode()).isEqualTo("BAD_INSTANCE_STATE"));
+                assertThatThrownBy(() -> taskOperations.transfer(task, admin, "invalid"))
+                    .isInstanceOfSatisfying(BizException.class,
+                        error -> assertThat(error.getCode()).isEqualTo("BAD_INSTANCE_STATE"));
+                assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?",
+                    String.class, task)).isEqualTo("PENDING");
+                assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class,
+                    started.instanceId())).isEqualTo(history);
+            }
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void oldRoundPendingTaskCannotAdvanceRunningInstance() {
+        StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
+        long task = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_task WHERE proc_inst_id = ? AND status = 'PENDING'",
+            Long.class, started.instanceId());
+        jdbcTemplate.update(
+            "UPDATE t_process_instance SET round_no = round_no + 1 WHERE id = ?", started.instanceId());
+        long history = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class, started.instanceId());
+        assertThatThrownBy(() -> processEngine.approve(new CompleteCmd(task, "APPROVE", "stale", null),
+            userId("bob"))).isInstanceOfSatisfying(BizException.class,
+                error -> assertThat(error.getCode()).isEqualTo("BAD_TASK_STATE"));
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE id = ?", String.class, task)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class, started.instanceId()))
+            .isEqualTo(history);
+    }
+
+    @Test
+    void recallingBeforeSignRestoresParentAndOnlyTheOriginalVoteCounts() {
+        long approver = userId("bob");
+        StartedV2 started = startV2(approvalFlow(approver), userId("admin"));
+        long parent = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_task WHERE proc_inst_id = ? AND status = 'PENDING'",
+            Long.class, started.instanceId());
+        setPrincipal(approver);
+        long child;
+        try {
+            child = taskOperations.addAssignee(parent, userId("admin"), "BEFORE", "复核");
+        } finally {
+            PrincipalHolder.clear();
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?", String.class, parent))
+            .isEqualTo("BLOCKED");
+        setPrincipal(userId("admin"));
+        try {
+            taskOperations.recallChild(child, "撤回加签");
+        } finally {
+            PrincipalHolder.clear();
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?", String.class, parent))
+            .isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?", String.class, child))
+            .isEqualTo("SKIPPED");
+        processEngine.approve(new CompleteCmd(parent, "APPROVE", "完成", null), approver);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_process_instance WHERE id = ?", String.class, started.instanceId()))
+            .isEqualTo("APPROVED");
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void allScopeBusinessReadsIntersectCompanySnapshotsAndKeepExplicitExceptions() {
+        long companyA = insertCompany("isolation-a-" + UUID.randomUUID());
+        long companyB = insertCompany("isolation-b-" + UUID.randomUUID());
+        long departmentA = insertDepartment(companyA, "isolation-a");
+        long departmentB = insertDepartment(companyB, "isolation-b");
+        long viewer = insertUser("isolation-reader-" + UUID.randomUUID());
+        long author = insertUser("isolation-author-" + UUID.randomUUID());
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", departmentA, viewer);
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", departmentB, author);
+        long role = insertRole("isolation_" + UUID.randomUUID().toString().replace("-", ""));
+        assignRole(viewer, role);
+        for (String permission : List.of(PermissionCodes.WORKFLOW_INSTANCE_READ,
+                PermissionCodes.FORM_DATA_READ, PermissionCodes.WORKFLOW_MONITOR_READ,
+                PermissionCodes.WORKFLOW_AUTOMATION_RETRY)) {
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, ?, 'ALL')
+                """, role, permission);
+        }
+        long form = insertForm("PUBLISHED", VALID_SCHEMA);
+        long process = insertProcess(form, "PUBLISHED", approvalFlow(author));
+        long data = insertSubmittedData(form, author);
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", companyB, data);
+        long instance = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                started_dept_id, company_id)
+            VALUES (?, ?, 'RUNNING', ?, ?, ?) RETURNING id
+            """, Long.class, process, data, author, departmentB, companyB);
+        setPrincipal(viewer);
+        try {
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isFalse();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isFalse();
+            assertThat(processInstanceMapper.selectInstancePage(viewer, false, false, true,
+                "authorized", null, null, null, null, null, 100, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).doesNotContain(instance);
+            assertThat(formDataService.exportRows(form, null, null, null, null)).isEmpty();
+            assertThat(formDataService.countForExport(form, null, null, null, null)).isZero();
+            assertThat(formDataMapper.selectById(data)).isNull();
+
+            jdbcTemplate.update("UPDATE t_process_instance SET company_id = ? WHERE id = ?", companyA, instance);
+            jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", companyA, data);
+            sqlSession.clearCache();
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isTrue();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isTrue();
+            assertThat(formDataService.exportRows(form, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId).containsExactly(data);
+            jdbcTemplate.update("UPDATE t_process_instance SET company_id = ? WHERE id = ?", companyB, instance);
+            jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", companyB, data);
+            sqlSession.clearCache();
+            jdbcTemplate.update("UPDATE t_process_instance SET started_by = ? WHERE id = ?",
+                viewer, instance);
+            jdbcTemplate.update("UPDATE t_form_data SET created_by = ? WHERE id = ?", viewer, data);
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isTrue();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isTrue();
+            assertThatThrownBy(() -> authorizationService.requireManageInstance(
+                instance, PermissionCodes.WORKFLOW_AUTOMATION_RETRY))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            assertThat(formDataService.exportRows(form, null, null, null, null)).isEmpty();
+            UUID file = insertMobileFile(viewer, "READY", null);
+            jdbcTemplate.update("INSERT INTO t_form_data_file(form_data_id, file_id, field_id, sort_order)"
+                + " VALUES (?, ?, 'file', 0)", data, file);
+            assertThat(mobileFileService.getMetadata(file, viewer, List.of()).id()).isEqualTo(file);
+            jdbcTemplate.update("UPDATE t_process_instance SET company_inferred = true WHERE id = ?",
+                instance);
+            jdbcTemplate.update("UPDATE t_form_data SET company_inferred = true WHERE id = ?", data);
+            sqlSession.clearCache();
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isFalse();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isFalse();
+            assertThatThrownBy(() -> mobileFileService.getMetadata(file, viewer, List.of()))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(mobileWorkflowMapper.selectInstancePage(viewer, null, null, 100, 0))
+                .extracting(MobileWorkflowMapper.InstanceRow::id).doesNotContain(instance);
+            assertThat(mobileWorkflowMapper.selectInitiatedPage(viewer, null, null, 100, 0))
+                .extracting(MobileWorkflowMapper.InitiatedRow::id).doesNotContain(instance);
+
+            setPrincipal(userId("admin"));
+            assertThat(authorizationService.canReadFullInstance(instance, userId("admin"))).isTrue();
+            assertThat(authorizationService.canReadFormData(data, userId("admin"))).isTrue();
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(viewer);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void crossCompanyTaskAssignmentDoesNotGrantCrossCompanyManagement() {
+        long company = insertCompany("assigned-company-" + UUID.randomUUID());
+        long starter = insertUser("assigned-starter-" + UUID.randomUUID());
+        long viewer = insertUser("assigned-viewer-" + UUID.randomUUID());
+        moveUserToDepartment(viewer, insertDepartment(anyCompanyId(), "assigned-viewer"));
+        long role = insertRole("assigned_" + UUID.randomUUID().toString().replace("-", ""));
+        assignRole(viewer, role);
+        jdbcTemplate.update("""
+            INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+            VALUES (?, 'workflow:task:read', NULL), (?, 'workflow:automation:retry', 'ALL'),
+                   (?, 'workflow:monitor:read', 'ALL'), (?, 'workflow:outbox:retry', 'ALL'),
+                   (?, 'console:entry:access', NULL)
+            """, role, role, role, role, role);
+        long form = insertForm("PUBLISHED", VALID_SCHEMA);
+        long process = insertProcess(form, "PUBLISHED", approvalFlow(viewer));
+        long data = insertSubmittedData(form, starter);
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", company, data);
+        long instance = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by, company_id)
+            VALUES (?, ?, 'RUNNING', ?, ?) RETURNING id
+            """, Long.class, process, data, starter, company);
+        jdbcTemplate.update("""
+            INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, task_type, approval_mode)
+            VALUES (?, 'review', ?, 'PENDING', 'APPROVAL', 'OR_SIGN')
+            """, instance, viewer);
+        UUID event = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_workflow_outbox(id, aggregate_type, aggregate_id, event_type, status, payload)
+            VALUES (?, 'PROCESS_INSTANCE', ?, 'TASK_ASSIGNED', 'DEAD', '{}'::jsonb)
+            """, event, instance);
+        setPrincipal(viewer);
+        try {
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isTrue();
+            assertThat(processInstanceMapper.selectInstancePage(viewer, false, true, false,
+                "authorized", null, null, null, null, null, 100, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).contains(instance);
+            assertThat(taskMapper.countTaskPage(viewer, "pending", null)).isEqualTo(1);
+            assertThatThrownBy(() -> authorizationService.requireManageInstance(
+                instance, PermissionCodes.WORKFLOW_AUTOMATION_RETRY))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            assertThat(workflowMonitoring.outbox("DEAD", 1, 100).records()).isEmpty();
+            assertThatThrownBy(() -> workflowMonitoring.retryOutbox(event))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_workflow_outbox WHERE id = ?", String.class, event))
+                .isEqualTo("DEAD");
+            jdbcTemplate.update("UPDATE t_process_instance SET company_id = NULL WHERE id = ?", instance);
+            sqlSession.clearCache();
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isFalse();
+            assertThat(taskMapper.countTaskPage(viewer, "pending", null)).isZero();
+            assertThatThrownBy(() -> authorizationService.requireConfirmedInstance(instance))
+                .isInstanceOf(HiddenResourceException.class);
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(viewer);
+        }
+    }
 
     @Test
     @org.springframework.transaction.annotation.Transactional
@@ -447,6 +816,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long first = insertUser("vis-first");
         long second = insertUser("vis-second");
         long reader = insertUser("vis-reader");
+        moveUserToDepartment(reader, insertDepartment(anyCompanyId(), "option-reader-company"));
         long approverRole = insertRole("vis-approver");
         jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code) "
             + "VALUES (?, 'workflow:task:read')", approverRole);
@@ -784,6 +1154,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long roleId = insertRole("all_scope_" + UUID.randomUUID().toString().replace("-", ""));
         long formId = insertForm("PUBLISHED", VALID_SCHEMA);
         long dataId = insertSubmittedData(formId, userId("admin"));
+        confirmFixtureCompany(formId, anyCompanyId());
+        moveUserToDepartment(userId, insertDepartment(anyCompanyId(), "data-reader-company"));
         try {
             assignRole(userId, roleId);
             jdbcTemplate.update("""
@@ -831,7 +1203,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             setPrincipal(userId);
             var drafts = mobileDraftService.list(userId);
             assertThat(drafts)
-                .extracting(com.antflow.mobile.workflow.MobileDraftDto::id)
+                .extracting(com.antflow.form.runtime.MobileDraftDto::id)
                 .containsExactly(deniedDraft);
             assertThat(drafts.get(0).readOnly()).isTrue();
             assertThat(mobileDraftService.count(userId)).isEqualTo(1L);
@@ -2423,7 +2795,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void wecomActiveJobConstraintAndRestartRecoveryWorkOnPostgres() {
+    void wecomActiveJobConstraintAndExpiredLeaseTakeoverWorkOnPostgres() {
         long companyId = jdbcTemplate.queryForObject(
             "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
         long adminId = userId("admin");
@@ -2437,11 +2809,21 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, Long.class, companyId, adminId);
 
         assertThat(duplicate).isEmpty();
-        wecomService.failInterruptedJobs();
-        assertThat(jdbcTemplate.queryForMap("""
-            SELECT status, message FROM t_wecom_sync_job WHERE id = ?
-            """, firstId)).containsEntry("status", "FAILED")
-            .containsEntry("message", "服务已重启，请重新同步");
+        UUID firstClaim = ReflectionTestUtils.invokeMethod(wecomService, "claimJob", firstId);
+        assertThat(firstClaim).isNotNull();
+        assertThat(ReflectionTestUtils.<UUID>invokeMethod(wecomService, "claimJob", firstId)).isNull();
+        jdbcTemplate.update("UPDATE t_wecom_sync_job SET lease_expires_at = now() - interval '1 second' WHERE id = ?",
+            firstId);
+        UUID replacement = ReflectionTestUtils.invokeMethod(wecomService, "claimJob", firstId);
+        assertThat(replacement).isNotNull().isNotEqualTo(firstClaim);
+        assertThat(jdbcTemplate.update("""
+            UPDATE t_wecom_sync_job SET phase = 'STALE_WRITE'
+            WHERE id = ? AND claim_token = ? AND lease_expires_at > now()
+            """, firstId, firstClaim)).isZero();
+        jdbcTemplate.update("""
+            UPDATE t_wecom_sync_job SET status = 'SUCCESS', claim_token = NULL, lease_expires_at = NULL
+            WHERE id = ? AND claim_token = ?
+            """, firstId, replacement);
 
         long nextId = jdbcTemplate.queryForObject("""
             INSERT INTO t_wecom_sync_job(company_id, initiated_by) VALUES (?, ?) RETURNING id
@@ -2595,6 +2977,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
             insertInstance(processId, dataIds.get(2), "REJECTED", bobId, started, started.plusHours(4));
             insertInstance(processId, dataIds.get(3), "APPROVED", scopedUser, started,
                 started.plusHours(2));
+            confirmFixtureCompany(formId, anyCompanyId());
+            moveUserToDepartment(scopedUser, insertDepartment(anyCompanyId(), "report-company"));
 
             LocalDate from = started.toLocalDate();
             LocalDate to = LocalDate.now();
@@ -2801,6 +3185,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long scopedRole = insertRole("export_scoped");
         long mine = insertSubmittedData(formId, scopedUser);
         long theirs = insertSubmittedData(formId, bobId);
+        confirmFixtureCompany(formId, anyCompanyId());
+        moveUserToDepartment(scopedUser, insertDepartment(anyCompanyId(), "export-company"));
         try {
             // 行级范围跟着**读**能力走，所以受限角色两个能力都要有（只有导出权限会被挡在 403，
             // 见下面那条断言）。
@@ -3191,6 +3577,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                                approval_mode, task_type, approved_at)
             VALUES (?, 'approved-node', ?, ?, 'APPROVED', 'OR_SIGN', 'APPROVAL', now())
             """, visibleInstanceId, ownerId, viewerId);
+        confirmFixtureCompany(formId, anyCompanyId());
 
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
             "authorized", null, ownerId, null, null, null, 1, 0))
@@ -3211,6 +3598,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                                            started_by, started_at)
             VALUES (?, ?, 'RUNNING', '__rework__', ?, now() + interval '1 minute')
             """, processId, reworkDataId, viewerId);
+        confirmFixtureCompany(formId, anyCompanyId());
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
             "mine", null, null, null, null, null, 10, 0))
             .extracting(com.antflow.task.ProcessInstance::getId)
@@ -3266,6 +3654,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     VALUES (?, 'record_manager', ?, 'PENDING', 'OR_SIGN', 'APPROVAL')
                     """, instanceId, viewerId);
             }
+            confirmFixtureCompany(formId, companyId);
             long visibleId = instanceIds.get(0);
             String businessNo = jdbcTemplate.queryForObject("""
                 SELECT data.business_no FROM t_form_data data
@@ -3409,6 +3798,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, 'cc1', ?, 'CC', 'OR', 'APPROVAL', 0)
             RETURNING id
             """, Long.class, instanceId, bobId);
+        confirmFixtureCompany(formId, anyCompanyId());
 
         assertThat(authorizationService.instanceVisibility(instanceId, bobId))
             .isEqualTo(AuthorizationService.InstanceVisibility.FULL);
@@ -3927,6 +4317,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
             INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
             VALUES (?, ?, 'RUNNING', ?) RETURNING id
             """, Long.class, processId, dataId, ownerId);
+        confirmFixtureCompany(formId, anyCompanyId());
+        moveUserToDepartment(viewerId, insertDepartment(anyCompanyId(), "instance-reader-company"));
         try {
             assignRole(viewerId, roleId);
             jdbcTemplate.update("""
@@ -4082,7 +4474,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 try {
                     return transactions.execute(status -> {
                         mobileFileLinkService.append(dataId, List.of(
-                            new com.antflow.mobile.workflow.MobileFileRef(fileId, "f1", 0)), ownerId);
+                            new com.antflow.attachment.MobileFileRef(fileId, "f1", 0)), ownerId);
                         return null;
                     });
                 } catch (Throwable throwable) {
@@ -4125,7 +4517,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     void uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked() throws Exception {
         long ownerId = userId("admin");
         byte[] png = TINY_PNG;
-        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+        com.antflow.attachment.MobileFileDto first = mobileFileService.upload(
             new MockMultipartFile("file", "dup.png", "image/png", png), ownerId);
         assertThat(first.status()).isEqualTo("READY");
         UUID freshId = null;
@@ -4148,13 +4540,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     first.id());
             }));
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
-            Future<com.antflow.mobile.workflow.MobileFileDto> reupload = executor.submit(
+            Future<com.antflow.attachment.MobileFileDto> reupload = executor.submit(
                 () -> mobileFileService.upload(
                     new MockMultipartFile("file", "dup.png", "image/png", png), ownerId));
             // 让它走到加锁点，再放行 t1 提交。
             Thread.sleep(300);
             release.countDown();
-            com.antflow.mobile.workflow.MobileFileDto again = reupload.get(20, TimeUnit.SECONDS);
+            com.antflow.attachment.MobileFileDto again = reupload.get(20, TimeUnit.SECONDS);
             freshId = again.id();
             assertThat(again.id()).as("去重把已删文件还给了客户端（没走行锁）").isNotEqualTo(first.id());
             assertThat(jdbcTemplate.queryForObject(
@@ -4181,7 +4573,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Test
     void uploadToleratesDuplicateReadyRowsForTheSameBytes() throws Exception {
         long ownerId = userId("admin");
-        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+        com.antflow.attachment.MobileFileDto first = mobileFileService.upload(
             new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
         String sha = jdbcTemplate.queryForObject(
             "SELECT sha256 FROM t_mobile_file WHERE id = ?", String.class, first.id());
@@ -4193,7 +4585,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, ?, 'dup.png', ?, 'image/png', ?, ?, 'READY', now() + interval '1 minute')
             """, twin, ownerId, "image/" + twin + "-dup.png", (long) TINY_PNG.length, sha);
         try {
-            com.antflow.mobile.workflow.MobileFileDto again = mobileFileService.upload(
+            com.antflow.attachment.MobileFileDto again = mobileFileService.upload(
                 new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
             // 固定取最早那行，而不是抛 TooManyResultsException
             assertThat(again.id()).isEqualTo(first.id());
@@ -4218,12 +4610,15 @@ class PostgresTransactionalIntegrityIntegrationTest {
             UUID other = UUID.randomUUID();
             assertThat(mobileFileMapper.claimProcessing(fileId, other)).isEqualTo(1);
             assertThat(mobileFileMapper.publishProcessed(fileId, UUID.randomUUID(),
-                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4")).isZero();
+                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4", 2d)).isZero();
             assertThat(mobileFileMapper.publishProcessed(fileId, other,
-                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4")).isEqualTo(1);
+                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4", 2d)).isEqualTo(1);
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT status FROM t_mobile_file WHERE id = ?", String.class, fileId))
                 .isEqualTo("READY");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT duration_seconds FROM t_mobile_file WHERE id = ?", Double.class, fileId))
+                .isEqualTo(2d);
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT processing_claim_token FROM t_mobile_file WHERE id = ?", UUID.class, fileId))
                 .isNull();
@@ -4252,7 +4647,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     List<Throwable> failures = runConcurrently(ownerId,
                         () -> mobileFileService.delete(fileId, ownerId),
                         () -> mobileFileLinkService.append(dataId,
-                            List.of(new com.antflow.mobile.workflow.MobileFileRef(fileId, "f1", 0)),
+                            List.of(new com.antflow.attachment.MobileFileRef(fileId, "f1", 0)),
                             ownerId));
                     long links = jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ? AND file_id = ?",
@@ -4292,8 +4687,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         UUID fileId = insertMobileFile(ownerId, "READY", null);
         try {
             mobileFileLinkService.append(dataId, List.of(
-                new com.antflow.mobile.workflow.MobileFileRef(fileId, "fieldA", 0),
-                new com.antflow.mobile.workflow.MobileFileRef(fileId, "fieldB", 1)), ownerId);
+                new com.antflow.attachment.MobileFileRef(fileId, "fieldA", 0),
+                new com.antflow.attachment.MobileFileRef(fileId, "fieldB", 1)), ownerId);
 
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ?", Long.class, dataId))
@@ -4304,7 +4699,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
             // 再插一次同一个文件但换了字段：DO UPDATE 让新字段胜出（reconcileEditable 的迁移语义）
             mobileFileLinkService.append(dataId, List.of(
-                new com.antflow.mobile.workflow.MobileFileRef(fileId, "editableField", 2)), ownerId);
+                new com.antflow.attachment.MobileFileRef(fileId, "editableField", 2)), ownerId);
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT field_id FROM t_form_data_file WHERE form_data_id = ?", String.class, dataId))
                 .isEqualTo("editableField");
@@ -4364,6 +4759,17 @@ class PostgresTransactionalIntegrityIntegrationTest {
             INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
             VALUES (?, 'COMPANY', ?) ON CONFLICT DO NOTHING
             """, formId, companyId);
+    }
+
+    /** Attribution is explicit only in fixtures testing reads; migration fixtures retain their NULLs. */
+    private void confirmFixtureCompany(long formId, long companyId) {
+        jdbcTemplate.update("""
+            UPDATE t_form_data SET company_id = ?, company_inferred = false WHERE form_def_id = ?
+            """, companyId, formId);
+        jdbcTemplate.update("""
+            UPDATE t_process_instance pi SET company_id = ?, company_inferred = false
+            FROM t_form_data data WHERE data.id = pi.form_data_id AND data.form_def_id = ?
+            """, companyId, formId);
     }
 
     private long insertSubmittedData(long formId, long creatorId) {
@@ -4554,7 +4960,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     void workflowMonitorOverviewRunsUnderEveryDataScope() {
         // 直接 new 一个控制器：这里验的是 SQL 拼装，不是 @PreAuthorize 那条门（测试里没有代理）。
         WorkflowMonitoringController controller =
-            new WorkflowMonitoringController(jdbcTemplate, authorizationService);
+            new WorkflowMonitoringController(jdbcTemplate, authorizationService, auditService);
         long adminId = userId("admin");
         long scopedUser = insertUser("monitor-scoped");
         long scopedRole = insertRole("monitor_scoped");

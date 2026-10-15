@@ -6,7 +6,7 @@ import com.antflow.authz.PermissionCodes;
 import com.antflow.audit.AuditService;
 import com.antflow.audit.TrustedProxyProperties;
 import com.antflow.engine.BizException;
-import com.antflow.mobile.workflow.MobileFileProperties;
+import com.antflow.attachment.MobileFileProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.minio.GetObjectArgs;
 import io.minio.BucketExistsArgs;

@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftService;
+
 import com.antflow.authz.AuthorizationService;
 import com.antflow.engine.WorkflowRuntimeV2;
 import com.antflow.engine.condition.ConditionEvaluator;
@@ -256,7 +258,7 @@ class ApprovalPreviewServiceTest {
         previous.setAssigneeId(8L);
         when(taskMapper.selectById(401L)).thenReturn(rework);
         when(instanceMapper.selectById(501L)).thenReturn(instance);
-        when(formDataMapper.selectById(301L)).thenReturn(formData);
+        when(formDataMapper.selectRuntimeById(301L)).thenReturn(formData);
         when(forms.getById(10L)).thenReturn(form);
         when(runtime.active(instance)).thenReturn(true);
         when(runtime.formSchema(instance)).thenReturn("[]");

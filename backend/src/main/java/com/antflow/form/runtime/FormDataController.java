@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import com.antflow.mobile.workflow.MobileFileRef;
+import com.antflow.attachment.MobileFileRef;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
@@ -84,20 +84,16 @@ public class FormDataController {
 
     @PostMapping
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_RUNTIME_READ + "')")
-    public Map<String, Object> submit(@RequestBody SubmitRequest body) {
+    public FormDataService.SubmitResult submit(@RequestBody SubmitRequest body) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        FormDataService.SubmitResult result = service.submit(
+        return service.submit(
             body.formCode(),
             body.status(),
             body.data(),
             p.userId(),
             body.files() == null ? List.of() : body.files(),
             body.draftId(), body.companyId());
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("dataId", result.dataId());
-        response.put("businessNo", result.businessNo());
-        return response;
     }
 
     @GetMapping

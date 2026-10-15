@@ -41,6 +41,7 @@ public final class PermissionCodes {
     public static final String WORKFLOW_INSTANCE_WITHDRAW = "workflow:instance:withdraw";
     public static final String WORKFLOW_INSTANCE_OVERRIDE = "workflow:instance:override";
     public static final String WORKFLOW_MONITOR_READ = "workflow:monitor:read";
+    public static final String WORKFLOW_OUTBOX_RETRY = "workflow:outbox:retry";
     public static final String WORKFLOW_TASK_READ = "workflow:task:read";
     public static final String WORKFLOW_TASK_APPROVE = "workflow:task:approve";
     public static final String WORKFLOW_TASK_REJECT = "workflow:task:reject";

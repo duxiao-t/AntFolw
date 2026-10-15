@@ -32,6 +32,11 @@
       "displayText": [
         "java",
         "sql"
+      ],
+      "validation": [
+        "desktop",
+        "java",
+        "mobile"
       ]
     }
   },
@@ -47,7 +52,7 @@
   "H5": {
     "javaGates": 3,
     "tsGates": 3,
-    "requiredFalseRuntimeInjections": 1
+    "requiredFalseRuntimeInjections": 0
   },
   "H6": {
     "entryBudgetKiB": 160,

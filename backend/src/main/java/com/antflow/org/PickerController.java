@@ -1,8 +1,8 @@
 package com.antflow.org;
 
-import com.antflow.mobile.workflow.MobileOrgService;
+import com.antflow.org.MobileOrgService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.antflow.mobile.workflow.MobilePickerUserDto;
+import com.antflow.org.MobilePickerUserDto;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;

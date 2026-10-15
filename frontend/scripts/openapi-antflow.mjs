@@ -17,7 +17,7 @@
  * 文件**——"漏提交一个新生成的服务文件"正是它抓不到的漏。所以这里自己比四个方向：
  * 新增 / 遗留（生成不出来）/ 内容不一致。
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { generateService } from '@umijs/openapi';
@@ -52,9 +52,14 @@ function listFiles(root) {
 }
 
 const generateInto = (serversPath) => generateService(generateOptions(serversPath));
+const sharedTypes = join(FRONTEND_ROOT, '..', 'shared', 'api.generated.d.ts');
+const portableTypes = (directory) => '// Generated from the backend OpenAPI snapshot. Run npm --prefix frontend run openapi:generate.\n'
+  + readFileSync(join(directory, 'typings.d.ts'), 'utf8')
+    .replace('declare namespace AntFlowAPI', 'export declare namespace AntFlowAPI');
 
 if (mode === '--write') {
   await generateInto(SERVERS_PATH);
+  writeFileSync(sharedTypes, portableTypes(GENERATED_DIR));
   console.log(`[openapi] 已生成 ${shown(GENERATED_DIR)}/`);
   process.exit(0);
 }
@@ -76,6 +81,9 @@ try {
     );
 
   const problems = [];
+  if (!existsSync(sharedTypes) || readFileSync(sharedTypes, 'utf8') !== portableTypes(fresh)) {
+    problems.push('shared/api.generated.d.ts 与后端契约不一致');
+  }
   if (missing.length > 0) problems.push(`新增（生成了但没提交）：\n  ${missing.join('\n  ')}`);
   if (stale.length > 0) problems.push(`遗留（生成不出来，该删）：\n  ${stale.join('\n  ')}`);
   if (changed.length > 0) problems.push(`内容不一致：\n  ${changed.join('\n  ')}`);

@@ -92,13 +92,13 @@ class ProcessEngineParallelTest {
             new ConditionsHandler(evaluator),
             new ParallelHandler(handlersList(), evaluator)
         );
-        return new ProcessEngine(
+        return TreeRuntimeFixture.withRequiredV2(new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
             historyMapper, handlers, notifier,
             json, formalNumberService, workflowJobMapper,
             Mockito.mock(com.antflow.authz.AuthorizationService.class)
-        );
+        , org.mockito.Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class)));
     }
 
     // ParallelHandler needs the full handler list; build it standalone to avoid recursion in the lambda.
@@ -272,7 +272,7 @@ class ProcessEngineParallelTest {
             .thenReturn(taskWith(2L, "a2", 43L, "PENDING", "p1", "b2"));
         Mockito.when(processInstanceMapper.selectById(1L))
             .thenReturn(runningInstance(PARALLEL_FLOW));
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");
@@ -342,7 +342,7 @@ class ProcessEngineParallelTest {
             .thenReturn(taskWith(2L, "a2", 43L, "PENDING", "p1", "b2"));
         Mockito.when(processInstanceMapper.selectById(1L))
             .thenReturn(runningInstance(PARALLEL_FLOW));
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");
@@ -401,7 +401,7 @@ class ProcessEngineParallelTest {
             .thenReturn(taskWith(1L, "a0", 40L, "PENDING", null, null));
         Mockito.when(processInstanceMapper.selectById(1L))
             .thenReturn(runningInstance(flow));
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");
