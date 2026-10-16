@@ -3,23 +3,25 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChecklistField } from './ChecklistField';
 import { FileUploadField } from './FileUploadField';
+import { FileStillProcessingError, type NativeFile } from './nativeMedia';
 import { ImageUploadField } from './ImageUploadField';
 import { VideoUploadField } from './VideoUploadField';
 import { firstVisibleValidationError } from '../../registry/displayConditions';
 import type { SchemaNode } from '../../registry/types';
 
-const media = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
+const media = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn(), resume: vi.fn() }));
 
 // 只把网络部分替掉，`toMediaFiles` / `withPendingUpload` 这些纯函数要留真的（渲染路径会用到）。
 vi.mock('./nativeMedia', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./nativeMedia')>()),
   uploadMediaFile: media.upload,
   deleteNativeFile: media.remove,
+  waitForNativeFileReady: media.resume,
 }));
 
 type Change = (value: unknown) => void;
 
-function dto(overrides: Record<string, unknown> = {}) {
+function dto(overrides: Partial<NativeFile> = {}): NativeFile {
   return {
     id: 'file-1', name: 'photo.jpg', contentUrl: '/api/mobile/files/file-1/content',
     contentType: 'image/jpeg', size: 12, status: 'READY', ...overrides,
@@ -53,6 +55,7 @@ describe('桌面端媒体上传', () => {
   beforeEach(() => {
     media.upload.mockReset();
     media.remove.mockReset();
+    media.resume.mockReset();
     media.upload.mockResolvedValue(dto());
   });
 
@@ -125,6 +128,42 @@ describe('桌面端媒体上传', () => {
     onChange.mock.calls.forEach(([value]) => {
       expect(Array.isArray(value) ? value.filter(Boolean) : []).toEqual([]);
     });
+  });
+
+  it('轮询窗口用完但服务端还在转码：给"继续等待"而不是"重试"，点了只续查状态', async () => {
+    const stillProcessing = dto({ contentType: 'video/mp4', status: 'PROCESSING' });
+    media.upload.mockRejectedValueOnce(new FileStillProcessingError(stillProcessing));
+    media.resume.mockResolvedValue(dto({ contentType: 'video/mp4' }));
+    const onChange = vi.fn<Change>();
+    const { container } = render(
+      <App>
+        <VideoUploadField.Component
+          node={{ id: 'clip', type: 'video_upload', label: '视频', props: {} }}
+          mode="runtime-fill" value={[]} onChange={onChange} />
+      </App>,
+    );
+
+    // happy-dom 读不出真实时长，入队前的时长预检要自己给元数据（见 stubVideoDuration）。
+    const restore = stubVideoDuration(5);
+    try {
+      await pickFile(container, new File(['x'], 'clip.mp4', { type: 'video/mp4' }));
+
+      // 判失败再"重试"就是第二份视频（服务端对视频不按内容去重），所以这里必须是"继续等待"。
+      expect(await screen.findByRole('button', { name: '继续等待' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: '继续等待' }));
+
+      await waitFor(() => expect(media.resume).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'file-1', status: 'PROCESSING' }),
+      ));
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'file-1', contentType: 'video/mp4' }),
+      ]));
+      expect(media.upload).toHaveBeenCalledTimes(1);
+    } finally {
+      restore();
+    }
   });
 
   it('超过 maxDuration 的视频在入队前就被挡下（不上传、不进表单值）', async () => {

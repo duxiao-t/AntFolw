@@ -33,8 +33,9 @@ spring:
     scheduling:
       pool:
         # 默认只有 1 条线程：outbox 的 poll() 一次最多同步投递 50 条（webhook 超时 5s），
-        # 期间 renewLeases() 和其它 @Scheduled（媒体 reaper、企微同步、备份、孤儿清扫）全被排队
-        # → 投递中的租约可能在"还活着"的时候过期被别的实例抢走。至少给 2，留出续租的线程。
+        # 期间其它 @Scheduled（媒体 reaper、企微同步、备份、孤儿清扫）全被排队。
+        # **这只是缓解**：续租不再依赖调度线程（poll() 每条之间自己续，见 WorkflowOutboxDispatcher），
+        # 所以线程数不是租约正确性的前提，给几条是为了别让 reaper/同步类任务互相饿死。
         size: ${SCHEDULING_POOL_SIZE:4}
 server:
   port: ${PORT:8080}

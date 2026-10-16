@@ -86,6 +86,21 @@ export async function uploadMediaFile(
   return waitForNativeFileReady(uploaded, options);
 }
 
+/**
+ * 客户端轮询窗口用完，但服务端**没有失败**（行还在 PROCESSING，只是队列排得久）。
+ * 带上最后一次看到的文件，调用方可据此续等，而不是判失败让用户重传（视频不走去重，重传就是两份）。
+ * 与移动端 `FileStillProcessingError` 同一语义。
+ */
+export class FileStillProcessingError extends Error {
+  readonly file: NativeFile;
+
+  constructor(file: NativeFile) {
+    super('视频仍在服务端处理中，请勿重复上传，可点「继续等待」刷新状态');
+    this.name = 'FileStillProcessingError';
+    this.file = file;
+  }
+}
+
 /** 删掉还没提交的文件（服务端对已提交关联的文件会拒绝，正好只在填单期可删）。 */
 export async function deleteNativeFile(id: string): Promise<void> {
   await request<void>(`${MEDIA_UPLOAD_ENDPOINT}/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -103,11 +118,13 @@ export async function waitForNativeFileReady(
   options.onProgress?.({ percent: 97, phase: 'processing' });
   // 30 分钟（1s/次）。转码并发只有几路，几十个视频一起传时排在后面的要等很久——服务端现在**不会**
   // 因为队列满就失败（它保持 PROCESSING 等空位），所以这里的上限不该比"真正处理完"更早放弃。
+  let latest = file;
   for (let attempt = 0; attempt < 1800; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     const current = await request<NativeFile>(
       `${MEDIA_UPLOAD_ENDPOINT}/${encodeURIComponent(file.id)}`,
     );
+    latest = current;
     if (current.status === 'FAILED') {
       throw new Error(current.failureReason || '视频处理失败，请重新上传');
     }
@@ -116,7 +133,7 @@ export async function waitForNativeFileReady(
       return current;
     }
   }
-  throw new Error('视频处理超时，请稍后重试');
+  throw new FileStillProcessingError(latest);
 }
 
 /**

@@ -448,7 +448,11 @@ export function FileUploadField(props: MobileFieldProps) {
     if (target?.status === 'deleting') {
       return;
     }
-    if (target?.remote && target.createdInSession) {
+    // 轮询窗口用完的条目也算"服务端已知"：不试删除的话，用户既提交不了（值里没有它）也摆脱不掉它。
+    // shortcut: 服务端对转码中的行按设计拒绝删除（BAD_FILE_STATE），那种情况只做本地移除，对象要等
+    // 服务端支持"吊销"才会被清掉——删不掉的残留好过把用户卡在"处理中"。
+    const stillProcessing = target?.status === 'processing';
+    if (target?.remote && (target.createdInSession || stillProcessing)) {
       commitItems(
         itemsRef.current.map((item): UploadItem =>
           item.localId === localId ? { ...item, status: 'deleting', progress: 100 } : item,
@@ -457,14 +461,16 @@ export function FileUploadField(props: MobileFieldProps) {
       try {
         await deleteMobileFile(target.remote.id);
       } catch (error) {
-        commitItems(
-          itemsRef.current.map((item): UploadItem =>
-            item.localId === localId
-              ? { ...item, status: 'delete_failed', progress: 100, error: errorMessage(error) }
-              : item,
-          ),
-        );
-        return;
+        if (!stillProcessing) {
+          commitItems(
+            itemsRef.current.map((item): UploadItem =>
+              item.localId === localId
+                ? { ...item, status: 'delete_failed', progress: 100, error: errorMessage(error) }
+                : item,
+            ),
+          );
+          return;
+        }
       }
     }
     commitItems(itemsRef.current.filter((item) => item.localId !== localId));

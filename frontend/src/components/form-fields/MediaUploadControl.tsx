@@ -3,8 +3,10 @@ import type { UploadFile } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import {
   deleteNativeFile,
+  FileStillProcessingError,
   toMediaFiles,
   uploadMediaFile,
+  waitForNativeFileReady,
   withPendingUpload,
   type MediaUploadEvent,
   type NativeFile,
@@ -21,6 +23,8 @@ type PendingItem = {
   percent: number;
   error?: string;
   file: File;
+  /** 轮询窗口用完但服务端还在转码时带上的服务端文件：重试只续查状态，不再传第二份。 */
+  remote?: NativeFile;
 };
 
 let localSequence = 0;
@@ -121,36 +125,62 @@ export function MediaUploadControl({
     onChange?.(withPendingUpload([...files], pendingFlagRef.current));
   };
 
+  const patch = (item: PendingItem, changes: Partial<PendingItem>) => setPending((entries) =>
+    entries.map((entry) => (entry.uid === item.uid ? { ...entry, ...changes } : entry)));
+
+  const settle = () => { inFlightRef.current = Math.max(0, inFlightRef.current - 1); };
+
+  const finishUpload = (item: PendingItem, file: NativeFile) => {
+    if (removedRef.current.has(item.uid)) {
+      // 上传期间用户把它删了：服务端文件一起删掉，别留孤儿。
+      void deleteNativeFile(file.id).catch(() => undefined);
+      setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
+      return;
+    }
+    setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
+    writeFiles([...filesRef.current.filter((entry) => entry.id !== file.id), file]);
+  };
+
+  const failUpload = (item: PendingItem, error: unknown) => {
+    if (removedRef.current.has(item.uid)) {
+      setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
+      return;
+    }
+    // 轮询窗口用完 ≠ 服务端失败：条目留在"处理中"，重试只续查状态，不再上传第二份（移动端同语义）。
+    if (error instanceof FileStillProcessingError) {
+      patch(item, { status: 'processing', percent: 97, error: undefined, remote: error.file });
+      return;
+    }
+    patch(item, { status: 'error', percent: 0, error: errorMessage(error) });
+  };
+
   const startUpload = async (item: PendingItem) => {
-    const patch = (changes: Partial<PendingItem>) => setPending((entries) =>
-      entries.map((entry) => (entry.uid === item.uid ? { ...entry, ...changes } : entry)));
-    const settle = () => { inFlightRef.current = Math.max(0, inFlightRef.current - 1); };
     try {
       const file = await uploadMediaFile(item.file, {
         watermark,
         watermarkText,
         onProgress: (event: MediaUploadEvent) => {
           // 服务端说在转码就显示"处理中"：停在上传的百分比上会让人以为快好了。
-          patch(event.phase === 'processing' ? { status: 'processing', percent: 97 }
+          patch(item, event.phase === 'processing' ? { status: 'processing', percent: 97 }
             : { percent: event.percent });
         },
       });
-      if (removedRef.current.has(item.uid)) {
-        // 上传期间用户把它删了：服务端文件一起删掉，别留孤儿。
-        void deleteNativeFile(file.id).catch(() => undefined);
-        return;
-      }
-      setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
-      writeFiles([...filesRef.current.filter((entry) => entry.id !== file.id), file]);
-      settle();
+      finishUpload(item, file);
     } catch (error) {
-      if (removedRef.current.has(item.uid)) {
-        setPending((entries) => entries.filter((entry) => entry.uid !== item.uid));
-        settle();
-        return;
-      }
-      patch({ status: 'error', percent: 0, error: errorMessage(error) });
+      failUpload(item, error);
+    } finally {
       settle();
+    }
+  };
+
+  /** 已知服务端文件时的"重试"= 继续轮询状态，不再传第二份。 */
+  const resumeUpload = async (item: PendingItem) => {
+    if (!item.remote) return;
+    patch(item, { status: 'processing', error: undefined });
+    try {
+      finishUpload(item, await waitForNativeFileReady(item.remote));
+    } catch (error) {
+      failUpload(item, error);
     }
   };
 
@@ -179,6 +209,8 @@ export function MediaUploadControl({
   };
 
   const failed = pending.find((item) => item.status === 'error');
+  /** 上传已完成、只是服务端还在转码且客户端轮询窗口用完的条目（与"正在传"区分：它有服务端 id）。 */
+  const stillProcessing = pending.find((item) => item.status === 'processing' && item.remote);
 
   const fileList: UploadFile[] = [
     ...uploaded.map((file) => ({
@@ -201,9 +233,15 @@ export function MediaUploadControl({
     if (pendingItem) {
       // 处理中的视频不给删：服务端后台任务正往同一个 key 写结果，删了会留下读不出来的孤儿对象
       // （那件事要单独修，先别把用户送进那个坑）。
-      if (pendingItem.status === 'processing') {
+      if (pendingItem.status === 'processing' && !pendingItem.remote) {
         message.warning('视频正在加水印，处理完再删');
         return false;
+      }
+      // 已知服务端 id 的条目（窗口用完那种）可以删：服务端对转码中的行按设计拒绝删除
+      // （BAD_FILE_STATE），删不掉就只做本地移除——总比把用户卡在"处理中"强。
+      // shortcut: 那种残留对象要等服务端支持"吊销"才会被清掉。
+      if (pendingItem.remote) {
+        void deleteNativeFile(pendingItem.remote.id).catch(() => undefined);
       }
       removedRef.current.add(uid);
       setPending((entries) => entries.filter((entry) => entry.uid !== uid));
@@ -251,6 +289,14 @@ export function MediaUploadControl({
             enqueue(failed.file);
           }}>
             重试
+          </Button>
+        </span>
+      ) : null}
+      {stillProcessing ? (
+        <span className="form-fields-media-hint">
+          {stillProcessing.name} 仍在服务端转码，请勿重复选择同一个视频
+          <Button type="link" size="small" onClick={() => void resumeUpload(stillProcessing)}>
+            继续等待
           </Button>
         </span>
       ) : null}
