@@ -31,6 +31,7 @@ AntFlow 是一套自研审批平台，包含可视化表单设计、流程设计
 - Docker Desktop 或兼容的 Docker Engine + Compose
 - Java 17、Maven 3.9
 - Node.js 22+
+- 首次构建镜像需要能访问 Debian 源：后端镜像会装 `ffmpeg` 与中文字体（`fonts-wqy-microhei`，合计约 +150MB）——水印是上传链路的一步，缺了它开了水印的上传会直接 422。离线环境请预先把这两个包装进基础镜像。
 
 ### 1. 配置本地密钥
 

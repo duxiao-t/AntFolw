@@ -339,6 +339,13 @@
 - **决策：** **保持现状**。把它变成保密边界等于**改口径**：要对哪些视图、哪些角色、哪些字段过滤，都没定；而一旦过滤，有权限读者拿到的载荷会全部改变。
 - **影响：** 谁要把它当保密手段是误解——权限的正确表达是"这条记录你读不到"，不是"这个字段我藏起来"。真要做这件事，先定清上面三个维度，且必须逐视图验证。
 
+## D-20261016-my-submissions-returns-a-page
+
+- **状态：** accepted
+- **背景：** `GET /api/forms/data`（本人提交列表）从 `List<FormData>` 改成分页对象（`Page`：`records/total/...`）——提交多的人一次全量返回已经是几十 MB。
+- **决策：** 保留分页返回，不做旧形状兼容层。仓库内消费方已同步（桌面 `frontend/src/pages/runtime/form/List.tsx` 读 `records`；`Fill.tsx` 走 POST 不受影响），移动端走自己的 `/api/mobile/submissions`。
+- **影响：** 外部脚本或缓存住的旧前端包按数组解析会静默拿到 `undefined`（不是报错）。`page/size` 有缺省值（1/20），所以"只取第一页"的调用方是**少返回**而不是失败——外部集成不要再假设"一次拿全"。
+
 ## D-20260930-unhandled-errors-in-frontend-tests-keep-the-flag
 
 - **状态：** accepted（先收回过一次，被 CI 打回，最终保留）
