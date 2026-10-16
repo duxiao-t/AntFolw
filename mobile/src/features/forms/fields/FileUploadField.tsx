@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeleteOutline, FileOutline, PictureOutline, UploadOutline } from 'antd-mobile-icons';
 import type { MobileFileDto, UploadProgressEvent } from '../files.api';
-import { deleteMobileFile, fetchMobileFileBlob, uploadMobileFile } from '../files.api';
+import {
+  deleteMobileFile,
+  fetchMobileFileBlob,
+  FileStillProcessingError,
+  uploadMobileFile,
+  waitForProcessedFile,
+} from '../files.api';
 import type { MobileFieldProps, MobileSchemaNode } from '../schema/types';
 import { fieldError, fieldLabel, FieldShell, isRequired } from './fieldShared';
 import { ReadonlyMediaList } from '../components/MediaPreview';
@@ -220,14 +226,17 @@ export function FileUploadField(props: MobileFieldProps) {
                     {item.error ? <div className="af-upload-list__error">{item.error}</div> : null}
                   </div>
                   <div className="upload-file-row__actions">
-                    {item.status === 'failed' ? (
+                    {item.status === 'failed'
+                      || (item.status === 'processing' && item.remote?.status === 'PROCESSING') ? (
                       <button
                         type="button"
                         className="af-link-button af-upload-list__retry"
-                        aria-label={`重试 ${item.file.name}`}
-                        onClick={() => void queueFileUpload(item.file, item.localId)}
+                        aria-label={`${item.remote?.status === 'PROCESSING' ? '继续等待' : '重试'} ${item.file.name}`}
+                        onClick={() => void (item.remote?.status === 'PROCESSING'
+                          ? resumeProcessing(item)
+                          : queueFileUpload(item.file, item.localId))}
                       >
-                        重试
+                        {item.remote?.status === 'PROCESSING' ? '继续等待' : '重试'}
                       </button>
                     ) : null}
                     <button
@@ -361,13 +370,51 @@ export function FileUploadField(props: MobileFieldProps) {
         ),
       );
     } catch (error) {
-      commitItems(
-        itemsRef.current.map((item): UploadItem =>
-          item.localId === localId
-            ? { ...item, status: 'failed', error: errorMessage(error) }
-            : item,
-        ),
+      failItem(localId, error);
+    }
+  }
+
+  /**
+   * 客户端轮询窗口用完但服务端还在处理：**不算失败**（否则用户会重传，视频不走去重）。
+   * 保留 remote 与 processing 状态：值仍算"未完成上传"（提交会被拦），重试按钮变成"继续等待"。
+   */
+  function failItem(localId: string, error: unknown) {
+    const stillProcessing = error instanceof FileStillProcessingError;
+    commitItems(
+      itemsRef.current.map((item): UploadItem =>
+        item.localId === localId
+          ? {
+              ...item,
+              status: stillProcessing ? 'processing' : 'failed',
+              progress: stillProcessing ? Math.max(item.progress, 99) : item.progress,
+              remote: stillProcessing ? error.file : item.remote,
+              error: stillProcessing ? undefined : errorMessage(error),
+            }
+          : item,
+      ),
+    );
+  }
+
+  /** 已知服务端文件时的"重试"= 继续轮询状态，不是再上传一份。 */
+  async function resumeProcessing(item: UploadItem) {
+    if (!item.remote) return;
+    commitItems(itemsRef.current.map((current): UploadItem =>
+      current.localId === item.localId
+        ? { ...current, status: 'processing', error: undefined }
+        : current,
+    ));
+    try {
+      const remote = await waitForProcessedFile(
+        item.remote,
+        (event) => updateUploadProgress(item.localId, event),
       );
+      commitItems(itemsRef.current.map((current): UploadItem =>
+        current.localId === item.localId
+          ? { ...current, status: 'ready', progress: 100, remote, error: undefined, createdInSession: true }
+          : current,
+      ));
+    } catch (error) {
+      failItem(item.localId, error);
     }
   }
 
