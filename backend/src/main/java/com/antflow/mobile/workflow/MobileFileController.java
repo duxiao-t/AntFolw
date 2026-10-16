@@ -1,5 +1,9 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.attachment.MobileFileService;
+import com.antflow.attachment.MobileFileDto;
+import com.antflow.attachment.MobileFileContent;
+
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;

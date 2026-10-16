@@ -1,5 +1,7 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftService;
+
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.org.User;
 import com.antflow.org.UserMapper;
@@ -66,7 +68,7 @@ class MobileBootstrapControllerTest {
         department.setName("研发部");
         when(userMapper.selectById(1L)).thenReturn(user);
         when(departmentMapper.selectById(10L)).thenReturn(department);
-        when(taskMapper.selectCount(any())).thenReturn(2L);
+        when(taskMapper.countPendingInbox(1L)).thenReturn(2L);
         when(draftService.count(1L)).thenReturn(3L);
         when(workflowMapper.countUnreadNotifications(1L)).thenReturn(4L);
         when(mobileAppService.favorites(1L)).thenReturn(List.of(

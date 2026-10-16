@@ -11,6 +11,15 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface FormDataMapper extends BaseMapper<FormData> {
 
+    /** Internal read after owner/instance authorization; generic selects retain management scope. */
+    @InterceptorIgnore(dataPermission = "true")
+    @Select("SELECT * FROM t_form_data WHERE id = #{id}")
+    FormData selectRuntimeById(@Param("id") Long id);
+
+    @InterceptorIgnore(dataPermission = "true")
+    @Select("SELECT COUNT(*) FROM t_form_data WHERE created_by = #{userId} AND status = 'DRAFT'")
+    long countMyDrafts(@Param("userId") long userId);
+
     /**
      * 本人提交列表：自助入口，只按 created_by 过滤，不受行级数据权限约束。
      *
@@ -21,8 +30,10 @@ public interface FormDataMapper extends BaseMapper<FormData> {
     @InterceptorIgnore(dataPermission = "true")
     @Select("""
         <script>
-        SELECT * FROM t_form_data
+        SELECT data.* FROM t_form_data data
         WHERE created_by = #{userId}
+          AND
+        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
         <if test="formDefId != null"> AND form_def_id = #{formDefId} </if>
         ORDER BY created_at DESC, id DESC
         LIMIT #{limit} OFFSET #{offset}
@@ -37,8 +48,10 @@ public interface FormDataMapper extends BaseMapper<FormData> {
     @InterceptorIgnore(dataPermission = "true")
     @Select("""
         <script>
-        SELECT COUNT(*) FROM t_form_data
+        SELECT COUNT(*) FROM t_form_data data
         WHERE created_by = #{userId}
+          AND
+        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
         <if test="formDefId != null"> AND form_def_id = #{formDefId} </if>
         </script>
         """)
@@ -62,6 +75,7 @@ public interface FormDataMapper extends BaseMapper<FormData> {
      *
      * <p>导出上限 1 万行 → 最坏 1 万个参数，Postgres 上限 65535，不分批也放得下。
      */
+    @InterceptorIgnore(dataPermission = "true")
     @Select("""
         <script>
         SELECT d.id AS data_id, COALESCE(v.schema, legacy.schema, f.schema)::text AS schema

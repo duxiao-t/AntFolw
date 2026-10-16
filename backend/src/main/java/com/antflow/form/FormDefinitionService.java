@@ -35,16 +35,11 @@ public class FormDefinitionService {
     private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
 
     private static final Set<String> STATUSES = Set.of("DRAFT", "PUBLISHED", "DEPRECATED");
-    private static final Set<String> FIELD_TYPES = Set.of(
-        "text", "textarea", "number", "money",
-        "radio", "checkbox", "select", "multi_select", "search",
-        "date", "date_range", "time", "switch",
-        "image_upload", "video_upload", "file_upload", "checklist",
-        "user_picker", "dept_picker",
-        "description", "span_layout", "table_list", "matrix_fill",
-        "scan_code", "audio_upload", "location"
-    );
-    private static final Set<String> CONTAINER_TYPES = Set.of("span_layout");
+    // 字段类型清单的唯一真源在 FieldTypeCatalog（它同时生成 fixtures/field-semantics/field-types.json
+    // 供两端注册表对账）。这里以前是手写的一份 Set，和前端、移动端各自手写的清单会静默漂移。
+    private static final Set<String> FIELD_TYPES = FieldTypeCatalog.ids();
+    private static final Set<String> CONTAINER_TYPES =
+        FieldTypeCatalog.idsOfKind(FieldTypeCatalog.Kind.CONTAINER);
 
     public Page<FormDefinitionMapper.Summary> list(long page, long size, String keyword,
                                                    String status) {
@@ -104,6 +99,7 @@ public class FormDefinitionService {
             fd.setName(name);
             fd.setDescription(description);
             fd.setVersion(1);
+            rejectDisplayConditionCycles(schema);
             fd.setSchema(writeJson(schema));
             fd.setSettings(writeJson(settings == null ? java.util.Map.of() : settings));
             fd.setStatus("DRAFT");
@@ -125,6 +121,9 @@ public class FormDefinitionService {
             // 表单的审批流开关、业务单号配置就这样无声消失。
             String nextSchema = schema == null ? fd.getSchema() : writeJson(schema);
             String nextSettings = settings == null ? fd.getSettings() : writeJson(settings);
+            // 草稿不校验结构（历来如此），但**环**要拦：它会让设计器预览与两端渲染都给出
+            // 一个说不清的可见性结果，留到发布才发现太晚。
+            if (schema != null) rejectDisplayConditionCycles(schema);
             // 数据源的「可引用表单」清单只拦**新增**绑定：引用被撤销后，已经绑着它的字段照常保存
             // （见 OptionRuntimeService.requireNewBindingsAreReferenced 的说明）。
             if (schema != null && optionRuntimeService != null) {
@@ -171,7 +170,10 @@ public class FormDefinitionService {
                 optionRuntimeService.requireNewBindingsAreReferenced(
                     fd.getId(), fd.getSchema(), writeJson(schema));
             }
-            if (schema != null) fd.setSchema(writeJson(schema));
+            if (schema != null) {
+                rejectDisplayConditionCycles(schema);
+                fd.setSchema(writeJson(schema));
+            }
             if (settings != null) fd.setSettings(writeJson(settings));
         }
         mapper.updateById(fd);
@@ -271,7 +273,7 @@ public class FormDefinitionService {
     public Map<String, Object> canonicalizeStarterRevision(String schema, Object data,
                                                             Object existingData,
                                                             Object process) {
-        return canonicalizeStarterData(schema, data, valueMap(existingData), process, true);
+        return canonicalizeStarterData(schema, data, valueMap(readTree(existingData)), process, true);
     }
 
     /** Validates already-canonical initiator data while skipping ROOT-hidden fields. */
@@ -280,6 +282,14 @@ public class FormDefinitionService {
         Set<String> acceptedIds = new java.util.LinkedHashSet<>(leafFieldIds(schema));
         acceptedIds.removeIf(id -> "HIDDEN".equals(modes.get(id)));
         validateSubmission(schema, data, acceptedIds);
+    }
+
+    /** Rework retains persisted restricted values, so only editable fields are revalidated. */
+    public void validateStarterRevision(String schema, Object data, Object process) {
+        Map<String, String> modes = starterFieldModes(process);
+        Set<String> editableIds = new java.util.LinkedHashSet<>(leafFieldIds(schema));
+        editableIds.removeIf(id -> !"EDITABLE".equals(modes.getOrDefault(id, "EDITABLE")));
+        validateSubmission(schema, data, editableIds);
     }
 
     private Map<String, Object> canonicalizeStarterData(String schema, Object data,
@@ -544,6 +554,7 @@ public class FormDefinitionService {
     private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node,
                                    Map<?, ?> values, Set<String> fieldIds,
                                    Set<String> visibleIds) {
+        node = validationNode(node);
         if (!visibleIds.contains(node.path("id").asText())) {
             return;
         }
@@ -591,7 +602,66 @@ public class FormDefinitionService {
     }
 
     private void validateSchema(String s) {
-        parseSchema(s).forEach(this::validatePublishingNode);
+        var nodes = parseSchema(s);
+        rejectDisplayConditionCycles(nodes);
+        nodes.forEach(this::validatePublishingNode);
+    }
+
+    /**
+     * 拒绝 displayCondition 的环（互指 A↔B、自指 A→A）。
+     *
+     * <p>环是**配置错误**：环上字段到底显不显示没有可解释的答案。运行时不会崩（{@code resolveVisible}
+     * 用 Java `Set.add` 的布尔返回值判环），但两端都会给出一个"谁也说不清对不对"的结果，所以保存与
+     * 发布都拒绝。（前端 `visibleNodeIds` 曾经写成 `!visiting.add(id)`——JS 的 `Set.add` 返回集合本身，
+     * 那个条件恒假、等于没判环，自指与互指会直接 RangeError，抛在 React 渲染里就是整页白屏。）
+     *
+     * <p>只查环，不在这里补别的结构校验：草稿保存历来不校验结构，改成全量校验会让存量草稿存不下去。
+     */
+    private void rejectDisplayConditionCycles(Object schema) {
+        JsonNode root;
+        try {
+            root = json.valueToTree(schema);
+        } catch (IllegalArgumentException e) {
+            return; // 形状怪异的对象交给既有结构校验，这里只管环
+        }
+        if (root == null || !root.isArray()) return;
+        var nodes = new java.util.ArrayList<JsonNode>();
+        root.forEach(nodes::add);
+        rejectDisplayConditionCycles(nodes);
+    }
+
+    private void rejectDisplayConditionCycles(List<JsonNode> roots) {
+        var sourceOf = new java.util.LinkedHashMap<String, String>();
+        roots.forEach(node -> collectConditionSources(node, sourceOf));
+        var state = new java.util.HashMap<String, Integer>();
+        for (String start : sourceOf.keySet()) {
+            if (state.containsKey(start)) continue;
+            var path = new java.util.ArrayList<String>();
+            String id = start;
+            while (id != null && !state.containsKey(id)) {
+                state.put(id, 1);
+                path.add(id);
+                String next = sourceOf.get(id);
+                id = next == null || next.isBlank() ? null : next;
+            }
+            if (id != null && state.get(id) == 1) {
+                var cycle = new java.util.ArrayList<>(path.subList(path.indexOf(id), path.size()));
+                cycle.add(id);
+                throw new BizException("BAD_SCHEMA",
+                    "displayCondition 互指: " + String.join(" → ", cycle) + "，请改掉引用");
+            }
+            path.forEach(visited -> state.put(visited, 2));
+        }
+    }
+
+    private void collectConditionSources(JsonNode node, Map<String, String> out) {
+        String id = node.path("id").asText("");
+        if (!id.isBlank()) {
+            var condition = node.path("props").path("displayCondition");
+            out.putIfAbsent(id, condition.path("fieldId")
+                .asText(condition.path("field").asText("")).trim());
+        }
+        node.path("children").forEach(child -> collectConditionSources(child, out));
     }
 
     private List<com.fasterxml.jackson.databind.JsonNode> parseSchema(String s) {
@@ -643,6 +713,7 @@ public class FormDefinitionService {
 
     private void validateNodeValue(com.fasterxml.jackson.databind.JsonNode node, Map<?, ?> values,
                                    Set<String> visibleIds) {
+        node = validationNode(node);
         if (!visibleIds.contains(node.path("id").asText())) {
             return;
         }
@@ -655,6 +726,7 @@ public class FormDefinitionService {
         }
         Object value = values.get(node.path("id").asText());
         String type = node.path("type").asText();
+        if ("description".equals(type)) return;
         if ("table_list".equals(type)) {
             validateTableValue(node, value, null);
             return;
@@ -669,6 +741,7 @@ public class FormDefinitionService {
         if (required && isEmpty(value)) {
             throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " is required");
         }
+        validateValueShape(node, value);
         if ("dept_picker".equals(type) && !isEmpty(value)) {
             validateDepartmentPickerValue(node, value);
         }
@@ -687,8 +760,8 @@ public class FormDefinitionService {
         if (maxLength > -1 && value instanceof String s && s.length() > maxLength) {
             throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " exceeds maxLength");
         }
-        int minChecked = rules.path("minChecked").asInt(-1);
-        int maxChecked = rules.path("maxChecked").asInt(props.path("maxSelected").asInt(-1));
+        int minChecked = props.path("minChecked").asInt(-1);
+        int maxChecked = props.path("maxChecked").asInt(props.path("maxSelected").asInt(-1));
         if (value instanceof List<?> list) {
             if (minChecked > -1 && list.size() < minChecked) {
                 throw new BizException("FORM_DATA_INVALID", node.path("label").asText(node.path("id").asText()) + " below minChecked");
@@ -756,6 +829,118 @@ public class FormDefinitionService {
         }
     }
 
+    private JsonNode validationNode(JsonNode node) {
+        if (!node.path("rules").isObject()) return node;
+        var copy = (com.fasterxml.jackson.databind.node.ObjectNode) node.deepCopy();
+        var props = node.path("props").isObject()
+            ? (com.fasterxml.jackson.databind.node.ObjectNode) node.path("props").deepCopy()
+            : json.createObjectNode();
+        props.setAll((com.fasterxml.jackson.databind.node.ObjectNode) node.path("rules"));
+        copy.set("props", props);
+        return copy;
+    }
+
+    private void validateValueShape(JsonNode node, Object value) {
+        String type = node.path("type").asText();
+        if ("description".equals(type) || value == null
+            || value instanceof String text && text.isBlank()
+            || value instanceof List<?> list && list.isEmpty()) return;
+        JsonNode props = node.path("props");
+        String label = node.path("label").asText(node.path("id").asText());
+        boolean valid = switch (type) {
+            case "text", "textarea", "search", "scan_code", "date", "time" -> value instanceof String;
+            case "number", "money" -> value instanceof Number || value instanceof String;
+            case "switch" -> value instanceof Boolean;
+            case "select", "radio" -> value instanceof String || value instanceof Number;
+            case "multi_select", "checkbox" -> value instanceof List<?> list
+                && list.stream().allMatch(item -> item instanceof String || item instanceof Number);
+            case "date_range" -> value instanceof List<?> list && list.size() == 2
+                && list.stream().allMatch(item -> item instanceof String text && !text.isBlank());
+            case "user_picker" -> validUserPicker(value, props.path("multiple").asBoolean(false));
+            case "file_upload", "image_upload", "video_upload", "audio_upload" -> value instanceof List<?> files
+                && files.stream().allMatch(item -> item instanceof Map<?, ?> file
+                    && file.get("id") instanceof String
+                    && (file.get("status") == null || "READY".equals(file.get("status"))));
+            case "checklist" -> value instanceof List<?> entries
+                && entries.stream().allMatch(item -> item instanceof Map<?, ?>);
+            default -> true;
+        };
+        if (!valid) throw new BizException("FORM_DATA_INVALID", label + "格式不正确");
+        if (value instanceof String text) {
+            if (props.path("minLength").isNumber() && text.length() < props.path("minLength").asInt()) {
+                throw new BizException("FORM_DATA_INVALID", label + " below minLength");
+            }
+            if (props.path("pattern").isTextual()) {
+                try {
+                    if (!java.util.regex.Pattern.compile(props.path("pattern").asText()).matcher(text).find()) {
+                        throw new BizException("FORM_DATA_INVALID", label + "格式不正确");
+                    }
+                } catch (java.util.regex.PatternSyntaxException exception) {
+                    throw new BizException("BAD_SCHEMA", label + "校验规则无效");
+                }
+            }
+        }
+        if (value instanceof List<?> list && props.path("maxCount").isNumber()
+            && list.size() > props.path("maxCount").asInt()) {
+            throw new BizException("FORM_DATA_INVALID", label + " exceeds maxCount");
+        }
+        if (Set.of("number", "money").contains(type) && props.path("precision").isNumber()) {
+            try {
+                if (new java.math.BigDecimal(value.toString()).stripTrailingZeros().scale()
+                    > props.path("precision").asInt()) {
+                    throw new BizException("FORM_DATA_INVALID", label + " exceeds precision");
+                }
+            } catch (NumberFormatException exception) {
+                throw new BizException("FORM_DATA_INVALID", label + " must be a number");
+            }
+        }
+        if ("checklist".equals(type)) validateChecklistValue(node, (List<?>) value);
+    }
+
+    private static boolean validUserPicker(Object value, boolean multiple) {
+        if (multiple && value instanceof List<?> list) {
+            return list.stream().allMatch(item -> validUserPicker(item, false));
+        }
+        return value instanceof Number number && Double.isFinite(number.doubleValue())
+            && number.doubleValue() > 0 && number.doubleValue() <= 9007199254740991d
+            && number.doubleValue() == Math.rint(number.doubleValue());
+    }
+
+    private void validateChecklistValue(JsonNode node, List<?> entries) {
+        JsonNode props = node.path("props");
+        Map<String, Map<?, ?>> byId = new java.util.LinkedHashMap<>();
+        for (Object raw : entries) {
+            Map<?, ?> entry = (Map<?, ?>) raw;
+            Object id = entry.get("id") == null ? entry.get("itemId") : entry.get("id");
+            if (id != null) byId.put(String.valueOf(id), entry);
+        }
+        int index = 0;
+        for (JsonNode item : props.path("items")) {
+            Map<?, ?> entry = byId.get(item.path("id").asText("item-" + index++));
+            Object status = entry == null ? null
+                : entry.get("status") == null ? entry.get("result") : entry.get("status");
+            if (item.path("required").asBoolean(false) && isEmpty(status)) {
+                throw new BizException("FORM_DATA_INVALID", "请完成检查项");
+            }
+            if (entry == null) continue;
+            Object images = entry.get("images") == null ? entry.get("photos") : entry.get("images");
+            int photos = images instanceof List<?> list ? list.size() : 0;
+            if (photos > props.path("photoMaxCount").asInt(9)) {
+                throw new BizException("FORM_DATA_INVALID", "检查项照片超过上限");
+            }
+            Object description = entry.get("description") == null ? entry.get("remark") : entry.get("description");
+            if (props.path("allowDescription").asBoolean(true) && !isEmpty(status)
+                && props.path("descriptionRequiredByResult").path(String.valueOf(status)).asBoolean(false)
+                && isEmpty(description) && photos == 0) {
+                throw new BizException("FORM_DATA_INVALID", "检查项描述必填");
+            }
+        }
+        if (props.path("required").asBoolean(false) && entries.stream().noneMatch(raw -> {
+            Map<?, ?> entry = (Map<?, ?>) raw;
+            return !isEmpty(entry.get("status") == null ? entry.get("result") : entry.get("status"));
+        })) throw new BizException("FORM_DATA_INVALID", "请完成检查项");
+    }
+
     private boolean containsAcceptedField(JsonNode nodes, Set<String> fieldIds) {
         if (!nodes.isArray()) return false;
         for (var child : nodes) {
@@ -779,6 +964,7 @@ public class FormDefinitionService {
         JsonNode rules = node.path("rules");
         boolean required = rules.path("required").asBoolean(
             props.path("required").asBoolean(false));
+        if (rows.isEmpty() && !required) return;
         int minRows = Math.max(0, props.path("minRows").asInt(required ? 1 : 0));
         int maxRows = props.path("maxRows").canConvertToInt()
             ? props.path("maxRows").asInt() : Integer.MAX_VALUE;

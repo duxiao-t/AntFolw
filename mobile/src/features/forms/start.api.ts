@@ -1,47 +1,47 @@
+import type { AntFlowAPI } from '../../../../shared/api.generated';
+import type { Contract } from '../../shared/api/types';
 import { apiRequest } from '../../shared/api/http';
 import type { MobileFormValues } from './schema/types';
 
-export type StartResult = {
-  instanceId: number;
-  formDataId: number;
-  businessNo: string;
-  firstTaskIds: number[];
-};
+export type StartResult = Required<AntFlowAPI.MobileStartResult>;
 
-export type DirectSubmitResult = {
-  dataId: number;
-  businessNo: string;
-};
+export type DirectSubmitResult = Required<AntFlowAPI.SubmitResult>;
 
-export type ApprovalPreview = {
+export type ApprovalPreview = Omit<AntFlowAPI.ApprovalPreviewDto, 'nodes'> & {
   nodes: ApprovalPreviewNode[];
 };
 
-export type ApprovalPreviewNode = {
-  nodeId: string;
-  nodeName: string;
-  approvalMode: 'ANY' | 'ALL' | 'RATIO' | 'SEQUENTIAL';
-  deferred: boolean;
-  autoPass?: boolean;
-  assignees: Array<{ userId: number; displayName: string }>;
-};
+export type ApprovalPreviewNode = Omit<
+  Contract<
+    AntFlowAPI.ApprovalPreviewNodeDto,
+    'nodeId' | 'nodeName' | 'approvalMode' | 'deferred'
+  >,
+  'assignees'
+> & { assignees: Required<AntFlowAPI.ApprovalPreviewAssigneeDto>[] };
 
 export function fetchApprovalPreview({
   formCode,
   values,
   selfSelected,
   reworkTaskId,
+  draftId,
 }: {
   formCode: string;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
   reworkTaskId: number | null;
+  draftId?: number | null;
 }) {
   return apiRequest<ApprovalPreview>(
     `/api/mobile/forms/${encodeURIComponent(formCode)}/approval-preview`,
     {
       method: 'POST',
-      body: JSON.stringify({ data: values, selfSelected, reworkTaskId }),
+      body: JSON.stringify({
+        data: values,
+        selfSelected,
+        reworkTaskId,
+        ...(draftId != null ? { draftId } : {}),
+      }),
     },
   );
 }
@@ -51,12 +51,14 @@ export async function startMobileInstance({
   values,
   selfSelected,
   draftId,
+  companyId,
   idempotencyKey,
 }: {
   formCode: string;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
   draftId: number | null;
+  companyId: number | null;
   idempotencyKey: string;
 }) {
   return apiRequest<StartResult>('/api/mobile/instances', {
@@ -67,6 +69,7 @@ export async function startMobileInstance({
       data: values,
       selfSelected,
       draftId,
+      companyId,
       files: collectMobileFileRefs(values),
     }),
   });
@@ -76,10 +79,12 @@ export async function submitMobileFormData({
   formCode,
   values,
   draftId,
+  companyId,
 }: {
   formCode: string;
   values: MobileFormValues;
   draftId: number | null;
+  companyId: number | null;
 }) {
   // 移动端专用入口：桌面端提交走 /api/forms/data，移动端走 /api/mobile/submissions
   return apiRequest<DirectSubmitResult>('/api/mobile/submissions', {
@@ -89,18 +94,17 @@ export async function submitMobileFormData({
       status: 'SUBMITTED',
       data: values,
       draftId,
+      companyId,
       files: collectMobileFileRefs(values),
     }),
   });
 }
 
-export type MobileFileRef = {
-  fileId: string;
-  fieldId: string;
-  sortOrder: number;
-};
+export type MobileFileRef = Required<AntFlowAPI.MobileFileRef>;
 
-export function collectMobileFileRefs(values: MobileFormValues): MobileFileRef[] {
+export function collectMobileFileRefs(
+  values: MobileFormValues,
+): MobileFileRef[] {
   const refs: MobileFileRef[] = [];
   for (const [fieldId, value] of Object.entries(values)) {
     collectValueFiles(value, fieldId, refs);
@@ -108,7 +112,11 @@ export function collectMobileFileRefs(values: MobileFormValues): MobileFileRef[]
   return refs;
 }
 
-function collectValueFiles(value: unknown, fieldId: string, refs: MobileFileRef[]) {
+function collectValueFiles(
+  value: unknown,
+  fieldId: string,
+  refs: MobileFileRef[],
+) {
   if (!Array.isArray(value)) {
     return;
   }
@@ -137,11 +145,13 @@ function isMobileFileValue(value: unknown): value is { id: string } {
     contentUrl?: unknown;
     url?: unknown;
   };
-  return typeof value === 'object'
-    && value != null
-    && !Array.isArray(value)
-    && typeof file.id === 'string'
-    && typeof file.contentType === 'string'
-    && (typeof file.size === 'number' || typeof file.sizeBytes === 'number')
-    && (typeof file.contentUrl === 'string' || typeof file.url === 'string');
+  return (
+    typeof value === 'object' &&
+    value != null &&
+    !Array.isArray(value) &&
+    typeof file.id === 'string' &&
+    typeof file.contentType === 'string' &&
+    (typeof file.size === 'number' || typeof file.sizeBytes === 'number') &&
+    (typeof file.contentUrl === 'string' || typeof file.url === 'string')
+  );
 }

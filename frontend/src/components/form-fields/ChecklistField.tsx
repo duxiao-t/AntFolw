@@ -1,5 +1,8 @@
+import { Space, Divider, ColorPicker, Checkbox, InputNumber, Modal } from 'antd';
+import { MinusOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useState } from 'react';
 import { CheckCircleOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Input, Radio, Typography } from 'antd';
+import { Button, Input, Radio, Typography } from 'antd';
 import { useEffect, useRef } from 'react';
 import { AuthenticatedMedia } from './MediaPreview';
 import { MediaUploadControl } from './MediaUploadControl';
@@ -76,6 +79,141 @@ export const ChecklistField: FieldType = {
     descriptionRequiredByResult: { fail: true },
     oneClick: true,
     photoMaxCount: 9,
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    const checklistResults = Array.isArray(props.results) && props.results.length >= 2
+      ? props.results
+      : [
+          { id: 'pass', label: '通过', color: checklistResultColors[0] },
+          { id: 'fail', label: '不通过', color: checklistResultColors[1] },
+          { id: 'na', label: '不适用', color: checklistResultColors[2] },
+        ];
+    const descMap = props.descriptionRequiredByResult ?? {};
+
+    return (
+      <Space
+        direction="vertical"
+        style={{ width: '100%' }}
+        size={16}
+        separator={<Divider style={{ margin: 0 }} />}
+      >
+        <div className="checklist-config__section">
+          <div className="checklist-config__section-title">检查项</div>
+          <ChecklistItemsEditor
+            value={props.items}
+            onChange={(items) => updateProps({ items })}
+          />
+        </div>
+
+        <div className="checklist-config__section">
+          <div className="checklist-config__section-title">结果选项</div>
+          <Typography.Text type="secondary" className="checklist-config__hint">
+            2~4 个，结果名称同时作为手机按钮文字；颜色用于手机端选中状态。
+          </Typography.Text>
+          <div className="checklist-config__rows">
+            {checklistResults.map((result, index) => (
+              <div key={result.id ?? index} className="checklist-config__row">
+                <ColorPicker
+                  aria-label={`结果${index + 1}颜色`}
+                  disabledAlpha
+                  size="small"
+                  value={result.color ?? checklistResultColors[index] ?? checklistResultColors[3]}
+                  onChangeComplete={(color) => {
+                    const next = [...checklistResults];
+                    next[index] = { ...result, color: color.toHexString() };
+                    updateProps({ results: next });
+                  }}
+                />
+                <Input
+                  value={result.label ?? ''}
+                  placeholder={`结果${index + 1}`}
+                  onChange={(event) => {
+                    const next = [...checklistResults];
+                    next[index] = { ...result, label: event.target.value };
+                    updateProps({ results: next });
+                  }}
+                />
+                <Checkbox
+                  checked={descMap[result.id] === true}
+                  onChange={(event) =>
+                    updateProps({
+                      descriptionRequiredByResult: {
+                        ...descMap,
+                        [result.id]: event.target.checked,
+                      },
+                    })
+                  }
+                >
+                  描述必填
+                </Checkbox>
+                <Button
+                  icon={<MinusOutlined />}
+                  size="small"
+                  disabled={checklistResults.length <= 2}
+                  aria-label={`删除结果${index + 1}`}
+                  onClick={() =>
+                    updateProps({
+                      results: checklistResults.filter((_, itemIndex) => itemIndex !== index),
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+          <Button
+            size="small"
+            icon={<PlusOutlined />}
+            disabled={checklistResults.length >= 4}
+            onClick={() =>
+              updateProps({
+                results: [
+                  ...checklistResults,
+                  {
+                    id: `result-${Date.now()}`,
+                    label: `结果${checklistResults.length + 1}`,
+                    color: checklistResultColors[checklistResults.length] ?? checklistResultColors[3],
+                  },
+                ],
+              })
+            }
+          >
+            新增结果
+          </Button>
+        </div>
+
+        <div className="checklist-config__section">
+          <div className="checklist-config__section-title">通用设置</div>
+          <div className="checklist-config__rows">
+            <Checkbox
+              checked={props.allowDescription !== false}
+              onChange={(event) =>
+                updateProps({ allowDescription: event.target.checked })
+              }
+            >
+              允许填写图文描述（文字 + 现场照片）
+            </Checkbox>
+            <Checkbox
+              checked={props.oneClick !== false}
+              onChange={(event) => updateProps({ oneClick: event.target.checked })}
+            >
+              支持一键全部设为某结果
+            </Checkbox>
+          </div>
+          <div className="checklist-config__inline-field">
+            <span>每条现场照片最多</span>
+            <InputNumber
+              min={1}
+              max={20}
+              size="small"
+              style={{ width: 96 }}
+              value={props.photoMaxCount ?? 9}
+              onChange={(value) => updateProps({ photoMaxCount: value ?? 9 })}
+            />
+          </div>
+        </div>
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange }) => {
     const items = itemsOf(node);
@@ -227,20 +365,110 @@ export const ChecklistField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <input
-        value={node.label ?? ''}
-        onChange={(e) => onChange({ ...node, label: e.target.value })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }}
-      />
-      <Checkbox
-        checked={node.props?.allowDescription !== false}
-        onChange={(e) => onChange({ ...node, props: { ...node.props, allowDescription: e.target.checked } })}
-      >
-        允许填写图文描述
-      </Checkbox>
-    </div>
-  ),
 };
+
+const checklistResultColors = ['#22A052', '#D93025', '#8F8F8F', '#5A6FA8'] as const;
+
+type ChecklistItemInput = {
+  id?: string;
+  label?: string;
+  required?: boolean;
+};
+
+function ChecklistItemsEditor({
+  value,
+  onChange,
+}: {
+  value?: ChecklistItemInput[];
+  onChange(items: { id: string; label: string; required: boolean }[]): void;
+}) {
+  const items = value ?? [];
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const normalized = items.map((item, index) => ({
+    id: item.id ?? `item-${index}`,
+    label: String(item.label ?? `检查项${index + 1}`),
+    required: item.required !== false,
+  }));
+  const commit = (next: { id: string; label: string; required: boolean }[]) =>
+    onChange(next);
+  const update = (index: number, patch: Partial<{ label: string; required: boolean }>) =>
+    commit(normalized.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, ...patch } : item,
+    ));
+  const add = () =>
+    commit([
+      ...normalized,
+      { id: `item-${Date.now()}-${normalized.length}`, label: `检查项${normalized.length + 1}`, required: true },
+    ]);
+  const remove = (index: number) =>
+    commit(normalized.filter((_, itemIndex) => itemIndex !== index));
+  const applyBulk = () => {
+    const lines = bulkText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return;
+    const additions = lines.map((line, index) => ({
+      id: `item-${Date.now()}-${normalized.length + index}`,
+      label: line,
+      required: true,
+    }));
+    commit([...normalized, ...additions]);
+    setBulkOpen(false);
+    setBulkText('');
+  };
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={8}>
+      {normalized.map((item, index) => (
+        <div key={item.id} className="checklist-config__row">
+          <Input
+            placeholder="检查内容"
+            value={item.label}
+            onChange={(event) => update(index, { label: event.target.value })}
+          />
+          <Checkbox
+            checked={item.required}
+            onChange={(event) => update(index, { required: event.target.checked })}
+          >
+            必检
+          </Checkbox>
+          <Button
+            icon={<DeleteOutlined />}
+            size="small"
+            aria-label="删除检查项"
+            onClick={() => remove(index)}
+          />
+        </div>
+      ))}
+      <Space>
+        <Button size="small" icon={<PlusOutlined />} onClick={add}>
+          新增检查项
+        </Button>
+        <Button size="small" onClick={() => setBulkOpen(true)}>
+          批量添加
+        </Button>
+      </Space>
+      <Modal
+        title="批量添加检查项"
+        open={bulkOpen}
+        onOk={applyBulk}
+        onCancel={() => setBulkOpen(false)}
+        okText="添加"
+        cancelText="取消"
+      >
+        <Typography.Text type="secondary">
+          每行一条，按行拆分，自动生成检查项。
+        </Typography.Text>
+        <Input.TextArea
+          rows={6}
+          value={bulkText}
+          placeholder={'例如：\n设备外观完好\n接地线连接牢固\n指示灯状态正常'}
+          onChange={(event) => setBulkText(event.target.value)}
+          style={{ marginTop: 12 }}
+        />
+      </Modal>
+    </Space>
+  );
+}

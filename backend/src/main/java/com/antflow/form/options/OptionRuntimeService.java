@@ -390,6 +390,18 @@ public class OptionRuntimeService {
             return context.schema();
         }
         authorization.requireReadableFormData(request.dataId());
+        jdbc.query("""
+            SELECT form_def_id, created_by, company_id FROM t_form_data
+            WHERE id = ? AND status = 'DRAFT'
+            """, rs -> {
+                if (!rs.next()) return null;
+                if (rs.getLong("created_by") != user) {
+                    throw new HiddenResourceException("draft not found");
+                }
+                Long companyId = rs.getObject("company_id", Long.class);
+                authorization.requireFormUse(rs.getLong("form_def_id"), companyId);
+                return rs.getLong("form_def_id");
+            }, request.dataId());
         // 版本口径必须和 instanceId 路径一致：那张表优先用实例的"当前修订版"，
         // 只在没有修订版时才退回该行的 form_def_version。否则表单修订升级后，同一条记录
         // 从两个入口会解析出不同的字段与数据源版本（选项显示/查询结果对不上）。

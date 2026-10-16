@@ -1,3 +1,5 @@
+import { Space } from 'antd';
+import { PanelField } from './panelField';
 import { InputNumber } from 'antd';
 import type { FieldComponentProps, FieldType } from '../../registry/types';
 import { useLinkedValue } from './dynamicOptions';
@@ -7,23 +9,47 @@ export const NumberField: FieldType = {
   label: '数字',
   icon: 'field-number',
   defaultProps: { min: 0, max: 1000000, precision: 0, required: false },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="最小值">
+          <InputNumber
+            style={{ width: '100%' }}
+            value={props.min}
+            placeholder="不限制"
+            onChange={(value) => updateProps({ min: value ?? undefined })}
+          />
+        </PanelField>
+        <PanelField label="最大值">
+          <InputNumber
+            style={{ width: '100%' }}
+            value={props.max}
+            placeholder="不限制"
+            onChange={(value) => updateProps({ max: value ?? undefined })}
+          />
+        </PanelField>
+        <PanelField label="小数位">
+          <InputNumber
+            min={0}
+            max={8}
+            style={{ width: '100%' }}
+            value={props.precision ?? 0}
+            onChange={(value) => updateProps({ precision: value ?? 0 })}
+          />
+        </PanelField>
+        <PanelField label="步长">
+          <InputNumber
+            min={0}
+            style={{ width: '100%' }}
+            value={props.step ?? 1}
+            onChange={(value) => updateProps({ step: value ?? 1 })}
+          />
+        </PanelField>
+      </Space>
+    );
+  },
   Component: (props) => <LinkedNumberField {...props} />,
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <div>最小值</div>
-      <input type="number" value={node.props?.min ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, min: e.target.value === '' ? undefined : Number(e.target.value) } })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <div>最大值</div>
-      <input type="number" value={node.props?.max ?? ''} onChange={(e) => onChange({ ...node, props: { ...node.props, max: e.target.value === '' ? undefined : Number(e.target.value) } })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-      <div>小数位</div>
-      <input type="number" value={node.props?.precision ?? 0} onChange={(e) => onChange({ ...node, props: { ...node.props, precision: Number(e.target.value) } })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-    </div>
-  ),
 };
 
 function LinkedNumberField({ node, mode, value, onChange, values, optionContext }: FieldComponentProps) {

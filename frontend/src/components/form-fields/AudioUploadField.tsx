@@ -1,3 +1,5 @@
+import { PanelField } from './panelField';
+import { InputNumber } from 'antd';
 import { AudioOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App, Button, Space, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
@@ -149,13 +151,35 @@ function formatDuration(value?: number) {
 export const AudioUploadField: FieldType = {
   type: 'audio_upload', label: '录音', icon: 'audio',
   defaultProps: { required: false, maxCount: 3, maxDuration: 60 },
-  Component: AudioInput,
-  ConfigPanel: () => null,
-  validate(value, props) {
-    if (hasPendingAudioUpload(value)) return '仍有录音未完成上传';
-    const files = Array.isArray(value) ? value : [];
-    if (props.required && files.length === 0) return '请完成录音';
-    if (files.length > numberProp(props.maxCount, 3, 1, 10)) return `最多录制 ${numberProp(props.maxCount, 3, 1, 10)} 段`;
-    return null;
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <PanelField label="最多录音段数">
+          <InputNumber
+            min={1}
+            max={10}
+            precision={0}
+            style={{ width: '100%' }}
+            value={props.maxCount ?? 3}
+            onChange={(value) => updateProps({ maxCount: value ?? 3 })}
+          />
+        </PanelField>
+        <PanelField label="每段最长时长(秒)">
+          <InputNumber
+            min={5}
+            max={60}
+            precision={0}
+            style={{ width: '100%' }}
+            value={props.maxDuration ?? 60}
+            onChange={(value) => updateProps({ maxDuration: value ?? 60 })}
+          />
+        </PanelField>
+        <Typography.Text type="secondary">
+          填报时直接调用浏览器或企业微信录音，不允许选择已有音频。
+        </Typography.Text>
+      </Space>
+    );
   },
+  Component: AudioInput,
 };

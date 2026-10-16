@@ -75,28 +75,35 @@ public class ProcessEngine {
     private final FormalNumberService formalNumberService;
     private final WorkflowJobMapper workflowJobMapper;
     private final AuthorizationService authorizationService;
+    private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
 
-    /** Optional only so the legacy unit tests that construct this class directly keep working. */
-    @Autowired(required = false)
+    @Autowired
     private WorkflowRuntimeV2 runtimeV2;
     @Autowired(required = false)
     private BusinessNumberService businessNumbers;
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
+        // P4a：归属由**调用方**解析好（它才分得清"用户显式选的"与"从草稿继承的"），
+        // 引擎只做 fail-closed 检查——绝不让一条无归属的记录静默落库。
+        Long companyId = cmd.companyId();
+        if (companyId == null) {
+            throw new BizException("BAD_COMPANY", "发起时必须确定公司归属");
+        }
+        if (runtimeV2 == null) {
+            throw new BizException("RUNTIME_REQUIRED", "发起流程需要 V2 运行时");
+        }
         FormDefinition fd = formDefinitionService.getByCode(cmd.formCode());
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + cmd.formCode());
         }
         // 表单使用授权：未获得 t_form_resource_grant 授权的用户不能发起该表单的流程。
-        authorizationService.requireFormUse(fd.getId());
+        authorizationService.requireFormUse(fd.getId(), companyId);
         ProcessDefinition pd = processDefinitionService.latestPublishedForForm(fd.getId());
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());
         }
-        if (runtimeV2 != null) {
-            processDefinitionService.requireNodeFallbackPolicy(pd.getProcess());
-        }
+        processDefinitionService.requireNodeFallbackPolicy(pd.getProcess());
         var visibleData = formDefinitionService.canonicalizeStarterSubmission(
             fd.getSchema(), cmd.data(), pd.getProcess());
 
@@ -108,7 +115,10 @@ public class ProcessEngine {
         fd2.setData(writeJson(visibleData));
         fd2.setStatus("SUBMITTED");
         fd2.setCreatedBy(userId);
+        fd2.setCompanyId(companyId);
+        fd2.setCompanyInferred(false);
         formDataMapper.insert(fd2);
+        mediaValidator.validate(fd2.getId());
 
         ProcessInstance pi = new ProcessInstance();
         pi.setProcDefId(pd.getId());
@@ -123,13 +133,14 @@ public class ProcessEngine {
             .filter(principal -> principal.userId() == userId)
             .ifPresent(principal -> pi.setStartedDeptId(principal.departmentId()));
         pi.setStartedAt(OffsetDateTime.now());
-        if (runtimeV2 != null) {
-            WorkflowRuntimeV2.StartState state = runtimeV2.prepareStart(fd2, pd, userId);
-            pi.setEngineVersion(2);
-            pi.setRoundNo(1);
-            pi.setProcessDefinitionVersionId(state.processVersionId());
-            pi.setCurrentFormRevisionId(state.revisionId());
-        }
+        // 与 fd2 同一个值（同一次解析、同一个事务）。
+        pi.setCompanyId(companyId);
+        pi.setCompanyInferred(false);
+        WorkflowRuntimeV2.StartState state = runtimeV2.prepareStart(fd2, pd, userId);
+        pi.setEngineVersion(2);
+        pi.setRoundNo(1);
+        pi.setProcessDefinitionVersionId(state.processVersionId());
+        pi.setCurrentFormRevisionId(state.revisionId());
         processInstanceMapper.insert(pi);
 
         // 引擎后续一律走快照树，而非 pd.getProcess()
@@ -169,6 +180,7 @@ public class ProcessEngine {
         if (initial == null) throw new BizException("NOT_FOUND", "task not found");
         ProcessInstance instance = processInstanceMapper.selectForUpdate(initial.getProcInstId());
         TaskEntity task = taskMapper.selectForUpdate(taskId);
+        if (instance != null) authorizationService.requireConfirmedInstance(instance.getId());
         if (instance == null || task == null || !"RUNNING".equals(instance.getStatus())
             || !"APPROVED".equals(task.getStatus())
             || !Objects.equals(task.getApprovedBy(), operatorId)) {
@@ -204,13 +216,13 @@ public class ProcessEngine {
         LockedTask locked = lockPendingTask(cmd.taskId());
         TaskEntity t = locked.task();
         ProcessInstance pi = locked.instance();
-        skipDelegatedParentIfNeeded(t, operatorId);
         if ("REWORK".equals(t.getTaskType())) {
             throw new BizException("BAD_TASK_TYPE", "Rework task must be resubmitted from the form");
         }
         if (!force && !Objects.equals(t.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
         }
+        skipDelegatedParentIfNeeded(t, operatorId);
 
         // 永远走快照，不依赖 pd.getProcess()（避免流程改版后已发起的实例跑飞）
         JsonNode root = readProcessTree(pi);
@@ -239,7 +251,7 @@ public class ProcessEngine {
                 return;
             }
             if (runtimeV2.activateAfterSign(t)) return;
-            WorkflowRuntimeV2.Decision decision = runtimeV2.approve(t, cur, operatorId);
+            WorkflowRuntimeV2.Decision decision = runtimeV2.approve(t, cur);
             if (!decision.newTaskIds().isEmpty()) {
                 notifyAssigned(pi.getId(), decision.newTaskIds());
             }
@@ -396,8 +408,8 @@ public class ProcessEngine {
         if (runtimeV2 != null && runtimeV2.active(pi) && t.getNodeInstanceId() != null) {
             WorkflowRuntimeV2.Decision decision = t.getOperationKind() != null
                 && t.getOperationKind().startsWith("ADD_")
-                ? runtimeV2.rejectAdditional(t, operatorId)
-                : runtimeV2.rejectVote(t, cur, operatorId);
+                ? runtimeV2.rejectAdditional(t)
+                : runtimeV2.rejectVote(t, cur);
             settleV2Decision(decision, cmd, operatorId, force, t, pi, root, cur);
             return;
         }
@@ -436,7 +448,9 @@ public class ProcessEngine {
             throw new AccessDeniedException("not your task");
         }
         ProcessInstance instance = locked.instance();
-        FormData formDataRow = formDataMapper.selectById(instance.getFormDataId());
+        FormData formDataRow = formDataMapper.selectRuntimeById(instance.getFormDataId());
+        mediaValidator.validate(instance.getFormDataId(),
+            formDefinitionService.starterFieldModes(instance.getProcessSnapshot()));
         if (formDataRow == null) {
             throw new BizException("NOT_FOUND", "form data not found");
         }
@@ -448,7 +462,7 @@ public class ProcessEngine {
         if (runtimeV2 != null && runtimeV2.active(instance)) {
             runtimeV2.beginRound(instance, "RESUBMIT");
         }
-        taskMapper.updateById(task);
+        updateTaskOrConflict(task);
         formDataRow.setStatus("SUBMITTED");
         formDataMapper.updateById(formDataRow);
         if (runtimeV2 != null && runtimeV2.active(instance)) {
@@ -537,6 +551,7 @@ public class ProcessEngine {
     public void withdraw(long instanceId, long operatorId) {
         ProcessInstance pi = processInstanceMapper.selectForUpdate(instanceId);
         if (pi == null) throw new BizException("NOT_FOUND", "instance not found");
+        authorizationService.requireConfirmedInstance(instanceId);
         if (!Objects.equals(pi.getStartedBy(), operatorId)) {
             throw new AccessDeniedException("only starter can withdraw");
         }
@@ -562,7 +577,7 @@ public class ProcessEngine {
         TaskEntity rework = newReturnedTask(pi.getId(), "__rework__", "REWORK",
             "OR", pi.getStartedBy(), null, null);
         taskMapper.insert(rework);
-        FormData formData = formDataMapper.selectById(pi.getFormDataId());
+        FormData formData = formDataMapper.selectRuntimeById(pi.getFormDataId());
         if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
         formData.setStatus("NEEDS_REVISION");
         formDataMapper.updateById(formData);
@@ -670,11 +685,16 @@ public class ProcessEngine {
     /** Executes a persisted timeout action; already-handled tasks are a successful no-op. */
     @Transactional
     public boolean completeTaskTimeout(Long jobId) {
+        WorkflowJob initial = workflowJobMapper.selectById(jobId);
+        if (initial == null) return false;
+        ProcessInstance instance = processInstanceMapper.selectForUpdate(initial.getProcInstId());
         WorkflowJob job = workflowJobMapper.selectForUpdate(jobId);
         if (job == null || !"TASK_TIMEOUT".equals(job.getJobType())
             || !"RUNNING".equals(job.getStatus())) return false;
-        TaskEntity task = taskMapper.selectById(job.getTaskId());
-        if (task == null || !"PENDING".equals(task.getStatus())) {
+        TaskEntity task = taskMapper.selectForUpdate(job.getTaskId());
+        if (instance == null || !"RUNNING".equals(instance.getStatus())
+            || task == null || !Objects.equals(task.getProcInstId(), instance.getId())
+            || !"PENDING".equals(task.getStatus())) {
             finishTimeoutJob(job, "task already completed");
             return false;
         }
@@ -788,7 +808,7 @@ public class ProcessEngine {
             force ? "FORCE_REJECT" : "REJECT", operatorId, command.comment());
 
         if (previous == null) {
-            FormData formData = formDataMapper.selectById(instance.getFormDataId());
+            FormData formData = formDataMapper.selectRuntimeById(instance.getFormDataId());
             if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
             formData.setStatus("NEEDS_REVISION");
             formDataMapper.updateById(formData);
@@ -857,11 +877,16 @@ public class ProcessEngine {
         if (instance == null) {
             throw new BizException("NOT_FOUND", "instance not found");
         }
+        authorizationService.requireConfirmedInstance(instance.getId());
         TaskEntity current = taskMapper.selectForUpdate(taskId);
         if (current == null || !Objects.equals(current.getProcInstId(), instance.getId())
             || !"PENDING".equals(current.getStatus())) {
             throw new BizException("TASK_NOT_PENDING", "Task not pending");
         }
+        if (!"RUNNING".equals(instance.getStatus())) {
+            throw new BizException("BAD_INSTANCE_STATE", "终态流程不能继续处理任务");
+        }
+        if (runtimeV2 != null) runtimeV2.requireActiveTask(current, instance);
         return new LockedTask(current, instance);
     }
 
@@ -915,7 +940,7 @@ public class ProcessEngine {
                 throw new BizException("FORM_DATA_INVALID", "字段不可编辑: " + key);
             }
         }
-        FormData formData = formDataMapper.selectById(pi.getFormDataId());
+        FormData formData = formDataMapper.selectRuntimeById(pi.getFormDataId());
         if (formData == null) {
             throw new BizException("NOT_FOUND", "form data not found");
         }
@@ -931,6 +956,11 @@ public class ProcessEngine {
             merged, editable);
         formData.setData(writeJson(merged));
         formDataMapper.updateById(formData);
+        Map<String, String> modes = new LinkedHashMap<>();
+        readTree(schema == null ? fd.getSchema() : schema).forEach(node ->
+            modes.put(node.path("id").asText(),
+                editable.contains(node.path("id").asText()) ? "EDITABLE" : "READONLY"));
+        mediaValidator.validate(formData.getId(), modes);
         if (runtimeV2 != null && runtimeV2.active(pi)) {
             long revisionId = runtimeV2.createRevision(formData, "SUBMITTED", "NODE_EDIT",
                 operatorId);
@@ -1092,7 +1122,7 @@ public class ProcessEngine {
     }
 
     private JsonNode readFormData(Long formDataId) {
-        FormData fd = formDataMapper.selectById(formDataId);
+        FormData fd = formDataMapper.selectRuntimeById(formDataId);
         if (fd == null) return json.createObjectNode();
         return readTreeOrEmpty(fd.getData());
     }
@@ -1102,7 +1132,7 @@ public class ProcessEngine {
         if (runtimeV2 != null && runtimeV2.active(instance)) {
             return readTree(runtimeV2.processTree(instance));
         }
-        FormData data = formDataMapper.selectById(instance.getFormDataId());
+        FormData data = formDataMapper.selectRuntimeById(instance.getFormDataId());
         FormDefinition form = data == null ? null
             : formDefinitionService.getById(data.getFormDefId());
         if (form == null) return readTree(instance.getProcessSnapshot());
@@ -1177,7 +1207,7 @@ public class ProcessEngine {
         rework.setOperationKind("REWORK");
         taskMapper.insert(rework);
 
-        FormData formData = formDataMapper.selectById(instance.getFormDataId());
+        FormData formData = formDataMapper.selectRuntimeById(instance.getFormDataId());
         if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
         formData.setStatus("NEEDS_REVISION");
         formDataMapper.updateById(formData);

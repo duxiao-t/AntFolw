@@ -15,12 +15,49 @@ import static org.mockito.Mockito.when;
 
 class DepartmentServiceTest {
     @Test
+    void crossCompanyParentAndRootSortAreRejectedBeforeWriting() {
+        DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
+        DepartmentService service = service(mapper, Mockito.mock(DepartmentLeaderMapper.class));
+        Department first = dept(2L, null, "d_2", "甲公司");
+        Department other = dept(3L, null, "d_3", "乙公司");
+        other.setCompanyId(2L);
+        when(mapper.selectById(2L)).thenReturn(first);
+        when(mapper.selectById(3L)).thenReturn(other);
+
+        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
+            assertThrows(BizException.class, () -> service.move(2L, 3L)).getCode());
+        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
+            assertThrows(BizException.class, () -> service.movePosition(2L, 3L, "AFTER")).getCode());
+        Department child = dept(null, 3L, null, "新部门");
+        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
+            assertThrows(BizException.class, () -> service.create(child)).getCode());
+        Mockito.verify(mapper, Mockito.never()).insert(any(Department.class));
+        Mockito.verify(mapper, Mockito.never()).updateById(any(Department.class));
+    }
+
+    @Test
+    void moveRejectsSelfAndMixedCompanySubtree() {
+        DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
+        DepartmentService service = service(mapper, Mockito.mock(DepartmentLeaderMapper.class));
+        Department root = dept(2L, null, "d_2", "甲公司");
+        Department child = dept(3L, 2L, "d_2.d_3", "错误归属");
+        child.setCompanyId(2L);
+        when(mapper.selectById(2L)).thenReturn(root);
+        when(mapper.subtree("d_2")).thenReturn(List.of(child));
+
+        assertEquals("BAD_MOVE", assertThrows(BizException.class, () -> service.move(2L, 2L)).getCode());
+        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
+            assertThrows(BizException.class, () -> service.move(2L, null)).getCode());
+        Mockito.verify(mapper, Mockito.never()).updateById(any(Department.class));
+    }
+
+    @Test
     void createUsesStableIdBasedPathSoChineseOrDuplicateNamesDoNotBreakLtree() {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         when(leaderMapper.selectList(any())).thenReturn(List.of());
         when(mapper.selectList(any())).thenReturn(List.of());
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
 
         Department parent = dept(2L, null, "d_2", "研发中心");
         when(mapper.selectById(2L)).thenReturn(parent);
@@ -34,6 +71,7 @@ class DepartmentServiceTest {
         created.setCompanyId(1L);
         created.setParentId(2L);
         created.setName("研发中心");
+        created.setLeaderIds(null);
 
         service.create(created);
 
@@ -45,7 +83,7 @@ class DepartmentServiceTest {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         when(leaderMapper.selectList(any())).thenReturn(List.of());
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
 
         Department root = dept(2L, null, "tech", "Tech");
         Department devops = dept(4L, 2L, "tech.devops", "DevOps");
@@ -68,7 +106,7 @@ class DepartmentServiceTest {
     void setLeadersStoresMultipleLeadersAndKeepsFirstLeaderForCompatibility() {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
         Department department = dept(4L, 2L, "d_2.d_4", "DevOps");
         when(mapper.selectById(4L)).thenReturn(department);
 
@@ -78,14 +116,15 @@ class DepartmentServiceTest {
         assertEquals(5L, updated.getLeaderId());
         verify(leaderMapper).insert(new DepartmentLeader(4L, 5L));
         verify(leaderMapper).insert(new DepartmentLeader(4L, 6L));
-        verify(mapper).updateById(department);
+        verify(mapper).update(Mockito.isNull(),
+            Mockito.<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Department>>any());
     }
 
     @Test
     void moveOrderSwapsWithPreviousSibling() {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
         Department first = dept(2L, null, "d_2", "Tech");
         first.setSortOrder(1);
         Department second = dept(3L, null, "d_3", "HR");
@@ -105,7 +144,7 @@ class DepartmentServiceTest {
     void moveOrderKeepsTopSiblingInPlace() {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
         Department first = dept(2L, null, "d_2", "Tech");
         first.setSortOrder(1);
         Department second = dept(3L, null, "d_3", "HR");
@@ -125,7 +164,7 @@ class DepartmentServiceTest {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
         when(leaderMapper.selectList(any())).thenReturn(List.of());
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
         Department first = dept(2L, null, "d_2", "Tech");
         first.setSortOrder(1);
         Department second = dept(3L, null, "d_3", "HR");
@@ -150,7 +189,7 @@ class DepartmentServiceTest {
     void deleteRejectsDepartmentThatStillHasMembers() {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentLeaderMapper leaderMapper = Mockito.mock(DepartmentLeaderMapper.class);
-        DepartmentService service = new DepartmentService(mapper, leaderMapper);
+        DepartmentService service = service(mapper, leaderMapper);
         Department department = dept(4L, null, "d_4", "Operations");
         when(mapper.selectById(4L)).thenReturn(department);
         when(mapper.selectList(any())).thenReturn(List.of());
@@ -162,6 +201,19 @@ class DepartmentServiceTest {
         assertEquals("部门下仍有成员，请先移动或删除成员", error.getMessage());
         Mockito.verify(mapper, Mockito.never()).deleteById(4L);
     }
+    private static DepartmentService service(DepartmentMapper mapper, DepartmentLeaderMapper leaders) {
+        CompanyMapper companies = Mockito.mock(CompanyMapper.class);
+        when(companies.selectById(1L)).thenReturn(new Company());
+        UserMapper users = Mockito.mock(UserMapper.class);
+        when(users.selectById(Mockito.anyLong())).thenAnswer(call -> {
+            User user = new User();
+            user.setId(call.getArgument(0));
+            user.setDeptId(4L);
+            return user;
+        });
+        return new DepartmentService(mapper, leaders, companies, users);
+    }
+
     private static Department dept(Long id, Long parentId, String path, String name) {
         Department d = new Department();
         d.setId(id);

@@ -1,0 +1,1514 @@
+{
+  "note": "Submit-time shape and constraint contract; expected validity is independent of each implementation. Historical readonly rendering is not revalidated.",
+  "cases": [
+    {
+      "id": "text-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "text",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "内容"
+      },
+      "valid": true
+    },
+    {
+      "id": "text-invalid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "text",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "textarea-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "textarea",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "内容"
+      },
+      "valid": true
+    },
+    {
+      "id": "textarea-invalid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "textarea",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "search-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "search",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "内容"
+      },
+      "valid": true
+    },
+    {
+      "id": "search-invalid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "search",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "scan_code-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "scan_code",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "内容"
+      },
+      "valid": true
+    },
+    {
+      "id": "scan_code-invalid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "scan_code",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "number-zero",
+      "schema": [
+        {
+          "id": "field",
+          "type": "number",
+          "props": {
+            "required": true,
+            "min": 0,
+            "max": 10,
+            "precision": 2
+          }
+        }
+      ],
+      "values": {
+        "field": 0
+      },
+      "valid": true
+    },
+    {
+      "id": "number-bounds",
+      "schema": [
+        {
+          "id": "field",
+          "type": "number",
+          "props": {
+            "max": 10
+          }
+        }
+      ],
+      "values": {
+        "field": 11
+      },
+      "valid": false
+    },
+    {
+      "id": "number-precision",
+      "schema": [
+        {
+          "id": "field",
+          "type": "number",
+          "props": {
+            "precision": 2
+          }
+        }
+      ],
+      "values": {
+        "field": 1.123
+      },
+      "valid": false
+    },
+    {
+      "id": "number-bool",
+      "schema": [
+        {
+          "id": "field",
+          "type": "number",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": false
+      },
+      "valid": false
+    },
+    {
+      "id": "money-zero",
+      "schema": [
+        {
+          "id": "field",
+          "type": "money",
+          "props": {
+            "required": true,
+            "min": 0,
+            "max": 10,
+            "precision": 2
+          }
+        }
+      ],
+      "values": {
+        "field": 0
+      },
+      "valid": true
+    },
+    {
+      "id": "money-bounds",
+      "schema": [
+        {
+          "id": "field",
+          "type": "money",
+          "props": {
+            "max": 10
+          }
+        }
+      ],
+      "values": {
+        "field": 11
+      },
+      "valid": false
+    },
+    {
+      "id": "money-precision",
+      "schema": [
+        {
+          "id": "field",
+          "type": "money",
+          "props": {
+            "precision": 2
+          }
+        }
+      ],
+      "values": {
+        "field": 1.123
+      },
+      "valid": false
+    },
+    {
+      "id": "money-bool",
+      "schema": [
+        {
+          "id": "field",
+          "type": "money",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": false
+      },
+      "valid": false
+    },
+    {
+      "id": "date-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "date",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "2026-10-15"
+      },
+      "valid": true
+    },
+    {
+      "id": "date-invalid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "date",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "time-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "time",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "09:00"
+      },
+      "valid": true
+    },
+    {
+      "id": "time-invalid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "time",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "range-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "date_range",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          "2026-10-15",
+          "2026-10-16"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "range-incomplete",
+      "schema": [
+        {
+          "id": "field",
+          "type": "date_range",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          "2026-10-15",
+          ""
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "select-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "select",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              }
+            ]
+          }
+        }
+      ],
+      "values": {
+        "field": "a"
+      },
+      "valid": true
+    },
+    {
+      "id": "select-array",
+      "schema": [
+        {
+          "id": "field",
+          "type": "select",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          "a"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "radio-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "radio",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              }
+            ]
+          }
+        }
+      ],
+      "values": {
+        "field": "a"
+      },
+      "valid": true
+    },
+    {
+      "id": "radio-array",
+      "schema": [
+        {
+          "id": "field",
+          "type": "radio",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          "a"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "multi_select-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "multi_select",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
+            ]
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "multi_select-scalar",
+      "schema": [
+        {
+          "id": "field",
+          "type": "multi_select",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "a"
+      },
+      "valid": false
+    },
+    {
+      "id": "multi_select-max",
+      "schema": [
+        {
+          "id": "field",
+          "type": "multi_select",
+          "props": {
+            "maxChecked": 1
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "checkbox-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checkbox",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
+            ]
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "checkbox-scalar",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checkbox",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "a"
+      },
+      "valid": false
+    },
+    {
+      "id": "checkbox-max",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checkbox",
+          "props": {
+            "maxChecked": 1
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          "a",
+          "b"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "switch-false",
+      "schema": [
+        {
+          "id": "field",
+          "type": "switch",
+          "props": {
+            "required": true
+          }
+        }
+      ],
+      "values": {
+        "field": false
+      },
+      "valid": true
+    },
+    {
+      "id": "switch-string",
+      "schema": [
+        {
+          "id": "field",
+          "type": "switch",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "true"
+      },
+      "valid": false
+    },
+    {
+      "id": "user_picker-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "user_picker",
+          "props": {
+            "required": true
+          }
+        }
+      ],
+      "values": {
+        "field": 7
+      },
+      "valid": true
+    },
+    {
+      "id": "user_picker-multiple",
+      "schema": [
+        {
+          "id": "field",
+          "type": "user_picker",
+          "props": {
+            "multiple": true
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          7,
+          8
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "user_picker-bad",
+      "schema": [
+        {
+          "id": "field",
+          "type": "user_picker",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": -1
+      },
+      "valid": false
+    },
+    {
+      "id": "dept_picker-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "dept_picker",
+          "props": {
+            "required": true
+          }
+        }
+      ],
+      "values": {
+        "field": 7
+      },
+      "valid": true
+    },
+    {
+      "id": "dept_picker-multiple",
+      "schema": [
+        {
+          "id": "field",
+          "type": "dept_picker",
+          "props": {
+            "multiple": true
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          7,
+          8
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "dept_picker-bad",
+      "schema": [
+        {
+          "id": "field",
+          "type": "dept_picker",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": -1
+      },
+      "valid": false
+    },
+    {
+      "id": "file_upload-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "file_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "file_upload-shape",
+      "schema": [
+        {
+          "id": "field",
+          "type": "file_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "local-file"
+      },
+      "valid": false
+    },
+    {
+      "id": "file_upload-processing",
+      "schema": [
+        {
+          "id": "field",
+          "type": "file_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "PROCESSING",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "file_upload-limit",
+      "schema": [
+        {
+          "id": "field",
+          "type": "file_upload",
+          "props": {
+            "maxCount": 1
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          },
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "image_upload-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "image_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "image_upload-shape",
+      "schema": [
+        {
+          "id": "field",
+          "type": "image_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "local-file"
+      },
+      "valid": false
+    },
+    {
+      "id": "image_upload-processing",
+      "schema": [
+        {
+          "id": "field",
+          "type": "image_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "PROCESSING",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "image_upload-limit",
+      "schema": [
+        {
+          "id": "field",
+          "type": "image_upload",
+          "props": {
+            "maxCount": 1
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          },
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "video_upload-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "video_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "video_upload-shape",
+      "schema": [
+        {
+          "id": "field",
+          "type": "video_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "local-file"
+      },
+      "valid": false
+    },
+    {
+      "id": "video_upload-processing",
+      "schema": [
+        {
+          "id": "field",
+          "type": "video_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "PROCESSING",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "video_upload-limit",
+      "schema": [
+        {
+          "id": "field",
+          "type": "video_upload",
+          "props": {
+            "maxCount": 1
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          },
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "audio_upload-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "audio_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "audio_upload-shape",
+      "schema": [
+        {
+          "id": "field",
+          "type": "audio_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": "local-file"
+      },
+      "valid": false
+    },
+    {
+      "id": "audio_upload-processing",
+      "schema": [
+        {
+          "id": "field",
+          "type": "audio_upload",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "PROCESSING",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "audio_upload-limit",
+      "schema": [
+        {
+          "id": "field",
+          "type": "audio_upload",
+          "props": {
+            "maxCount": 1
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          },
+          {
+            "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+            "status": "READY",
+            "contentType": "application/octet-stream"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "checklist-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checklist",
+          "props": {
+            "required": true,
+            "items": [
+              {
+                "id": "one",
+                "label": "项目一",
+                "required": true
+              }
+            ],
+            "results": [
+              {
+                "id": "pass",
+                "label": "通过"
+              },
+              {
+                "id": "fail",
+                "label": "不通过"
+              }
+            ],
+            "photoMaxCount": 1,
+            "descriptionRequiredByResult": {
+              "fail": true
+            }
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "one",
+            "status": "pass"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "checklist-required",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checklist",
+          "props": {
+            "required": true,
+            "items": [
+              {
+                "id": "one",
+                "label": "项目一",
+                "required": true
+              }
+            ],
+            "results": [
+              {
+                "id": "pass",
+                "label": "通过"
+              },
+              {
+                "id": "fail",
+                "label": "不通过"
+              }
+            ],
+            "photoMaxCount": 1,
+            "descriptionRequiredByResult": {
+              "fail": true
+            }
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "one",
+            "status": ""
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "checklist-description",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checklist",
+          "props": {
+            "required": true,
+            "items": [
+              {
+                "id": "one",
+                "label": "项目一",
+                "required": true
+              }
+            ],
+            "results": [
+              {
+                "id": "pass",
+                "label": "通过"
+              },
+              {
+                "id": "fail",
+                "label": "不通过"
+              }
+            ],
+            "photoMaxCount": 1,
+            "descriptionRequiredByResult": {
+              "fail": true
+            }
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "one",
+            "status": "fail"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "checklist-photos",
+      "schema": [
+        {
+          "id": "field",
+          "type": "checklist",
+          "props": {
+            "required": true,
+            "items": [
+              {
+                "id": "one",
+                "label": "项目一",
+                "required": true
+              }
+            ],
+            "results": [
+              {
+                "id": "pass",
+                "label": "通过"
+              },
+              {
+                "id": "fail",
+                "label": "不通过"
+              }
+            ],
+            "photoMaxCount": 1,
+            "descriptionRequiredByResult": {
+              "fail": true
+            }
+          }
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "id": "one",
+            "status": "fail",
+            "images": [
+              {
+                "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+                "status": "READY",
+                "contentType": "application/octet-stream"
+              },
+              {
+                "id": "d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60",
+                "status": "READY",
+                "contentType": "application/octet-stream"
+              }
+            ]
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "location-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "location",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {
+          "latitude": 30,
+          "longitude": 120,
+          "accuracy": 0,
+          "coordinateSystem": "WGS84"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "location-bounds",
+      "schema": [
+        {
+          "id": "field",
+          "type": "location",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": {
+          "latitude": 91,
+          "longitude": 120
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "description-no-value",
+      "schema": [
+        {
+          "id": "field",
+          "type": "description",
+          "props": {}
+        }
+      ],
+      "values": {
+        "field": null
+      },
+      "valid": true
+    },
+    {
+      "id": "span-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "span_layout",
+          "props": {},
+          "children": [
+            {
+              "id": "child",
+              "type": "text"
+            }
+          ]
+        }
+      ],
+      "values": {
+        "field": null
+      },
+      "valid": true
+    },
+    {
+      "id": "table-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "table_list",
+          "props": {
+            "minRows": 1,
+            "maxRows": 2
+          },
+          "children": [
+            {
+              "id": "child",
+              "type": "text",
+              "props": {
+                "required": true
+              }
+            }
+          ]
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "child": "内容"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "table-optional-empty",
+      "schema": [
+        {
+          "id": "field",
+          "type": "table_list",
+          "props": {
+            "minRows": 1,
+            "maxRows": 2
+          },
+          "children": [
+            {
+              "id": "child",
+              "type": "text",
+              "props": {
+                "required": true
+              }
+            }
+          ]
+        }
+      ],
+      "values": {
+        "field": []
+      },
+      "valid": true
+    },
+    {
+      "id": "table-required-child",
+      "schema": [
+        {
+          "id": "field",
+          "type": "table_list",
+          "props": {
+            "minRows": 1,
+            "maxRows": 2
+          },
+          "children": [
+            {
+              "id": "child",
+              "type": "text",
+              "props": {
+                "required": true
+              }
+            }
+          ]
+        }
+      ],
+      "values": {
+        "field": [
+          {
+            "child": ""
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "table-shape",
+      "schema": [
+        {
+          "id": "field",
+          "type": "table_list",
+          "props": {
+            "minRows": 1,
+            "maxRows": 2
+          },
+          "children": [
+            {
+              "id": "child",
+              "type": "text",
+              "props": {
+                "required": true
+              }
+            }
+          ]
+        }
+      ],
+      "values": {
+        "field": "bad"
+      },
+      "valid": false
+    },
+    {
+      "id": "matrix-valid",
+      "schema": [
+        {
+          "id": "field",
+          "type": "matrix_fill",
+          "props": {
+            "rows": [
+              {
+                "id": "row_1",
+                "label": "行1"
+              }
+            ],
+            "columns": [
+              {
+                "id": "col_1",
+                "label": "列1"
+              }
+            ],
+            "cellType": "number",
+            "maxRows": 20,
+            "maxColumns": 10,
+            "precision": 2,
+            "required": true,
+            "min": 0
+          }
+        }
+      ],
+      "values": {
+        "field": {
+          "cells": {
+            "row_1": {
+              "col_1": 0
+            }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "matrix-required",
+      "schema": [
+        {
+          "id": "field",
+          "type": "matrix_fill",
+          "props": {
+            "rows": [
+              {
+                "id": "row_1",
+                "label": "行1"
+              }
+            ],
+            "columns": [
+              {
+                "id": "col_1",
+                "label": "列1"
+              }
+            ],
+            "cellType": "number",
+            "maxRows": 20,
+            "maxColumns": 10,
+            "precision": 2,
+            "required": true,
+            "min": 0
+          }
+        }
+      ],
+      "values": {
+        "field": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "matrix-precision",
+      "schema": [
+        {
+          "id": "field",
+          "type": "matrix_fill",
+          "props": {
+            "rows": [
+              {
+                "id": "row_1",
+                "label": "行1"
+              }
+            ],
+            "columns": [
+              {
+                "id": "col_1",
+                "label": "列1"
+              }
+            ],
+            "cellType": "number",
+            "maxRows": 20,
+            "maxColumns": 10,
+            "precision": 2,
+            "required": true,
+            "min": 0
+          }
+        }
+      ],
+      "values": {
+        "field": {
+          "cells": {
+            "row_1": {
+              "col_1": 1.234
+            }
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "rules-precedence",
+      "schema": [
+        {
+          "id": "field",
+          "type": "text",
+          "props": {
+            "required": true,
+            "maxLength": 1
+          },
+          "rules": {
+            "maxLength": 10
+          }
+        }
+      ],
+      "values": {
+        "field": "long"
+      },
+      "valid": true
+    },
+    {
+      "id": "rules-required",
+      "schema": [
+        {
+          "id": "field",
+          "type": "text",
+          "props": {
+            "required": false
+          },
+          "rules": {
+            "required": true
+          }
+        }
+      ],
+      "values": {
+        "field": ""
+      },
+      "valid": false
+    },
+    {
+      "id": "rules-pattern",
+      "schema": [
+        {
+          "id": "field",
+          "type": "text",
+          "props": {},
+          "rules": {
+            "pattern": "^\\d+$"
+          }
+        }
+      ],
+      "values": {
+        "field": "abc"
+      },
+      "valid": false
+    }
+  ]
+}

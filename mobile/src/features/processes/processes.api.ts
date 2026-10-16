@@ -1,52 +1,57 @@
+import type { AntFlowAPI } from '../../../../shared/api.generated';
+import type { Contract } from '../../shared/api/types';
 import { apiRequest } from '../../shared/api/http';
 import type { MobileSchemaNode } from '../forms/schema/types';
 import type { ApprovalRecord, ApprovalSummary } from '../tasks/tasks.api';
 
-export type MobileHistoryItem = {
-  id: number;
-  fromNodeId?: string | null;
-  toNodeId?: string | null;
-  taskId?: number | null;
-  action: string;
-  operatorId?: number | null;
-  comment?: string | null;
-  createdAt: string;
-};
+export type MobileHistoryItem = import('../tasks/tasks.api').MobileHistoryItem;
 
-export type MobileProcessFile = {
-  id: string;
-  name: string;
-  contentType: string;
-  size: number;
-  contentUrl: string;
-};
+export type MobileProcessFile = import('../tasks/tasks.api').MobileTaskFile;
 
-export type MobileInstanceDetail = {
-  visibility: 'FULL' | 'SUMMARY';
-  id: number;
-  status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
+export type MobileInstanceDetail = Omit<
+  Contract<
+    AntFlowAPI.MobileInstanceDetailDto,
+    'visibility' | 'id' | 'status' | 'canWithdraw'
+  >,
+  | 'formName'
+  | 'businessNo'
+  | 'applicantName'
+  | 'applicantEmployeeNo'
+  | 'applicantDepartment'
+  | 'currentNodeName'
+  | 'schema'
+  | 'formData'
+  | 'processSnapshot'
+  | 'history'
+  | 'files'
+  | 'approvalSummary'
+  | 'approvalRecords'
+> & {
   formName?: string | null;
   businessNo?: string | null;
   applicantName?: string | null;
   applicantEmployeeNo?: string | null;
   applicantDepartment?: string | null;
-  startedAt?: string;
   currentNodeName?: string | null;
   schema?: MobileSchemaNode[] | null;
-  formData?: Record<string, unknown> | null;
   processSnapshot?: unknown;
+  formData?: Record<string, unknown> | null;
   history?: MobileHistoryItem[];
-  canWithdraw: boolean;
   files?: MobileProcessFile[];
   approvalSummary: ApprovalSummary;
   approvalRecords: ApprovalRecord[];
 };
 
 export async function fetchMobileInstanceDetail(instanceId: number) {
-  return apiRequest<MobileInstanceDetail>(`/api/mobile/instances/${instanceId}`);
+  return apiRequest<MobileInstanceDetail>(
+    `/api/mobile/instances/${instanceId}`,
+  );
 }
 
-export async function withdrawMobileInstance(instanceId: number, idempotencyKey: string) {
+export async function withdrawMobileInstance(
+  instanceId: number,
+  idempotencyKey: string,
+) {
   await apiRequest<void>(`/api/mobile/instances/${instanceId}/withdraw`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },

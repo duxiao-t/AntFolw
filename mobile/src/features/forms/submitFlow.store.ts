@@ -6,6 +6,8 @@ export type SubmitFlowState = {
   formCode: string | null;
   draftId: number | null;
   reworkTaskId: number | null;
+  /** P4a：填写页选定的公司归属，带到确认页（进幂等键）。有部门的人这里是 null，服务端按身份推导。 */
+  companyId: number | null;
   values: MobileFormValues;
   selfSelected: Record<string, number[]>;
   selfSelectedUsers: Record<number, SelfSelectAssignee>;
@@ -34,11 +36,12 @@ export const useSubmitFlowStore = create<SubmitFlowState>((set) => ({
   formCode: null,
   draftId: null,
   reworkTaskId: null,
+  companyId: null,
   values: {},
   selfSelected: {},
   selfSelectedUsers: {},
   reset() {
-    set({ formCode: null, draftId: null, reworkTaskId: null, values: {}, selfSelected: {}, selfSelectedUsers: {} });
+    set({ formCode: null, draftId: null, reworkTaskId: null, companyId: null, values: {}, selfSelected: {}, selfSelectedUsers: {} });
   },
 }));
 
@@ -47,16 +50,19 @@ export function beginSubmitFlow({
   draftId,
   values,
   reworkTaskId = null,
+  companyId = null,
 }: {
   formCode: string;
   draftId: number | null;
   values: MobileFormValues;
   reworkTaskId?: number | null;
+  companyId?: number | null;
 }) {
   useSubmitFlowStore.setState({
     formCode,
     draftId,
     reworkTaskId,
+    companyId,
     values,
     selfSelected: {},
     selfSelectedUsers: {},

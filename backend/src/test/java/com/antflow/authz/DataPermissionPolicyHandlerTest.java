@@ -40,8 +40,8 @@ class DataPermissionPolicyHandlerTest {
         assertThat(handler.getSqlSegment(new Table("t_task"), null, FORM_DATA_STATEMENT))
             .as("未配置的表不注入").isNull();
         assertThat(handler.getSqlSegment(FORM_DATA_TABLE, null,
-            "com.antflow.form.runtime.FormDataMapper.selectById"))
-            .as("未开启的语句不注入").isNull();
+            "com.antflow.form.runtime.UnrelatedMapper.selectById"))
+            .as("非受控 mapper 不注入").isNull();
     }
 
     @Test
@@ -54,7 +54,7 @@ class DataPermissionPolicyHandlerTest {
     void administratorInjectsNothing() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                true, true, false, 7L, Set.of())));
+                true, true, false, 7L, Set.of(), 1L)));
 
         assertThat(handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)).isNull();
     }
@@ -63,23 +63,24 @@ class DataPermissionPolicyHandlerTest {
     void nonAdminAllScopeDoesNotDependOnFormUsageGrant() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, true, false, 7L, Set.of())));
+                false, true, false, 7L, Set.of(), 1L)));
 
         String segment = handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)
             .toString();
 
-        assertThat(segment).isEqualTo("1 = 1").doesNotContain("t_form_resource_grant");
+        assertThat(segment).contains("t_form_data.company_id = 1", "company_inferred = false")
+            .doesNotContain("t_form_resource_grant");
     }
 
     @Test
     void missingCapabilityFailsClosed() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, false, 7L, Set.of())));
+                false, false, false, 7L, Set.of(), 1L)));
 
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of()));
+            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(), 1L));
 
         assertThat(segment).contains("1 = 0");
     }
@@ -88,7 +89,7 @@ class DataPermissionPolicyHandlerTest {
     void selfScopeUsesOwnerColumnWithoutFormUsageGrant() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of()));
+            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(), 1L));
 
         assertThat(segment).contains("t_form_data.created_by = 7");
         assertThat(segment).doesNotContain("t_form_resource_grant");
@@ -102,7 +103,7 @@ class DataPermissionPolicyHandlerTest {
         aliased.setAlias(new net.sf.jsqlparser.expression.Alias("fd"));
         String segment = DataPermissionPolicyHandler.buildSegment(aliased,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(3L, 5L)));
+            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(3L, 5L), 1L));
 
         assertThat(segment).contains("scope_pi.form_data_id = fd.id");
         assertThat(segment).contains("scope_pi.started_dept_id IN (3,5)");
@@ -114,7 +115,7 @@ class DataPermissionPolicyHandlerTest {
     void selfAndDepartmentScopesAreUnioned() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(3L)));
+            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(3L), 1L));
 
         assertThat(segment).contains(" OR ");
         assertThat(segment).contains("t_form_data.created_by = 7");
@@ -125,7 +126,7 @@ class DataPermissionPolicyHandlerTest {
     void formDefinitionListRequiresMaintainerAndIgnoresDepartmentScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DEFINITION_TABLE,
             DataPermissionRules.FORM_DEFINITION,
-            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
+            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L), 1L));
 
         assertThat(segment).contains("t_form_maintainer");
         assertThat(segment).contains("maintainer.user_id = 5");
@@ -138,14 +139,17 @@ class DataPermissionPolicyHandlerTest {
     void formDataListRequiresOnlyCapabilityScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
+            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L), 1L));
 
-        assertThat(segment).startsWith("(EXISTS (SELECT 1 FROM t_process_instance");
+        assertThat(segment).contains("EXISTS (SELECT 1 FROM t_process_instance",
+            "t_form_data.company_id = 1", "company_inferred = false");
         assertThat(segment).doesNotContain("t_form_resource_grant");
     }
 
     @Test
     void scopeRegistrationMatchesSnapshotInsteadOfAllowingEverything() {
+        org.springframework.test.util.ReflectionTestUtils.setField(authorizationService, "jdbcTemplate",
+            Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class));
         // 证明 handler 依赖的是 AuthorizationService 的有效范围，而不是自行猜测
         var role = new AuthorizationService.RoleGrant(1L, "dept_manager",
             DataScope.DEPARTMENT, Set.of());
@@ -171,7 +175,7 @@ class DataPermissionPolicyHandlerTest {
             .extracting(DataPermissionRules.Rule::table, DataPermissionRules.Rule::statements)
             .containsExactly(
                 org.assertj.core.groups.Tuple.tuple("t_form_data",
-                    Set.of("com.antflow.form.runtime.FormDataMapper.selectList")),
+                    Set.of("com.antflow.form.runtime.FormDataMapper.select")),
                 org.assertj.core.groups.Tuple.tuple("t_form_definition",
                     Set.of("com.antflow.form.FormDefinitionMapper.selectSummaryPage")));
     }

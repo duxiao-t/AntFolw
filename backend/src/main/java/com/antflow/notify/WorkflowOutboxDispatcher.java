@@ -45,6 +45,7 @@ public class WorkflowOutboxDispatcher {
                 UPDATE t_workflow_outbox SET locked_at = now()
                 WHERE status = 'RUNNING' AND locked_by = ?
                   AND locked_at < now() - interval '30 seconds'
+                  AND locked_at > now() - interval '2 minutes'
                 """, workerId);
         } catch (Exception error) {
             log.warn("Workflow outbox lease renewal failed: {}", error.toString());
@@ -74,6 +75,7 @@ public class WorkflowOutboxDispatcher {
     void deliver(Event event) {
         try {
             JsonNode payload = json.readTree(event.payload());
+            String message = payload.path("message").asText(title(event.type()));
             Long taskId = payload.path("taskId").isNumber()
                 ? payload.path("taskId").asLong() : null;
             if (event.recipientId() != null) {
@@ -81,11 +83,11 @@ public class WorkflowOutboxDispatcher {
                     INSERT INTO t_user_notification(event_id, user_id, event_type, title, payload)
                     VALUES (?, ?, ?, ?, ?::jsonb)
                     ON CONFLICT (event_id, user_id) DO NOTHING
-                    """, event.id(), event.recipientId(), event.type(), title(event.type()),
+                    """, event.id(), event.recipientId(), event.type(), message,
                     event.payload());
             }
             publisher.publishReliable(new NotificationEvent(this, event.type(), event.instanceId(),
-                taskId, event.recipientId(), title(event.type()), deliveryKey(event, payload)));
+                taskId, event.recipientId(), message, deliveryKey(event, payload)));
             jdbc.update("""
                 UPDATE t_workflow_outbox
                 SET status = 'DELIVERED', delivered_at = now(),

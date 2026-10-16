@@ -33,7 +33,14 @@ class TaskOperationServiceTest {
         historyMapper = Mockito.mock(TaskHistoryMapper.class);
         instanceMapper = Mockito.mock(ProcessInstanceMapper.class);
         notifier = Mockito.mock(NotificationPublisher.class);
-        ops = new TaskOperationService(taskMapper, historyMapper, instanceMapper, notifier);
+        ops = new TaskOperationService(taskMapper, historyMapper, instanceMapper, notifier,
+            Mockito.mock(com.antflow.authz.AuthorizationService.class));
+        ProcessInstance running = new ProcessInstance();
+        running.setId(1L);
+        running.setStatus("RUNNING");
+        Mockito.when(instanceMapper.selectForUpdate(1L)).thenReturn(running);
+        Mockito.when(taskMapper.selectForUpdate(Mockito.anyLong()))
+            .thenAnswer(call -> taskMapper.selectById(call.getArgument(0)));
         // 默认 insert 行为：分配 id
         Mockito.doAnswer(inv -> {
             TaskEntity t = inv.getArgument(0);
@@ -110,6 +117,25 @@ class TaskOperationServiceTest {
     }
 
     // ---------- 2. delegate ----------
+    @Test
+    void reworkTasksCannotBeTransferredDelegatedOrAddedToAndRootCannotBeRecalled() {
+        loginAs(42L);
+        TaskEntity rework = parentTask(100L, 42L, "PENDING");
+        rework.setTaskType("REWORK");
+        Mockito.when(taskMapper.selectById(100L)).thenReturn(rework);
+        assertThatThrownBy(() -> ops.transfer(100L, 99L, "x"))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+        assertThatThrownBy(() -> ops.delegate(100L, 99L, "x"))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+        assertThatThrownBy(() -> ops.addAssignee(100L, 99L, "x"))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+        assertThatThrownBy(() -> ops.recallChild(100L, "x"))
+            .isInstanceOf(com.antflow.engine.BizException.class);
+        Mockito.verify(taskMapper, Mockito.never()).updateById(any(TaskEntity.class));
+        Mockito.verify(taskMapper, Mockito.never()).insert(any(TaskEntity.class));
+        Mockito.verifyNoInteractions(historyMapper, notifier);
+    }
+
     @Test
     void delegate_keepsParentPending_createsMirrorChild() {
         loginAs(42L);

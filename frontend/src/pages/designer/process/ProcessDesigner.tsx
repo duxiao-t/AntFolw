@@ -52,13 +52,6 @@ function upstreamApprovals(root: TreeNode, id: string): Array<{ id: string; labe
     .map((node) => ({ id: node.id, label: node.name || '审批人' }));
 }
 
-type FormDefinition = {
-  id: number;
-  code: string;
-  name: string;
-  schema?: any[] | string;
-};
-
 function parseJsonValue<T>(value: T | string | undefined, fallback: T): T {
   if (typeof value !== 'string') return value ?? fallback;
   try {
@@ -110,10 +103,12 @@ export function ProcessDesignerSurface({
     })();
   }, [formDefId, load]);
 
-  const { data: formDef } = useQuery<FormDefinition>({
+  const { data: formDef } = useQuery<AntFlowAPI.FormDefinition>({
     queryKey: ['form-def-for-flow', formDefId],
     queryFn: () =>
-      request<FormDefinition>(`/api/forms/definitions/${formDefId}`),
+      request<AntFlowAPI.FormDefinition>(
+        `/api/forms/definitions/${formDefId}`,
+      ),
     enabled: !!formDefId,
   });
   const formSchema = useMemo(

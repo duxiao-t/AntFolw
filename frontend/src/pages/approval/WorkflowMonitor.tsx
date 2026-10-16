@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { request } from '@umijs/max';
 import { Button, Empty, Result, Skeleton, Table, Tag } from 'antd';
 import dayjs from 'dayjs';
+import OutboxEvents from './OutboxEvents';
 import '../Welcome.css';
 
 type StuckInstance = {
@@ -134,6 +135,7 @@ export default function WorkflowMonitor() {
         </article>
       </section>
 
+      <OutboxEvents />
       <div className="workplace-main-grid">
         <section className="workplace-section">
           <div className="section-heading"><div><p className="section-kicker">BLOCKED FLOW</p><h2>卡死实例</h2></div><span className="section-count">{data.stuckInstances.length} 个</span></div>

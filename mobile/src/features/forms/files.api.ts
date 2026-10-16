@@ -1,6 +1,12 @@
 import type { MobileFile } from '../../shared/api/types';
+import type { Contract } from '../../shared/api/types';
+import type { AntFlowAPI } from '../../../../shared/api.generated';
 import { getAuthController } from '../../shared/api/auth';
-import { ApiError, ApiErrorFactory, type ApiErrorBody } from '../../shared/api/errors';
+import {
+  ApiError,
+  ApiErrorFactory,
+  type ApiErrorBody,
+} from '../../shared/api/errors';
 import { apiRequest } from '../../shared/api/http';
 
 export type MobileFileDto = MobileFile;
@@ -24,18 +30,14 @@ export class FileStillProcessingError extends Error {
   }
 }
 
-export type MobilePickerUser = {
-  id: number;
-  displayName: string;
-  username?: string;
-  department?: string | null;
-  employeeNo?: string | null;
+export type MobilePickerUser = Omit<
+  Contract<AntFlowAPI.MobilePickerUserDto, 'id' | 'displayName'>,
+  'department' | 'employeeNo'
+> & {
+  department?: AntFlowAPI.MobilePickerUserDto['department'] | null;
+  employeeNo?: AntFlowAPI.MobilePickerUserDto['employeeNo'] | null;
 };
-
-export type MobilePickerDept = {
-  id: number;
-  name: string;
-};
+export type MobilePickerDept = Required<AntFlowAPI.MobilePickerDepartmentDto>;
 
 /**
  * 设计器给「用户选择」字段配的候选范围。参数名与桌面 /api/users 完全一致，
@@ -56,19 +58,36 @@ export async function searchMobileUsers(
   keyword: string,
   scope: MobileUserScope = {},
 ): Promise<MobilePickerUser[]> {
-  return apiRequest<MobilePickerUser[]>(withQuery(endpoint, { keyword: keyword.trim(), ...scope }));
+  return apiRequest<MobilePickerUser[]>(
+    withQuery(endpoint, { keyword: keyword.trim(), ...scope }),
+  );
 }
 
-export async function fetchMobileUser(endpoint: string, id: number): Promise<MobilePickerUser> {
-  return apiRequest<MobilePickerUser>(`${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`);
+export async function fetchMobileUser(
+  endpoint: string,
+  id: number,
+): Promise<MobilePickerUser> {
+  return apiRequest<MobilePickerUser>(
+    `${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`,
+  );
 }
 
-export async function fetchMobileDepartment(endpoint: string, id: number): Promise<MobilePickerDept> {
-  return apiRequest<MobilePickerDept>(`${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`);
+export async function fetchMobileDepartment(
+  endpoint: string,
+  id: number,
+): Promise<MobilePickerDept> {
+  return apiRequest<MobilePickerDept>(
+    `${endpoint.replace(/\?.*$/, '').replace(/\/$/, '')}/${id}`,
+  );
 }
 
-export async function searchMobileDepartments(endpoint: string, keyword: string): Promise<MobilePickerDept[]> {
-  return apiRequest<MobilePickerDept[]>(withQuery(endpoint, { keyword: keyword.trim() }));
+export async function searchMobileDepartments(
+  endpoint: string,
+  keyword: string,
+): Promise<MobilePickerDept[]> {
+  return apiRequest<MobilePickerDept[]>(
+    withQuery(endpoint, { keyword: keyword.trim() }),
+  );
 }
 
 export async function uploadMobileFile(
@@ -85,7 +104,11 @@ export async function uploadMobileFile(
     }
   }
   if (onProgress && typeof XMLHttpRequest !== 'undefined') {
-    const uploaded = await uploadMobileFileWithProgress(endpoint, formData, onProgress);
+    const uploaded = await uploadMobileFileWithProgress(
+      endpoint,
+      formData,
+      onProgress,
+    );
     return waitForProcessedFile(uploaded, onProgress);
   }
   const uploaded = await apiRequest<MobileFileDto>(endpoint, {
@@ -149,15 +172,27 @@ function uploadMobileFileWithProgress(
         return;
       }
       if (event.loaded >= event.total) {
-        emitProgress(onProgress, progressState, { phase: 'uploading', progress: 95 });
-        emitProgress(onProgress, progressState, { phase: 'processing', progress: 96 });
+        emitProgress(onProgress, progressState, {
+          phase: 'uploading',
+          progress: 95,
+        });
+        emitProgress(onProgress, progressState, {
+          phase: 'processing',
+          progress: 96,
+        });
         return;
       }
-      const progress = Math.min(95, Math.max(1, Math.round((event.loaded / event.total) * 100)));
+      const progress = Math.min(
+        95,
+        Math.max(1, Math.round((event.loaded / event.total) * 100)),
+      );
       emitProgress(onProgress, progressState, { phase: 'uploading', progress });
     };
     xhr.upload.onload = () => {
-      emitProgress(onProgress, progressState, { phase: 'processing', progress: 96 });
+      emitProgress(onProgress, progressState, {
+        phase: 'processing',
+        progress: 96,
+      });
     };
     xhr.onerror = () => rejectOnce(new Error('网络异常，文件上传失败'));
     xhr.onabort = () => rejectOnce(new Error('文件上传已取消'));
@@ -178,15 +213,30 @@ function uploadMobileFileWithProgress(
       }
       settled = true;
       clearFallback();
-      if (xhr.status === 401 && !retry && !controller.isAuthEndpoint(endpoint)) {
-        void controller.refresh()
-          .then(() => uploadMobileFileWithProgress(endpoint, formData, onProgress, true, progressState))
+      if (
+        xhr.status === 401 &&
+        !retry &&
+        !controller.isAuthEndpoint(endpoint)
+      ) {
+        void controller
+          .refresh()
+          .then(() =>
+            uploadMobileFileWithProgress(
+              endpoint,
+              formData,
+              onProgress,
+              true,
+              progressState,
+            ),
+          )
           .then(resolve, reject);
         return;
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          const metadata = JSON.parse(xhr.responseText || '{}') as MobileFileDto;
+          const metadata = JSON.parse(
+            xhr.responseText || '{}',
+          ) as MobileFileDto;
           resolve(metadata);
         } catch {
           reject(new Error('文件上传响应解析失败'));
@@ -213,7 +263,12 @@ function uploadMobileFileWithProgress(
       // ponytail: bounded synthetic progress for WebViews that omit upload byte events;
       // replace with streaming transport progress if the platform exposes it reliably.
       fallbackTimer = setInterval(() => {
-        if (settled || progressState.phase !== 'uploading' || progressState.progress >= 90) return;
+        if (
+          settled ||
+          progressState.phase !== 'uploading' ||
+          progressState.progress >= 90
+        )
+          return;
         emitProgress(onProgress, progressState, {
           phase: 'uploading',
           progress: Math.min(90, Math.max(1, progressState.progress + 3)),
@@ -221,14 +276,20 @@ function uploadMobileFileWithProgress(
       }, 500);
     }
     if (!retry) {
-      emitProgress(onProgress, progressState, { phase: 'uploading', progress: 0 });
+      emitProgress(onProgress, progressState, {
+        phase: 'uploading',
+        progress: 0,
+      });
     }
     startFallback();
     xhr.send(formData);
   });
 }
 
-export async function waitForProcessedFile(file: MobileFileDto, onProgress?: UploadProgressHandler) {
+export async function waitForProcessedFile(
+  file: MobileFileDto,
+  onProgress?: UploadProgressHandler,
+) {
   if (file.status !== 'PROCESSING') {
     onProgress?.({ phase: 'done', progress: 100 });
     return file;
@@ -256,11 +317,16 @@ export async function waitForProcessedFile(file: MobileFileDto, onProgress?: Upl
   throw new FileStillProcessingError(latest);
 }
 
-async function fetchMobileFileBlobWithAuth(contentUrl: string, retry = false): Promise<Blob> {
+async function fetchMobileFileBlobWithAuth(
+  contentUrl: string,
+  retry = false,
+): Promise<Blob> {
   const url = new URL(contentUrl, window.location.origin);
-  if (url.origin !== window.location.origin
-    || !/^\/api\/mobile\/files\/[^/]+\/content$/.test(url.pathname)
-    || contentUrl.includes('\\')) {
+  if (
+    url.origin !== window.location.origin ||
+    !/^\/api\/mobile\/files\/[^/]+\/content$/.test(url.pathname) ||
+    contentUrl.includes('\\')
+  ) {
     throw new Error('无效的附件地址');
   }
   const controller = getAuthController();
@@ -276,7 +342,11 @@ async function fetchMobileFileBlobWithAuth(contentUrl: string, retry = false): P
     headers,
     credentials: 'include',
   });
-  if (response.status === 401 && !retry && !controller.isAuthEndpoint(contentUrl)) {
+  if (
+    response.status === 401 &&
+    !retry &&
+    !controller.isAuthEndpoint(contentUrl)
+  ) {
     await controller.refresh();
     return fetchMobileFileBlobWithAuth(contentUrl, true);
   }
@@ -327,18 +397,30 @@ function emitProgress(
 function apiErrorFromXhr(xhr: XMLHttpRequest) {
   let raw: Partial<ApiErrorBody> | null = null;
   try {
-    raw = JSON.parse(xhr.responseText || 'null') as Partial<ApiErrorBody> | null;
+    raw = JSON.parse(
+      xhr.responseText || 'null',
+    ) as Partial<ApiErrorBody> | null;
   } catch {
     raw = null;
   }
-  const retryAfter = Number.parseFloat(xhr.getResponseHeader('Retry-After') ?? '');
+  const retryAfter = Number.parseFloat(
+    xhr.getResponseHeader('Retry-After') ?? '',
+  );
   return new ApiError(xhr.status, {
     code: typeof raw?.code === 'string' ? raw.code : `HTTP_${xhr.status}`,
-    message: typeof raw?.message === 'string' ? raw.message : xhr.statusText || 'Request failed',
+    message:
+      typeof raw?.message === 'string'
+        ? raw.message
+        : xhr.statusText || 'Request failed',
     traceId: typeof raw?.traceId === 'string' ? raw.traceId : undefined,
     fieldErrors: Array.isArray(raw?.fieldErrors)
-      ? raw.fieldErrors.filter((entry): entry is { field: string; message: string } =>
-          Boolean(entry && typeof entry.field === 'string' && typeof entry.message === 'string'),
+      ? raw.fieldErrors.filter(
+          (entry): entry is { field: string; message: string } =>
+            Boolean(
+              entry &&
+                typeof entry.field === 'string' &&
+                typeof entry.message === 'string',
+            ),
         )
       : undefined,
     retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,

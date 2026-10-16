@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "skipLibCheck": false,
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src/services/antflow/typings.d.ts"]
+}

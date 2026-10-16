@@ -10,6 +10,7 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.org.CompanyAttribution;
 import com.antflow.process.DefinitionVersionRepository;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class InstanceController {
     private final AuditService auditService;
     private final FormDefinitionService formDefinitionService;
     private final FormDataMapper formDataMapper;
+    private final CompanyAttribution companyAttribution;
     @Autowired(required = false)
     private DefinitionVersionRepository definitionVersions;
 
@@ -44,7 +46,11 @@ public class InstanceController {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        return auditService.execute(() -> engine.start(cmd, p.userId()), result ->
+        // 归属按**身份**解析（请求里的 companyId 只对无部门的全局管理员有意义），引擎只收已解析的值。
+        Long companyId = companyAttribution.resolve(cmd.companyId());
+        StartCmd resolved = new StartCmd(cmd.formCode(), cmd.data(), cmd.selfSelected(),
+            companyId);
+        return auditService.execute(() -> engine.start(resolved, p.userId()), result ->
             auditService.success("workflow.instance.start", "PROCESS_INSTANCE",
                 result.get("instanceId"), AuditService.RiskLevel.NORMAL,
                 Map.of("changedFields", List.of("status", "startedBy", "startedAt",
@@ -114,7 +120,7 @@ public class InstanceController {
             result.put("instance", summaryInstance(pi));
             result.put("tasks", tasks.stream().map(InstanceController::summaryTask).toList());
         } else {
-            var formData = formDataMapper.selectById(pi.getFormDataId());
+            var formData = formDataMapper.selectRuntimeById(pi.getFormDataId());
             var form = formData == null ? null : formDefinitionService.getById(formData.getFormDefId());
             result.put("instance", pi);
             result.put("tasks", tasks);

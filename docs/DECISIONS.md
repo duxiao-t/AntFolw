@@ -355,3 +355,452 @@
   - **全项目不再因"未处理错误"而红**；断言失败、测试内抛出的错误照旧会红。丢的是"异步未处理错误"这层安全网——用别的手段补（写用例时自己 `await` 干净、`afterEach` 里 unmount）。
   - 已排除的窄口径修法（别再试）：about:blank / srcdoc / javascript: 都是 origin=null（postMessage 直接 SecurityError）；`disableIframePageLoading` 会让 contentWindow 变 null（spyOn 失败，覆盖一样丢）；自挂 `unhandledRejection` 处理器挡不住（vitest 有自己的监听）；桩 `global.fetch` 也没用（iframe 文档加载走 happy-dom 内部的真实 HTTP）。
   - **教训**：本机全绿不等于 CI 绿——环境相关的未处理错误/类型错误只在 CI 暴露（同一次里还抓到一个 `tsc -b` 的报错，本机 `npm run lint` 不跑 tsc，`vitest` 也不算类型）。改这两处之前，别拿本机绿灯当推送依据。
+
+## D-20261009-data-export-moves-into-form-data-page
+
+- **状态：** accepted
+- **背景：** 「数据导出」原本是「数据与报表」下的独立页面（`report.export` + `/report/export`），但它的内容（表单台账 + 字段列）与「表单管理 → 提交数据」完全同源，用户要在两个入口间来回找。
+- **决策：** 撤下该页面，导出表单改成「提交数据」表格工具栏的「导出」按钮 + 弹窗；默认沿用表格当前的表单/状态/提交人筛选（时间范围仍由弹窗自己给，表格没有这个筛选）。导出接口与能力点 `form:data:export` 不变。
+  - **注册表、`page-capabilities.json`、`t_menu` 行必须同一轮一起删**：`MenuService.loadTree()` 会为每一行的 page_key 调 `PageCapabilityRegistry.require()`，只删一边会让整棵导航报 `MENU_PAGE_KEY_UNKNOWN`。故 V53 顺带推进 `t_menu_revision.version`，让已登录前端重拉导航。
+  - **弹窗由调用方「开着才渲染」**，不要在弹窗内部用 `useEffect` 同步 `defaults`：那样用户改了筛选后，任何一次重渲染都会把输入打回默认值。（先试过 `Modal destroyOnHidden` + `open` prop，实测首次打开拿到的仍是挂载时的旧 `defaults`。）
+- **影响：** `/report/export` 只留一条重定向，不再有独立页面；旧菜单项由 V53 删掉后需要重建 web 镜像才在界面上消失。
+
+## D-20261009-never-run-tsc-build-in-frontend
+
+- **状态：** accepted
+- **背景：** 前端 `npm run tsc` 是 `max setup && tsc --noEmit`（正确的类型检查）。这轮为了"跑一次类型检查"敲了 `npx tsc -b`，而根 `tsconfig.json` 带 `declaration: true` 且没有 `noEmit` → 它在**源码旁边生成了 854 个 `.js`/`.d.ts`**。
+- **决策：** 前端永远只用 `npm run tsc` / `npm run lint`，**不要 `tsc -b`**。
+- **影响：** 一旦生成，vitest 解析 `./ExportModal` 时 **`.js` 优先于 `.tsx`**，测试静默跑在旧的编译产物上——现象是"组件挂载了、effect 也跑了、DOM 却是空的"（改动没生效，怎么改都不对）。排查时先用 `git ls-files --others --exclude-standard -- '*.js' '*.d.ts'` 确认有没有产物；清掉即可（`--exclude-standard` 保证不误删被 gitignore 的 `.umi/` 与已跟踪的 `request-temp.js` 之类真源码）。
+
+## D-20261009-display-condition-cycles-rejected-at-save-and-publish
+
+- **状态：** accepted
+- **背景：** `displayCondition` 的环（互指 A↔B、自指 A→A）是配置错误，但没人拦：前端 `visibleNodeIds` 的判环守卫写成了 `if (!node || !visiting.add(id)) return false;` —— **JS 的 `Set.add` 返回集合本身（恒真）**，`!visiting.add(id)` 恒为 false，等于没判环；上方注释却写着"防住互指条件死循环"。实测互指与自指都 `RangeError: Maximum call stack size exceeded`，而它被 `FormRenderer` 的渲染路径调用，抛在 React 渲染里会让**整页白屏**（表单既打不开也提交不了）。后端 `resolveVisible` 用的是 Java `Set.add`（返回布尔），没有这个 bug。
+- **决策：** **保存与发布都拒绝环**（`BAD_SCHEMA`，消息带环路径如 `a → b → a`）；运行时不崩、按"来源视为不满足"给确定性结果。具体落点：
+  - 后端 `rejectDisplayConditionCycles` 在 `saveDraft`（新建与更新）、`update`、publish 的 `validateSchema` 生效 —— 覆盖导入与直接调 API 的路径。
+  - **故意不放进 `parseSchema`**：它同时被 `validateSubmission` 等提交路径使用，存量已发布表单可能已带环（界面禁止成环是后来的事），在提交路径拒绝会让它们当场填不了。故提交路径保持宽容，只在写路径拒绝。
+  - 前端设计器**不必新增**候选过滤：`useFormDesignerStore.allowedDisplayRuleTargetIds` 早已按"来源必须是 select + 目标必须在来源之后 + `reachesSource` 防回边"限制成环，界面构造不出环；环的真实入口是导入与 API。
+- **影响：** 新保存/发布的表单不会带环；存量带环的表单照常可填可读（确定性结果），清理属后续数据治理。前端新增 `findDisplayConditionCycle`（显式栈，不递归）供保存前提示。
+
+## D-20261009-shared-field-semantics-fixtures
+
+- **状态：** accepted
+- **背景：** 字段可见性/校验/显示文本在三端各有一份实现（桌面 `registry/displayConditions.ts`、移动 `schema/validators.ts`、后端 `FormDefinitionService`，另有 SQL 视图）。已经实际漂移：移动端的 `visibleNodeIds` 是桌面"边走边判"的**旧版拷贝**（条件引用后面才声明的字段时两端结果不同），且 `numberCompare` 漏了"先拒空值"（空数字字段能满足 `gte 0`）。两处都是没人发现的漂移，直到两端显示不一致。
+- **决策：** 建**三端共用的 fixture**（`fixtures/field-semantics/visibility.json`）作为口径的单一约定：每条用例含 schema + values + 期望（可见集合、环路径），期望值**写在 fixture 里、不取自任一实现**；桌面与移动各有一份 `*.fixture.test.ts` 读同一份 JSON，后端在 `FormDefinitionServiceSchemaTest` 里覆盖环的拒绝。实现与 fixture 不一致时**改实现**，只有口径本身变了才动期望，且三端一起动。
+- **影响：** fixture 上线当天就抓到移动端第二个漂移（报告里没有的那处）。后续每加一条语义（新的操作符、新的容器类型）都应先加 fixture 再加实现。这也是把"复制 → 漂移 → 无人发现"变成"红灯"的最便宜手段；在没有共享包机制（两端独立 lockfile、Umi 与 Vite 异构）的前提下，fixture 是当前唯一可行的单一真源载体。
+
+## D-20261009-frontend-import-boundary-gate-with-committed-baseline
+
+- **状态：** accepted
+- **背景：** 桌面端页面之间直接 import 对方的内部实现（`FormManagementWizard` 拿 `designer/*` 的 4 个模块、`RecordList` 拿 `proc/detailPresentation`……共 8 处），改一页会连带改另一页，且这些内部件永远无法单独测。后端这边有 ArchUnit，TS 这边一条都没有。
+- **决策：** 写一个**只拦新增**的小图检查 `frontend/scripts/check-import-boundaries.mjs`，三条规则（页面之间不许互 import 内部件 / `components/**` 不许 import `pages/**` / `utils/**` 不许 import 页面或组件），存量违规冻在 `frontend/import-boundaries.baseline.json`，接进 CI 的 frontend job（`npm run check:boundaries`）。
+  - **不用 Biome 的 `noRestrictedImports` 做主力**：它能表达"某目录不许引某前缀"，但**没有冻结机制**（没有 ArchUnit `FreezingArchRule` 那样的存盘），存量 8 处一上规则就是全红，而 P0 明确不许为"全绿"重构全仓。所以用带基线的脚本；Biome 留给它自己那几条。
+  - 解析用**行锚定的正则**而不是 TS 解析器（不引新依赖）：`^\s*(import|export)…from '…'` + 副作用 import + 动态 `import()`。行锚定顺带避免把注释里的 `// import x from 'y'` 当成真依赖。
+- **影响：** 基线里那 8 条是**已知库存**，不是认可；`--write` 会把已被修掉的条目从基线里去掉并提示，防止基线偷偷膨胀。**本轮顺手清掉了自己刚造的 1 条**（`ExportModal` 跨页面 import `report/Center` → 三个纯函数上移到 `frontend/src/utils/dateRange.ts`）——第 9 条本来是我几分钟前写的，冻进去等于开局就作废门禁。
+
+## D-20261009-health-metrics-baseline-unknown-is-not-zero
+
+- **状态：** accepted
+- **背景：** 审计报告 B4 定了六个健康指标，但"现状值"是那次扫描的快照，没有可执行的载体：不接进 CI 就会随代码漂走，而一旦有人把没测过的量写成 0，门禁会假装通过（报告专门警告过这条）。
+- **决策：** `scripts/health-metrics.mjs`（纯 Node 内置模块，无依赖）+ 实测基线 `docs/health-metrics.baseline.json`，CI 里单独一个 `metrics` job。三条纪律写进脚本注释：**测不到记 `null` 不写 0**；**基线是实测值不是目标值**；**变好不拦（只提示收紧基线）、变差当场红**。
+  - 每条指标自己定义"什么是变差"（`compare()` 里逐条写，不做通用引擎）：H1 缺口集合只许变小；H2 接入渠道只许变多；H3 副本数、H4 运行时数、H5 必需 V2 的可选注入数只许不增；H5 门禁数、H6 预算只许不减/不放松。
+  - **H4 的"活跃 v1 实例数"刻意留 `null`（未测）**：那要连生产库查，CI 拿不到。脚本里同时存下了查法（`SELECT engine_version, status, count(*) FROM t_process_instance GROUP BY 1,2;`），留待有人真去查，而不是拿 0 冒充。
+  - **H6 的实测产物也留 `null`**：体积数字由 mobile 自己的 `check:bundle-budget` 产出并已在 CI 里拦，这里只读它的阈值，不重复实现一套测量。
+- **影响：** 六条指标的当前值现在只有一处可查（基线文件），且"未测"与"为零"在文件里长得不一样。H1 的缺口另外还有 A1 那两条生成物对账测试兜底（缺口只减不增）。
+
+## D-20261009-real-openapi-contract-generate-at-build-time-not-runtime
+
+- **状态：** accepted（**产物已落地**，见 `D-20261010-contract-client-gated-on-both-sides-per-endpoint-types`）
+- **背景：** 审计报告说桌面 codegen"复用已接通的 OpenAPI"——核验后那句是错的：`frontend/config/config.ts` 的 `schemaPath` 指向 `frontend/config/oneapi.json`，其 `info.title` 是 **"Ant Design Pro"**，即模板脚手架契约，业务契约从未接通。实测：活栈后端容器内 `GET /v3/api-docs` 返回 **200、118 KB、163 条 `/api/` 路径**（`title: "OpenAPI definition"`），契约**确实存在且可确定性产出**。
+- **决策：** 真实契约**必须构建期导出并提交**，不能让前端运行时去 fetch 后端：
+  - 经 web（:7070）取 `/v3/api-docs` 拿到的是 **SPA 首页 HTML**（nginx 没代理，0 条 `/api/` 路径）。
+  - 容器里连 `curl`/`wget` 都没有（本轮是用 `bash` 的 `/dev/tcp` 手工取的），所以"部署后再抓"这条路也不通。
+  - 做法：CI 里 boot 一次上下文导出 spec + 提交 + **比对无差异**（生成物不一致即拒），再把 `schemaPath` 指过去。
+  - **产物并入 P1**（与 H3「手写重复业务 DTO」的目标阶段一致，`docs/architecture-review-2026-10-09.md:217`）：
+    契约的消费方是 P1 的 API client / 移动端 DTO，先落产物等于又造一个没有消费方、没有门禁的化石。
+- **影响 / P1 入口点清单**（照做即可，不必重新勘探）：
+  - **boot 配方照抄** `backend/src/test/java/com/antflow/integration/PostgresTransactionalIntegrityIntegrationTest.java:80-125`：
+    `@SpringBootTest` + `"antflow.mobile.files.storage=test"`（`:88`）+ `@Import(...TestFileStorageConfig.class)`（`:96`，内存
+    `FileStorage` 顶掉 MinIO）+ PG 走 `ANTFLOW_TEST_POSTGRES_URL` 否则起 Testcontainer（`:103-125`）。本地实测这套在
+    `mvn -B test` 里跑 **88 条用例 0 skip / 38.7s**。**CI 的 backend job 已有 PG service，不用加服务，也不需要 MinIO。**
+    （对比：`AntFlowApplicationTests` 是 `@Disabled` 的，不是这条路的参照。）
+  - `/v3/api-docs` 已 `permitAll`（`backend/src/main/java/com/antflow/auth/SecurityConfig.java:78`），导出不用鉴权。
+  - **未实测（先做这个再动手）**：springdoc 输出是否稳定可 diff —— `application.yml:123-127` 只有 `swagger-ui.path` /
+    `api-docs.path`，**没有排序配置**。先连生成两次对比；不稳就先固定输出顺序，否则"重新生成无差异"会假红。
+  - **前端成本比先前估计的小得多**（早先这里写的"P1/P5 量级"是错的）：生成目录 `frontend/src/services/ant-design-pro/`
+    只有 **4 个文件**，消费者只有 `frontend/src/pages/table-list/` 的 **4 个文件**（demo 脚手架），
+    **生产代码 0 处 import**（真实调用是 95 处直接 `request()`，45 个文件）。所以 6 条路径 → 163 条路径影响的是 demo 页。
+  - **本轮没有提交 spec**：没有比对门禁的生成物一定会变成谎话（`oneapi.json` 就是没门禁的模板契约躺了两年的样子）。
+
+## D-20261009-instance-complete-webhook-shares-outbound-policy
+
+- **状态：** accepted
+- **背景：** 审计 A7-1：实例完成回调 `notify/WebhookNotificationListener` 自建裸 `HttpClient`、**一个出站护栏都没有**，而 TRIGGER 的 `automation/WebhookClient.java:41` 调了 `WebhookSecurityPolicy`——两条出站通道防护不一致。核对后确认两点：① 该 URL 来自服务端 `@Value("${antflow.webhook.on-complete:}")`，**不是用户可控**（用户/设计器可控的是 TRIGGER，URL 写在流程定义 JSON 里），所以这是"防护不一致"而不是已证实的 SSRF，可利用性仍为 **[待实测]**；② `antflow.webhook.on-complete` 在仓库所有配置里都没设，监听器默认关闭（`accepts()` 空 URL 即 false），**改动不会改断任何现有部署**。
+- **决策：** 完成回调**共用 TRIGGER 那一套全局策略**，不新开第二种信任设置：
+  - 投递前 `securityPolicy.validate(uri)`（`WebhookNotificationPolicy` 同款：scheme + 生产强制 https + `allowed-hosts` + DNS 解析后的地址黑名单）。校验放在 `try` **之外**：目标不合法是配置问题，不该被兜底包成 "webhook failed for instance X"，否则日志里分不清"地址不被允许"和"对面没响应"。
+  - 启动时 `validateDefinition(uri)` 先校验一次（**只做静态检查、不做 DNS**——webhook 主机的解析抖动不该拖着整个应用起不来）。配错在启动就喊，而不是等 10 次退避重试变 `DEAD`。`validateDefinition` 是既有方法（`ProcessDefinitionService.java:636` 用它校验 TRIGGER URL）；`@Value` 没有"保存"时刻，**启动**就是它的对应时刻。
+  - `followRedirects(NEVER)` 显式写出（JDK 本来就是默认，写出来是防将来被顺手改；与 `WebhookClient.java:70` 一致）。
+- **已接受的代价（重要，别当成 bug）：** `WebhookSecurityPolicy.java:80-81` 的私网放行是 `allowPrivateAddresses && !prod`，**prod 下恒假** → **内网/腾讯完成回调在生产环境打不通**。要救它只能开全局 `allow-private-addresses`，而那会**同时放宽设计器可写的 TRIGGER 通道**（TRIGGER 仍受 `allowed-hosts` 约束，所以放宽的幅度有限，但确实放宽了）。这是"共用一套策略"的一致性代价，是明确选择的，不是缺陷。
+- **影响：** 两条出站通道现在同一个护栏。**未做**：抽公共 `HttpClient` bean（报告里的"共用客户端"）——对安全结论没有影响，归 P5 的集成收敛。
+
+## D-20261009-display-text-fixture-cross-checks-java-and-sql
+
+- **状态：** accepted
+- **背景：** 审计想把 SQL 层接进 H2"共用语义对拍"。核对后发现**前提不成立**：`v_form_ledger` 不是显示文本渲染器，是 **BI 脱敏投影**——`V49:56` 给 `value_json`/`value_text` 加了类型白名单（`number/money/date/date_range/time/switch/radio/checkbox/select/multi_select/user_picker/dept_picker/table_list`），**`text/textarea/search` 不在内 → 两列都是 NULL**，真库测试 `PostgresTransactionalIntegrityIntegrationTest:812-814` 早就断言了这条。它与 Java `FormValueDisplay` 的重叠面**只有"值 → 选项标签"**；Java 的 checklist 汇总、table_list 明细、附件处理 SQL 一概没有。所以"接线"其实是**新开一个维度**。
+- **决策：** 建 `fixtures/field-semantics/display-text.json`，两侧对同一份期望负责：
+  - Java `FormValueDisplay.cell()`（`backend/src/test/java/com/antflow/form/runtime/FormValueDisplayFixtureTest.java`）。
+  - SQL `v_form_ledger.value_label` / `value_text`（`PostgresTransactionalIntegrityIntegrationTest#ledgerMatchesTheSharedDisplayFixture`）。
+  - 每条 case 带**显式 `fieldId`**；**数组原文按解析后的 JSON 比**（`textJson`），不把 jsonb 的空格格式当业务口径；
+    **"字段缺失 → 没有台账行" 与 "值为 null → 有行、列 NULL" 分开断言**；
+    SQL 夹具**为每条 case 建匹配的 `t_form_definition_version` 快照**并置 `data.status='SUBMITTED'`——
+    V49 按行自己的版本钉 `meta`，缺快照会**回退最新版**，把版本错误掩盖成"看着对"。
+  - **期望按各层真实契约写**：自由文本那格是 `java=原文` 而 `sqlLabel=null, sqlText=null`（脱敏），不是"两侧都输出原文"。
+- **影响：** Java 与 SQL 的显示口径现在有一份共同的可执行期望。**未做且明确记录**：`checkbox` 数组在两侧都**没有**标签映射
+  （`FormValueDisplay.java:241` 只认 `multi_select`；SQL 同）——桌面补出 checkbox 渲染器不会顺带修好它在台账/导出里的显示，
+  这是**待收敛的现状，不是目标契约**。
+
+## D-20261009-health-metrics-h2-direction-and-per-dimension-channels
+
+- **状态：** accepted
+- **背景：** H2 复用了我给 H1 写的 `subset()` 辅助函数，但两者的"变差"方向**相反**：H1 是"新增缺口"变差，
+  H2 是"新增渠道"变好。结果是**加 `sql` 渠道被判变差、丢 `java` 渠道反而通过**——门禁的方向是反的。
+  同时 `channels` 是目录扫描（`java` 扫整个 `backend/src`），会把真库集成测试目录也计入，与新的 `sql` 渠道重复记账；
+  打印写死 `/4`，而名单里根本没有 `sql`，读者把"3/4"误读成"还缺一块"。
+- **决策：** **改方向，不是改基线**（更新基线会把 bug 一起冻住）：
+  - H2 判定改成"**基线里的渠道丢了才算变差**"；新增渠道是变好（打印提示，不报错）。
+  - 加 `node scripts/health-metrics.mjs --self-test`（沿用 `deploy.sh --self-test` 的仓内先例，不引框架）：
+    三条断言守住方向——新增渠道不报变差、丢渠道报变差、**分维度**丢渠道也报变差。
+  - 渠道改成**声明式分维度**：`visibility` = 桌面/移动；`fieldTypes` = 桌面/移动/Java(`backend/src/main`)；
+    `displayText` = Java(`backend/src/test/.../form/runtime`) / SQL(`backend/src/test/.../integration`)。
+    **分母来自完整声明** `['desktop','mobile','java','sql']`，输出同时给并集与分维度明细。
+- **影响：** 并集 4/4 现在与明细一起打印，**不再能被读成"同一套语义四端全部对拍"**。把 `--self-test` 加进 CI 是可选的下一步（目前只在本地/评审时跑）。
+
+## D-20261009-company-attribution-policy
+
+- **状态：** **accepted**（政策已拍板；**实现排期归 P4**，见下"仍未定"）。报告把它列为"最该早定"的一项。
+- **背景（已复核的现状）：**
+  - **公司轴只存在于组织与企微**：`t_company`（`V1:15-19`）、`t_department.company_id NOT NULL`（`V1:21-29`）、以及 4 张 `t_wecom_*`（`V30`）。**没有任何业务表有 company 维度**——`t_form_definition`/`t_process_definition`/`t_form_resource_grant`/`t_role`/`t_permission`/`t_process_instance`/`t_form_data`/`t_task`/`t_workflow_job`/`t_audit_event`/`t_workflow_outbox` 全没有。
+  - **已经有"发起时快照"的先例**：`t_process_instance.started_by` + `started_dept_id`（`ProcessEngine.java:121-124` 写入，`V20:88-94` 回填），数据范围就是按它过滤（`InstanceScopeSql.java:41,45`）。**但公司不在这份快照里**，只能由 `started_dept_id → t_department.company_id` **现推**。
+  - **授权链路没有任何公司过滤**：`DataScope` 是 `SELF/DEPARTMENT/DEPARTMENT_AND_DESCENDANTS/CUSTOM/ALL`（`DataScope.java:3-9`）；`manageableDepartments` 在 `ALL` 下返回**全部**部门（`AuthorizationService.java:209,248,326`）。`admin` 按角色码放行（`:631`），**没有公司级管理员的概念**。用户与公司的关系是**间接的**（`t_user.dept_id → t_department.company_id`）。
+  - seed 的 admin **`dept_id` 为 NULL**（`V2:9-19`）→ 它发起的实例 `started_dept_id` 也是 NULL，**将来无从回溯公司**。
+
+- **为什么"现在定"比"以后定"便宜（这是本提议的核心）**：公司**可以从部门现推，而部门是可以改归属的**。今天做归属快照，回填是**精确**的（`dept → company` 当前映射即历史映射）；等组织调整过、部门合并/迁移/删除之后再回填，就只能得到**近似值或无法判断**。这与 `started_dept_id` 当初做成快照是同一个理由。
+
+- **六个子决策、选项与代价**（建议值附在每行末尾）：
+
+| # | 子决策 | 选项 | 代价 / 影响 | 我的建议 |
+|---|---|---|---|---|
+| 1 | 表单/流程模板是否按公司归属 | (a) **全局共享**（现状）；(b) 每个公司一套模板 | (a) 零成本，但"能看到多少个模板"完全由授权决定；(b) 要改 `t_form_definition`/`t_process_definition` + 全部列表查询 + 设计器 | **(a) 全局共享**：模板是"能力"，不是"数据" |
+| 2 | 发布版本是否不可变 | (a) 不可变（现状，`V31` 版本表）；(b) 允许改历史版本 | (a) 零成本；(b) 要动版本钉住语义，影响历史可读性 | **(a) 保持** |
+| 3 | 「公司级使用授权」怎么表达 | (a) 给 `t_form_resource_grant` 加 `COMPANY` 主题类型；(b) 新增独立的公司级授权表 | (a) 一次前滚迁移 + `AuthorizationService.requireFormUse` 里多一个分支（小）；(b) 多一套表与查询（中） | **(a)**：它已经有 USER/ROLE 两种主题，加第三种最省 |
+| 4 | 实例/数据/作业的归属在哪一刻固定 | (a) **创建时快照 `company_id`**；(b) 查询时由 `started_dept_id` 现推 | (a) 加列 + 回填 + 写路径；(b) 零成本，但**组织一变历史就漂**，且 NULL 部门行永远无解 | **(a) 快照**——这正是"早定省钱"的那一条 |
+| 5 | 公司管理员 vs 全局管理员 | (a) 只在**授权**上分层（公司管理员的 `manageableDepartments` 被限制在本公司）；(b) 再引入一套角色/权限命名空间 | (a) 改 `manageableDepartments`/`currentDataScope` 加公司过滤，**不动角色模型**（中）；(b) 角色、权限码、`SecurityAuthorizationController` 全要动（大） | **(a)**：现有 `admin` 是全局的，先只收敛数据范围 |
+| 6 | 调岗/部门改归属是否改历史归属 | (a) 不改（快照说了算）；(b) 跟着部门走 | 若 #4 选 (a)，本条**零额外成本**——这正是快照的意义 | **(a)** |
+
+- **已拍板（2026-10-10）**：
+  - **#1 模板全局共享** —— 模板是"能力"不是"数据"；一套模板，谁**能用**由公司级授权决定。
+  - **#4 创建时快照 `company_id`** —— 与现有 `started_dept_id` 同一做法。
+  - **#5 公司管理员只收敛数据范围** —— 不动现有的全局 `admin`（角色码放行），只把公司级管理员的
+    `manageableDepartments` / 数据范围限制在本公司；**不引入租户命名空间**。
+- **连带确定（由上三条推出来的，不需要再单独拍）**：
+  - **#3 公司级使用授权是"全局共享"能成立的前提**，因此不再是可选项：给 `t_form_resource_grant`
+    的主题类型加 `COMPANY`（它已有 USER/ROLE 两种，加第三种最省）。**没有这一步，全局共享就等于"所有公司都能用所有表单"。**
+  - **#6 调岗/部门改归属不改历史归属** —— 由 #4 的快照直接保证，零额外成本。
+  - **#2 发布版本不可变保持现状**（`V31` 版本表已经这么做）。
+### P4a「公司归属快照」——历史口径与写路径清点（2026-10-10）
+
+**历史归属口径（已采纳）**：**无法证明归属的历史记录保留 `company_id = NULL`，表示"待确认"**——
+不自动归给公司 1，也不按发起人**今天**的部门去猜。P4 隔离启用后，这些记录**不向公司管理员开放**，
+只保留全局管理员的确认入口。
+
+**为什么"回填"不能承诺天然精确（我先前说错了）**：`V20:88-94` 当年就是这么回填 `started_dept_id` 的——
+`SET started_dept_id = u.dept_id FROM t_user u WHERE u.id = pi.started_by`，用的是**迁移当时**的用户部门。
+所以已有数据里 `started_dept_id` 本身就是当年的**推断值**，不是发起时的事实。正确说法是：
+**"在能确认归属未发生变化的范围内可准确回填"**，而不是"今天回填一定精确"。
+
+历史记录分三类：① 有 `started_dept_id` 且部门仍在 → 按 `dept→company` 映射回填，**标注为推断值**；
+② `started_dept_id IS NULL`（seed admin 的 `dept_id` 就是 NULL，`V2:9-19`；以及系统发起）→ **保持 NULL**；
+③ 无实例的 `t_form_data`（见下）→ **没有部门快照可依，保持 NULL**。
+定量仍是两条只读查询（**本轮未在生产执行**，所以本文不写任何历史数字）：
+
+```sql
+SELECT count(*) FROM t_process_instance WHERE started_dept_id IS NULL;
+SELECT d.company_id, count(*) FROM t_process_instance pi
+  JOIN t_department d ON d.id = pi.started_dept_id GROUP BY 1 ORDER BY 2 DESC;
+```
+
+**写路径清点（这是"P4a 不只是加一列"的实证）**：
+
+| 记录 | 写入口 | 归属来源 |
+| --- | --- | --- |
+| `t_process_instance` | **只有一处**：`ProcessEngine.java:133`（`started_by`/`started_dept_id` 在 `:121-124` 写）。两个调用方都是有身份的：`POST /api/instances/start`、`POST /api/mobile/instances`。**没有任何调度/作业/导入会建实例** | 创建时快照 |
+| `t_form_data`（引擎路径） | `ProcessEngine.java:111`，与实例同一个 `@Transactional` | **从实例继承** |
+| `t_form_data`（**无流程提交 / 草稿**） | `FormDataService.java:105`（桌面）与 `MobileDraftService.java:51`（移动草稿）——**不建实例**，form_data 自己就是权威归属 | **必须自己快照**（无实例可继承） |
+| `t_task` | 5 处（`ProcessEngine.java:564/781/1178`、`ApprovalHandler.java:117`、`CcHandler.java:53`、`TaskOperationService.java:85/128/179`、`WorkflowRuntimeV2.java:538/819`） | **一律从 `proc_inst_id` 继承**，不按人推算 |
+| `t_workflow_job` | `WorkflowJobService.java:46/90`、`WorkflowRuntimeV2.java:189/848` | 同上，继承 |
+
+`PrincipalHolder` 只有 `userId` + `departmentId`（`auth/PrincipalHolder.java:9-11`），**没有 companyId** ——
+公司在新路径上要由 `dept_id → t_department.company_id` 解析（或让 principal 带上）。
+
+**两个口径（已定，2026-10-10）**：
+1. **无部门的全局管理员发起 → 显式指定目标公司**：发起时必选，不选不允许提交。
+   **不配置默认公司**（那等于静默归因，发起人可能都不知道自己发的单进了哪家）。
+2. **草稿建好 → 同人跨公司调岗 → 再提交 → 取「草稿创建时」的公司**：与"创建时快照"同一原则，
+   草稿行自己存公司、提交时实例继承它；调岗不改已有草稿的归属。
+   现有代码**不会让**别人提交你的草稿（`MobileDraftService.requireOwnedDraft` 拒绝
+   `created_by != userId`，两条提交路径都过这道闸），所以这个场景只能是同一人先建草稿再调岗。
+
+**P4a 的验收**：组织变化不改旧归属；新写入不漏快照；无公司的新记录**不存在**（要么有明确公司，要么显式待确认）。
+本片**不改读权限**，但**也不能称为"完全不变行为"**——写路径上多了一列与一次解析。
+
+**仍未定**：P4a 的 owner（含历史归属的人工确认与上线验收）+ **发布窗口**；上面两个口径的产品答复。
+
+> **已定（2026-10-10）**：发布方式与历史 NULL 的口径见
+> `D-20261010-p4a-rollout-is-a-maintenance-window-and-null-has-two-sources`；
+> 上面原文（本文与 `HANDOFF.md`）提到的"**滚动部署检查**（迁移先上、应用后上）"**是错的**，
+> 已由该条目更正——本仓做不到那个顺序，也不存在新旧混跑。
+
+- **影响：** 决策已定，**本轮仍不动任何 schema**。P4 的实现顺序：#4 的快照（= P4a）→ #3 的 COMPANY 授权主题 → #5 的数据范围收敛。
+
+  **#3 的理由要更正**（我先前说"没有 COMPANY 就等于所有公司都能用所有表单"，这是错的）：
+  `AuthorizationService.hasFormGrant`（`:246-274`）**已经**按 `USER` / `ROLE` / `DEPARTMENT` 三种主题授权，
+  没有 COMPANY **不等于**默认全开。COMPANY 的价值是**直接表达"公司级开放范围"**。
+  后续还要明确它是**新增一种授予方式**，还是**必须通过的公司门槛**——只加一个 OR 分支，
+  **不会**自动限制已有的全局 ROLE 授权。
+
+
+## D-20261010-company-attribution-resolved-by-caller-not-engine
+
+- **状态：** accepted
+- **背景：** P4a 落地时发现"谁来解析归属"不能含糊。引擎（`ProcessEngine.start`）分不清
+  「用户显式选的公司」与「从草稿继承的快照」，而且它没有身份（`PrincipalHolder` 只在请求线程里）；
+  计划里"引擎调 `CompanyAttribution.resolve(...)`"那一版会让"草稿转正式"必须重新解析——正是要避免的事。
+- **决策：** 解析放在**调用方**（`InstanceController` / `MobileWorkflowService` / `FormDataService` /
+  `MobileDraftService`），`StartCmd` 只携带**已解析好**的 `companyId`；引擎只剩一道 fail-closed 检查
+  （为 `null` 直接拒绝，绝不静默落一条无归属的记录）。草稿转正走
+  `CompanyAttribution.forDraft(草稿行里的 company_id, 请求值)`——**只认快照**，绝不按当前部门重解析。
+- **影响：** 新增/修改写路径时，`new StartCmd(...)` 必须显式给出归属（编译器会指出全部调用点）。
+  `t_task` / `t_workflow_job` 不加列、继续从实例继承。领域包不再新增对 `mobile` 适配层的类型依赖
+  （`ArchitectureBoundaryTest` 会拦；因此 `MobileDraftService` 只回 `Long` 而不是整个 `MobileDraftDto`）。
+
+## D-20261010-archunit-baseline-refrozen-on-signature-change
+
+- **状态：** accepted
+- **背景：** `ArchitectureBoundaryTest` 用 `FreezingArchRule` 冻结"存量违规"。它比对的是**违规行的文本**，
+  而行的文本里含**构造器与方法签名**。P4a 给 `FormDataService`/`SubmitRequest` 加了参数、
+  改了 `submit` 的重载形状，于是同一批"领域→mobile"依赖的描述文本变了，门禁报成"新增违规"。
+  实测：`HEAD` 上该规则是绿的，确认变化只涉及这两个类的签名（没有新增跨包依赖）后才动基线。
+- **决策：** 只针对 `f2b55862`（`domainDoesNotDependOnTheMobileAdapter`）**追加**新签名形态的行，
+  **不删**旧行、**不改规则措辞**（改措辞等于清空基线）。追加后连跑两遍确认收敛（`FreezingArchRule`
+  每次运行都会**移除已过时的行**，但**不会自动加入新行**，所以必须手工补）。其余两条规则未动。
+- **影响：** 以后凡是改了会出现在违规行文本里的签名，都要按同样办法补行——**先确认没有真的新增跨包依赖**，
+  再补文本。存盘文件里会长期同时存在旧/新签名形态的行，这是该机制的常态，不是脏数据。
+
+## D-20261010-contract-client-gated-on-both-sides-per-endpoint-types
+
+- **状态：** accepted（P1-a 落地；`D-20261009-real-openapi-contract-generate-at-build-time-not-runtime` 的"产物并入 P1"到此兑现）
+- **背景：** 真源后端、消费方前端。没有门禁的生成物一定会变成谎话（`frontend/config/oneapi.json`
+  就是躺了两年的模板契约）。同时 H3「手写重复业务 DTO」= 5，5 处**全是同一个 `FormDefinition` envelope 的副本**。
+- **决策（四件，都是被实测推翻过直觉之后才这么定的）：**
+  1. **不直接用 `npm run openapi`。** umi 插件那条命令①遍历 `openAPI` 数组的每一条，模板那条没设
+     `projectName` → 按 `package.json` 的 name 再生成一个目录，与既有 `src/services/ant-design-pro/`
+     的全局 `declare namespace API` **声明合并冲突**；②`openAPIConfig.map((item) => genAllFiles(item))`
+     **没有 await**，当门禁是竞态。改用 `scripts/openapi-antflow.mjs` 直接调已装的同一个生成器
+     （`@umijs/openapi` 的 `generateService`，返回 Promise）并 await，配置与检查共用
+     `scripts/antflow-openapi.options.mjs`。**命名空间换 `AntFlowAPI`**：生成的 `typings.d.ts` 是
+     全局 `declare namespace`，与模板那份必须分开；顺带页面写 `AntFlowAPI.X` 不用 import，不碰导入边界门禁。
+  2. **前端门禁比"文件集合 + 逐文件内容"，不是 `git diff --exit-code`。** 后者比的是工作树与索引，
+     **覆盖不到新增的未跟踪文件**——"漏提交一个新生成的服务文件"正是它抓不到的漏。`--check` 生成到
+     临时目录，报**新增 / 遗留（生成不出来）/ 内容不一致**三个方向，都红。
+  3. **`skipLibCheck: true` 意味着生成的 `.d.ts` 其实不被检查**（只有"被引用处"受检查）。
+     另加 `frontend/tsconfig.openapi.json`（`skipLibCheck: false`、`types: []`、范围只有生成的声明文件）
+     + `npm run tsc:openapi`。**取证**：往声明里塞一个 `NoSuchTypeAtAll`，`tsc:openapi` 红（TS2304）
+     而 `npm run tsc` **退出码 0** —— 证明这条检查不是多余的。生成器模板自带 `// @ts-ignore`
+     （在 `api.ts` 里），所以受控检查**只针对声明文件**（那里没有这句），应用侧 `tsc` 照旧把关。
+  4. **五处副本按端点各自取类型，不用断言把三个角色捏成一个**：列表 → `Summary`（**不含**
+     `schema`/`settings`，列表端点不返回）、详情 → `FormDefinition`（`schema`/`settings` 线上是**字符串**）、
+     保存体 → `SaveBody`（`schema`/`settings` 是**对象**）。生成类型里属性**全是可选的**（后端没加注解），
+     所以 `id`/`version` 是 `number | undefined`：**一律显式分支**（缺了就早返回/禁用），
+     **不许 `as`/`!`/`NonNullable<...>` 假装已完成运行时校验**。`status` 只用于显示映射时**保留未知值兜底**
+     （`statusMap` 加索引签名 + `?? 兜底`），真正驱动发布这类动作时才检查允许值。
+- **H3 指标必须一起改准**（否则归零也守不住）：旧版是逐行正则，①扫到 `src/services/`——那里的声明
+  是**从契约生成的**（不是副本），不排除的话"接通契约"会被判成变差；②把**派生别名**
+  （`= AntFlowAPI.X`）与**独立对象体**混在一起数。改成：排除 `frontend/src/services/`，
+  且分类抽成纯函数 `classifyFormDefinition()`，`--self-test` 钉住四类分类 + 两个方向
+  （新增独立副本必须红 / 多一个派生别名不算变差）。**基线 5 → 0**，并实测加回一份副本会红。
+- **影响：** 后端改契约（改 controller 签名/字段/路径）→ `ApiContractSnapshotTest` 红，消息给
+  **路径数对比** + 重写命令 `mvn -B test -Dtest=ApiContractSnapshotTest -Dantflow.openapi.write=true`
+  （**默认不写工作区**）。前端改契约后忘了重生成/提交 → `npm run openapi:check` 红。四条门禁都在
+  CI 的 frontend job 里。P1-b（设计器逐字段配置分派迁移）另开方案。
+- **补齐（2026-10-13）**：模板那条 `openAPI` 没设 `projectName`，插件默认取 `package.json` 的 name
+  （现在是 `antflow-frontend`）⇒ 跑 `npm run openapi` 会生成 `src/services/antflow-frontend/`，
+  与既有 `ant-design-pro/` 的全局 `declare namespace API` **声明合并**打红 `tsc`。
+  已补 `projectName: 'ant-design-pro'`（`frontend/config/config.ts`），实测**不再生成新目录**、碰撞消失。
+  **但先前这条写的"原地重生成、行为不变"是错的**：实测重生成并非内容中立 —— 当前生成器把 tag 拆成了
+  独立文件，于是多出 `src/services/ant-design-pro/rule.ts`，而 `api.ts` 少了 77 行、
+  `pages/table-list/` 里 4 个文件仍从 `api` 里 import `rule`/`addRule`/`updateRule`/`removeRule` ⇒
+  `tsc` 反而红。所以**这一行只修掉了命名空间碰撞**；`npm run openapi` 目前仍会打红 `tsc`
+  （第二个、独立的成因：生成器按 tag 拆文件，与两年没重生成的存量输出不一致）。
+  要让那条命令真正变成 no-op，得把重生成产物一并提交并改 `pages/table-list/` 那 4 处 import。
+
+## D-20261010-p4a-rollout-is-a-maintenance-window-and-null-has-two-sources
+
+- **状态：** accepted（发布步骤落地为 `docs/p4a-rollout-runbook.md`；owner / 窗口仍未定）
+- **背景：** P4a 的代码早已落地，差的只是上线闭环。原本把这件事描述成"滚动部署检查（迁移先上、
+  应用后上）"（`HANDOFF.md`、本文上文）——**这句话是错的**，而且错得会让人去试一条不可行的路。
+- **决策一：本仓的发布**就是**维护窗口内停机重启**，不是滚动发布。实测依据：
+  `compose.yaml:41-86` 只有一个 `backend` 服务（全仓 grep 不到 `replicas`/`--scale`/`deploy:`）；
+  `infra/docker/nginx.conf:24-52` 是 `proxy_pass http://backend:8080`，**没有 `upstream` 块**；
+  且 **Flyway 在应用容器启动时跑**（`application.yml:26-29`），`deploy.sh`/`Dockerfile*`/CI 里
+  **没有**独立迁移步骤。⇒ 迁移与应用**必然同时生效**，新旧版本**不可能同时在线**。
+  **"旧实例长期混跑、写出没有 `company_id` 的新记录"这个风险在本仓不存在**——不是被缓解了，
+  而是原始条件不成立。
+- **决策二：`company_id IS NULL` 有两种来源，而库层分不出。** `company_id` **没有** DEFAULT、
+  **没有** CHECK、**没有** trigger，索引也不是 partial；`company_inferred` 只有
+  `DEFAULT false`（`V54:21,23`）。所以旧 schema 下"新写入漏了归属"与历史"待确认"两种行写出来
+  都是 `(NULL, false)`，**库层分不出来**。挡住误写的**只有应用层**的
+  fail-closed（`ProcessEngine.java:89-92` 的 `BAD_COMPANY`），数据库本身不管。⇒ 上线后必须靠
+  **`company_id IS NULL AND started_at > 上线时刻` 必须为 0** 来兜（`started_at` 是
+  `TIMESTAMPTZ NOT NULL`，`V1__init.sql:99`），它用时间把"上线前就存在的 NULL"排除掉。
+  这条**上线前跑没有意义**——而且那时 `company_id` 这一列**还不存在**，查它会报列不存在。
+- **决策三（实测，本条的地基）：V54 在 Flyway 真实路径下是原子的**，失败 = **整体回滚**。
+  用 `%LOCALAPPDATA%\Temp\p4a\V54Rehearsal.java` 在两个一次性探针库上跑（`target=53` 建库 →
+  造 fixture → 放开跑）：触发 pre-flight 时 V54 失败并抛 `P4a: 存在被多个实例引用的 t_form_data…`，
+  而 **4 个新列 0/4、2 个索引 0/2、`flyway_schema_history` 里连"失败行"都没有、业务数据完好**；
+  干净库则 4/4、2/2、1 行 `success=true`。Flyway 自己的日志：`Changes successfully rolled back.`
+  **准确表述**：回滚保证的是**逻辑状态与迁移前一致**（结构、数据、迁移历史三样），
+  不是"物理字节相同"。
+  **为什么必须重证一遍**：`PostgresTransactionalIntegrityIntegrationTest:490-495` 早就断言过
+  guard 会抛，但它走 `jdbcTemplate.execute(sql)`——那是**驱动层**的多语句隐式事务，
+  **不是**上线时跑 V54 的 Flyway 路径。
+- **决策四（先前漏了的一格）：V54 成功之后旧镜像能不能起，是另一回事。**
+  `%LOCALAPPDATA%\Temp\p4a\RollbackRehearsal.java`：库跑到 V54（`history: 53=true 54=true`、4/4 列）
+  后，把 Flyway 的 locations 换成**只有 V1..V53** 的目录（模拟旧镜像）→ `validate()` OK、
+  `migrate()` OK `migrationsExecuted=0`。⇒ 历史表里那条解析不出的 V54，**Flyway 10 按
+  "future migration" 容忍，不硬失败**。
+  **先前给的理由是错的**：本文草稿写过"旧代码不读这两列所以回退安全"——那压根没检查 Flyway，
+  而 Flyway 才是启动期的硬门。已按实测结论替换。**仍未实测的一格**：
+  `spring.jpa.hibernate.ddl-auto: validate`（旧实体没有这两列映射，`validate` 只查"映射到的表/列
+  在不在"、不查多余列，**预期通过但是推理不是实测**）——窗口前用上一个镜像 tag 配 V54 库副本起一次补掉。
+- **决策五：由此把恢复手段排序反过来。** **首要动作是"修好再起"或"回退旧镜像"**——`V54 失败`时
+  库的逻辑状态与迁移前一致（决策三），旧镜像配 V53 schema 当然能跑；`V54 成功之后`回退旧镜像也
+  已经实测能起（决策四）。**不需要 `flyway repair`**（失败路径下历史表一行都没有，下次启动干净
+  重试 V54）——这条要紧，因为仓库规矩是 forward-only、禁止用 repair 掩盖状态
+  （`D-20260917-flyway-forward-only`）。**整库备份从"主要恢复手段"降级为最后兜底**，它只对
+  "迁移成功、随后发现业务问题"有用（那时回退镜像也撤销不了已回填的值）。
+  **但两个场景的库状态不同，别混**：`V54 失败` → 库仍是 V53；`V54 成功、应用随后没起来` →
+  库是 V54。后者回退旧镜像虽可行，代价是**旧代码写出的实例 `company_id` 为 NULL ⇒ 归因暂停**
+  （上线后那条 `started_at > 上线时刻` 的检查会开始非 0，那是本次回退的直接后果，不是 bug），
+  所以那种情况优先"修好再起新镜像"而不是回退。
+- **决策六：历史 `company_id IS NULL` 接受长期保持。** 不自动归属、不按发起人今天的部门猜——
+  否则就是把 `started_dept_id` 那次"用迁移当时的部门推断"的错误再来一遍。
+- **影响：** 剩下的真实风险只有**停机时长**。它**不等于**回填 `UPDATE` 的耗时——窗口里还有
+  4 个 `ALTER TABLE`（各取 ACCESS EXCLUSIVE，要等长事务让路）、外键校验、以及 2 个
+  **非 `CONCURRENTLY`** 的 `CREATE INDEX`（取 SHARE 锁，建索引期间表不可写，大表上常比回填更贵）。
+  所以副库计时必须掐**完整的 `Flyway migrate`** 并记锁等待，且**镜像构建要移出窗口**。
+  **那个数只能在生产量级的副库上量**，runbook 不给估算值。§1 那条重复 `form_data_id`
+  检查的价值因此被**重新定位**：不是"防损坏"（V54 损坏不了），而是**别在停机窗口里才发现**。
+  **仍未定**：owner、发布窗口。
+
+## D-20261010-legacy-drafts-stay-blocked-until-a-human-confirms-the-company
+
+- **状态：** accepted（口径已定；处置方式=**人工 SQL 逐条回填**，不改产品代码）
+- **背景：** V54 的 step 2 只按实例回填（`V54:49-55`），而**草稿没有实例** ⇒ 全部 V54 之前的草稿
+  都是 `company_id IS NULL`。两端草稿都存 `t_form_data status='DRAFT'`（**没有** `t_mobile_draft` 表）。
+  于是 `CompanyAttribution.forDraft`（`CompanyAttribution.java:71-77`）对它们抛
+  `COMPANY_PENDING` → HTTP 422。
+- **两个不直观的点（都会让"顺手修一下"落空）**：
+  1. **现有公司选择器结构上救不了旧草稿。** `storedCompanyId == null` 的检查在**最前面**，
+     在它之后才看 `explicitCompanyId` ⇒ 用户在请求里带了公司也没用。选择器是按"无部门账号建**新**草稿"
+     设计的，不是"认领旧草稿"。⇒ 若要代码放开，必须改 `forDraft` 的语义（把"显式选择"与"推断"分开），
+     那是产品改动，本轮不做。
+  2. **阻的不只是提交，保存也被阻。** `MobileDraftService.update:65` 也过 `forDraft`，
+     所以用户连继续写这份草稿都不行。而且它抛的是"暂时无法**提交**"——文案对保存路径不准确
+     （已知粗糙点，记录不修）。
+  桌面端不经 UI 触达（`frontend/src/pages/runtime/form/Fill.tsx:130` 写死 `draftId: null`），
+  所以这是**移动端的硬阻断**。
+- **决策：** 不改代码，由 runbook 里指定的 `draft handler` **逐条人工确认**后用 SQL 回填
+  （`company_inferred` 保持 `false` = 已确认快照，不是推断值）。回填语句必须**事务 + `FOR UPDATE` +
+  三层守卫（是草稿 / 归属为空 / 没有实例）**，且**影响行数必须为 1** —— 只按 `id` 更新会改错行。
+- **影响：** ① 这条路径顺带让 `forDraft` 那句"请联系管理员确认归属"**变真**（此前没有任何确认机制，
+  它是空话）——所以文案不必改。② **必须在窗口后尽快做**，回填前移动端用户的提交与保存都被挡，
+  不是"上线后按需"。③ **"NULL 归零"不是成功口径**：还要单独报"仍被别的规则挡住"的草稿
+  （表单不再 `PUBLISHED` / `form_def_version` 不匹配 / `readOnly` / 权限变化），并抽查一条走真实保存路径。
+
+## D-20261010-rollback-needs-an-image-tagged-before-build
+
+- **状态：** accepted（写进 runbook §2.4；**这不是建议，是回退预案成立的前提**）
+- **背景：** `compose.yaml` 的 backend/web **只有 `build:`、没有 `image:`** ⇒ Compose 自动命名成
+  `antflow-local-backend:latest`，**每次 `docker compose up -d --build` 都覆盖同一个 tag**；
+  `deploy.sh:180-190` 里**没有** `docker tag` / `docker save` / 推镜像。本机那些 `predeploy-*` tag 与
+  `backups/predeploy-*/previous-images.tar` 来自**未提交**的机制（全仓 grep `predeploy` 零命中）。
+  ⇒ 照原来的流程，"回退旧镜像"**没有镜像可回退**。
+- **决策：** 把"存旧镜像"写成上线步骤里的硬前置，且**顺序写死**：
+  `docker compose images` → `image inspect` 记下 ID → **tag** → `image inspect` 校验 tag 指向的
+  就是那个 ID → **然后才允许 `build`**。
+- **为什么顺序是重点：** `--build` 会覆盖 `latest`，**先 build 再 tag 存下来的是新镜像**，
+  回退预案当场失效——而且 tag 名字看着挺对，不容易发现。
+  `docker save` 是**可选加强**（防 `docker image prune`），**不是 tag 的替代**。
+- **影响：** tag 与 image ID 都要进发布记录。同一条约束也决定了 `ddl-auto: validate` 那格
+  能不能做权威验证（runbook §5.2(b)）：**没有 `pre-v54` tag 就只能做机制代理，不能下结论**。
+
+## D-20261014-designer-config-panels-migrate-per-field
+
+- **状态：** accepted（P1-b / B1 首批落地）。
+- **决策：** `FieldType.ConfigPanel` 为可选成员，接收 `node` 与 `updateProps(patch)`；Inspector 有面板时渲染注册表实现，否则回退原 switch。迁移字段同时删除旧 case，每个字段只维护一份组件配置。首批只迁 text / textarea。
+- **边界：** 标题、必填、校验、显示逻辑和外部数据联动继续由 Inspector 管理；只搬组件配置，不改运行时渲染器与 store 合并语义。PanelField 放 components/form-fields 共用，字段不反向 import pages。
+- **取舍：** 迁移期间两种分派并存，但同一字段不存在两份配置实现；逐批验收、可单独回滚。当前完成首批，不代表完整 P1-b 已完成。
+- **验证：** B1 行为测试覆盖面板写回及未迁移 number 回退；停用注册表分派使新面板用例失败，恢复后通过。完整数字与本地部署验收见 HANDOFF 的 B1 小节。
+
+## D-20261014-company-form-use-is-a-gate
+
+- **状态：** accepted，按本轮用户确认的三条口径实施。
+- **决策：** 非全局管理员使用表单须同时满足运行时能力、COMPANY 门槛和 USER/ROLE/DEPARTMENT 任一主体授权；COMPANY 不是 OR 授权。模板维护与已提交业务数据读取继续独立裁决。
+- **兼容：** V55 只前滚，向迁移时未删除的存量表单补已有公司门槛，保留旧主体授权；以后新建公司不自动获准。新表单由全局管理员显式选公司。旧 grants 请求省略或传 null 的 companyIds 时保留原值，显式空数组撤销门槛；非全局管理员不得传公司清单。
+- **草稿：** 本人调岗后的旧草稿按固定公司校验门槛，不按新公司重判。读取表单和审批预览用经所有者/表单校验的 draftId，移动缓存区分草稿/重提上下文；外部选项用 dataId，草稿查询额外检查原公司门槛。保存/提交仍保留 NULL 待确认阻断、版本检查及提交成功后删草稿的事务约束。
+- **管理与审计：** 复用 grants 接口、authz_version 乐观锁和既有行锁；仅全局管理员设置公司，公司不存在则拒绝。公司清单与候选标签进入真实契约生成链路；高风险授权审计记录 companyIds 变更与数量。
+- **边界：** 本片完成 P4 #3，不实施 #5 公司业务数据隔离、公司管理入口及 BI 隔离。P4a 生产上线和历史草稿人工确认仍按原 runbook 执行，不能把仓内 V55 读成生产已上线。
+
+### P1-b 收口（同轮）
+
+剩余 21 个旧 case 原样迁入注册表，删除 Inspector 组件配置 switch；选项/矩阵编辑器移到 components 供字段共用，局部检查项和人员范围编辑器随所属字段迁移。23 类有面板，3 类无专属配置保持可选。未知属性、默认值和运行时组件保留；旧字段共用 case 对应共用面板。行为测试、类型与导入边界验证见 HANDOFF 最新记录。
+
+## D-20261014-mobile-session-and-overlay-use-shared-entrypoints
+
+- **状态：** accepted，实测修复并部署到本机栈。
+- **弹层：** 将 main.tsx 已有的 React 19 `unstableSetRender` 注册原样移到 shared/ui/antdMobileRenderer；main 和测试 setup 都导入它。保留 createRoot 复用及卸载时序，用真实 Toast 和重复使用容器两条用例守护。原全量测试的旧卸载 API 异常已消失。
+- **会话：** applySession 优先取 mobileBootstrap.user，缺 bootstrap 时保持 payload.user 回退。登录响应基础 user 没有 deptId，完整 bootstrap 有；先前普通用户被误判为无部门、保存草稿按钮禁用。登录、恢复、刷新三条回归统一覆盖这条解析规则。
+- **授权界面：** employee 只由“已授权公司内全部员工”开关管理，从“指定角色”候选移除，避免该角色在保存时被开关的关闭值移除。
+- **验证：** 后端 610 条零失败（2 skipped），桌面 338 条、移动 368 条，三套退出码均为 0；本机 V55、健康 UP、真实浏览器双公司/调岗草稿及弹层验收通过，页面异常 0。发布记录见 `docs/local-release-2026-10-14.md`。
+
+## D-20261015-org-company-management-boundaries
+
+- **状态：** accepted，P4 #5-1；企微调岗限制已由用户明确选择。
+- **公司与部门：** 公司创建继续要求 `system:company:manage`，不改变现有委派规则；请求只绑定名称，trim 后校验 1～128 个字符，id/createdAt 由服务端生成。非全局管理员公司列表仅返回本人有效部门所属公司。部门公司不可修改，父子、移动、排序限定同公司，根排序独立计数；不引入迁移或新角色。
+- **组织权限：** `OrgCompanyAccess` 统一约束公司、部门及人员源/目标归属，与现有能力和数据范围相交。组织人员列表、分页和导出可传 companyId；非全局管理员省略参数时仍受本人公司约束，无有效公司返回空，ALL/CUSTOM 不能跨公司。全局管理员的人员查询省略 companyId 保持原全局行为。业务通用数据范围的公司收敛仍属 #5-2。
+- **调岗与关联：** 本地成员跨公司调岗仅全局管理员可做。存在任意企微用户映射的成员禁止跨公司；同公司手工部门变更允许，但后续同步可能覆盖。上级、下属及部门负责人不跨公司，不自动拆关系；先由管理员显式调整。清空上级与负责人必须实际写入 SQL NULL。调岗沿用授权版本失效，不改实例/草稿公司快照。
+- **界面与兼容：** 多公司首次进入通讯录必须明确选公司，唯一公司自动选；切换卸载旧公司页面状态，写请求期间禁止切换。成员表单提交实际 deptId，失败保留内容。桌面部门字段迁至 `/api/pickers/departments`，该端点增加 companyId/parentId 与可选公司过滤，保留运行时选择器的既有可见口径，不将组织管理边界直接套到审批候选。
+- **契约与边界：** 真实 OpenAPI 快照及客户端同步生成。PickerController 既有 mobile 依赖只因增加 DepartmentMapper 导致构造器描述变化，架构冻结条目按实际签名更新，已消除的部门返回类型/调用依赖移除，未放宽规则。#5-2 的业务读取、导出、附件、作业及 BI 隔离另行实施。
+
+## D-20261015-company-isolation-exceptions-and-completion
+
+- **状态：** accepted，用户在统一规划中确认并要求实施。
+- **读取例外：** 保留跨公司审批/抄送的既有任务权限及调岗后本人历史访问，不扩大管理、报表或业务导出范围；NULL/inferred 公司快照须经确认，不能因 owner/assignee 提前放行正文。
+- **BI：** 延续仅全局可信账号直连五个只读视图；不向公司管理员提供该账号，公司管理员使用应用报表。
+- **交付：** 连续推进 P4→P2→P3→P5→统一本机验收和提交，生产只交付发布包；旧 V1 写路径须获得生产零活跃实例/待办/可恢复作业证据才退役。完整口径见 `docs/architecture-completion-plan.md`。
+
+## D-20261015-trusted-media-and-shared-contracts
+
+- **状态：** accepted，本批实施。
+- **字段：** 两端复用纯校验函数，74 条共同 fixture 对拍 Java/桌面/移动，覆盖 26 类、空值、0/false、明细作用域、矩阵、检查项、媒体数量/READY。约束 rules 优先 props；历史只读不重验、未知属性保留。
+- **时长：** 客户端 durationSeconds 仅供展示/预检，上传与水印成品均在服务端探测并存 V57 新列；正式提交时以数据库实测为准，旧文件缺值则下载补测，超限或缺工具回滚提交并保留草稿。不对历史只读字段补测，不把草稿保存变为正式提交校验。
+- **契约：** 真实 OpenAPI 快照同时生成桌面客户端与不引用 Umi 的 `shared/api.generated.d.ts`，生成门禁逐字核对两份。登录/刷新和无流程提交改用记录返回既有 JSON，移动字段按生成 DTO 派生，JSON schema/表单值继续由运行时解释。桌面 utoopack root 指仓库根，以编译共享纯校验。
+- **领域边界：** 附件上移 `attachment`，草稿上移 `form.runtime`，运行时选择器上移 `org`；原 URL 与返回字段保留。ArchUnit 仅移除已消除的存量依赖，不放宽规则。
+
+## D-20261015-sync-leases-and-outbox-replay
+
+- **状态：** accepted，本批实施。
+- **企微：** 作业 UUID 领取，120 秒租约、30 秒续租且过期不得续活；每个组织/成员批次事务中先锁租约行并验持有权。失租停止，启动/定时恢复 PENDING 与过期 RUNNING，重新拉取并幂等执行；完整拉取前不得停用缺失人员。批次错误回退逐成员时也检查租约，原有随机密码和已有密码保留。
+- **通知：** 旧写路径的通知也落同一事务 outbox，不直接调用外部渠道；消费失败回到既有重试/DEAD。保留原 UUID、轮次抄送幂等与至少一次语义。
+- **重放：** GET `/api/workflow-monitor/outbox` 默认 DEAD，按监控能力公司范围分页且不回 payload/原始错误；POST `/{id}/retry` 要求 `workflow:outbox:retry`（默认 SELF、不自动授非管理员）与实例管理范围，只允许 DEAD→PENDING、重置次数/租约并写 HIGH 审计。缺能力403、越界404、状态冲突422。
+- **兼容：** V58 只加列，升级先停旧 worker；真实企业账号联调、生产窗口和 V1 退役仍须独立证据。

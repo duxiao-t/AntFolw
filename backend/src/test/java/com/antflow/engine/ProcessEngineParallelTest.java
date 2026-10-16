@@ -81,6 +81,9 @@ class ProcessEngineParallelTest {
         }}
         """;
 
+    /** P4a：引擎要求调用方给出**已解析**的归属；并行网关与归属无关，给个常量即可。 */
+    private static final long TEST_COMPANY_ID = 1L;
+
     private ProcessEngine engine() {
         var handlers = List.of(
             new EmptyHandler(),
@@ -89,13 +92,13 @@ class ProcessEngineParallelTest {
             new ConditionsHandler(evaluator),
             new ParallelHandler(handlersList(), evaluator)
         );
-        return new ProcessEngine(
+        return TreeRuntimeFixture.withRequiredV2(new ProcessEngine(
             formDefinitionService, formDataMapper, processDefinitionService,
             taskMapper, processInstanceMapper, new TaskMapperExt(processInstanceMapper),
             historyMapper, handlers, notifier,
             json, formalNumberService, workflowJobMapper,
             Mockito.mock(com.antflow.authz.AuthorizationService.class)
-        );
+        , org.mockito.Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class)));
     }
 
     // ParallelHandler needs the full handler list; build it standalone to avoid recursion in the lambda.
@@ -208,7 +211,7 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
 
-        Map<String, Object> res = engine().start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        Map<String, Object> res = engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         assertThat((Iterable<?>) res.get("firstTaskIds")).hasSize(2);
         List<TaskEntity> tasks = insertedTasks();
@@ -231,7 +234,7 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
 
         Map<String, Object> result = engine().start(
-            new StartCmd("F1", Map.of("amount", 50), null), 7L);
+            new StartCmd("F1", Map.of("amount", 50), null, TEST_COMPANY_ID), 7L);
 
         assertThat((Iterable<?>) result.get("firstTaskIds")).hasSize(1);
         assertThat(insertedTasks()).extracting(TaskEntity::getNodeId)
@@ -246,7 +249,7 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
 
         Map<String, Object> result = engine().start(
-            new StartCmd("F1", Map.of("amount", 150), null), 7L);
+            new StartCmd("F1", Map.of("amount", 150), null, TEST_COMPANY_ID), 7L);
 
         assertThat((Iterable<?>) result.get("firstTaskIds")).hasSize(2);
         assertThat(insertedTasks()).extracting(TaskEntity::getNodeId)
@@ -260,7 +263,7 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         // Task id 1 = a1/42; task id 2 = a2/43 (insert order).
         Mockito.when(taskMapper.selectById(1L))
@@ -269,7 +272,7 @@ class ProcessEngineParallelTest {
             .thenReturn(taskWith(2L, "a2", 43L, "PENDING", "p1", "b2"));
         Mockito.when(processInstanceMapper.selectById(1L))
             .thenReturn(runningInstance(PARALLEL_FLOW));
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");
@@ -310,7 +313,7 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
         Mockito.when(assigneeResolver.resolve(eq("a4"), any())).thenReturn(List.of(45L));
 
-        engine().start(new StartCmd("F1", Map.of(), null), 7L);
+        engine().start(new StartCmd("F1", Map.of(), null, TEST_COMPANY_ID), 7L);
 
         assertThat(insertedTasks()).filteredOn(task -> "PENDING".equals(task.getStatus()))
             .extracting(TaskEntity::getAssigneeId)
@@ -331,7 +334,7 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
         Mockito.when(assigneeResolver.resolve(eq("a3"), any())).thenReturn(List.of(44L));
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
 
         Mockito.when(taskMapper.selectById(1L))
             .thenReturn(taskWith(1L, "a1", 42L, "PENDING", "p1", "b1"));
@@ -339,7 +342,7 @@ class ProcessEngineParallelTest {
             .thenReturn(taskWith(2L, "a2", 43L, "PENDING", "p1", "b2"));
         Mockito.when(processInstanceMapper.selectById(1L))
             .thenReturn(runningInstance(PARALLEL_FLOW));
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");
@@ -392,13 +395,13 @@ class ProcessEngineParallelTest {
         Mockito.when(assigneeResolver.resolve(eq("a1"), any())).thenReturn(List.of(42L));
         Mockito.when(assigneeResolver.resolve(eq("a2"), any())).thenReturn(List.of(43L));
         ProcessEngine eng = engine();
-        eng.start(new StartCmd("F1", Map.of("k", "v"), null), 7L);
+        eng.start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L);
         // Task 1 = a0/40; approve it to enter the parallel gateway.
         Mockito.when(taskMapper.selectById(1L))
             .thenReturn(taskWith(1L, "a0", 40L, "PENDING", null, null));
         Mockito.when(processInstanceMapper.selectById(1L))
             .thenReturn(runningInstance(flow));
-        Mockito.when(formDataMapper.selectById(1L)).thenAnswer(inv -> {
+        Mockito.when(formDataMapper.selectRuntimeById(1L)).thenAnswer(inv -> {
             FormData fd = new FormData();
             fd.setId(1L); fd.setFormDefId(1L); fd.setData("{\"k\":\"v\"}");
             fd.setStatus("SUBMITTED");

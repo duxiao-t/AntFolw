@@ -1,4 +1,6 @@
 import type { DisplayCondition, SchemaNode } from './types';
+import { basicFieldError, validationProps } from '../../../shared/form-validation';
+import { validateMatrixValue } from '../components/form-fields/matrixFill';
 
 /** 上传类字段：提交前要确认没有"还在传"或"服务端还没处理完"的文件。 */
 const MEDIA_FIELD_TYPES = new Set(['image_upload', 'video_upload', 'file_upload', 'audio_upload']);
@@ -113,6 +115,7 @@ function checklistError(node: SchemaNode, value: unknown): string | null {
 /** 明细表：行数上下限 + **逐行**校验（只算该行可见的字段，口径照移动端 `validateTableList`）。 */
 function tableListError(node: SchemaNode, value: unknown): string | null {
   if (hasPendingUpload(value)) return '表格里仍有文件未完成上传';
+  if (value != null && !Array.isArray(value)) return `${node.label ?? node.id}格式不正确`;
   const rows = Array.isArray(value) ? value : [];
   // 0 行交给上面的通用必填判断（选填的明细表不该因为 `minRows` 的默认值 1 就永远提交不了）；
   // 这里管的是"填了一半"与"填多了"。
@@ -195,7 +198,15 @@ export function isVisibleNode(
  *
  * <p>以前是一遍 `forEach` 边走边判：条件引用**后面才声明**的字段时，那个字段还没被算过，
  * 于是"来源不可见"被当成"不可见"（或反之）——同一份数据在前后端能得出两套可见性。
- * 现在按 id 递归求值 + memo，声明顺序无关；`visiting` 防住互指条件（A 依赖 B、B 依赖 A）死循环。
+ * 现在按 id 递归求值 + memo，声明顺序无关。
+ *
+ * <p>**环**（互指 A↔B、自指 A→A）在保存与发布时会被拒（`findDisplayConditionCycle` +
+ * 后端 `validateAcyclicDisplayConditions`），但存量 schema 里可能已经有环，所以这里必须给
+ * **确定性**结果而不是递归爆栈：走到已经在递归栈上的节点时，把它的来源当作"不满足"，该节点不可见。
+ *
+ * <p>注意**不能**写成 `if (!node || !visiting.add(id)) return false;`：JS 的 `Set.add` 返回集合
+ * 本身（恒为真值），那个判环条件恒假、等于没判——自指与互指会直接把栈打爆（RangeError），
+ * 而抛在 React 渲染里会让整页白屏。这里曾经那样写过，注释还写着"防住死循环"。
  */
 export function visibleNodeIds(nodes: SchemaNode[], values: Record<string, any>) {
   const all = flattenNodes(nodes);
@@ -210,7 +221,9 @@ export function visibleNodeIds(nodes: SchemaNode[], values: Record<string, any>)
     const cached = memo.get(id);
     if (cached !== undefined) return cached;
     const node = byId.get(id);
-    if (!node || !visiting.add(id)) return false;
+    if (!node) return false;
+    if (visiting.has(id)) return false;
+    visiting.add(id);
     const parentId = parentOf.get(id);
     const sourceId = node.props?.displayCondition?.fieldId;
     const visible = (parentId === undefined || resolve(parentId))
@@ -227,8 +240,39 @@ export function visibleNodeIds(nodes: SchemaNode[], values: Record<string, any>)
   return visibleIds;
 }
 
-export function collectVisibleValues(nodes: SchemaNode[], values: Record<string, any>) {
-  const output: Record<string, any> = {};
+/**
+ * 找出 `displayCondition.fieldId` 里的环（互指 A↔B、自指 A→A）。
+ * 返回环上的 id 路径（首尾同一个 id，如 `['a','b','a']`），没有环返回 null。
+ *
+ * <p>环是**配置错误**：保存与发布都必须拒绝（后端 `validateAcyclicDisplayConditions` 同口径）。
+ * 运行时不崩（见 `visibleNodeIds`），但"环上字段到底显不显示"没有可解释的答案，不能留到线上才发现。
+ *
+ * <p>用显式栈而不是递归：这个函数存在的意义之一就是防递归爆栈，它自己不该成为新的爆栈点。
+ */
+export function findDisplayConditionCycle(nodes: SchemaNode[]): string[] | null {
+  const all = flattenNodes(nodes);
+  const byId = new Map(all.map((node) => [node.id, node]));
+  const sourceOf = (id: string) => byId.get(id)?.props?.displayCondition?.fieldId;
+  const state = new Map<string, 'visiting' | 'done'>();
+  for (const start of all) {
+    if (state.has(start.id)) continue;
+    const path: string[] = [];
+    let id: string | undefined = start.id;
+    while (id !== undefined && !state.has(id)) {
+      state.set(id, 'visiting');
+      path.push(id);
+      const next = sourceOf(id);
+      id = next && byId.has(next) ? next : undefined;
+    }
+    if (id !== undefined && state.get(id) === 'visiting') {
+      return [...path.slice(path.indexOf(id)), id];
+    }
+    for (const visited of path) state.set(visited, 'done');
+  }
+  return null;
+}
+
+export function collectVisibleValues(nodes: SchemaNode[], values: Record<string, any>) {  const output: Record<string, any> = {};
   const visibleIds = visibleNodeIds(nodes, values);
   for (const node of nodes) {
     if (!visibleIds.has(node.id)) continue;
@@ -254,11 +298,21 @@ function firstVisibleValidationErrorIn(
   values: Record<string, any>,
   visibleIds: ReadonlySet<string>,
 ): string | null {
-  for (const node of nodes) {
+  for (const sourceNode of nodes) {
+    const node = { ...sourceNode, props: validationProps(sourceNode) };
     if (!visibleIds.has(node.id)) continue;
     if (node.children?.length && node.type !== 'table_list') {
       const childError = firstVisibleValidationErrorIn(node.children, values, visibleIds);
       if (childError) return childError;
+      continue;
+    }
+    if (node.type === 'description') continue;
+    if (node.type === 'matrix_fill') {
+      if (values[node.id] != null && (typeof values[node.id] !== 'object'
+        || Array.isArray(values[node.id]))) return `${node.label ?? node.id}格式不正确`;
+      const error = validateMatrixValue(values[node.id], node.props, node.label);
+      if (error) return error;
+      continue;
     }
     if (node.props?.required && isEmptyValue(values[node.id] ?? node.props.defaultValue)) {
       return String(node.props.validationMessage ?? `请填写${node.label ?? node.id}`);
@@ -285,17 +339,10 @@ function firstVisibleValidationErrorIn(
     if (node.type === 'table_list') {
       const error = tableListError(node, value);
       if (error) return error;
+      continue;
     }
-    if ((node.type === 'number' || node.type === 'money') && !isEmptyValue(value)) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return `${node.label ?? node.id}必须是数字`;
-      if (typeof node.props?.min === 'number' && number < node.props.min) {
-        return `${node.label ?? node.id}不能小于${node.props.min}`;
-      }
-      if (typeof node.props?.max === 'number' && number > node.props.max) {
-        return `${node.label ?? node.id}不能大于${node.props.max}`;
-      }
-    }
+    const common = basicFieldError(node, value);
+    if (common) return common;
   }
   return null;
 }

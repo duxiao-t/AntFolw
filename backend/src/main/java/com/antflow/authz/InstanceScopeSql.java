@@ -31,12 +31,16 @@ public final class InstanceScopeSql {
         if (current.isEmpty()) {
             return new Scope("1 = 0", List.of());
         }
-        if (current.get().admin() || current.get().unrestricted()) {
+        if (current.get().admin()) {
             return new Scope("1 = 1", List.of());
         }
         AuthorizationService.DataScopeFilter scope = current.get();
+        if (scope.companyId() == null) return new Scope("1 = 0", List.of());
+        String company = alias + ".company_id = ? AND " + alias + ".company_inferred = false";
+        if (scope.unrestricted()) return new Scope("(" + company + ")", List.of(scope.companyId()));
         List<String> parts = new ArrayList<>();
         List<Object> args = new ArrayList<>();
+        args.add(scope.companyId());
         if (scope.selfAllowed()) {
             parts.add(alias + ".started_by = ?");
             args.add(scope.userId());
@@ -49,7 +53,8 @@ public final class InstanceScopeSql {
         if (parts.isEmpty()) {
             return new Scope("1 = 0", List.of());
         }
-        return new Scope("(" + String.join(" OR ", parts) + ")", List.copyOf(args));
+        return new Scope("(" + company + " AND (" + String.join(" OR ", parts) + "))",
+            List.copyOf(args));
     }
 
     /** 给"SQL 末尾还有 LIMIT ?"的查询拼参数：范围参数在前，limit 在最后。 */

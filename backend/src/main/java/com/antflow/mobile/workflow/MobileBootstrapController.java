@@ -28,13 +28,6 @@ public class MobileBootstrapController {
     }
 }
 
-record MobileBootstrapDto(MobileUserDto user, int pendingCount, int draftCount,
-                          int unreadNotificationCount,
-                          List<MobileAppDto> favoriteApps,
-                          List<RecentProcessDto> recentProcesses,
-                          String brandingVersion) {
-}
-
 record MobileUserDto(Long id, String username, String displayName, String department,
                      Long deptId, String employeeNo, List<String> roles) {
 }

@@ -33,6 +33,7 @@ export type MobileSchemaNode = {
   type: FieldTypeCode | string;
   label?: string;
   props?: Record<string, unknown>;
+  rules?: Record<string, unknown>;
   children?: MobileSchemaNode[];
 };
 

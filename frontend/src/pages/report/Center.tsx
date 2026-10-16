@@ -2,8 +2,8 @@ import { PageContainer } from '@ant-design/pro-components';
 import { request } from '@umijs/max';
 import { Alert, Empty, Select, Table, Typography } from 'antd';
 import { createStyles } from 'antd-style';
-import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
+import { RANGE_PRESETS, rangeParams, tzOffsetMinutes } from '@/utils/dateRange';
 
 /** /api/reports/approval-summary 的形状；看板取的是同一份，所以类型放这里共用。 */
 export type ReportCounts = {
@@ -24,22 +24,6 @@ export type ApprovalSummary = {
   byDepartment: Array<ReportCounts & { deptId: number | null; deptName: string | null }>;
   byDay: Array<{ date: string; started: number; finished: number }>;
 };
-
-export const RANGE_PRESETS = [
-  { label: '近 7 天', value: 7 },
-  { label: '近 30 天', value: 30 },
-  { label: '近 90 天', value: 90 },
-];
-
-/** 时间范围（含首尾）。报表一律带客户端时区：库里按 UTC 存，不换算"今天"会比用户看到的早 8 小时。 */
-export function rangeParams(days: number, today = dayjs()): { from: string; to: string } {
-  return {
-    from: today.subtract(days - 1, 'day').format('YYYY-MM-DD'),
-    to: today.format('YYYY-MM-DD'),
-  };
-}
-
-export const tzOffsetMinutes = () => -new Date().getTimezoneOffset();
 
 const useStyles = createStyles(({ token }) => ({
   filterBar: {

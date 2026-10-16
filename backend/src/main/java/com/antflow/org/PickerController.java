@@ -1,8 +1,8 @@
 package com.antflow.org;
 
-import com.antflow.mobile.workflow.MobileOrgService;
-import com.antflow.mobile.workflow.MobilePickerDepartmentDto;
-import com.antflow.mobile.workflow.MobilePickerUserDto;
+import com.antflow.org.MobileOrgService;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.antflow.org.MobilePickerUserDto;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class PickerController {
     private final MobileOrgService service;
+    private final DepartmentMapper departmentMapper;
 
     @GetMapping("/users")
     @PreAuthorize("@authz.consoleEntry()")
@@ -51,8 +52,13 @@ public class PickerController {
      */
     @GetMapping("/departments")
     @PreAuthorize("@authz.consoleEntry()")
-    public List<MobilePickerDepartmentDto> departments() {
-        return service.allDepartments();
+    public List<PickerDepartment> departments(@RequestParam(required = false) Long companyId) {
+        QueryWrapper<Department> query = new QueryWrapper<Department>()
+            .select("id", "name", "company_id", "parent_id").orderByAsc("sort_order").orderByAsc("id");
+        if (companyId != null) query.eq("company_id", companyId);
+        return departmentMapper.selectList(query).stream()
+            .map(department -> new PickerDepartment(department.getId(), department.getName(),
+                department.getCompanyId(), department.getParentId())).toList();
     }
 
     @GetMapping("/roles")
@@ -66,4 +72,6 @@ public class PickerController {
     public List<PickerRoleDto> selectedRoles(@RequestParam List<Long> ids) {
         return service.selectedRoles(ids);
     }
+
+    public record PickerDepartment(Long id, String name, Long companyId, Long parentId) { }
 }

@@ -33,12 +33,13 @@ public class UserController {
                            @RequestParam(required = false) Boolean leaderOnly,
                            @RequestParam(required = false) String position,
                            @RequestParam(required = false) List<Long> userIds,
-                           @RequestParam(required = false) String scopeType) {
+                           @RequestParam(required = false) String scopeType,
+                           @RequestParam(required = false) Long companyId) {
         // 指名范围但名单为空 = 零候选。空数组会被序列化丢掉，所以靠 scopeType 区分
         // "没配范围"和"配了指定人员但一个人都没选"——判据必须在服务端，不能交给客户端。
         if ("user".equals(scopeType) && (userIds == null || userIds.isEmpty())) return List.of();
         return userService.listAuthorized(UserService.UserQuery.of(
-            keyword, deptId, includeDescendants, leaderOnly, position, userIds));
+            keyword, deptId, includeDescendants, leaderOnly, position, userIds, companyId));
     }
 
     /**
@@ -60,7 +61,8 @@ public class UserController {
             @RequestParam(required = false) String position,
             @RequestParam(required = false) List<Long> userIds,
             @RequestParam(required = false) String scopeType,
-            @RequestParam(defaultValue = "csv") String format) {
+            @RequestParam(defaultValue = "csv") String format,
+            @RequestParam(required = false) Long companyId) {
         authorizationService.requirePermission(PermissionCodes.ORG_USER_READ);
         if (!java.util.Set.of("csv", "xlsx").contains(format)) {
             throw new BizException("EXPORT_FORMAT_UNSUPPORTED", "只支持 csv 或 xlsx");
@@ -68,7 +70,7 @@ public class UserController {
         List<User> users = "user".equals(scopeType) && (userIds == null || userIds.isEmpty())
             ? List.of()
             : userService.listAuthorized(UserService.UserQuery.of(
-                keyword, deptId, includeDescendants, leaderOnly, position, userIds));
+                keyword, deptId, includeDescendants, leaderOnly, position, userIds, companyId));
         boolean truncated = users.size() > EXPORT_LIMIT;
         if (truncated) users = users.subList(0, EXPORT_LIMIT);
         var model = new FormDataExport.Model(EXPORT_HEADERS, users.stream()
@@ -122,8 +124,9 @@ public class UserController {
                            @RequestParam(defaultValue = "20") long size,
                            @RequestParam(required = false) String keyword,
                            @RequestParam(required = false) Long deptId,
-                           @RequestParam(defaultValue = "false") boolean includeDescendants) {
-        return userService.listAuthorizedPage(keyword, deptId, includeDescendants, page, size);
+                           @RequestParam(defaultValue = "false") boolean includeDescendants,
+                           @RequestParam(required = false) Long companyId) {
+        return userService.listAuthorizedPage(keyword, deptId, includeDescendants, page, size, companyId);
     }
 
     @GetMapping("/manager-candidates")

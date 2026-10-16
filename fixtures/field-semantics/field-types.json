@@ -1,0 +1,188 @@
+{
+  "specVersion" : 1,
+  "note" : "字段类型的唯一真源是后端 com.antflow.form.FieldTypeCatalog；本文件由 FieldTypeCatalogSpecTest 生成，不要手改。两端注册表与它对账：缺类型必须显式记录。",
+  "roles" : [ "FIELD=单值输入", "DISPLAY=不产生值", "CONTAINER=children 与父级共用扁平值域", "TABLE=值是按行数组（行内另有字段作用域）", "CHECKLIST=值逐项（含照片）", "MATRIX=按行列矩阵" ],
+  "fieldTypes" : [ {
+    "id" : "audio_upload",
+    "kind" : "FIELD",
+    "media" : true,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "checkbox",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : true,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "checklist",
+    "kind" : "CHECKLIST",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "date",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "date_range",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "dept_picker",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "description",
+    "kind" : "DISPLAY",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : false
+  }, {
+    "id" : "file_upload",
+    "kind" : "FIELD",
+    "media" : true,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "image_upload",
+    "kind" : "FIELD",
+    "media" : true,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "location",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "matrix_fill",
+    "kind" : "MATRIX",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "money",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "multi_select",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : true,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "number",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "radio",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : true,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "scan_code",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "search",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "select",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : true,
+    "displaySource" : true,
+    "requiredAble" : true
+  }, {
+    "id" : "span_layout",
+    "kind" : "CONTAINER",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : false
+  }, {
+    "id" : "switch",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "table_list",
+    "kind" : "TABLE",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : false
+  }, {
+    "id" : "text",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "textarea",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "time",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "user_picker",
+    "kind" : "FIELD",
+    "media" : false,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  }, {
+    "id" : "video_upload",
+    "kind" : "FIELD",
+    "media" : true,
+    "options" : false,
+    "displaySource" : false,
+    "requiredAble" : true
+  } ]
+}

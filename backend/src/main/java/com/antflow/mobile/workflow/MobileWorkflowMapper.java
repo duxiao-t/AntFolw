@@ -12,7 +12,13 @@ import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface MobileWorkflowMapper {
-    @Select("SELECT COUNT(*) FROM t_user_notification WHERE user_id = #{userId} AND read_at IS NULL")
+    String NOTIFICATION_SNAPSHOT = "(" + com.antflow.authz.CompanySnapshotSql.ADMIN + " OR " + """
+        EXISTS (SELECT 1 FROM t_process_instance pi
+          WHERE pi.id = NULLIF(payload->>'instanceId', '')::bigint AND
+        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE + "))";
+
+    @Select("SELECT COUNT(*) FROM t_user_notification WHERE user_id = #{userId}"
+        + " AND read_at IS NULL AND " + NOTIFICATION_SNAPSHOT)
     long countUnreadNotifications(@Param("userId") long userId);
 
     @Select("""
@@ -23,6 +29,8 @@ public interface MobileWorkflowMapper {
                created_at, read_at
         FROM t_user_notification
         WHERE user_id = #{userId}
+          AND
+        """ + NOTIFICATION_SNAPSHOT + """
         <if test="unreadOnly">
           AND read_at IS NULL
         </if>
@@ -41,13 +49,20 @@ public interface MobileWorkflowMapper {
         """)
     int markNotificationRead(@Param("id") long id, @Param("userId") long userId);
 
-    @Select("SELECT COUNT(*) FROM t_cc_record WHERE recipient_id = #{userId} AND read_at IS NULL")
+    String CC_SNAPSHOT = """
+        EXISTS (SELECT 1 FROM t_process_instance pi
+          WHERE pi.id = t_cc_record.proc_inst_id AND
+        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + ")";
+
+    @Select("SELECT COUNT(*) FROM t_cc_record WHERE recipient_id = #{userId}"
+        + " AND read_at IS NULL AND " + CC_SNAPSHOT)
     long countUnreadCc(@Param("userId") long userId);
 
     @Update("""
         UPDATE t_cc_record SET read_at = COALESCE(read_at, now())
         WHERE id = #{id} AND recipient_id = #{userId}
-        """)
+          AND
+        """ + CC_SNAPSHOT)
     int markCcRead(@Param("id") long id, @Param("userId") long userId);
 
     @Select("""
@@ -83,6 +98,8 @@ public interface MobileWorkflowMapper {
         LEFT JOIN t_user applicant ON applicant.id = pi.started_by
         LEFT JOIN t_department dept ON dept.id = applicant.dept_id
         WHERE t.assignee_id = #{userId}
+          AND
+        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
         <choose>
           <when test="view == 'done'">
             AND (t.status IN ('APPROVED', 'REJECTED', 'RESUBMITTED')
@@ -130,6 +147,8 @@ public interface MobileWorkflowMapper {
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
+          AND
+        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
           AND pi.current_node_id IS DISTINCT FROM '__rework__'
         <if test="status != null and status != ''">
           AND pi.status = #{status}
@@ -167,6 +186,8 @@ public interface MobileWorkflowMapper {
           JOIN t_form_data data ON data.id = pi.form_data_id
           JOIN t_form_definition form ON form.id = data.form_def_id
           WHERE pi.started_by = #{userId}
+            AND
+        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
             AND pi.current_node_id IS DISTINCT FROM '__rework__'
           UNION ALL
           SELECT 'DIRECT' AS kind,
@@ -181,6 +202,8 @@ public interface MobileWorkflowMapper {
           FROM t_form_data data
           JOIN t_form_definition form ON form.id = data.form_def_id
           WHERE data.created_by = #{userId}
+            AND
+        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
             AND data.status = 'SUBMITTED'
             AND NOT EXISTS (
               SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = data.id
@@ -220,6 +243,8 @@ public interface MobileWorkflowMapper {
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE data.id = #{dataId}
           AND data.created_by = #{userId}
+          AND
+        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
           AND data.status = 'SUBMITTED'
           AND NOT EXISTS (
             SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = data.id
@@ -377,52 +402,13 @@ public interface MobileWorkflowMapper {
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
+          AND
+        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
         ORDER BY pi.started_at DESC, pi.id DESC
         LIMIT #{limit}
         """)
     List<RecentProcessDto> selectRecentProcesses(@Param("userId") long userId,
                                                  @Param("limit") int limit);
-
-    /**
-     * 关联一个附件。主键是 `(form_data_id, file_id)`——同一个文件在一条记录里只能挂一次，
-     * 所以冲突时**更新归属字段**而不是 DO NOTHING：`reconcileEditable` 会先插"受限字段"的旧链接、
-     * 再插"可编辑字段"的新链接，后者才是权威分类；DO NOTHING 会把这次字段迁移静默吞掉。
-     */
-    @Insert("""
-        INSERT INTO t_form_data_file(form_data_id, file_id, field_id, sort_order)
-        VALUES (#{formDataId}, #{fileId}, #{fieldId}, #{sortOrder})
-        ON CONFLICT (form_data_id, file_id)
-        DO UPDATE SET field_id = EXCLUDED.field_id, sort_order = EXCLUDED.sort_order
-        """)
-    void insertFileLink(@Param("formDataId") Long formDataId,
-                        @Param("fileId") UUID fileId,
-                        @Param("fieldId") String fieldId,
-                        @Param("sortOrder") int sortOrder);
-
-    @Delete("DELETE FROM t_form_data_file WHERE form_data_id = #{formDataId}")
-    void deleteFileLinks(@Param("formDataId") Long formDataId);
-
-    @Select("""
-        SELECT file_id AS fileId, field_id AS fieldId, sort_order AS sortOrder
-        FROM t_form_data_file
-        WHERE form_data_id = #{formDataId}
-        ORDER BY field_id, sort_order, file_id
-        """)
-    List<FormDataFileLink> selectFileLinks(@Param("formDataId") Long formDataId);
-
-    @Select("""
-        SELECT mf.*
-        FROM t_mobile_file mf
-        JOIN t_form_data_file fdf ON fdf.file_id = mf.id
-        WHERE fdf.form_data_id = #{formDataId}
-          AND mf.status = 'READY'
-          AND mf.deleted_at IS NULL
-        ORDER BY fdf.field_id, fdf.sort_order, mf.created_at
-        """)
-    List<MobileFile> selectFilesByFormDataId(@Param("formDataId") Long formDataId);
-
-    record FormDataFileLink(java.util.UUID fileId, String fieldId, int sortOrder) {
-    }
 
     record TaskRow(Long id, Long instanceId, String nodeId, String formCode,
                    String formName, String businessNo, String applicantName,

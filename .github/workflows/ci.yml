@@ -7,6 +7,18 @@ on:
     branches: [master, main]
 
 jobs:
+  # 六个健康指标（docs/architecture-review-2026-10-09.md B4）：冻结实测基线，只禁止变差。
+  # 纯 Node 内置模块，不需要装依赖，所以单独一个 job，几秒就跑完。
+  metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Health metrics
+        run: node scripts/health-metrics.mjs
+
   backend:
     runs-on: ubuntu-latest
     services:
@@ -64,6 +76,17 @@ jobs:
         run: npm run biome:lint
       - name: Type-check
         run: npm run tsc
+      # 生成的声明（src/services/antflow/typings.d.ts）平时被 tsconfig 的 skipLibCheck 跳过，
+      # 只有"被引用处"受检查。这条单独用 skipLibCheck:false 检查它本身，范围只有该文件。
+      - name: Type-check generated declarations
+        run: npm run tsc:openapi
+      # 导入边界：只拦新增（存量冻在 frontend/import-boundaries.baseline.json）。
+      - name: Import boundaries
+        run: npm run check:boundaries
+      # 契约 client 必须能由提交的 config/antflow-api.json 重生成且逐字一致：
+      # 新增（漏提交）/ 遗留（该删）/ 内容不一致 三个方向都红。
+      - name: Contract client up to date
+        run: npm run openapi:check
       - name: Test
         run: npm test
       - name: Build

@@ -355,14 +355,17 @@ public class WorkflowRuntimeV2 {
         return true;
     }
 
-    public Decision approve(TaskEntity task, JsonNode node, long operatorId) {
+    public Decision approve(TaskEntity task, JsonNode node) {
         if (task.getNodeInstanceId() == null) return Decision.advanceNode();
         lockNode(task.getNodeInstanceId());
-        jdbc.update("""
+        int updated = jdbc.update("""
             UPDATE t_node_participant SET status = 'APPROVED'
             WHERE node_instance_id = ? AND actual_user_id = ? AND sequence_no = ?
               AND status = 'PENDING'
-            """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
+            """, task.getNodeInstanceId(), task.getAssigneeId(), task.getSequenceNo());
+        if (updated != 1) {
+            throw new BizException("BAD_TASK_STATE", "审批参与人状态已变更，请刷新");
+        }
         Counts counts = counts(task.getNodeInstanceId());
         String mode = mode(node);
         if ("SEQUENTIAL".equals(mode) && counts.waiting() > 0) {
@@ -384,14 +387,17 @@ public class WorkflowRuntimeV2 {
         return passed ? Decision.advanceNode() : Decision.rejectNode();
     }
 
-    public Decision rejectVote(TaskEntity task, JsonNode node, long operatorId) {
+    public Decision rejectVote(TaskEntity task, JsonNode node) {
         if (task.getNodeInstanceId() == null) return Decision.rejectNode();
         lockNode(task.getNodeInstanceId());
-        jdbc.update("""
+        int updated = jdbc.update("""
             UPDATE t_node_participant SET status = 'REJECTED'
             WHERE node_instance_id = ? AND actual_user_id = ? AND sequence_no = ?
               AND status = 'PENDING'
-            """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
+            """, task.getNodeInstanceId(), task.getAssigneeId(), task.getSequenceNo());
+        if (updated != 1) {
+            throw new BizException("BAD_TASK_STATE", "审批参与人状态已变更，请刷新");
+        }
         Counts counts = counts(task.getNodeInstanceId());
         String mode = mode(node);
         if ("ANY".equals(mode) || "SEQUENTIAL".equals(mode)) {
@@ -408,14 +414,17 @@ public class WorkflowRuntimeV2 {
         return passed ? Decision.advanceNode() : Decision.rejectNode();
     }
 
-    public Decision rejectAdditional(TaskEntity task, long operatorId) {
+    public Decision rejectAdditional(TaskEntity task) {
         if (task.getNodeInstanceId() == null) return Decision.rejectNode();
         lockNode(task.getNodeInstanceId());
-        jdbc.update("""
+        int updated = jdbc.update("""
             UPDATE t_node_participant SET status = 'REJECTED'
             WHERE node_instance_id = ? AND actual_user_id = ? AND sequence_no = ?
               AND status IN ('PENDING', 'WAITING')
-            """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
+            """, task.getNodeInstanceId(), task.getAssigneeId(), task.getSequenceNo());
+        if (updated != 1) {
+            throw new BizException("BAD_TASK_STATE", "审批参与人状态已变更，请刷新");
+        }
         cancelPending(task, "additional reviewer rejected");
         completeNode(task.getNodeInstanceId(), "REJECTED");
         return Decision.rejectNode();
@@ -571,6 +580,58 @@ public class WorkflowRuntimeV2 {
             """, actualUserId, parent.getNodeInstanceId(), parent.getSequenceNo());
     }
 
+    public void requireActiveAssignee(long userId) {
+        Long active = jdbc.query("SELECT id FROM t_user WHERE id = ? AND status = 'ACTIVE'",
+            rs -> rs.next() ? rs.getLong(1) : null, userId);
+        if (active == null) throw new BizException("BAD_ASSIGNEE", "target user is not active");
+    }
+
+    public void requireActiveTask(TaskEntity task, ProcessInstance instance) {
+        if (!active(instance)) return;
+        if ("REWORK".equals(task.getTaskType())) {
+            if (!"__rework__".equals(instance.getCurrentNodeId())
+                || !"__rework__".equals(task.getNodeId())
+                || !Objects.equals(task.getAssigneeId(), instance.getStartedBy())) {
+                throw new BizException("BAD_TASK_STATE", "待修改任务不属于当前流程阶段");
+            }
+            return;
+        }
+        Long node = jdbc.query("""
+            SELECT id FROM t_process_node_instance
+            WHERE id = ? AND proc_inst_id = ? AND node_id = ? AND round_no = ? AND status = 'ACTIVE'
+            """, rs -> rs.next() ? rs.getLong(1) : null, task.getNodeInstanceId(),
+            instance.getId(), task.getNodeId(), instance.getRoundNo());
+        if (node == null) throw new BizException("BAD_TASK_STATE", "审批节点已失效，请刷新");
+    }
+
+    public void recallChild(TaskEntity child, TaskEntity parent) {
+        if (parent == null || !Objects.equals(parent.getNodeInstanceId(), child.getNodeInstanceId())) {
+            throw new BizException("BAD_RECALL_STATE", "子任务与父任务不匹配");
+        }
+        if ("ADD_BEFORE".equals(child.getOperationKind())
+            || "ADD_AFTER".equals(child.getOperationKind())) {
+            if (!List.of("PENDING", "BLOCKED").contains(parent.getStatus())) {
+                throw new BizException("BAD_RECALL_STATE", "原审批已处理，不能撤回加签");
+            }
+            jdbc.update("""
+                UPDATE t_node_participant SET status = 'CANCELLED'
+                WHERE node_instance_id = ? AND sequence_no = ? AND status IN ('PENDING', 'WAITING')
+                """, child.getNodeInstanceId(), child.getSequenceNo());
+            if ("ADD_BEFORE".equals(child.getOperationKind())) {
+                jdbc.update("UPDATE t_task SET status = 'PENDING' WHERE id = ? AND status = 'BLOCKED'",
+                    parent.getId());
+                jdbc.update("""
+                    UPDATE t_node_participant SET status = 'PENDING'
+                    WHERE node_instance_id = ? AND sequence_no = ? AND status = 'WAITING'
+                    """, parent.getNodeInstanceId(), parent.getSequenceNo());
+                outbox(parent.getProcInstId(), parent.getAssigneeId(), "TASK_ASSIGNED", parent.getId());
+            }
+        } else {
+            reassignParticipant(parent, parent.getAssigneeId());
+        }
+        outbox(child.getProcInstId(), child.getAssigneeId(), "TASK_CANCELLED", child.getId());
+    }
+
     public int addParticipant(TaskEntity parent, long userId, boolean before) {
         if (parent.getNodeInstanceId() == null) return 1;
         Integer sequence = jdbc.queryForObject("""
@@ -702,9 +763,7 @@ public class WorkflowRuntimeV2 {
 
     public void adminReassign(TaskEntity task, long targetUserId, long operatorId,
                               String reason) {
-        Long active = jdbc.query("SELECT id FROM t_user WHERE id = ? AND status = 'ACTIVE'",
-            rs -> rs.next() ? rs.getLong(1) : null, targetUserId);
-        if (active == null) throw new BizException("BAD_ASSIGNEE", "target user is not active");
+        requireActiveAssignee(targetUserId);
         long previous = task.getAssigneeId();
         jdbc.update("""
             UPDATE t_task SET assignee_id = ?, delegated_from = ?,
@@ -887,7 +946,7 @@ public class WorkflowRuntimeV2 {
                    COUNT(*) FILTER (WHERE status = 'REJECTED') AS rejected,
                    COUNT(*) FILTER (WHERE status = 'PENDING') AS pending,
                    COUNT(*) FILTER (WHERE status = 'WAITING') AS waiting
-            FROM t_node_participant WHERE node_instance_id = ?
+            FROM t_node_participant WHERE node_instance_id = ? AND status <> 'CANCELLED'
             """, rs -> rs.next() ? new Counts(rs.getInt("total"), rs.getInt("approved"),
                 rs.getInt("rejected"), rs.getInt("pending"), rs.getInt("waiting"))
                 : new Counts(0, 0, 0, 0, 0), nodeInstanceId);

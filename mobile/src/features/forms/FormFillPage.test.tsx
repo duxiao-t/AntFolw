@@ -14,6 +14,8 @@ const AUTH_USER: MobileUser = {
   username: 'zhangsan',
   displayName: '张三',
   roles: ['user'],
+  // 有部门 → 归属由服务端按身份推导，填写页不出现公司选择器（P4a）。
+  deptId: 20,
 };
 
 const FORM_RESPONSE = {
@@ -32,6 +34,9 @@ function setupFetch() {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/companies')) {
+        return jsonResponse([{ id: 1, name: 'AntFlow' }]);
+      }
       if (url.includes('/api/mobile/forms/leave')) {
         return jsonResponse(FORM_RESPONSE);
       }
@@ -168,6 +173,40 @@ describe('FormFillPage', () => {
     expect(queryClient.getQueryState(queryKeys.bootstrap)?.isInvalidated).toBe(true);
   });
 
+  it('asks a department-less account to pick a company before it will save or submit', async () => {
+    // 没有部门的账号（如种子 admin）服务端推不出归属，必须显式选公司：P4a。
+    useAuthStore.setState({
+      status: 'authenticated',
+      accessToken: 't',
+      user: { ...AUTH_USER, deptId: undefined },
+    });
+    const { router } = renderForm();
+
+    await screen.findByLabelText('开始时间');
+    const picker = await screen.findByRole('combobox');
+    expect(screen.getByText(/请选择本次提交归属的公司/)).toBeInTheDocument();
+    // 未选公司：保存与提交都被挡住。
+    expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '提交' })).toBeDisabled();
+
+    await userEvent.selectOptions(picker, '1');
+    await userEvent.type(await screen.findByLabelText('开始时间'), '2026-07-30');
+    await userEvent.type(screen.getByLabelText('结束时间'), '2026-07-31');
+    await userEvent.type(inputByLabel('请假事由'), '回家探亲');
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    await waitFor(() => {
+      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+      const draftPost = calls.find(([url, init]) =>
+        String(url).includes('/api/mobile/drafts') && (init as RequestInit).method === 'POST');
+      if (!draftPost) throw new Error('draft post missing');
+      expect(JSON.parse(String((draftPost[1] as RequestInit).body))).toMatchObject({
+        companyId: 1,
+      });
+    });
+    await waitFor(() => expect(router.state.location.search).toBe('?draftId=102'));
+  });
+
   it('renders initiator editable, readonly and hidden field permissions', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -205,6 +244,48 @@ describe('FormFillPage', () => {
     renderForm('/forms/leave?draftId=101');
 
     expect(await screen.findByLabelText('开始时间')).toHaveValue('2026-07-30');
+  });
+
+  it('allows rework with legacy readonly values while still requiring editable fields', async () => {
+    const schema = [
+      { id: 'subject', type: 'text', label: '修改说明', props: { required: true } },
+      { id: 'legacy', type: 'switch', label: '历史只读值' },
+    ];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input).includes('/api/mobile/forms/leave')) {
+        return jsonResponse({ ...FORM_RESPONSE, schema });
+      }
+      if (String(input).includes('/api/mobile/rework-tasks/401')) {
+        return jsonResponse({
+          taskId: 401, instanceId: 501, formCode: 'leave', schema,
+          formData: { subject: '', legacy: 'true' },
+          processSnapshot: { id: 'root', type: 'ROOT', props: {
+            formPerms: [{ fieldId: 'legacy', mode: 'READONLY' }],
+          } },
+        });
+      }
+      return jsonResponse({});
+    });
+    renderForm('/forms/leave?reworkTaskId=401');
+    await screen.findByLabelText('修改说明');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('请填写修改说明')).toBeInTheDocument();
+    await userEvent.type(inputByLabel('修改说明'), '修订内容');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('确认提交目标页')).toBeInTheDocument();
+  });
+
+  it('still validates readonly defaults on a new submission', async () => {
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({
+      ...FORM_RESPONSE,
+      schema: [{ id: 'legacy', type: 'switch', label: '默认开关', props: { defaultValue: 'true' } }],
+      starterFieldModes: { legacy: 'READONLY' },
+    }));
+    const { router } = renderForm();
+    await screen.findByText('默认开关');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/forms/leave'));
+    expect(screen.queryByText('确认提交目标页')).not.toBeInTheDocument();
   });
 
   it('retries an existing draft update after one transport failure', async () => {

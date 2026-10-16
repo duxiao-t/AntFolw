@@ -10,19 +10,6 @@ import { request } from '@umijs/max';
 import { App, Button, Popconfirm, Space } from 'antd';
 import { useRef } from 'react';
 
-type FormDefinition = {
-  id: number;
-  code: string;
-  name: string;
-  description?: string;
-  version: number;
-  schema?: unknown;
-  settings?: unknown;
-  status: 'DRAFT' | 'PUBLISHED' | 'DEPRECATED';
-  createdAt?: string;
-  updatedAt?: string;
-};
-
 type PageResult<T> = {
   records?: T[];
   total?: number;
@@ -49,7 +36,7 @@ export default function FormListPage() {
 
   const reload = () => actionRef.current?.reload();
 
-  const createForm = async (values: Partial<FormDefinition>) => {
+  const createForm = async (values: Partial<AntFlowAPI.SaveBody>) => {
     await request('/api/forms/definitions', {
       method: 'POST',
       data: {
@@ -64,7 +51,7 @@ export default function FormListPage() {
     reload();
   };
 
-  const updateForm = async (id: number, values: Partial<FormDefinition>) => {
+  const updateForm = async (id: number, values: Partial<AntFlowAPI.SaveBody>) => {
     await request(`/api/forms/definitions/${id}`, {
       method: 'PUT',
       data: {
@@ -94,7 +81,7 @@ export default function FormListPage() {
     reload();
   };
 
-  const columns: ProColumns<FormDefinition>[] = [
+  const columns: ProColumns<AntFlowAPI.Summary>[] = [
     { title: 'ID', dataIndex: 'id', search: false, width: 80 },
     {
       title: '关键词',
@@ -128,72 +115,77 @@ export default function FormListPage() {
       title: '操作',
       valueType: 'option',
       width: 360,
-      render: (_, fd) => (
-        <Space wrap>
-          <ModalForm
-            title="编辑表单"
-            trigger={<Button size="small">编辑</Button>}
-            initialValues={fd}
-            modalProps={{ destroyOnHidden: true }}
-            onFinish={async (vals) => {
-              await updateForm(fd.id, vals);
-              return true;
-            }}
-          >
-            <ProFormText
-              name="name"
-              label="表单名称"
-              rules={[{ required: true, message: '请输入表单名称' }]}
-            />
-            <ProFormTextArea
-              name="description"
-              label="描述"
-              fieldProps={{ maxLength: 500, showCount: true }}
-            />
-          </ModalForm>
-          <Button
-            size="small"
-            onClick={() => navigate(`/approval/forms/${fd.id}/wizard?step=designer`)}
-          >
-            组件配置
-          </Button>
-          <Button
-            size="small"
-            onClick={() => navigate(`/approval/forms/${fd.id}/wizard?step=process`)}
-          >
-            流程
-          </Button>
-          <Button
-            size="small"
-            disabled={fd.status !== 'DRAFT'}
-            onClick={() => publishForm(fd.id)}
-          >
-            发布
-          </Button>
-          <Button
-            size="small"
-            disabled={fd.status === 'DEPRECATED'}
-            onClick={() => disableForm(fd.id)}
-          >
-            停用
-          </Button>
-          <Button
-            size="small"
-            onClick={() => navigate(`/admin/form-data?formDefId=${fd.id}`)}
-          >
-            数据
-          </Button>
-          <Popconfirm
-            title="确认删除该表单？"
-            description="删除后列表不再展示，历史提交数据仍会保留。"
-            onConfirm={() => deleteForm(fd.id)}
-          >
-            <Button size="small" danger>
-              删除
+      render: (_, fd) => {
+        // 生成契约里 id 是可选的（后端没加 @NotNull）：没有 id 就没有能操作的行。
+        const id = fd.id;
+        if (id === undefined) return null;
+        return (
+          <Space wrap>
+            <ModalForm
+              title="编辑表单"
+              trigger={<Button size="small">编辑</Button>}
+              initialValues={fd}
+              modalProps={{ destroyOnHidden: true }}
+              onFinish={async (vals) => {
+                await updateForm(id, vals);
+                return true;
+              }}
+            >
+              <ProFormText
+                name="name"
+                label="表单名称"
+                rules={[{ required: true, message: '请输入表单名称' }]}
+              />
+              <ProFormTextArea
+                name="description"
+                label="描述"
+                fieldProps={{ maxLength: 500, showCount: true }}
+              />
+            </ModalForm>
+            <Button
+              size="small"
+              onClick={() => navigate(`/approval/forms/${id}/wizard?step=designer`)}
+            >
+              组件配置
             </Button>
-          </Popconfirm>
-        </Space>
-      ),
+            <Button
+              size="small"
+              onClick={() => navigate(`/approval/forms/${id}/wizard?step=process`)}
+            >
+              流程
+            </Button>
+            <Button
+              size="small"
+              disabled={fd.status !== 'DRAFT'}
+              onClick={() => publishForm(id)}
+            >
+              发布
+            </Button>
+            <Button
+              size="small"
+              disabled={fd.status === 'DEPRECATED'}
+              onClick={() => disableForm(id)}
+            >
+              停用
+            </Button>
+            <Button
+              size="small"
+              onClick={() => navigate(`/admin/form-data?formDefId=${id}`)}
+            >
+              数据
+            </Button>
+            <Popconfirm
+              title="确认删除该表单？"
+              description="删除后列表不再展示，历史提交数据仍会保留。"
+              onConfirm={() => deleteForm(id)}
+            >
+              <Button size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -204,7 +196,7 @@ export default function FormListPage() {
       columns={columns}
       pagination={{ defaultPageSize: 20 }}
       request={async (params) => {
-        const result = await request<PageResult<FormDefinition>>(
+        const result = await request<PageResult<AntFlowAPI.Summary>>(
           '/api/forms/definitions',
           {
             params: {

@@ -9,9 +9,9 @@ import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.org.UserMapper;
-import com.antflow.mobile.workflow.MobileFileLinkService;
-import com.antflow.mobile.workflow.MobileFileRef;
-import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.attachment.MobileFileLinkService;
+import com.antflow.attachment.MobileFileRef;
+import com.antflow.form.runtime.MobileDraftService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,7 +42,10 @@ public class FormDataService {
     /** 台账里外链下拉的选项名要去选项行取（schema 里只有列映射与版本号）。 */
     private final com.antflow.form.options.OptionRuntimeService optionRuntime;
     private final MobileFileLinkService fileLinkService;
+    private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
     private final MobileDraftService draftService;
+    /** P4a：无流程提交/草稿没有实例可继承归属，这两条路径必须自己解析。 */
+    private final com.antflow.org.CompanyAttribution companyAttribution;
     /** 可选注入：老的单测直接 new 本类，不给它传这个依赖。 */
     @Autowired(required = false)
     private DefinitionVersionRepository versions;
@@ -65,6 +68,12 @@ public class FormDataService {
     @Transactional
     public SubmitResult submit(String formCode, String status, Object data, Long userId,
                        List<MobileFileRef> files, Long draftId) {
+        return submit(formCode, status, data, userId, files, draftId, null);
+    }
+
+    @Transactional
+    public SubmitResult submit(String formCode, String status, Object data, Long userId,
+                       List<MobileFileRef> files, Long draftId, Long explicitCompanyId) {
         FormDefinition fd = formDefinitionService.getByCode(formCode);
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
@@ -72,7 +81,6 @@ public class FormDataService {
         if (userId == null || authorizationService.currentUserId() != userId) {
             throw new AccessDeniedException("submission user does not match current principal");
         }
-        authorizationService.requireFormUse(fd.getId());
         String normalizedStatus = status == null ? "SUBMITTED" : status;
         // status 是客户端传进来的：`t_form_data.status` 只有 DRAFT/SUBMITTED 两个合法值
         // （APPROVED/REJECTED 是 **t_process_instance** 的状态，引擎推进实例时写的）。不拦的话
@@ -88,6 +96,17 @@ public class FormDataService {
             throw new BizException("FORM_HAS_PROCESS",
                 "该表单已启用审批流程，请从发起入口提交");
         }
+        // P4a 归属：转正**取草稿行的快照**（绝不按当前部门重解析，否则调岗会改归属）；
+        // 新提交才按身份解析。解析放在 insert 之前，失败不留半条记录。
+        Long companyId;
+        if (draftId == null) {
+            companyId = companyAttribution.resolve(explicitCompanyId);
+        } else {
+            companyId = companyAttribution.forDraft(
+                draftService.companySnapshotForSubmit(draftId, fd.getId(), userId),
+                explicitCompanyId);
+        }
+        authorizationService.requireFormUse(fd.getId(), companyId);
         formDefinitionService.validateSubmission(fd.getSchema(), data);
         Object storedData = "DRAFT".equals(normalizedStatus)
             ? data
@@ -102,8 +121,12 @@ public class FormDataService {
         fd2.setData(writeJson(storedData));
         fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
+        fd2.setCompanyId(companyId);
+        fd2.setCompanyInferred(false);
         mapper.insert(fd2);
+        if ("SUBMITTED".equals(normalizedStatus)) mediaValidator.validate(fd2.getId());
         fileLinkService.append(fd2.getId(), files, userId);
+        // 删草稿必须在 insert **成功之后**：创建失败要连草稿一起回滚，不能人财两空。
         if (draftId != null) draftService.deleteAfterSubmit(draftId, fd.getId(), userId);
         return new SubmitResult(fd2.getId(), fd2.getBusinessNo());
     }
@@ -216,7 +239,7 @@ public class FormDataService {
     }
 
     public FormData getById(Long id) {
-        FormData data = mapper.selectById(id);
+        FormData data = mapper.selectRuntimeById(id);
         if (data == null) {
             throw new BizException("FORM_DATA_NOT_FOUND", "Form data not found: " + id);
         }

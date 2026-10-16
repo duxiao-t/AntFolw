@@ -68,6 +68,12 @@ public class DataPermissionPolicyHandler implements MultiDataPermissionHandler {
             ? "1 = 0"
             : conditions.size() == 1 ? conditions.get(0)
                 : "(" + String.join(" OR ", conditions) + ")";
+        if (rule.dataScoped()) {
+            String company = scope.companyId() == null ? "1 = 0"
+                : alias + ".company_id = " + scope.companyId()
+                    + " AND " + alias + ".company_inferred = false";
+            scopePart = company + (scopePart == null ? "" : " AND (" + scopePart + ")");
+        }
         if (rule.requiredCondition() == null) {
             return scopePart == null ? "1 = 1" : scopePart;
         }

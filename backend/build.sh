@@ -2,15 +2,16 @@
 # 宿主无 JDK/Maven，用容器编译；Maven 仓库挂载到 /www/antflow/.m2 持久化，避免每次全量下载依赖。
 # 用法: ./build.sh package | ./build.sh clean package | ./build.sh test
 #
-# 集成测试 PostgresTransactionalIntegrityIntegrationTest 需要一个真的 PostgreSQL：
+# 集成测试与 OpenAPI 契约测试需要一个真的 PostgreSQL：
 # 要么给 ANTFLOW_TEST_POSTGRES_URL（外部库），要么让容器能访问宿主 docker socket 起 Testcontainers。
 set -e
 mkdir -p /www/antflow/.m2
 
-# pom 的 resources 里有 ../frontend/config/page-capabilities.json；只挂 backend 时该目录不存在，
-# maven-resources-plugin 会静默跳过，打出的 jar 缺这个资源、启动即失败。
+# 保留仓库相对路径：打包资源、共享 fixture 与 BI 角色集成测试都读取 backend 之外的文件。
 RUN_ARGS=(-v /www/antflow/backend:/app -w /app -v /www/antflow/.m2:/root/.m2
-          -v /www/antflow/frontend/config:/frontend/config:ro)
+          -v /www/antflow/frontend/config:/frontend/config:ro
+          -v /www/antflow/fixtures:/fixtures:ro
+          -v /www/antflow/infra:/infra:ro)
 # 外部测试库要显式传进去——只在宿主机 export 的话，容器里的 System.getenv 读到的是空值，
 # 照样会去起 Testcontainers。
 if [ -n "${ANTFLOW_TEST_POSTGRES_URL:-}" ]; then
@@ -29,11 +30,10 @@ if [ -z "${ANTFLOW_TEST_POSTGRES_URL:-}" ]; then
         echo "build.sh: 集成测试无法运行。请挂载 socket 或指向一个可用的库。" >&2
         exit 1 ;;
       *)
-        # 只排除需要数据库的那一个集成测试：其余单元测试（鉴权、草稿、工作流…）没有任何外部依赖，
-        # 一起跳过等于"打包成功但什么都没验证"。
+        # 仅排除需要 PostgreSQL 的测试，其余单元测试仍须通过。
         echo "build.sh: 无 docker socket 且未设置 ANTFLOW_TEST_POSTGRES_URL，" >&2
-        echo "build.sh: 本次构建跳过 PostgresTransactionalIntegrityIntegrationTest，其余测试照跑。" >&2
-        MVN_ARGS+=(-Dtest=!PostgresTransactionalIntegrityIntegrationTest) ;;
+        echo "build.sh: 本次构建跳过 PostgresTransactionalIntegrityIntegrationTest 和 ApiContractSnapshotTest，其余测试照跑。" >&2
+        MVN_ARGS+=('-Dtest=!PostgresTransactionalIntegrityIntegrationTest,!ApiContractSnapshotTest') ;;
     esac
   fi
 fi

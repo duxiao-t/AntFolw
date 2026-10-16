@@ -1,36 +1,30 @@
+import type { AntFlowAPI } from '../../../../shared/api.generated';
+import type { Contract } from '../../shared/api/types';
 import { apiRequest } from '../../shared/api/http';
 import type { MobileSchemaNode } from '../forms/schema/types';
 
 export type TaskView = 'pending' | 'done' | 'process';
 
-export type TaskListItem = {
-  id: number;
-  instanceId: number;
-  nodeId: string;
-  formCode: string;
-  formName: string;
-  businessNo: string;
-  applicantName: string;
-  applicantEmployeeNo?: string;
-  applicantDepartment?: string;
-  nodeName: string;
-  taskType: 'APPROVAL' | 'REWORK' | string;
-  taskStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CC' | string;
-  instanceStatus: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | string;
-  createdAt: string;
-  readAt?: string | null;
-};
+export type TaskListItem = Contract<
+  Omit<AntFlowAPI.MobileTaskDto, 'readAt'>,
+  | 'id'
+  | 'instanceId'
+  | 'nodeId'
+  | 'formCode'
+  | 'formName'
+  | 'businessNo'
+  | 'applicantName'
+  | 'nodeName'
+  | 'taskType'
+  | 'taskStatus'
+  | 'instanceStatus'
+  | 'createdAt'
+> & { readAt?: string | null };
 
-export type StartedProcessItem = {
-  kind: 'WORKFLOW' | 'DIRECT';
-  id: number;
-  status: 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'SUBMITTED' | string;
-  formName: string;
-  businessNo?: string;
-  currentNodeName?: string;
-  startedAt: string;
-  finishedAt?: string | null;
-};
+export type StartedProcessItem = Contract<
+  Omit<AntFlowAPI.MobileInitiatedDto, 'finishedAt'>,
+  'kind' | 'id' | 'status' | 'formName' | 'startedAt'
+> & { finishedAt?: string | null };
 
 export type TaskCenterFilters = {
   view: TaskView;
@@ -57,9 +51,14 @@ type PagedResponse<T> = {
 const DEFAULT_PAGE = 1;
 const DEFAULT_SIZE = 20;
 
-export async function fetchTaskCenterItems(filters: TaskCenterFilters): Promise<TaskPageResult<TaskCenterItem>> {
+export async function fetchTaskCenterItems(
+  filters: TaskCenterFilters,
+): Promise<TaskPageResult<TaskCenterItem>> {
   if (filters.view === 'process') {
-    const result = await fetchList<StartedProcessItem>('/api/mobile/initiated', filters);
+    const result = await fetchList<StartedProcessItem>(
+      '/api/mobile/initiated',
+      filters,
+    );
     return {
       items: result.items.map((process) => ({ kind: 'process', process })),
       hasMore: result.hasMore,
@@ -73,7 +72,10 @@ export async function fetchTaskCenterItems(filters: TaskCenterFilters): Promise<
   };
 }
 
-async function fetchList<T>(path: string, filters: TaskCenterFilters): Promise<TaskPageResult<T>> {
+async function fetchList<T>(
+  path: string,
+  filters: TaskCenterFilters,
+): Promise<TaskPageResult<T>> {
   const page = filters.page ?? DEFAULT_PAGE;
   const size = filters.size ?? DEFAULT_SIZE;
   const params = new URLSearchParams({
@@ -92,63 +94,59 @@ async function fetchList<T>(path: string, filters: TaskCenterFilters): Promise<T
   return apiRequest<PagedResponse<T>>(`${path}?${params.toString()}`);
 }
 
-export type MobileHistoryItem = {
-  id: number;
-  fromNodeId?: string | null;
-  toNodeId?: string | null;
-  taskId?: number | null;
-  action: string;
-  operatorId?: number | null;
-  comment?: string | null;
-  createdAt: string;
-};
+export type MobileHistoryItem = Contract<
+  {
+    [K in keyof AntFlowAPI.MobileHistoryDto]:
+      | AntFlowAPI.MobileHistoryDto[K]
+      | null;
+  },
+  'id' | 'action' | 'createdAt'
+> &
+  Required<Pick<AntFlowAPI.MobileHistoryDto, 'id' | 'action' | 'createdAt'>>;
 
-export type RejectTarget = {
-  nodeId: string;
-  name: string;
-};
+export type RejectTarget = Required<AntFlowAPI.RejectTargetDto>;
 
-export type ApprovalSummary = {
-  flowedCount: number;
-  completedCount: number;
-  processingCount: number;
-  complete: boolean;
-};
+export type ApprovalSummary = Required<AntFlowAPI.ApprovalSummaryDto>;
 
-export type ApprovalRecord = {
-  id: string;
-  taskId?: number | null;
-  nodeId?: string | null;
-  nodeName: string;
-  recordKind?: 'SUBMISSION' | 'APPROVAL' | 'REWORK' | 'CC' | 'AUTOMATION' | string;
-  nodeType?: string | null;
-  parallelId?: string | null;
-  branchId?: string | null;
-  operationKind?: 'TRANSFER' | 'DELEGATE' | 'ADD_ASSIGNEE' | string | null;
-  sourceOperatorName?: string | null;
-  status: 'SUBMITTED' | 'PROCESSING' | 'APPROVED' | 'REJECTED' | 'RETURNED' | 'RESUBMITTED' | 'COMPLETED' | 'FAILED' | string;
-  operatorName: string;
-  employeeNo?: string | null;
-  department?: string | null;
-  comment?: string | null;
-  receivedAt: string;
-  completedAt?: string | null;
-  roundNo?: number | null;
-};
+export type ApprovalRecord = Omit<
+  {
+    [K in keyof AntFlowAPI.ApprovalRecordDto]:
+      | AntFlowAPI.ApprovalRecordDto[K]
+      | null;
+  },
+  'id' | 'nodeName' | 'status' | 'operatorName' | 'receivedAt'
+> &
+  Required<
+    Pick<
+      AntFlowAPI.ApprovalRecordDto,
+      'id' | 'nodeName' | 'status' | 'operatorName' | 'receivedAt'
+    >
+  >;
 
-export type MobileTaskFile = {
-  id: string;
-  name: string;
-  contentType: string;
-  size: number;
-  contentUrl: string;
-};
+export type MobileTaskFile = Required<
+  Pick<
+    AntFlowAPI.MobileFileDto,
+    'id' | 'name' | 'contentType' | 'size' | 'contentUrl'
+  >
+>;
 
-export type MobileTaskDetail = {
+export type MobileTaskDetail = Omit<
+  AntFlowAPI.MobileTaskDetailDto,
+  | 'task'
+  | 'schema'
+  | 'formData'
+  | 'processSnapshot'
+  | 'history'
+  | 'rejectTargets'
+  | 'files'
+  | 'approvalSummary'
+  | 'approvalRecords'
+  | 'commentPresets'
+> & {
   task: TaskListItem;
   schema: MobileSchemaNode[];
+  processSnapshot?: unknown;
   formData: Record<string, unknown> | null;
-  processSnapshot: unknown;
   history: MobileHistoryItem[];
   allowedActions: string[];
   rejectDisabled: boolean;
@@ -156,21 +154,24 @@ export type MobileTaskDetail = {
   files: MobileTaskFile[];
   approvalSummary: ApprovalSummary;
   approvalRecords: ApprovalRecord[];
-  commentPresets?: { approve: string[]; reject: string[] };
+  commentPresets?: Required<AntFlowAPI.ApprovalCommentPresets>;
 };
 
-export type TaskActionPayload = {
-  comment?: string;
-  data?: Record<string, unknown>;
-  rejectToNodeId?: string;
-};
+export type TaskActionPayload = Omit<
+  AntFlowAPI.MobileTaskActionRequest,
+  'data'
+> & { data?: Record<string, unknown> };
 
-export async function fetchTaskDetail(taskId: number): Promise<MobileTaskDetail> {
+export async function fetchTaskDetail(
+  taskId: number,
+): Promise<MobileTaskDetail> {
   return apiRequest<MobileTaskDetail>(`/api/mobile/tasks/${taskId}`);
 }
 
 export async function markTaskRead(taskId: number): Promise<void> {
-  await apiRequest<void>(`/api/mobile/tasks/${taskId}/read`, { method: 'POST' });
+  await apiRequest<void>(`/api/mobile/tasks/${taskId}/read`, {
+    method: 'POST',
+  });
 }
 
 export async function runTaskAction(

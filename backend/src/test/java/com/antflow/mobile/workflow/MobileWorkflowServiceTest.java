@@ -1,5 +1,15 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftDto;
+
+import com.antflow.form.runtime.MobileDraftService;
+
+import com.antflow.attachment.MobileFile;
+import com.antflow.attachment.MobileFileMapper;
+import com.antflow.attachment.MobileFileLinkService;
+import com.antflow.attachment.MobileFileRef;
+import com.antflow.attachment.MobileFileDto;
+
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.authz.PermissionCodes;
@@ -47,6 +57,7 @@ class MobileWorkflowServiceTest {
     private ProcessEngine engine;
     private MobileDraftService draftService;
     private MobileWorkflowMapper workflowMapper;
+    private com.antflow.attachment.FormDataFileMapper fileLinks;
     private FormDefinitionService formDefinitionService;
     private ProcessDefinitionService processDefinitionService;
     private FormDataMapper formDataMapper;
@@ -58,12 +69,14 @@ class MobileWorkflowServiceTest {
     private DepartmentMapper departmentMapper;
     private MobileWorkflowService service;
     private AuthorizationService authorizationService;
+    private com.antflow.org.CompanyAttribution companyAttribution;
 
     @BeforeEach
     void setUp() {
         engine = Mockito.mock(ProcessEngine.class);
         draftService = Mockito.mock(MobileDraftService.class);
         workflowMapper = Mockito.mock(MobileWorkflowMapper.class);
+        fileLinks = Mockito.mock(com.antflow.attachment.FormDataFileMapper.class);
         formDefinitionService = Mockito.mock(FormDefinitionService.class);
         processDefinitionService = Mockito.mock(ProcessDefinitionService.class);
         formDataMapper = Mockito.mock(FormDataMapper.class);
@@ -103,18 +116,24 @@ class MobileWorkflowServiceTest {
                 invocation.getArgument(1), Map.class));
         Mockito.when(processDefinitionService.commentPresets(Mockito.any(), Mockito.anyString()))
             .thenReturn(ApprovalCommentPresets.empty());
-        service = new MobileWorkflowService(engine, draftService, workflowMapper,
+        companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
+        Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(1L);
+        service = new MobileWorkflowService(engine, draftService, workflowMapper, fileLinks,
             formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
-            taskMapper, historyMapper, new MobileFileLinkService(workflowMapper, fileMapper),
-            objectMapper, authorizationService);
+            taskMapper, historyMapper, new MobileFileLinkService(fileLinks, fileMapper),
+            objectMapper, authorizationService, companyAttribution);
+        Mockito.when(instanceMapper.selectForUpdate(Mockito.anyLong()))
+            .thenAnswer(call -> instanceMapper.selectById(call.getArgument(0)));
+        Mockito.when(taskMapper.selectForUpdate(Mockito.anyLong()))
+            .thenAnswer(call -> taskMapper.selectById(call.getArgument(0)));
     }
 
     @Test
     void startLinksReadyFilesToSubmittedFormDataAndDeletesDraft() {
         UUID fileId = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
-        Mockito.when(draftService.get(101L, 7L)).thenReturn(new MobileDraftDto(101L, 10L,
-            "leave", "请假申请", 3, data, objectMapper.createArrayNode(), false, null, null));
+        Mockito.when(draftService.get(101L, 7L)).thenReturn(draftDto(101L, 3, data, 42L));
+        Mockito.when(companyAttribution.forDraft(42L, null)).thenReturn(42L);
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.when(fileMapper.selectByIdsForUpdate(any()))
             .thenReturn(List.of(file(fileId, 7L, "READY")));
@@ -124,7 +143,7 @@ class MobileWorkflowServiceTest {
 
         MobileStartResult result = service.start(new StartMobileInstanceRequest("leave", data,
             Map.of("a1", List.of(8L)), 101L,
-            List.of(new MobileFileRef(fileId, "attachment", 0))), 7L);
+            List.of(new MobileFileRef(fileId, "attachment", 0)), null), 7L);
 
         assertThat(result.instanceId()).isEqualTo(501L);
         assertThat(result.formDataId()).isEqualTo(301L);
@@ -132,20 +151,29 @@ class MobileWorkflowServiceTest {
         Mockito.verify(engine).start(startCaptor.capture(), Mockito.eq(7L));
         assertThat(startCaptor.getValue().formCode()).isEqualTo("leave");
         assertThat(startCaptor.getValue().data()).isEqualTo(data);
-        Mockito.verify(workflowMapper).insertFileLink(301L, fileId, "attachment", 0);
+        // P4a 核心口径：归属取**草稿行里的快照**（42L），不是请求里的（这里是 null）。
+        assertThat(startCaptor.getValue().companyId()).isEqualTo(42L);
+        Mockito.verify(companyAttribution).forDraft(42L, null);
+        Mockito.verify(companyAttribution, Mockito.never()).resolve(any());
+        Mockito.verify(fileLinks).insertFileLink(301L, fileId, "attachment", 0);
         Mockito.verify(draftService).deleteAfterSubmit(101L, 7L);
+    }
+
+    private MobileDraftDto draftDto(long id, int version, JsonNode data, Long companyId) {
+        return new MobileDraftDto(id, 10L, "leave", "请假申请", version, data,
+            objectMapper.createArrayNode(), false, companyId, false,
+            OffsetDateTime.now(), OffsetDateTime.now());
     }
 
 
     @Test
     void startRejectsDraftFromOlderFormVersion() {
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
-        Mockito.when(draftService.get(101L, 7L)).thenReturn(new MobileDraftDto(101L, 10L,
-            "leave", "请假申请", 2, data, objectMapper.createArrayNode(), false, null, null));
+        Mockito.when(draftService.get(101L, 7L)).thenReturn(draftDto(101L, 2, data, 42L));
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
 
         assertThatThrownBy(() -> service.start(new StartMobileInstanceRequest("leave", data,
-            Map.of(), 101L, List.of()), 7L))
+            Map.of(), 101L, List.of(), null), 7L))
             .isInstanceOf(BizException.class)
             .satisfies(exception -> assertThat(((BizException) exception).getCode()).isEqualTo("DRAFT_VERSION_MISMATCH"))
             .hasMessageContaining("表单已改版");
@@ -157,13 +185,26 @@ class MobileWorkflowServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.doThrow(new HiddenResourceException("form not found"))
             .when(authorizationService)
-            .requireFormUse(10L);
+            .requireFormUse(10L, 1L);
 
         assertThatThrownBy(() -> service.start(
-            new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of()), 7L))
+            new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of(), null), 7L))
             .isInstanceOf(HiddenResourceException.class);
         Mockito.verify(engine, Mockito.never()).start(Mockito.any(StartCmd.class),
             Mockito.anyLong());
+    }
+
+    @Test
+    void formReadUsesTheValidatedDraftContextInsteadOfTodaysCompany() {
+        Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
+        Mockito.when(authorizationService.currentUserId()).thenReturn(7L);
+        service.getMobileForm("leave", 101L, null);
+        Mockito.verify(draftService).requireUsableDraft(101L, 10L, 7L);
+        Mockito.verify(authorizationService, Mockito.never()).requireFormUse(Mockito.anyLong());
+        Mockito.doThrow(new HiddenResourceException("draft not found"))
+            .when(draftService).requireUsableDraft(102L, 10L, 7L);
+        assertThatThrownBy(() -> service.getMobileForm("leave", 102L, null))
+            .isInstanceOf(HiddenResourceException.class);
     }
 
     @Test
@@ -175,11 +216,11 @@ class MobileWorkflowServiceTest {
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
         Mockito.when(workflowMapper.selectInstanceDetail(501L))
             .thenReturn(instanceDetailRow(instance));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDataMapper.selectRuntimeById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class)))
             .thenReturn(List.of(history("ARRIVE", "root", "a1")));
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
         Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
         Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
 
@@ -208,11 +249,11 @@ class MobileWorkflowServiceTest {
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(reworkInstance);
         Mockito.when(workflowMapper.selectInstanceDetail(501L))
             .thenReturn(instanceDetailRow(reworkInstance));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDataMapper.selectRuntimeById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
 
         MobileInstanceDetailDto detail = service.getInstanceDetail(501L, 7L, List.of("user"));
 
@@ -229,10 +270,10 @@ class MobileWorkflowServiceTest {
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
         Mockito.when(formDefinitionService.starterFieldModes(Mockito.any()))
             .thenReturn(Map.of("privateAttachment", "HIDDEN"));
-        Mockito.when(workflowMapper.selectFileLinks(301L)).thenReturn(List.of(
-            new MobileWorkflowMapper.FormDataFileLink(visibleFileId, "receipt", 0),
-            new MobileWorkflowMapper.FormDataFileLink(hiddenFileId, "privateAttachment", 0)));
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of(
+        Mockito.when(fileLinks.selectFileLinks(301L)).thenReturn(List.of(
+            new com.antflow.attachment.FormDataFileMapper.FormDataFileLink(visibleFileId, "receipt", 0),
+            new com.antflow.attachment.FormDataFileMapper.FormDataFileLink(hiddenFileId, "privateAttachment", 0)));
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of(
             file(visibleFileId, 7L, "READY"), file(hiddenFileId, 7L, "READY")));
 
         MobileInstanceDetailDto detail = service.getInstanceDetail(501L, 7L, List.of("user"));
@@ -265,11 +306,11 @@ class MobileWorkflowServiceTest {
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
         Mockito.when(workflowMapper.selectInstanceDetail(501L))
             .thenReturn(instanceDetailRow(instance));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDataMapper.selectRuntimeById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
 
         MobileInstanceDetailDto detail = service.getInstanceDetail(501L, 7L, List.of("user"));
 
@@ -316,7 +357,7 @@ class MobileWorkflowServiceTest {
             new MobileWorkflowMapper.DirectSubmissionRow(601L, "SUBMITTED", now, "CHECK-001",
                 "{\"subject\":\"完成\"}", "check", "设备点检",
                 "[{\"id\":\"subject\",\"type\":\"text\",\"label\":\"主题\"}]"));
-        Mockito.when(workflowMapper.selectFilesByFormDataId(601L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(601L)).thenReturn(List.of());
 
         MobileDirectSubmissionDetailDto detail = service.getDirectSubmission(601L, 7L);
 
@@ -333,10 +374,10 @@ class MobileWorkflowServiceTest {
         Mockito.when(taskMapper.selectById(401L)).thenReturn(task);
         Mockito.when(instanceMapper.selectById(501L)).thenReturn(instance);
         Mockito.when(workflowMapper.selectTaskDetail(401L)).thenReturn(taskDetailRow(task, instance));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDataMapper.selectRuntimeById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
         Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
         Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
 
@@ -356,7 +397,7 @@ class MobileWorkflowServiceTest {
         ProcessInstance instance = instanceWithTwoApprovals();
         Mockito.when(workflowMapper.selectTaskDetail(401L)).thenReturn(taskDetailRow(task, instance));
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
         Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
         Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
 
@@ -385,7 +426,7 @@ class MobileWorkflowServiceTest {
         ProcessInstance instance = instanceWithTwoApprovals();
         Mockito.when(workflowMapper.selectTaskDetail(401L)).thenReturn(taskDetailRow(task, instance));
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
 
         MobileTaskDetailDto detail = service.getTaskDetail(401L, 8L, List.of("user"));
 
@@ -425,11 +466,11 @@ class MobileWorkflowServiceTest {
                     OffsetDateTime.parse("2026-07-20T09:01:00+08:00"),
                     OffsetDateTime.parse("2026-07-20T09:02:00+08:00"), null, 1),
                 approvalRow(cc, "李四")));
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(formData(301L));
+        Mockito.when(formDataMapper.selectRuntimeById(301L)).thenReturn(formData(301L));
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(taskMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(cc));
         Mockito.when(historyMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        Mockito.when(workflowMapper.selectFilesByFormDataId(301L)).thenReturn(List.of());
+        Mockito.when(fileLinks.selectFilesByFormDataId(301L)).thenReturn(List.of());
         Mockito.when(userMapper.selectById(7L)).thenReturn(user(7L, "张三", 20L));
         Mockito.when(userMapper.selectById(8L)).thenReturn(user(8L, "李四", 20L));
         Mockito.when(departmentMapper.selectById(20L)).thenReturn(department("研发部"));
@@ -462,7 +503,7 @@ class MobileWorkflowServiceTest {
         FormData original = formData(301L);
         original.setBusinessNo("000000000301");
         original.setStatus("NEEDS_REVISION");
-        Mockito.when(formDataMapper.selectById(301L)).thenReturn(original);
+        Mockito.when(formDataMapper.selectRuntimeById(301L)).thenReturn(original);
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form());
         Mockito.when(engine.resubmitRework(410L, 7L)).thenReturn(List.of(411L));
         JsonNode changed = objectMapper.createObjectNode().put("days", 3);
@@ -475,7 +516,7 @@ class MobileWorkflowServiceTest {
         assertThat(result.businessNo()).isEqualTo("000000000301");
         assertThat(result.firstTaskIds()).containsExactly(411L);
         assertThat(original.getData()).contains("\"days\":3");
-        Mockito.verify(workflowMapper).deleteFileLinks(301L);
+        Mockito.verify(fileLinks).deleteFileLinks(301L);
         Mockito.verify(engine).resubmitRework(410L, 7L);
     }
 
