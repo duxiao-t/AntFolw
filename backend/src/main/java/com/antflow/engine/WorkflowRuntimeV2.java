@@ -355,14 +355,17 @@ public class WorkflowRuntimeV2 {
         return true;
     }
 
-    public Decision approve(TaskEntity task, JsonNode node, long operatorId) {
+    public Decision approve(TaskEntity task, JsonNode node) {
         if (task.getNodeInstanceId() == null) return Decision.advanceNode();
         lockNode(task.getNodeInstanceId());
-        jdbc.update("""
+        int updated = jdbc.update("""
             UPDATE t_node_participant SET status = 'APPROVED'
             WHERE node_instance_id = ? AND actual_user_id = ? AND sequence_no = ?
               AND status = 'PENDING'
-            """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
+            """, task.getNodeInstanceId(), task.getAssigneeId(), task.getSequenceNo());
+        if (updated != 1) {
+            throw new BizException("BAD_TASK_STATE", "审批参与人状态已变更，请刷新");
+        }
         Counts counts = counts(task.getNodeInstanceId());
         String mode = mode(node);
         if ("SEQUENTIAL".equals(mode) && counts.waiting() > 0) {
@@ -384,14 +387,17 @@ public class WorkflowRuntimeV2 {
         return passed ? Decision.advanceNode() : Decision.rejectNode();
     }
 
-    public Decision rejectVote(TaskEntity task, JsonNode node, long operatorId) {
+    public Decision rejectVote(TaskEntity task, JsonNode node) {
         if (task.getNodeInstanceId() == null) return Decision.rejectNode();
         lockNode(task.getNodeInstanceId());
-        jdbc.update("""
+        int updated = jdbc.update("""
             UPDATE t_node_participant SET status = 'REJECTED'
             WHERE node_instance_id = ? AND actual_user_id = ? AND sequence_no = ?
               AND status = 'PENDING'
-            """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
+            """, task.getNodeInstanceId(), task.getAssigneeId(), task.getSequenceNo());
+        if (updated != 1) {
+            throw new BizException("BAD_TASK_STATE", "审批参与人状态已变更，请刷新");
+        }
         Counts counts = counts(task.getNodeInstanceId());
         String mode = mode(node);
         if ("ANY".equals(mode) || "SEQUENTIAL".equals(mode)) {
@@ -408,14 +414,17 @@ public class WorkflowRuntimeV2 {
         return passed ? Decision.advanceNode() : Decision.rejectNode();
     }
 
-    public Decision rejectAdditional(TaskEntity task, long operatorId) {
+    public Decision rejectAdditional(TaskEntity task) {
         if (task.getNodeInstanceId() == null) return Decision.rejectNode();
         lockNode(task.getNodeInstanceId());
-        jdbc.update("""
+        int updated = jdbc.update("""
             UPDATE t_node_participant SET status = 'REJECTED'
             WHERE node_instance_id = ? AND actual_user_id = ? AND sequence_no = ?
               AND status IN ('PENDING', 'WAITING')
-            """, task.getNodeInstanceId(), operatorId, task.getSequenceNo());
+            """, task.getNodeInstanceId(), task.getAssigneeId(), task.getSequenceNo());
+        if (updated != 1) {
+            throw new BizException("BAD_TASK_STATE", "审批参与人状态已变更，请刷新");
+        }
         cancelPending(task, "additional reviewer rejected");
         completeNode(task.getNodeInstanceId(), "REJECTED");
         return Decision.rejectNode();

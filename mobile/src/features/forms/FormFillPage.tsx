@@ -439,7 +439,8 @@ export function FormFillPage() {
   }
 
   function submitForm() {
-    const nextErrors = validateSchemaValues(formSchema, values);
+    const nextErrors = validateSchemaValues(formSchema, values,
+      reworkTaskId != null ? starterModeOverride : undefined);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       showToast({ icon: "fail", content: "请完善必填或格式错误字段" });

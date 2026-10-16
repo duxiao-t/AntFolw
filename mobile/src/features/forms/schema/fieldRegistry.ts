@@ -44,6 +44,7 @@ import {
   validationProps,
 } from '../../../../../shared/form-validation';
 import type {
+  FieldMode,
   FieldValidationErrors,
   MobileFieldDefinition,
   MobileFieldProps,
@@ -240,11 +241,12 @@ export function getFieldDefinition(type: string): MobileFieldDefinition {
 export function validateSchemaValues(
   schema: MobileSchemaNode[],
   values: MobileFormValues,
+  fieldModes: Readonly<Record<string, FieldMode>> = {},
 ): FieldValidationErrors {
   const errors: FieldValidationErrors = {};
   const visibleIds = visibleNodeIds(schema, values);
   for (const node of schema) {
-    validateNodeInValues(node, values, errors, visibleIds);
+    validateNodeInValues(node, values, errors, visibleIds, fieldModes);
   }
   return errors;
 }
@@ -254,13 +256,14 @@ function validateNodeInValues(
   values: MobileFormValues,
   errors: FieldValidationErrors,
   visibleIds: ReadonlySet<string>,
+  fieldModes: Readonly<Record<string, FieldMode>>,
 ) {
   const node = { ...sourceNode, props: validationProps(sourceNode) };
-  if (!visibleIds.has(node.id)) {
+  if (!visibleIds.has(node.id) || (fieldModes[node.id] ?? 'fill') !== 'fill') {
     return;
   }
   if (node.type === 'table_list') {
-    const error = validateTableList(node, values[node.id]);
+    const error = validateTableList(node, values[node.id], fieldModes);
     if (error) {
       errors[node.id] = error;
     }
@@ -284,7 +287,7 @@ function validateNodeInValues(
     errors[node.id] = error;
   }
   for (const child of node.children ?? []) {
-    validateNodeInValues(child, values, errors, visibleIds);
+    validateNodeInValues(child, values, errors, visibleIds, fieldModes);
   }
 }
 
@@ -546,7 +549,10 @@ function summarizeLocation(value: unknown) {
     : '未填写';
 }
 
-function validateTableList(node: MobileSchemaNode, value: unknown) {
+function validateTableList(node: MobileSchemaNode, value: unknown,
+  fieldModes: Readonly<Record<string, FieldMode>> = {}) {
+  const children = node.children ?? [];
+  if (children.length > 0 && !hasEditableField(children, fieldModes)) return null;
   const rows = Array.isArray(value) ? value : [];
   if (value != null && !Array.isArray(value))
     return `${node.label ?? node.id}格式不正确`;
@@ -562,7 +568,6 @@ function validateTableList(node: MobileSchemaNode, value: unknown) {
   if (rows.length > maxRows) {
     return `最多可填写${maxRows}行`;
   }
-  const children = node.children ?? [];
   for (const [index, row] of rows.entries()) {
     if (typeof row !== 'object' || row == null) {
       return `第${index + 1}行: 请填写${node.label ?? node.id}`;
@@ -571,7 +576,7 @@ function validateTableList(node: MobileSchemaNode, value: unknown) {
     const visibleIds = visibleNodeIds(children, rowValues);
     for (const child of children) {
       const rowErrors: FieldValidationErrors = {};
-      validateNodeInValues(child, rowValues, rowErrors, visibleIds);
+      validateNodeInValues(child, rowValues, rowErrors, visibleIds, fieldModes);
       const error = Object.values(rowErrors)[0];
       if (error) {
         return `第${index + 1}行: ${error}`;
@@ -579,6 +584,11 @@ function validateTableList(node: MobileSchemaNode, value: unknown) {
     }
   }
   return null;
+}
+
+function hasEditableField(nodes: MobileSchemaNode[], modes: Readonly<Record<string, FieldMode>>): boolean {
+  return nodes.some((node) => node.type !== 'description' && (node.children
+    ? hasEditableField(node.children, modes) : (modes[node.id] ?? 'fill') === 'fill'));
 }
 
 function summarizeRows(value: unknown) {

@@ -645,7 +645,7 @@ class FormDefinitionServiceSchemaTest {
         assertThat(revisedJson.at("/lines/0/item").asText()).isEqualTo("显示器");
         assertThat(revisedJson.at("/lines/0/approvedPrice").asInt()).isEqualTo(2600);
         assertThat(revisedJson.at("/lines/0/internalNote").asText()).isEqualTo("审批人备注");
-        assertThatCode(() -> service.validateStarterSubmission(schema, revised, process))
+        assertThatCode(() -> service.validateStarterRevision(schema, revised, process))
             .doesNotThrowAnyException();
 
         JsonNode projectedSchema = service.projectStarterSchema(schema, process);
@@ -653,6 +653,67 @@ class FormDefinitionServiceSchemaTest {
         assertThat(projectedSchema.at("/0/children")).hasSize(2);
         assertThat(projectedData.at("/lines/0/internalNote").isMissingNode()).isTrue();
         assertThat(projectedData.at("/lines/0/approvedPrice").asInt()).isEqualTo(2600);
+    }
+
+    @Test void reworkPreservesLegacyReadonlyValuesAndValidatesOnlyEditableFields() {
+        String schema = """
+            [{"id":"subject","type":"text","label":"主题","props":{"required":true}},
+             {"id":"legacy","type":"switch","label":"历史值"},
+             {"id":"secret","type":"switch","label":"隐藏值"},
+             {"id":"editable","type":"switch","label":"可编辑值"}]
+            """;
+        String process = """
+            {"type":"ROOT","props":{"formPerms":[
+              {"fieldId":"legacy","mode":"READONLY"},{"fieldId":"secret","mode":"HIDDEN"}]}}
+            """;
+        Map<String, Object> revised = service.canonicalizeStarterRevision(schema,
+            Map.of("subject", "修改后的主题", "legacy", false, "secret", false, "editable", true),
+            """
+                {"legacy":"true","secret":"false"}
+                """, process);
+
+        assertThat(revised).containsEntry("legacy", "true").containsEntry("secret", "false");
+        assertThatCode(() -> service.validateStarterRevision(schema, revised, process))
+            .doesNotThrowAnyException();
+        var invalid = new java.util.LinkedHashMap<>(revised);
+        invalid.put("editable", "true");
+        assertThatThrownBy(() -> service.validateStarterRevision(schema, invalid, process))
+            .isInstanceOf(BizException.class).hasMessageContaining("可编辑值");
+        invalid.put("editable", true);
+        invalid.remove("subject");
+        assertThatThrownBy(() -> service.validateStarterRevision(schema, invalid, process))
+            .isInstanceOf(BizException.class).hasMessageContaining("主题");
+    }
+
+    @Test void reworkSkipsLegacyReadonlyValuesInsideTableRows() {
+        String schema = """
+            [{"id":"lines","type":"table_list","label":"明细","props":{"minRows":1},
+              "children":[{"id":"item","type":"text","label":"项目","props":{"required":true}},
+                {"id":"legacy","type":"switch","label":"历史值"}]}]
+            """;
+        String process = """
+            {"type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}}
+            """;
+        Map<String, Object> revised = service.canonicalizeStarterRevision(schema,
+            Map.of("lines", List.of(Map.of("item", "修改项目", "legacy", false))),
+            Map.of("lines", List.of(Map.of("item", "原项目", "legacy", "true"))), process);
+        assertThat(json.valueToTree(revised).at("/lines/0/legacy").asText()).isEqualTo("true");
+        assertThatCode(() -> service.validateStarterRevision(schema, revised, process))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateStarterRevision(schema,
+            Map.of("lines", List.of(Map.of("legacy", "true"))), process))
+            .isInstanceOf(BizException.class).hasMessageContaining("项目");
+    }
+
+    @Test void initialSubmissionStillRejectsInvalidReadonlyDefaults() {
+        String schema = """
+            [{"id":"legacy","type":"switch","label":"默认值","props":{"defaultValue":"true"}}]
+            """;
+        String process = """
+            {"type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}}
+            """;
+        assertThatThrownBy(() -> service.canonicalizeStarterSubmission(schema, Map.of(), process))
+            .isInstanceOf(BizException.class).hasMessageContaining("默认值");
     }
 
     private String matrixSchema(String cellType, String extraProps) {

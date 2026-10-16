@@ -273,7 +273,7 @@ public class FormDefinitionService {
     public Map<String, Object> canonicalizeStarterRevision(String schema, Object data,
                                                             Object existingData,
                                                             Object process) {
-        return canonicalizeStarterData(schema, data, valueMap(existingData), process, true);
+        return canonicalizeStarterData(schema, data, valueMap(readTree(existingData)), process, true);
     }
 
     /** Validates already-canonical initiator data while skipping ROOT-hidden fields. */
@@ -282,6 +282,14 @@ public class FormDefinitionService {
         Set<String> acceptedIds = new java.util.LinkedHashSet<>(leafFieldIds(schema));
         acceptedIds.removeIf(id -> "HIDDEN".equals(modes.get(id)));
         validateSubmission(schema, data, acceptedIds);
+    }
+
+    /** Rework retains persisted restricted values, so only editable fields are revalidated. */
+    public void validateStarterRevision(String schema, Object data, Object process) {
+        Map<String, String> modes = starterFieldModes(process);
+        Set<String> editableIds = new java.util.LinkedHashSet<>(leafFieldIds(schema));
+        editableIds.removeIf(id -> !"EDITABLE".equals(modes.getOrDefault(id, "EDITABLE")));
+        validateSubmission(schema, data, editableIds);
     }
 
     private Map<String, Object> canonicalizeStarterData(String schema, Object data,

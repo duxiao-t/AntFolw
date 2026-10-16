@@ -209,6 +209,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private com.antflow.attachment.MobileFileLinkService mobileFileLinkService;
     @Autowired private WorkflowMonitoringController workflowMonitoring;
     @Autowired private com.antflow.notify.NotificationPublisher notifications;
+    @Autowired private com.antflow.mobile.workflow.MobileWorkflowService mobileWorkflowService;
+    @Autowired private com.antflow.mobile.workflow.ApprovalPreviewService approvalPreviewService;
 
     @Test
     void wecomSyncLosesLeaseWithoutWritingAndRestartsIdempotentlyFromUpstream() {
@@ -2339,6 +2341,180 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    void v2ForcedApprovalsSettleAllAndRatioVotesAndKeepTheRealOperator() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long otherId = insertUser("forced-approval-" + UUID.randomUUID());
+        for (String mode : List.of("ALL", "RATIO")) {
+            StartedV2 started = startV2(
+                multiSignFlow(mode, List.of(bobId, otherId), 50, adminId), adminId);
+            long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+
+            processEngine.forceApprove(
+                new CompleteCmd(taskId, "APPROVE", "emergency approval", null), adminId);
+
+            assertThat(jdbcTemplate.queryForMap("""
+                SELECT task.status, task.approved_by, participant.status AS vote
+                FROM t_task task JOIN t_node_participant participant
+                  ON participant.node_instance_id = task.node_instance_id
+                 AND participant.sequence_no = task.sequence_no
+                WHERE task.id = ?
+                """, taskId)).containsEntry("status", "APPROVED")
+                .containsEntry("approved_by", adminId).containsEntry("vote", "APPROVED");
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT operator_id FROM t_task_history
+                WHERE task_id = ? AND action = 'FORCE_APPROVE'
+                """, Long.class, taskId)).isEqualTo(adminId);
+            assertThat(pendingTaskCount(started.instanceId(), "a2")).isZero();
+
+            long otherTask = taskIdForAssignee(started.instanceId(), "a1", otherId);
+            if ("ALL".equals(mode)) {
+                processEngine.approve(
+                    new CompleteCmd(otherTask, "APPROVE", "normal approval", null), otherId);
+            } else {
+                processEngine.forceReject(
+                    new CompleteCmd(otherTask, "REJECT", "emergency rejection", null), adminId);
+            }
+            assertThat(pendingTaskCount(started.instanceId(), "a2")).isEqualTo(1L);
+            assertThatThrownBy(() -> processEngine.forceApprove(
+                new CompleteCmd(taskId, "APPROVE", "duplicate", null), adminId))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("TASK_NOT_PENDING"));
+        }
+    }
+
+    @Test
+    void v2ForcedRejectionSettlesAllAndRatioAfterTheOtherVote() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        for (String mode : List.of("ALL", "RATIO")) {
+            StartedV2 started = startV2(
+                multiSignFlow(mode, List.of(bobId, adminId), 100, adminId), adminId);
+            long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+
+            processEngine.forceReject(
+                new CompleteCmd(taskId, "REJECT", "emergency rejection", null), adminId);
+
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT participant.status FROM t_node_participant participant
+                JOIN t_task task ON participant.node_instance_id = task.node_instance_id
+                  AND participant.sequence_no = task.sequence_no WHERE task.id = ?
+                """, String.class, taskId)).isEqualTo("REJECTED");
+            assertThat(pendingReworkCount(started.instanceId())).isZero();
+
+            processEngine.approve(new CompleteCmd(
+                taskIdForAssignee(started.instanceId(), "a1", adminId),
+                "APPROVE", "normal approval", null), adminId);
+            assertThat(pendingReworkCount(started.instanceId())).isEqualTo(1L);
+            assertThat(pendingTaskCount(started.instanceId(), "a2")).isZero();
+        }
+    }
+
+    @Test
+    void v2ForcedAdditionalRejectionRecordsTheAdditionalReviewersVote() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long additionalId = insertUser("forced-additional-" + UUID.randomUUID());
+        for (String position : List.of("BEFORE", "AFTER")) {
+            StartedV2 started = startV2(approvalFlow(bobId), adminId);
+            long parent = taskIdForAssignee(started.instanceId(), "a1", bobId);
+            long child;
+            PrincipalHolder.set(new PrincipalHolder.Principal(bobId, "bob", List.of("admin")));
+            try {
+                child = taskOperations.addAssignee(parent, additionalId, position, "review");
+            } finally {
+                PrincipalHolder.clear();
+            }
+            if ("AFTER".equals(position)) {
+                processEngine.approve(new CompleteCmd(parent, "APPROVE", "ok", null), bobId);
+            }
+
+            processEngine.forceReject(
+                new CompleteCmd(child, "REJECT", "emergency rejection", null), adminId);
+
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT participant.status FROM t_node_participant participant
+                JOIN t_task task ON participant.node_instance_id = task.node_instance_id
+                  AND participant.sequence_no = task.sequence_no WHERE task.id = ?
+                """, String.class, child)).isEqualTo("REJECTED");
+            assertThat(pendingReworkCount(started.instanceId())).isEqualTo(1L);
+        }
+    }
+
+    @Test
+    void v2VoteMismatchRollsBackTaskAndHistoryInsteadOfLeavingAPartialApproval() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        for (String action : List.of("APPROVE", "REJECT")) {
+            StartedV2 started = startV2(approvalFlow(bobId), adminId);
+            long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+            jdbcTemplate.update("""
+                UPDATE t_node_participant SET actual_user_id = ?
+                WHERE node_instance_id = (SELECT node_instance_id FROM t_task WHERE id = ?)
+                """, adminId, taskId);
+            CompleteCmd command = new CompleteCmd(taskId, action, "mismatched participant", null);
+
+            assertThatThrownBy(() -> {
+                if ("APPROVE".equals(action)) processEngine.forceApprove(command, adminId);
+                else processEngine.forceReject(command, adminId);
+            }).isInstanceOfSatisfying(BizException.class,
+                error -> assertThat(error.getCode()).isEqualTo("BAD_TASK_STATE"));
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_task WHERE id = ?", String.class, taskId))
+                .isEqualTo("PENDING");
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_task_history
+                WHERE task_id = ? AND action IN ('FORCE_APPROVE', 'FORCE_REJECT_VOTE')
+                """, Long.class, taskId)).isZero();
+        }
+    }
+
+    @Test
+    void legacyReadonlyValueCanBePreviewedAndResubmittedButEditableValuesStayValidated()
+            throws Exception {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        String schema = """
+            [{"id":"subject","type":"text","label":"主题","props":{"required":true}},
+             {"id":"legacy","type":"switch","label":"历史值","props":{"defaultValue":true}},
+             {"id":"editable","type":"switch","label":"可编辑值"}]
+            """;
+        String flow = approvalFlow(bobId).replace("\"type\":\"ROOT\"", """
+            "type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}
+            """.trim());
+        StartedV2 started = startV2(flow, adminId, schema);
+        jdbcTemplate.update("""
+            UPDATE t_form_data SET data = jsonb_set(data, '{legacy}', '"true"'::jsonb)
+            WHERE id = ?
+            """, started.formDataId());
+        processEngine.reject(new CompleteCmd(
+            taskIdForAssignee(started.instanceId(), "a1", bobId), "REJECT", "revise", null),
+            bobId);
+        long reworkId = pendingReworkTaskId(started.instanceId());
+        String code = jdbcTemplate.queryForObject("""
+            SELECT form.code FROM t_form_definition form
+            JOIN t_form_data data ON data.form_def_id = form.id WHERE data.id = ?
+            """, String.class, started.formDataId());
+        JsonNode revised = flowJson.readTree("""
+            {"subject":"revised","legacy":false,"editable":true}
+            """);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            com.antflow.mobile.workflow.ReworkValidationFixture.previewAndResubmit(
+                mobileWorkflowService, approvalPreviewService, code, reworkId, adminId, revised);
+        } finally {
+            PrincipalHolder.clear();
+        }
+        JsonNode persisted = flowJson.readTree(jdbcTemplate.queryForObject(
+            "SELECT data::text FROM t_form_data WHERE id = ?", String.class, started.formDataId()));
+        assertThat(persisted.path("legacy").asText()).isEqualTo("true");
+        assertThat(persisted.path("legacy").isTextual()).isTrue();
+        assertThat(persisted.path("subject").asText()).isEqualTo("revised");
+        assertThat(pendingTaskCount(started.instanceId(), "a1")).isEqualTo(1L);
+    }
+
+    @Test
     void v2ConcurrentAnySignAdvancesOnceAndCancelsLosingTask() throws Exception {
         long adminId = userId("admin");
         long bobId = userId("bob");
@@ -3862,6 +4038,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    @org.springframework.transaction.annotation.Transactional
     void mobileNotificationsAreUserScopedAndReadIdempotently() {
         long adminId = userId("admin");
         long bobId = userId("bob");
@@ -4791,7 +4968,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     private StartedV2 startV2(String flow, long starterId) {
-        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        return startV2(flow, starterId, VALID_SCHEMA);
+    }
+
+    private StartedV2 startV2(String flow, long starterId, String schema) {
+        long formId = insertForm("DRAFT", schema);
         long processId = insertProcess(formId, "DRAFT", flow);
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);

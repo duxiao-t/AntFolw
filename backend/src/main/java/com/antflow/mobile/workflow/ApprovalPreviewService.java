@@ -147,7 +147,7 @@ public class ApprovalPreviewService {
         if (schema == null) schema = form.getSchema();
         Map<String, Object> data = formDefinitionService.canonicalizeStarterRevision(
             schema, request.data(), formData.getData(), processJson);
-        formDefinitionService.validateStarterSubmission(schema, data, processJson);
+        formDefinitionService.validateStarterRevision(schema, data, processJson);
         return new PreviewContext(readObject(processJson), objectMapper.valueToTree(data),
             instance.getStartedBy(), form.getId(), previousSelections(instance.getId()), instance);
     }

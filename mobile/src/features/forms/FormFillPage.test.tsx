@@ -246,6 +246,48 @@ describe('FormFillPage', () => {
     expect(await screen.findByLabelText('开始时间')).toHaveValue('2026-07-30');
   });
 
+  it('allows rework with legacy readonly values while still requiring editable fields', async () => {
+    const schema = [
+      { id: 'subject', type: 'text', label: '修改说明', props: { required: true } },
+      { id: 'legacy', type: 'switch', label: '历史只读值' },
+    ];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input).includes('/api/mobile/forms/leave')) {
+        return jsonResponse({ ...FORM_RESPONSE, schema });
+      }
+      if (String(input).includes('/api/mobile/rework-tasks/401')) {
+        return jsonResponse({
+          taskId: 401, instanceId: 501, formCode: 'leave', schema,
+          formData: { subject: '', legacy: 'true' },
+          processSnapshot: { id: 'root', type: 'ROOT', props: {
+            formPerms: [{ fieldId: 'legacy', mode: 'READONLY' }],
+          } },
+        });
+      }
+      return jsonResponse({});
+    });
+    renderForm('/forms/leave?reworkTaskId=401');
+    await screen.findByLabelText('修改说明');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('请填写修改说明')).toBeInTheDocument();
+    await userEvent.type(inputByLabel('修改说明'), '修订内容');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('确认提交目标页')).toBeInTheDocument();
+  });
+
+  it('still validates readonly defaults on a new submission', async () => {
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({
+      ...FORM_RESPONSE,
+      schema: [{ id: 'legacy', type: 'switch', label: '默认开关', props: { defaultValue: 'true' } }],
+      starterFieldModes: { legacy: 'READONLY' },
+    }));
+    const { router } = renderForm();
+    await screen.findByText('默认开关');
+    await userEvent.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/forms/leave'));
+    expect(screen.queryByText('确认提交目标页')).not.toBeInTheDocument();
+  });
+
   it('retries an existing draft update after one transport failure', async () => {
     const fetchMock = vi.mocked(fetch);
     const baseImplementation = fetchMock.getMockImplementation();

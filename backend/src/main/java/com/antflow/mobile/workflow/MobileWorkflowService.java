@@ -433,7 +433,7 @@ public class MobileWorkflowService {
             formDefinitionService.canonicalizeStarterRevision(effectiveSchema, data,
                 formData.getData(), instance.getProcessSnapshot());
         if (validate) {
-            formDefinitionService.validateStarterSubmission(effectiveSchema, canonicalData,
+            formDefinitionService.validateStarterRevision(effectiveSchema, canonicalData,
                 instance.getProcessSnapshot());
         }
         formData.setData(writeJson(objectMapper.valueToTree(canonicalData)));

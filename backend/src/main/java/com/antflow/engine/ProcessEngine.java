@@ -251,7 +251,7 @@ public class ProcessEngine {
                 return;
             }
             if (runtimeV2.activateAfterSign(t)) return;
-            WorkflowRuntimeV2.Decision decision = runtimeV2.approve(t, cur, operatorId);
+            WorkflowRuntimeV2.Decision decision = runtimeV2.approve(t, cur);
             if (!decision.newTaskIds().isEmpty()) {
                 notifyAssigned(pi.getId(), decision.newTaskIds());
             }
@@ -408,8 +408,8 @@ public class ProcessEngine {
         if (runtimeV2 != null && runtimeV2.active(pi) && t.getNodeInstanceId() != null) {
             WorkflowRuntimeV2.Decision decision = t.getOperationKind() != null
                 && t.getOperationKind().startsWith("ADD_")
-                ? runtimeV2.rejectAdditional(t, operatorId)
-                : runtimeV2.rejectVote(t, cur, operatorId);
+                ? runtimeV2.rejectAdditional(t)
+                : runtimeV2.rejectVote(t, cur);
             settleV2Decision(decision, cmd, operatorId, force, t, pi, root, cur);
             return;
         }
