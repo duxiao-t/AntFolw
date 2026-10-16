@@ -52,7 +52,7 @@ public class WecomAppController {
 
     @PostMapping("/api/mobile/wecom/media/import")
     @PreAuthorize("@authz.capability('" + PermissionCodes.FILE_ATTACHMENT_UPLOAD + "')")
-    public com.antflow.mobile.workflow.MobileFileDto importMedia(@RequestBody MediaRequest request) {
+    public com.antflow.attachment.MobileFileDto importMedia(@RequestBody MediaRequest request) {
         return service.importMedia(request.serverId(), request.mediaType());
     }
 

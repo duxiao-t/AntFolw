@@ -8,31 +8,20 @@ import { history, request, useModel } from '@umijs/max';
 import { App, Button, Input, Modal, Popconfirm, Space, Tag } from 'antd';
 import { useRef, useState } from 'react';
 import { CAPABILITY, hasCapability } from '../../authz';
-import type { SchemaNode } from '../../registry/types';
 import {
   buildFormTemplate,
   type FormTemplate,
   parseFormTemplate,
 } from './formTemplate';
 
-type FormDefinition = {
-  id: number;
-  code: string;
-  name: string;
-  description?: string;
-  status: 'DRAFT' | 'PUBLISHED' | 'DEPRECATED';
-  version: number;
-  updatedAt?: string;
-};
-
-type FormDefinitionDetail = FormDefinition & { schema: SchemaNode[] | string };
-
 type PageResult<T> = {
   records?: T[];
   total?: number;
 };
 
-const statusMap = {
+// 契约里 status 只是 `string`（后端没有 enum 注解）——这三个值是我们自己的词汇表，
+// 不是重复 DTO。带上索引签名，未知值走下面 render 里的兜底，而不是崩在类型上。
+const statusMap: Record<string, { color: string; text: string }> = {
   DRAFT: { color: 'default', text: '草稿' },
   PUBLISHED: { color: 'green', text: '已发布' },
   DEPRECATED: { color: 'red', text: '已停用' },
@@ -50,7 +39,7 @@ export default function FormManagementList() {
   const currentUser = initialState?.currentUser as any;
   const can = (permission: string) => hasCapability(currentUser, permission);
 
-  const handleDelete = async (record: FormDefinition) => {
+  const handleDelete = async (record: AntFlowAPI.Summary) => {
     try {
       await request(`/api/forms/definitions/${record.id}`, {
         method: 'DELETE',
@@ -62,7 +51,7 @@ export default function FormManagementList() {
     }
   };
 
-  const handleDisable = async (record: FormDefinition) => {
+  const handleDisable = async (record: AntFlowAPI.Summary) => {
     try {
       await request(`/api/forms/definitions/${record.id}/disable`, {
         method: 'POST',
@@ -74,18 +63,32 @@ export default function FormManagementList() {
     }
   };
 
-  const handleExport = async (record: FormDefinition) => {
+  const handleExport = async (record: AntFlowAPI.Summary) => {
     try {
-      const detail = await request<FormDefinitionDetail>(
+      const detail = await request<AntFlowAPI.FormDefinition>(
         `/api/forms/definitions/${record.id}`,
       );
-      const content = JSON.stringify(buildFormTemplate(detail), null, 2);
+      // 生成类型里属性都是可选的（后端没加 @NotNull），缺了就在这里显式早返回，
+      // 而不是拿 `as`/`!` 假装它一定在。
+      if (detail.name === undefined || detail.schema === undefined) {
+        message.error('表单详情不完整，无法导出');
+        return;
+      }
+      const content = JSON.stringify(
+        buildFormTemplate({
+          name: detail.name,
+          description: detail.description,
+          schema: detail.schema,
+        }),
+        null,
+        2,
+      );
       const url = URL.createObjectURL(
         new Blob([content], { type: 'application/json' }),
       );
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `${safeFileName(record.name)}.antflow-form.json`;
+      anchor.download = `${safeFileName(record.name ?? record.code ?? '')}.antflow-form.json`;
       anchor.click();
       URL.revokeObjectURL(url);
       message.success('表单模板已导出');
@@ -112,20 +115,23 @@ export default function FormManagementList() {
     if (!template || !importName.trim() || !importCode.trim()) return;
     setImporting(true);
     try {
-      const saved = await request<FormDefinition>('/api/forms/definitions', {
-        method: 'POST',
-        data: {
-          code: importCode.trim(),
-          name: importName.trim(),
-          description: template.description ?? '',
-          schema: template.schema,
-          settings: { workflowEnabled: false },
-        },
-      });
+      const body: AntFlowAPI.SaveBody = {
+        code: importCode.trim(),
+        name: importName.trim(),
+        description: template.description ?? '',
+        schema: template.schema,
+        settings: { workflowEnabled: false },
+      };
+      const saved = await request<AntFlowAPI.FormDefinition>(
+        '/api/forms/definitions',
+        { method: 'POST', data: body },
+      );
       message.success('模板已导入为新草稿');
       setTemplate(null);
       actionRef.current?.reload();
-      history.push(`/approval/forms/${saved.id}/wizard?step=designer`);
+      if (saved.id !== undefined) {
+        history.push(`/approval/forms/${saved.id}/wizard?step=designer`);
+      }
     } catch (error: any) {
       message.error(error?.message ?? '导入失败');
     } finally {
@@ -135,7 +141,7 @@ export default function FormManagementList() {
 
   return (
     <PageContainer title={false}>
-      <ProTable<FormDefinition>
+      <ProTable<AntFlowAPI.Summary>
         actionRef={actionRef}
         rowKey="id"
         columns={[
@@ -147,9 +153,9 @@ export default function FormManagementList() {
             dataIndex: 'status',
             width: 120,
             render: (_, record) => {
-              const status = statusMap[record.status] ?? {
+              const status = statusMap[record.status ?? ''] ?? {
                 color: 'default',
-                text: record.status,
+                text: record.status ?? '',
               };
               return <Tag color={status.color}>{status.text}</Tag>;
             },
@@ -221,7 +227,7 @@ export default function FormManagementList() {
           },
         ]}
         request={async (params) => {
-          const result = await request<PageResult<FormDefinition>>(
+          const result = await request<PageResult<AntFlowAPI.Summary>>(
             '/api/forms/definitions',
             {
               params: {

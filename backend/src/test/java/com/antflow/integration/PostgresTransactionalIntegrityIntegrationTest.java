@@ -1,5 +1,7 @@
 package com.antflow.integration;
 
+import com.antflow.form.runtime.MobileDraftDto;
+
 import com.antflow.audit.AuditService;
 import com.antflow.auth.PrincipalHolder;
 import com.antflow.authz.FormGrantService;
@@ -20,12 +22,12 @@ import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.form.runtime.FormDataService;
 import com.antflow.integration.wecom.WecomService;
 import com.antflow.mobile.workflow.MobileWorkflowMapper;
-import com.antflow.mobile.workflow.MobileDraftService;
+import com.antflow.form.runtime.MobileDraftService;
 import com.antflow.mobile.workflow.MobileAppService;
 import com.antflow.navigation.MenuService;
 import com.antflow.report.ReportService;
-import com.antflow.mobile.workflow.FileStorage;
-import com.antflow.mobile.workflow.StoredObject;
+import com.antflow.attachment.FileStorage;
+import com.antflow.attachment.StoredObject;
 import com.antflow.org.User;
 import com.antflow.org.UserService;
 import com.antflow.task.ProcessInstanceMapper;
@@ -37,6 +39,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -173,12 +178,17 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
     @Autowired private ProcessEngine processEngine;
     @Autowired private UserService userService;
+    @Autowired private com.antflow.org.DepartmentService departmentService;
+    @Autowired private com.antflow.org.DepartmentController departmentController;
+    @Autowired private com.antflow.org.CompanyController companyController;
     @Autowired private AuditService auditService;
     @Autowired private FormProcessPublishService publishService;
     @Autowired private ProcessInstanceMapper processInstanceMapper;
     @Autowired private TaskMapper taskMapper;
+    @Autowired private com.antflow.task.TaskOperationService taskOperations;
     @Autowired private FormGrantService formGrantService;
     @Autowired private MobileWorkflowMapper mobileWorkflowMapper;
     @Autowired private AuthorizationService authorizationService;
@@ -194,9 +204,609 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private WecomService wecomService;
     @Autowired private OptionSourceService optionSourceService;
     @Autowired private com.antflow.form.options.OptionRuntimeService optionRuntimeService;
-    @Autowired private com.antflow.mobile.workflow.MobileFileService mobileFileService;
-    @Autowired private com.antflow.mobile.workflow.MobileFileMapper mobileFileMapper;
-    @Autowired private com.antflow.mobile.workflow.MobileFileLinkService mobileFileLinkService;
+    @Autowired private com.antflow.attachment.MobileFileService mobileFileService;
+    @Autowired private com.antflow.attachment.MobileFileMapper mobileFileMapper;
+    @Autowired private com.antflow.attachment.MobileFileLinkService mobileFileLinkService;
+    @Autowired private WorkflowMonitoringController workflowMonitoring;
+    @Autowired private com.antflow.notify.NotificationPublisher notifications;
+    @Autowired private com.antflow.mobile.workflow.MobileWorkflowService mobileWorkflowService;
+    @Autowired private com.antflow.mobile.workflow.ApprovalPreviewService approvalPreviewService;
+
+    @Test
+    void wecomSyncLosesLeaseWithoutWritingAndRestartsIdempotentlyFromUpstream() {
+        com.antflow.integration.wecom.WecomSyncLeaseFixture.verifyRecovery(
+            jdbcTemplate, new TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)));
+    }
+
+    @Test
+    void failedOutboxReplayKeepsEventIdentityHidesPayloadAndEnforcesState() {
+        StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_workflow_outbox(id, aggregate_type, aggregate_id, event_type, status,
+                attempts, payload, last_error, locked_by, locked_at)
+            VALUES (?, 'PROCESS_INSTANCE', ?, 'TASK_ASSIGNED', 'DEAD', 10,
+                '{"secret":"never-return-payload"}'::jsonb, 'https://secret.example/credential', 'old', now())
+            """, id, started.instanceId());
+        setPrincipal(userId("admin"));
+        try {
+            WorkflowMonitoringController.OutboxPage page = workflowMonitoring.outbox("DEAD", 1, 100);
+            assertThat(page.records()).extracting(WorkflowMonitoringController.OutboxEvent::id).contains(id);
+            assertThat(page.records().toString()).doesNotContain("never-return-payload", "secret.example");
+            workflowMonitoring.retryOutbox(id);
+            assertThat(jdbcTemplate.queryForMap("""
+                SELECT id, status, attempts, locked_by, locked_at, last_error
+                FROM t_workflow_outbox WHERE id = ?
+                """, id)).containsEntry("id", id).containsEntry("status", "PENDING")
+                .containsEntry("attempts", 0).containsEntry("locked_by", null)
+                .containsEntry("locked_at", null).containsEntry("last_error", null);
+            assertThatThrownBy(() -> workflowMonitoring.retryOutbox(id))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("OUTBOX_STATE_CONFLICT"));
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM t_audit_event
+                WHERE action = 'workflow.outbox.retry' AND resource_id = ?
+                """, Long.class, String.valueOf(started.instanceId()))).isEqualTo(1);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void legacyNotificationIsStoredWithItsTransactionAndRollbackDoesNotDeliver() {
+        StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
+        long before = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_workflow_outbox WHERE aggregate_id = ?", Long.class, started.instanceId());
+        TransactionTemplate tx = new TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        tx.executeWithoutResult(status -> {
+            notifications.publish(new com.antflow.notify.NotificationEvent(
+                this, "TASK_RETURNED", started.instanceId(), null, userId("admin"), "退回修改"));
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_workflow_outbox WHERE aggregate_id = ?", Long.class,
+                started.instanceId())).isEqualTo(before + 1);
+            status.setRollbackOnly();
+        });
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_workflow_outbox WHERE aggregate_id = ?", Long.class, started.instanceId()))
+            .isEqualTo(before);
+    }
+
+    @Test
+    void globalBiRoleReadsOnlyTheFiveApprovedViewsAndCannotEscalate() throws Exception {
+        String role = "bi_probe_" + UUID.randomUUID().toString().replace("-", "");
+        String script = Files.readString(Path.of("../infra/sql/bi-readonly-role.sql"))
+            .replaceAll("(?m)^\\\\set[^\\r\\n]*", "").replace("antflow_bi", role);
+        try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            connection.setAutoCommit(false);
+            try {
+                statement.execute(script);
+                statement.execute("SET SESSION AUTHORIZATION " + role);
+                try (var result = statement.executeQuery("SELECT current_user, session_user")) {
+                    assertThat(result.next()).isTrue();
+                    assertThat(result.getString(1)).isEqualTo(role);
+                    assertThat(result.getString(2)).isEqualTo(role);
+                }
+                for (String view : List.of("v_form_ledger", "v_form_field_catalog",
+                    "v_form_option_catalog", "v_user_catalog", "v_department_catalog")) {
+                    try (var result = statement.executeQuery("SELECT count(*) FROM " + view)) {
+                        assertThat(result.next()).isTrue();
+                    }
+                }
+                for (String denied : List.of("SELECT * FROM t_user", "SELECT * FROM t_form_data",
+                    "UPDATE v_form_ledger SET data_status = 'DRAFT'", "CREATE TABLE public.bi_leak(id int)",
+                    "SET ROLE postgres")) {
+                    var savepoint = connection.setSavepoint();
+                    assertThatThrownBy(() -> statement.execute(denied)).as(denied)
+                        .isInstanceOf(java.sql.SQLException.class);
+                    connection.rollback(savepoint);
+                }
+            } finally {
+                connection.rollback();
+            }
+        }
+    }
+
+    @Test
+    void forgedMediaDurationRollsBackSubmissionAndKeepsOriginalDraft() {
+        long owner = userId("admin");
+        UUID file = UUID.randomUUID();
+        long form = insertForm("PUBLISHED",
+            "[{\"id\":\"clip\",\"type\":\"audio_upload\",\"props\":{\"maxDuration\":10}}]");
+        long draft = insertDraft(form, owner);
+        confirmFixtureCompany(form, anyCompanyId());
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                size_bytes, sha256, status, duration_seconds)
+            VALUES (?, ?, 'clip.wav', ?, 'audio/wav', 100, ?, 'READY', 20)
+            """, file, owner, "audio/" + file, "a".repeat(64));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, form);
+        setPrincipal(owner);
+        try {
+            assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED",
+                Map.of("clip", List.of(Map.of("id", file.toString(), "durationSeconds", 1))),
+                owner, List.of(new com.antflow.attachment.MobileFileRef(file, "clip", 0)),
+                draft, null)).isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("FORM_DATA_INVALID"));
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_form_data WHERE form_def_id = ?", Long.class, form))
+                .isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_form_data WHERE id = ?", String.class, draft)).isEqualTo("DRAFT");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_form_data_file WHERE file_id = ?", Long.class, file)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void terminalInstancesRejectResidualPendingTasksWithoutAnySideEffects() {
+        long admin = userId("admin");
+        long approver = userId("bob");
+        StartedV2 started = startV2(approvalFlow(approver), admin);
+        long task = jdbcTemplate.queryForObject("""
+            SELECT id FROM t_task WHERE proc_inst_id = ? AND status = 'PENDING'
+            """, Long.class, started.instanceId());
+        long history = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class, started.instanceId());
+        setPrincipal(approver);
+        try {
+            for (String terminal : List.of("APPROVED", "REJECTED", "WITHDRAWN")) {
+                jdbcTemplate.update("UPDATE t_process_instance SET status = ? WHERE id = ?",
+                    terminal, started.instanceId());
+                sqlSession.clearCache();
+                assertThatThrownBy(() -> processEngine.approve(
+                    new CompleteCmd(task, "APPROVE", "invalid", null), approver))
+                    .isInstanceOfSatisfying(BizException.class,
+                        error -> assertThat(error.getCode()).isEqualTo("BAD_INSTANCE_STATE"));
+                assertThatThrownBy(() -> taskOperations.transfer(task, admin, "invalid"))
+                    .isInstanceOfSatisfying(BizException.class,
+                        error -> assertThat(error.getCode()).isEqualTo("BAD_INSTANCE_STATE"));
+                assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?",
+                    String.class, task)).isEqualTo("PENDING");
+                assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class,
+                    started.instanceId())).isEqualTo(history);
+            }
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void oldRoundPendingTaskCannotAdvanceRunningInstance() {
+        StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
+        long task = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_task WHERE proc_inst_id = ? AND status = 'PENDING'",
+            Long.class, started.instanceId());
+        jdbcTemplate.update(
+            "UPDATE t_process_instance SET round_no = round_no + 1 WHERE id = ?", started.instanceId());
+        long history = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class, started.instanceId());
+        assertThatThrownBy(() -> processEngine.approve(new CompleteCmd(task, "APPROVE", "stale", null),
+            userId("bob"))).isInstanceOfSatisfying(BizException.class,
+                error -> assertThat(error.getCode()).isEqualTo("BAD_TASK_STATE"));
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE id = ?", String.class, task)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ?", Long.class, started.instanceId()))
+            .isEqualTo(history);
+    }
+
+    @Test
+    void recallingBeforeSignRestoresParentAndOnlyTheOriginalVoteCounts() {
+        long approver = userId("bob");
+        StartedV2 started = startV2(approvalFlow(approver), userId("admin"));
+        long parent = jdbcTemplate.queryForObject(
+            "SELECT id FROM t_task WHERE proc_inst_id = ? AND status = 'PENDING'",
+            Long.class, started.instanceId());
+        setPrincipal(approver);
+        long child;
+        try {
+            child = taskOperations.addAssignee(parent, userId("admin"), "BEFORE", "复核");
+        } finally {
+            PrincipalHolder.clear();
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?", String.class, parent))
+            .isEqualTo("BLOCKED");
+        setPrincipal(userId("admin"));
+        try {
+            taskOperations.recallChild(child, "撤回加签");
+        } finally {
+            PrincipalHolder.clear();
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?", String.class, parent))
+            .isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM t_task WHERE id = ?", String.class, child))
+            .isEqualTo("SKIPPED");
+        processEngine.approve(new CompleteCmd(parent, "APPROVE", "完成", null), approver);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_process_instance WHERE id = ?", String.class, started.instanceId()))
+            .isEqualTo("APPROVED");
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void allScopeBusinessReadsIntersectCompanySnapshotsAndKeepExplicitExceptions() {
+        long companyA = insertCompany("isolation-a-" + UUID.randomUUID());
+        long companyB = insertCompany("isolation-b-" + UUID.randomUUID());
+        long departmentA = insertDepartment(companyA, "isolation-a");
+        long departmentB = insertDepartment(companyB, "isolation-b");
+        long viewer = insertUser("isolation-reader-" + UUID.randomUUID());
+        long author = insertUser("isolation-author-" + UUID.randomUUID());
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", departmentA, viewer);
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", departmentB, author);
+        long role = insertRole("isolation_" + UUID.randomUUID().toString().replace("-", ""));
+        assignRole(viewer, role);
+        for (String permission : List.of(PermissionCodes.WORKFLOW_INSTANCE_READ,
+                PermissionCodes.FORM_DATA_READ, PermissionCodes.WORKFLOW_MONITOR_READ,
+                PermissionCodes.WORKFLOW_AUTOMATION_RETRY)) {
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, ?, 'ALL')
+                """, role, permission);
+        }
+        long form = insertForm("PUBLISHED", VALID_SCHEMA);
+        long process = insertProcess(form, "PUBLISHED", approvalFlow(author));
+        long data = insertSubmittedData(form, author);
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", companyB, data);
+        long instance = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                started_dept_id, company_id)
+            VALUES (?, ?, 'RUNNING', ?, ?, ?) RETURNING id
+            """, Long.class, process, data, author, departmentB, companyB);
+        setPrincipal(viewer);
+        try {
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isFalse();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isFalse();
+            assertThat(processInstanceMapper.selectInstancePage(viewer, false, false, true,
+                "authorized", null, null, null, null, null, 100, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).doesNotContain(instance);
+            assertThat(formDataService.exportRows(form, null, null, null, null)).isEmpty();
+            assertThat(formDataService.countForExport(form, null, null, null, null)).isZero();
+            assertThat(formDataMapper.selectById(data)).isNull();
+
+            jdbcTemplate.update("UPDATE t_process_instance SET company_id = ? WHERE id = ?", companyA, instance);
+            jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", companyA, data);
+            sqlSession.clearCache();
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isTrue();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isTrue();
+            assertThat(formDataService.exportRows(form, null, null, null, null))
+                .extracting(com.antflow.form.runtime.FormData::getId).containsExactly(data);
+            jdbcTemplate.update("UPDATE t_process_instance SET company_id = ? WHERE id = ?", companyB, instance);
+            jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", companyB, data);
+            sqlSession.clearCache();
+            jdbcTemplate.update("UPDATE t_process_instance SET started_by = ? WHERE id = ?",
+                viewer, instance);
+            jdbcTemplate.update("UPDATE t_form_data SET created_by = ? WHERE id = ?", viewer, data);
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isTrue();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isTrue();
+            assertThatThrownBy(() -> authorizationService.requireManageInstance(
+                instance, PermissionCodes.WORKFLOW_AUTOMATION_RETRY))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            assertThat(formDataService.exportRows(form, null, null, null, null)).isEmpty();
+            UUID file = insertMobileFile(viewer, "READY", null);
+            jdbcTemplate.update("INSERT INTO t_form_data_file(form_data_id, file_id, field_id, sort_order)"
+                + " VALUES (?, ?, 'file', 0)", data, file);
+            assertThat(mobileFileService.getMetadata(file, viewer, List.of()).id()).isEqualTo(file);
+            jdbcTemplate.update("UPDATE t_process_instance SET company_inferred = true WHERE id = ?",
+                instance);
+            jdbcTemplate.update("UPDATE t_form_data SET company_inferred = true WHERE id = ?", data);
+            sqlSession.clearCache();
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isFalse();
+            assertThat(authorizationService.canReadFormData(data, viewer)).isFalse();
+            assertThatThrownBy(() -> mobileFileService.getMetadata(file, viewer, List.of()))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(mobileWorkflowMapper.selectInstancePage(viewer, null, null, 100, 0))
+                .extracting(MobileWorkflowMapper.InstanceRow::id).doesNotContain(instance);
+            assertThat(mobileWorkflowMapper.selectInitiatedPage(viewer, null, null, 100, 0))
+                .extracting(MobileWorkflowMapper.InitiatedRow::id).doesNotContain(instance);
+
+            setPrincipal(userId("admin"));
+            assertThat(authorizationService.canReadFullInstance(instance, userId("admin"))).isTrue();
+            assertThat(authorizationService.canReadFormData(data, userId("admin"))).isTrue();
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(viewer);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void crossCompanyTaskAssignmentDoesNotGrantCrossCompanyManagement() {
+        long company = insertCompany("assigned-company-" + UUID.randomUUID());
+        long starter = insertUser("assigned-starter-" + UUID.randomUUID());
+        long viewer = insertUser("assigned-viewer-" + UUID.randomUUID());
+        moveUserToDepartment(viewer, insertDepartment(anyCompanyId(), "assigned-viewer"));
+        long role = insertRole("assigned_" + UUID.randomUUID().toString().replace("-", ""));
+        assignRole(viewer, role);
+        jdbcTemplate.update("""
+            INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+            VALUES (?, 'workflow:task:read', NULL), (?, 'workflow:automation:retry', 'ALL'),
+                   (?, 'workflow:monitor:read', 'ALL'), (?, 'workflow:outbox:retry', 'ALL'),
+                   (?, 'console:entry:access', NULL)
+            """, role, role, role, role, role);
+        long form = insertForm("PUBLISHED", VALID_SCHEMA);
+        long process = insertProcess(form, "PUBLISHED", approvalFlow(viewer));
+        long data = insertSubmittedData(form, starter);
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?", company, data);
+        long instance = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by, company_id)
+            VALUES (?, ?, 'RUNNING', ?, ?) RETURNING id
+            """, Long.class, process, data, starter, company);
+        jdbcTemplate.update("""
+            INSERT INTO t_task(proc_inst_id, node_id, assignee_id, status, task_type, approval_mode)
+            VALUES (?, 'review', ?, 'PENDING', 'APPROVAL', 'OR_SIGN')
+            """, instance, viewer);
+        UUID event = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_workflow_outbox(id, aggregate_type, aggregate_id, event_type, status, payload)
+            VALUES (?, 'PROCESS_INSTANCE', ?, 'TASK_ASSIGNED', 'DEAD', '{}'::jsonb)
+            """, event, instance);
+        setPrincipal(viewer);
+        try {
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isTrue();
+            assertThat(processInstanceMapper.selectInstancePage(viewer, false, true, false,
+                "authorized", null, null, null, null, null, 100, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId).contains(instance);
+            assertThat(taskMapper.countTaskPage(viewer, "pending", null)).isEqualTo(1);
+            assertThatThrownBy(() -> authorizationService.requireManageInstance(
+                instance, PermissionCodes.WORKFLOW_AUTOMATION_RETRY))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            assertThat(workflowMonitoring.outbox("DEAD", 1, 100).records()).isEmpty();
+            assertThatThrownBy(() -> workflowMonitoring.retryOutbox(event))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_workflow_outbox WHERE id = ?", String.class, event))
+                .isEqualTo("DEAD");
+            jdbcTemplate.update("UPDATE t_process_instance SET company_id = NULL WHERE id = ?", instance);
+            sqlSession.clearCache();
+            assertThat(authorizationService.canReadFullInstance(instance, viewer)).isFalse();
+            assertThat(taskMapper.countTaskPage(viewer, "pending", null)).isZero();
+            assertThatThrownBy(() -> authorizationService.requireConfirmedInstance(instance))
+                .isInstanceOf(HiddenResourceException.class);
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(viewer);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void companyGateIsRequiredForUserRoleAndDepartmentGrantsAndMatchesTheCatalog() {
+        long companyA = insertCompany("gate-a-" + UUID.randomUUID());
+        long companyB = insertCompany("gate-b-" + UUID.randomUUID());
+        long departmentA = insertDepartment(companyA, "gate-a");
+        long departmentB = insertDepartment(companyB, "gate-b");
+        long userA = insertUser("gate-a-" + UUID.randomUUID());
+        long userB = insertUser("gate-b-" + UUID.randomUUID());
+        long employee = roleId("employee");
+        assignRole(userA, employee);
+        assignRole(userB, employee);
+        moveUserToDepartment(userA, departmentA);
+        moveUserToDepartment(userB, departmentB);
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                VALUES (?, 'ROLE', ?)
+                """, formId, employee);
+            assertThat(authorizationService.hasFormGrant(formId, userA)).isFalse();
+            jdbcTemplate.update("""
+                INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                VALUES (?, 'COMPANY', ?)
+                """, formId, companyA);
+            for (String subject : List.of("USER", "ROLE", "DEPARTMENT")) {
+                jdbcTemplate.update("""
+                    DELETE FROM t_form_resource_grant
+                    WHERE form_def_id = ? AND subject_type <> 'COMPANY'
+                    """, formId);
+                if ("ROLE".equals(subject)) {
+                    jdbcTemplate.update("""
+                        INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                        VALUES (?, 'ROLE', ?)
+                        """, formId, employee);
+                } else {
+                    long first = "USER".equals(subject) ? userA : departmentA;
+                    long second = "USER".equals(subject) ? userB : departmentB;
+                    jdbcTemplate.update("""
+                        INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+                        VALUES (?, ?, ?), (?, ?, ?)
+                        """, formId, subject, first, formId, subject, second);
+                }
+                assertThat(authorizationService.canUseForm(formId, userA)).isTrue();
+                assertThat(authorizationService.canUseForm(formId, userB)).isFalse();
+                assertThat(authorizationService.usableFormIds(userA).orElseThrow()).contains(formId);
+                assertThat(authorizationService.usableFormIds(userB).orElseThrow()).doesNotContain(formId);
+                assertThat(mobileAppService.list(userA, null, null)).extracting("formId").contains(formId);
+                assertThat(mobileAppService.list(userB, null, null)).extracting("formId").doesNotContain(formId);
+                setPrincipal(userB);
+                assertThatThrownBy(() -> authorizationService.requireFormUse(formId))
+                    .isInstanceOf(HiddenResourceException.class);
+                PrincipalHolder.clear();
+            }
+            jdbcTemplate.update("""
+                DELETE FROM t_form_resource_grant
+                WHERE form_def_id = ? AND subject_type <> 'COMPANY'
+                """, formId);
+            assertThat(authorizationService.canUseForm(formId, userA)).isFalse();
+            moveUserToDepartment(userA, departmentB);
+            assertThat(authorizationService.usableFormIds(userA).orElseThrow()).doesNotContain(formId);
+            jdbcTemplate.update("UPDATE t_user SET dept_id = NULL WHERE id = ?", userA);
+            authorizationService.evict(userA);
+            assertThat(authorizationService.hasFormGrant(formId, userA)).isFalse();
+            setPrincipal(userId("admin"));
+            assertThatCode(() -> authorizationService.requireFormUse(formId)).doesNotThrowAnyException();
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(userA);
+            authorizationService.evict(userB);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void companyGrantsPreserveOldRequestsAndUseTheSharedVersion() {
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long companyId = anyCompanyId();
+        long admin = userId("admin");
+        setPrincipal(admin);
+        try {
+            var before = formGrantService.get(formId);
+            var granted = formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(before.version(), Set.of(admin),
+                    Set.of(), Set.of(), Set.of(companyId)));
+            assertThat(granted.companyIds()).containsExactly(companyId);
+            assertThat(granted.companies()).extracting(FormGrantService.GrantCompany::id)
+                .containsExactly(companyId);
+            var legacy = formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(granted.version(), Set.of(admin),
+                    Set.of(), Set.of()));
+            assertThat(legacy.companyIds()).containsExactly(companyId);
+            var cleared = formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(legacy.version(), Set.of(admin),
+                    Set.of(), Set.of(), Set.of()));
+            assertThat(cleared.companyIds()).isEmpty();
+            assertThat(formGrantService.candidates(formId).companies())
+                .extracting(FormGrantService.GrantCompany::id).contains(companyId);
+            assertThatThrownBy(() -> formGrantService.replace(formId,
+                new FormGrantService.FormGrantWriteRequest(legacy.version(), Set.of(admin),
+                    Set.of(), Set.of(), Set.of(companyId))))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("FORM_GRANT_VERSION_CONFLICT"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void onlyGlobalAdministratorsCanChangeCompanyGrants() {
+        long actor = insertUser("gate-maintainer-" + UUID.randomUUID());
+        long department = insertDepartment(anyCompanyId(), "gate-maintainer");
+        moveUserToDepartment(actor, department);
+        long role = insertRole("gate-maintainer-" + UUID.randomUUID());
+        jdbcTemplate.update("""
+            INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+            VALUES (?, 'form:authorization:manage', 'ALL')
+            """, role);
+        assignRole(actor, role);
+        long form = insertForm("DRAFT", VALID_SCHEMA);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_maintainer(form_def_id, user_id, granted_by)
+            VALUES (?, ?, ?)
+            """, form, actor, userId("admin"));
+        setPrincipal(actor);
+        try {
+            var before = formGrantService.get(form);
+            assertThat(formGrantService.candidates(form).companies()).isEmpty();
+            assertThatThrownBy(() -> formGrantService.replace(form,
+                new FormGrantService.FormGrantWriteRequest(before.version(),
+                    Set.of(), Set.of(), Set.of(), Set.of())))
+                .isInstanceOf(com.antflow.authz.AuthorizationFailureException.class);
+            assertThat(formGrantService.get(form).companyIds()).isEqualTo(before.companyIds());
+            setPrincipal(userId("admin"));
+            assertThatThrownBy(() -> formGrantService.replace(form,
+                new FormGrantService.FormGrantWriteRequest(before.version(),
+                    Set.of(), Set.of(), Set.of(), Set.of(Long.MAX_VALUE))))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("COMPANY_NOT_FOUND"));
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(actor);
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void transferredDraftUsesItsOriginalCompanyForReadSaveAndRevocation() throws Exception {
+        long companyA = insertCompany("draft-gate-a-" + UUID.randomUUID());
+        long companyB = insertCompany("draft-gate-b-" + UUID.randomUUID());
+        long departmentA = insertDepartment(companyA, "draft-a");
+        long departmentB = insertDepartment(companyB, "draft-b");
+        long author = insertUser("draft-gate-" + UUID.randomUUID());
+        assignRole(author, roleId("employee"));
+        moveUserToDepartment(author, departmentA);
+        long source = insertOptionSource("draft_gate_" + UUID.randomUUID().toString().replace("-", ""));
+        jdbcTemplate.update("""
+            INSERT INTO t_option_data_source_row(version_id, row_no, data)
+            VALUES (?, 1, '{"col":"a"}'::jsonb), (?, 2, '{"col":"b"}'::jsonb)
+            """, optionSourceVersionId(source), optionSourceVersionId(source));
+        long formId = insertForm("PUBLISHED", boundOptionSchema(source, optionSourceVersionId(source)));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+            VALUES (?, 'USER', ?), (?, 'COMPANY', ?)
+            """, formId, author, formId, companyA);
+        setPrincipal(author);
+        try {
+            long draft = mobileDraftService.create(code, flowJson.createObjectNode(), null, author);
+            moveUserToDepartment(author, departmentB);
+            setPrincipal(author);
+            assertThat(authorizationService.canUseForm(formId, author)).isFalse();
+            assertThat(mobileDraftService.get(draft, author).readOnly()).isFalse();
+            assertThat(mobileDraftService.requireUsableDraft(draft, formId, author)).isEqualTo(companyA);
+            mobileDraftService.update(draft, flowJson.createObjectNode().put("subject", "saved"), null, author);
+            assertThat(companyOfFormData(draft)).isEqualTo(companyA);
+            assertThat(queryOptionsByDataId(draft, "dept")).hasSize(2);
+            long otherForm = insertForm("PUBLISHED", VALID_SCHEMA);
+            assertThatThrownBy(() -> mobileDraftService.requireUsableDraft(draft, otherForm, author))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("BAD_DRAFT"));
+            jdbcTemplate.update("""
+                DELETE FROM t_form_resource_grant
+                WHERE form_def_id = ? AND subject_type = 'COMPANY'
+                """, formId);
+            assertThat(mobileDraftService.get(draft, author).readOnly()).isTrue();
+            assertThatThrownBy(() -> mobileDraftService.requireUsableDraft(draft, formId, author))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThatThrownBy(() -> queryOptionsByDataId(draft, "dept"))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draft)).isEqualTo(1);
+        } finally {
+            PrincipalHolder.clear();
+            authorizationService.evict(author);
+        }
+    }
+
+    @Test
+    void v55PreservesExistingGrantsAndDoesNotAuthorizeCompaniesCreatedLater() {
+        String schema = "company_gate_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            migrateTo(schema, "54");
+            long form = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, status, created_by) "
+                + "VALUES ('gate_existing', 'existing', '[]'::jsonb, 'PUBLISHED', 1) RETURNING id", Long.class);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_resource_grant(form_def_id, subject_type, subject_id) "
+                + "VALUES (?, 'USER', 1), (?, 'ROLE', 1)", form, form);
+            var before = jdbcTemplate.queryForList("SELECT form_def_id, subject_type, subject_id FROM "
+                + schema + ".t_form_resource_grant ORDER BY form_def_id, subject_type, subject_id");
+            migrateTo(schema, "55");
+            assertThat(jdbcTemplate.queryForList("SELECT form_def_id, subject_type, subject_id FROM "
+                + schema + ".t_form_resource_grant WHERE subject_type <> 'COMPANY' "
+                + "ORDER BY form_def_id, subject_type, subject_id")).isEqualTo(before);
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM "
+                + schema + ".t_form_resource_grant WHERE form_def_id = ? AND subject_type = 'COMPANY'",
+                Long.class, form)).isEqualTo(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".t_company", Long.class));
+            long newCompany = jdbcTemplate.queryForObject(
+                "INSERT INTO " + schema + ".t_company(name) VALUES ('later') RETURNING id", Long.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + schema
+                + ".t_form_resource_grant WHERE subject_type = 'COMPANY' AND subject_id = ?",
+                Long.class, newCompany)).isZero();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
 
     /**
      * 隐藏字段的选项可见性必须按"调用者自己所处的节点"判，而不是只看发起人。
@@ -208,6 +818,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long first = insertUser("vis-first");
         long second = insertUser("vis-second");
         long reader = insertUser("vis-reader");
+        moveUserToDepartment(reader, insertDepartment(anyCompanyId(), "option-reader-company"));
         long approverRole = insertRole("vis-approver");
         jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code) "
             + "VALUES (?, 'workflow:task:read')", approverRole);
@@ -247,7 +858,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             PrincipalHolder.set(new PrincipalHolder.Principal(starter, "admin", List.of("admin")));
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(
-                new StartCmd(code, Map.of(), Map.of()), starter);
+                new StartCmd(code, Map.of(), Map.of(), anyCompanyId()), starter);
             final long instanceId = ((Number) started.get("instanceId")).longValue();
             createdInstance = instanceId;
             long dataId = jdbcTemplate.queryForObject(
@@ -330,6 +941,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
         long draftId = insertDraft(formId, adminId);
+        // P4a：这条草稿要能转正，得有归属快照（V54 之前的历史草稿按口径是阻断转正的）。
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
+            anyCompanyId(), draftId);
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {
             formDataService.submit(code, "SUBMITTED", Map.of("subject", "done"), adminId,
@@ -339,6 +953,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
 
             long invalidDraftId = insertDraft(formId, adminId);
+            jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
+                anyCompanyId(), invalidDraftId);
             assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED", Map.of(), adminId,
                 List.of(), invalidDraftId)).isInstanceOf(BizException.class);
             assertThat(jdbcTemplate.queryForObject(
@@ -349,12 +965,199 @@ class PostgresTransactionalIntegrityIntegrationTest {
         }
     }
 
+    /**
+     * P4a 核心回归：**在 A 公司建的草稿，人调到 B 公司之后提交，仍然归 A**。
+     *
+     * <p>归属是"创建时快照"，不是"提交时按当前部门重算"——否则一次调岗就会把已经填好的单
+     * 改到别的公司名下（或者因为新部门没有归属而莫名被拒）。
+     */
+    @Test
+    void draftSubmittedAfterTheAuthorTransferredKeepsTheDraftCompany() {
+        long companyA = insertCompany("P4a 甲 " + UUID.randomUUID());
+        long companyB = insertCompany("P4a 乙 " + UUID.randomUUID());
+        long deptA = insertDepartment(companyA, "甲部");
+        long deptB = insertDepartment(companyB, "乙部");
+        long author = insertUser("p4a-transfer-" + UUID.randomUUID());
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
+            VALUES (?, 'USER', ?, ?)
+            """, formId, author, userId("admin"));
+        grantCompany(formId, companyA);
+        try {
+            assignRole(author, roleId("employee"));
+            moveUserToDepartment(author, deptA);
+            setPrincipal(author);
+
+            long draftId = mobileDraftService.create(code, flowJson.createObjectNode(), null,
+                author);
+            assertThat(companyOfFormData(draftId)).isEqualTo(companyA);
+
+            moveUserToDepartment(author, deptB);
+            authorizationService.evict(author);
+            setPrincipal(author);
+
+            FormDataService.SubmitResult submitted = formDataService.submit(code, "SUBMITTED",
+                Map.of("subject", "after transfer"), author, List.of(), draftId);
+
+            assertThat(companyOfFormData(submitted.dataId())).isEqualTo(companyA);
+            assertThat(companyInferredOf(submitted.dataId())).isFalse();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_resource_grant WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", author);
+            jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", author);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id IN (?, ?)", deptA, deptB);
+            jdbcTemplate.update("DELETE FROM t_company WHERE id IN (?, ?)", companyA, companyB);
+        }
+    }
+
+    /**
+     * P4a：V54 之前建的草稿没有归属快照——**保留草稿、阻断转正**。
+     * 提交时绝不按今天的部门猜一个公司出来。
+     */
+    @Test
+    void legacyDraftWithoutCompanySnapshotIsBlockedAndKept() {
+        long adminId = userId("admin");
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long draftId = insertDraft(formId, adminId);   // 直接 SQL：company_id 为 NULL
+        setPrincipal(adminId);
+        try {
+            assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED",
+                Map.of("subject", "legacy"), adminId, List.of(), draftId))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("COMPANY_PENDING"));
+
+            // 草稿还在，也没有留下半条正式记录（创建失败要整笔回滚）。
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE id = ?", Long.class, draftId))
+                .isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_form_data WHERE form_def_id = ? AND status = 'SUBMITTED'",
+                Long.class, formId)).isZero();
+        } finally {
+            PrincipalHolder.clear();
+            jdbcTemplate.update("DELETE FROM t_form_data WHERE form_def_id = ?", formId);
+            jdbcTemplate.update("DELETE FROM t_form_definition WHERE id = ?", formId);
+        }
+    }
+
+    /**
+     * P4a：归属是**事实快照**，后续审批不该改写它（审批只可能写表单字段值，不碰归属列）。
+     */
+    @Test
+    void approvingATaskDoesNotRewriteTheRecordedCompany() {
+        long adminId = userId("admin");
+        long approver = userId("bob");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "DRAFT", approvalFlow(approver));
+        String code = jdbcTemplate.queryForObject(
+            "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
+        long companyId = anyCompanyId();
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            publishService.publish(formId, processId);
+            Map<String, Object> started = processEngine.start(
+                new StartCmd(code, Map.of("subject", "company stays"), Map.of(), companyId),
+                adminId);
+            long instanceId = ((Number) started.get("instanceId")).longValue();
+            long dataId = ((Number) started.get("formDataId")).longValue();
+            long taskId = ((List<?>) started.get("firstTaskIds")).stream()
+                .map(Number.class::cast).mapToLong(Number::longValue).findFirst().orElseThrow();
+
+            setPrincipal(approver);
+            processEngine.approve(new CompleteCmd(taskId, "APPROVE", "ok", null), approver);
+
+            assertThat(companyOfFormData(dataId)).isEqualTo(companyId);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT company_id FROM t_process_instance WHERE id = ?", Long.class, instanceId))
+                .isEqualTo(companyId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    /**
+     * P4a 迁移自查：**一份 form_data 被多个实例引用**时"归属该跟哪条"无从判定，
+     * V54 必须停下来把问题报出来，而不是随便挑一条回填。
+     */
+    @Test
+    void migrationV54RefusesToBackfillWhenOneFormDataIsSharedByTwoInstances() throws Exception {
+        long adminId = userId("admin");
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(adminId));
+        long dataId = insertSubmittedData(formId, adminId);
+        jdbcTemplate.update("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
+            VALUES (?, ?, 'RUNNING', ?), (?, ?, 'RUNNING', ?)
+            """, processId, dataId, adminId, processId, dataId, adminId);
+
+        assertThatThrownBy(() -> jdbcTemplate.execute(migrationV54Sql()))
+            .hasMessageContaining("被多个实例引用");
+    }
+
+    /**
+     * P4a 历史回填：**按这条记录自己的 {@code started_dept_id} 快照映射**，
+     * 绝不按发起人**今天**的部门去猜（那样调过岗的单会被改归属）。
+     *
+     * <p>做法：造一条"V54 之前"形态的旧记录（{@code company_id} 为空、发起部门是甲），
+     * 而发起人今天在乙公司；再把迁移重放一遍（迁移本身是幂等的），看它落哪家。
+     */
+    @Test
+    void migrationV54BackfillsFromTheRowOwnDepartmentSnapshotNotTheAuthorsCurrentOne()
+        throws Exception {
+        long companyA = insertCompany("P4a 回填甲 " + UUID.randomUUID());
+        long companyB = insertCompany("P4a 回填乙 " + UUID.randomUUID());
+        long deptA = insertDepartment(companyA, "回填甲部");
+        long deptB = insertDepartment(companyB, "回填乙部");
+        long author = insertUser("p4a-backfill-" + UUID.randomUUID());
+        moveUserToDepartment(author, deptB);          // 他**今天**在乙公司
+        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(author));
+        long dataId = insertSubmittedData(formId, author);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by,
+                                           started_dept_id)
+            VALUES (?, ?, 'RUNNING', ?, ?) RETURNING id
+            """, Long.class, processId, dataId, author, deptA);
+
+        jdbcTemplate.execute(migrationV54Sql());
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_process_instance WHERE id = ?", Long.class, instanceId))
+            .isEqualTo(companyA);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_form_data WHERE id = ?", Long.class, dataId))
+            .isEqualTo(companyA);
+        // 而且必须标成"推断"：这是从同样由推断得来的 started_dept_id 推的，不是事实。
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_inferred FROM t_process_instance WHERE id = ?", Boolean.class,
+            instanceId)).isTrue();
+    }
+
+    /** 迁移文件本身就是被测对象：重放一遍看它在真实库上的行为（`ADD COLUMN IF NOT EXISTS` 等是幂等的）。 */
+    private static String migrationV54Sql() throws IOException {
+        return new String(new org.springframework.core.io.ClassPathResource(
+            "db/migration/V54__company_attribution_snapshot.sql").getInputStream().readAllBytes(),
+            StandardCharsets.UTF_8);
+    }
+
     @Test
     void formDataPageUsesCapabilityScopeWithoutFormUsageGrant() {
         long userId = insertUser("all-scope-" + UUID.randomUUID());
         long roleId = insertRole("all_scope_" + UUID.randomUUID().toString().replace("-", ""));
         long formId = insertForm("PUBLISHED", VALID_SCHEMA);
         long dataId = insertSubmittedData(formId, userId("admin"));
+        confirmFixtureCompany(formId, anyCompanyId());
+        moveUserToDepartment(userId, insertDepartment(anyCompanyId(), "data-reader-company"));
         try {
             assignRole(userId, roleId);
             jdbcTemplate.update("""
@@ -384,6 +1187,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long allowedForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long deniedForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long deniedDraft = insertDraft(deniedForm, userId);
+        jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
+            anyCompanyId(), deniedDraft);
+        // P4a：非管理员必须有部门才谈得上归属（无部门非管理员按口径一律拒建）。
+        long dept = insertDepartment(anyCompanyId(), "直提部");
+        moveUserToDepartment(userId, dept);
         assignRole(userId, roleId("employee"));
         jdbcTemplate.update("""
             INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
@@ -397,7 +1205,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             setPrincipal(userId);
             var drafts = mobileDraftService.list(userId);
             assertThat(drafts)
-                .extracting(com.antflow.mobile.workflow.MobileDraftDto::id)
+                .extracting(com.antflow.form.runtime.MobileDraftDto::id)
                 .containsExactly(deniedDraft);
             assertThat(drafts.get(0).readOnly()).isTrue();
             assertThat(mobileDraftService.count(userId)).isEqualTo(1L);
@@ -422,6 +1230,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 allowedForm, deniedForm);
             jdbcTemplate.update("DELETE FROM t_user_role WHERE user_id = ?", userId);
             jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", dept);
         }
     }
 
@@ -433,6 +1242,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
             + UUID.randomUUID().toString().replace("-", ""));
         long firstForm = insertForm("PUBLISHED", VALID_SCHEMA);
         long secondForm = insertForm("PUBLISHED", VALID_SCHEMA);
+        long departmentId = insertDepartment(anyCompanyId(), "catalog-company");
+        moveUserToDepartment(grantedUser, departmentId);
+        moveUserToDepartment(ungrantedUser, departmentId);
         try {
             jdbcTemplate.update("""
                 INSERT INTO t_role_permission(role_id, permission_code)
@@ -462,6 +1274,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             jdbcTemplate.update("DELETE FROM t_role WHERE id = ?", roleId);
             jdbcTemplate.update("DELETE FROM t_user WHERE id IN (?, ?)",
                 grantedUser, ungrantedUser);
+            jdbcTemplate.update("DELETE FROM t_department WHERE id = ?", departmentId);
             authorizationService.evict(grantedUser);
             authorizationService.evict(ungrantedUser);
         }
@@ -867,6 +1680,80 @@ class PostgresTransactionalIntegrityIntegrationTest {
         } finally {
             jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
+    }
+
+    /**
+     * 「值 → 显示文本」共用 fixture 的 **SQL 侧**：同一份 `fixtures/field-semantics/display-text.json`，
+     * Java 侧由 `FormValueDisplayFixtureTest` 断言。两层对着同一份期望，口径漂了才会有人喊。
+     *
+     * <p>注意台账是**脱敏投影**、不是显示渲染器：自由文本（text/textarea/search）不在 V49 的类型白名单里，
+     * `value_label` 与 `value_text` 都是 NULL。这是契约，不是遗漏。
+     */
+    @Test
+    void ledgerMatchesTheSharedDisplayFixture() throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode fixture = mapper.readTree(Files.readString(
+            Path.of("..", "fixtures", "field-semantics", "display-text.json"),
+            StandardCharsets.UTF_8));
+
+        String schema = "ledger_text_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            int index = 0;
+            for (JsonNode testCase : fixture.path("cases")) {
+                index++;
+                String id = testCase.path("id").asText();
+                String code = "display_" + index;
+                String schemaJson = mapper.writeValueAsString(testCase.path("schema"));
+
+                long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                    + ".t_form_definition(code, name, schema, settings, status) "
+                    + "VALUES (?, ?, ?::jsonb, '{}'::jsonb, 'PUBLISHED') RETURNING id",
+                    Long.class, code, id, schemaJson);
+                // 行自己的版本快照必须存在：V49 按 form_def_version 钉 meta，缺了会**回退最新版**
+                // ——那会把版本错误掩盖成"看着对"。
+                jdbcTemplate.update("INSERT INTO " + schema
+                    + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                    + "VALUES (?, 1, ?::jsonb, 'fixture')", formId, schemaJson);
+                long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                    + ".t_form_data(form_def_id, form_def_version, data, status) "
+                    + "VALUES (?, 1, ?::jsonb, 'SUBMITTED') RETURNING id",
+                    Long.class, formId, mapper.writeValueAsString(testCase.path("data")));
+
+                String fieldId = testCase.path("fieldId").asText();
+                JsonNode expect = testCase.path("expect").path("sql");
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT value_label, value_text FROM " + schema
+                        + ".v_form_ledger WHERE data_id = ? AND field_id = ?", dataId, fieldId);
+
+                assertThat(rows).as("台账行数不符：%s", id)
+                    .hasSize(expect.path("row").asBoolean() ? 1 : 0);
+                if (!expect.path("row").asBoolean()) continue;
+
+                Map<String, Object> row = rows.get(0);
+                assertThat(row.get("value_label")).as("value_label 不符：%s", id)
+                    .isEqualTo(fixtureText(expect.path("label")));
+                if (expect.has("textJson")) {
+                    Object rawText = row.get("value_text");
+                    assertThat(rawText).as("value_text 应是 JSON 数组文本：%s", id).isNotNull();
+                    assertThat(mapper.readTree(String.valueOf(rawText)))
+                        .as("value_text 按 JSON 解析后不符：%s", id)
+                        .isEqualTo(expect.get("textJson"));
+                } else {
+                    assertThat(row.get("value_text")).as("value_text 不符：%s", id)
+                        .isEqualTo(fixtureText(expect.path("text")));
+                }
+            }
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    /** fixture 里 `null` 与"键不存在"都表示期望 SQL NULL。 */
+    private static String fixtureText(JsonNode node) {
+        return node.isTextual() ? node.asText() : null;
     }
 
     @Test
@@ -1322,7 +2209,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(
-                new StartCmd(code, Map.of("subject", "versioned"), Map.of()), adminId);
+                new StartCmd(code, Map.of("subject", "versioned"), Map.of(), anyCompanyId()),
+                adminId);
             long instanceId = ((Number) started.get("instanceId")).longValue();
             long firstTaskId = ((List<?>) started.get("firstTaskIds")).stream()
                 .map(Number.class::cast).mapToLong(Number::longValue).findFirst().orElseThrow();
@@ -1377,7 +2265,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(new StartCmd(code,
-                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of()), adminId);
+                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of(), anyCompanyId()), adminId);
 
             assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM t_form_definition_version
@@ -1418,10 +2306,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             String first = String.valueOf(processEngine.start(
-                new StartCmd(code, Map.of("subject", "first"), Map.of()), adminId)
+                new StartCmd(code, Map.of("subject", "first"), Map.of(), anyCompanyId()), adminId)
                 .get("businessNo"));
             String second = String.valueOf(processEngine.start(
-                new StartCmd(code, Map.of("subject", "second"), Map.of()), adminId)
+                new StartCmd(code, Map.of("subject", "second"), Map.of(), anyCompanyId()), adminId)
                 .get("businessNo"));
 
             assertThat(first).matches("ITNUM-[0-9]{8}-0001");
@@ -1450,6 +2338,180 @@ class PostgresTransactionalIntegrityIntegrationTest {
             SELECT COUNT(*) FROM t_task
             WHERE proc_inst_id = ? AND node_id = 'a2' AND status = 'PENDING'
             """, Long.class, started.instanceId())).isEqualTo(1L);
+    }
+
+    @Test
+    void v2ForcedApprovalsSettleAllAndRatioVotesAndKeepTheRealOperator() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long otherId = insertUser("forced-approval-" + UUID.randomUUID());
+        for (String mode : List.of("ALL", "RATIO")) {
+            StartedV2 started = startV2(
+                multiSignFlow(mode, List.of(bobId, otherId), 50, adminId), adminId);
+            long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+
+            processEngine.forceApprove(
+                new CompleteCmd(taskId, "APPROVE", "emergency approval", null), adminId);
+
+            assertThat(jdbcTemplate.queryForMap("""
+                SELECT task.status, task.approved_by, participant.status AS vote
+                FROM t_task task JOIN t_node_participant participant
+                  ON participant.node_instance_id = task.node_instance_id
+                 AND participant.sequence_no = task.sequence_no
+                WHERE task.id = ?
+                """, taskId)).containsEntry("status", "APPROVED")
+                .containsEntry("approved_by", adminId).containsEntry("vote", "APPROVED");
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT operator_id FROM t_task_history
+                WHERE task_id = ? AND action = 'FORCE_APPROVE'
+                """, Long.class, taskId)).isEqualTo(adminId);
+            assertThat(pendingTaskCount(started.instanceId(), "a2")).isZero();
+
+            long otherTask = taskIdForAssignee(started.instanceId(), "a1", otherId);
+            if ("ALL".equals(mode)) {
+                processEngine.approve(
+                    new CompleteCmd(otherTask, "APPROVE", "normal approval", null), otherId);
+            } else {
+                processEngine.forceReject(
+                    new CompleteCmd(otherTask, "REJECT", "emergency rejection", null), adminId);
+            }
+            assertThat(pendingTaskCount(started.instanceId(), "a2")).isEqualTo(1L);
+            assertThatThrownBy(() -> processEngine.forceApprove(
+                new CompleteCmd(taskId, "APPROVE", "duplicate", null), adminId))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("TASK_NOT_PENDING"));
+        }
+    }
+
+    @Test
+    void v2ForcedRejectionSettlesAllAndRatioAfterTheOtherVote() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        for (String mode : List.of("ALL", "RATIO")) {
+            StartedV2 started = startV2(
+                multiSignFlow(mode, List.of(bobId, adminId), 100, adminId), adminId);
+            long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+
+            processEngine.forceReject(
+                new CompleteCmd(taskId, "REJECT", "emergency rejection", null), adminId);
+
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT participant.status FROM t_node_participant participant
+                JOIN t_task task ON participant.node_instance_id = task.node_instance_id
+                  AND participant.sequence_no = task.sequence_no WHERE task.id = ?
+                """, String.class, taskId)).isEqualTo("REJECTED");
+            assertThat(pendingReworkCount(started.instanceId())).isZero();
+
+            processEngine.approve(new CompleteCmd(
+                taskIdForAssignee(started.instanceId(), "a1", adminId),
+                "APPROVE", "normal approval", null), adminId);
+            assertThat(pendingReworkCount(started.instanceId())).isEqualTo(1L);
+            assertThat(pendingTaskCount(started.instanceId(), "a2")).isZero();
+        }
+    }
+
+    @Test
+    void v2ForcedAdditionalRejectionRecordsTheAdditionalReviewersVote() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        long additionalId = insertUser("forced-additional-" + UUID.randomUUID());
+        for (String position : List.of("BEFORE", "AFTER")) {
+            StartedV2 started = startV2(approvalFlow(bobId), adminId);
+            long parent = taskIdForAssignee(started.instanceId(), "a1", bobId);
+            long child;
+            PrincipalHolder.set(new PrincipalHolder.Principal(bobId, "bob", List.of("admin")));
+            try {
+                child = taskOperations.addAssignee(parent, additionalId, position, "review");
+            } finally {
+                PrincipalHolder.clear();
+            }
+            if ("AFTER".equals(position)) {
+                processEngine.approve(new CompleteCmd(parent, "APPROVE", "ok", null), bobId);
+            }
+
+            processEngine.forceReject(
+                new CompleteCmd(child, "REJECT", "emergency rejection", null), adminId);
+
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT participant.status FROM t_node_participant participant
+                JOIN t_task task ON participant.node_instance_id = task.node_instance_id
+                  AND participant.sequence_no = task.sequence_no WHERE task.id = ?
+                """, String.class, child)).isEqualTo("REJECTED");
+            assertThat(pendingReworkCount(started.instanceId())).isEqualTo(1L);
+        }
+    }
+
+    @Test
+    void v2VoteMismatchRollsBackTaskAndHistoryInsteadOfLeavingAPartialApproval() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        for (String action : List.of("APPROVE", "REJECT")) {
+            StartedV2 started = startV2(approvalFlow(bobId), adminId);
+            long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+            jdbcTemplate.update("""
+                UPDATE t_node_participant SET actual_user_id = ?
+                WHERE node_instance_id = (SELECT node_instance_id FROM t_task WHERE id = ?)
+                """, adminId, taskId);
+            CompleteCmd command = new CompleteCmd(taskId, action, "mismatched participant", null);
+
+            assertThatThrownBy(() -> {
+                if ("APPROVE".equals(action)) processEngine.forceApprove(command, adminId);
+                else processEngine.forceReject(command, adminId);
+            }).isInstanceOfSatisfying(BizException.class,
+                error -> assertThat(error.getCode()).isEqualTo("BAD_TASK_STATE"));
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_task WHERE id = ?", String.class, taskId))
+                .isEqualTo("PENDING");
+            assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_task_history
+                WHERE task_id = ? AND action IN ('FORCE_APPROVE', 'FORCE_REJECT_VOTE')
+                """, Long.class, taskId)).isZero();
+        }
+    }
+
+    @Test
+    void legacyReadonlyValueCanBePreviewedAndResubmittedButEditableValuesStayValidated()
+            throws Exception {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        String schema = """
+            [{"id":"subject","type":"text","label":"主题","props":{"required":true}},
+             {"id":"legacy","type":"switch","label":"历史值","props":{"defaultValue":true}},
+             {"id":"editable","type":"switch","label":"可编辑值"}]
+            """;
+        String flow = approvalFlow(bobId).replace("\"type\":\"ROOT\"", """
+            "type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}
+            """.trim());
+        StartedV2 started = startV2(flow, adminId, schema);
+        jdbcTemplate.update("""
+            UPDATE t_form_data SET data = jsonb_set(data, '{legacy}', '"true"'::jsonb)
+            WHERE id = ?
+            """, started.formDataId());
+        processEngine.reject(new CompleteCmd(
+            taskIdForAssignee(started.instanceId(), "a1", bobId), "REJECT", "revise", null),
+            bobId);
+        long reworkId = pendingReworkTaskId(started.instanceId());
+        String code = jdbcTemplate.queryForObject("""
+            SELECT form.code FROM t_form_definition form
+            JOIN t_form_data data ON data.form_def_id = form.id WHERE data.id = ?
+            """, String.class, started.formDataId());
+        JsonNode revised = flowJson.readTree("""
+            {"subject":"revised","legacy":false,"editable":true}
+            """);
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            com.antflow.mobile.workflow.ReworkValidationFixture.previewAndResubmit(
+                mobileWorkflowService, approvalPreviewService, code, reworkId, adminId, revised);
+        } finally {
+            PrincipalHolder.clear();
+        }
+        JsonNode persisted = flowJson.readTree(jdbcTemplate.queryForObject(
+            "SELECT data::text FROM t_form_data WHERE id = ?", String.class, started.formDataId()));
+        assertThat(persisted.path("legacy").asText()).isEqualTo("true");
+        assertThat(persisted.path("legacy").isTextual()).isTrue();
+        assertThat(persisted.path("subject").asText()).isEqualTo("revised");
+        assertThat(pendingTaskCount(started.instanceId(), "a1")).isEqualTo(1L);
     }
 
     @Test
@@ -1763,7 +2825,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             assertThatThrownBy(() -> processEngine.start(
-                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of()), adminId))
+                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of(), anyCompanyId()),
+                adminId))
                 .isInstanceOfSatisfying(BizException.class,
                     error -> assertThat(error.getCode()).isEqualTo("FALLBACK_UNAVAILABLE"));
             assertThat(jdbcTemplate.queryForObject("""
@@ -1908,7 +2971,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void wecomActiveJobConstraintAndRestartRecoveryWorkOnPostgres() {
+    void wecomActiveJobConstraintAndExpiredLeaseTakeoverWorkOnPostgres() {
         long companyId = jdbcTemplate.queryForObject(
             "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
         long adminId = userId("admin");
@@ -1922,11 +2985,21 @@ class PostgresTransactionalIntegrityIntegrationTest {
             """, Long.class, companyId, adminId);
 
         assertThat(duplicate).isEmpty();
-        wecomService.failInterruptedJobs();
-        assertThat(jdbcTemplate.queryForMap("""
-            SELECT status, message FROM t_wecom_sync_job WHERE id = ?
-            """, firstId)).containsEntry("status", "FAILED")
-            .containsEntry("message", "服务已重启，请重新同步");
+        UUID firstClaim = ReflectionTestUtils.invokeMethod(wecomService, "claimJob", firstId);
+        assertThat(firstClaim).isNotNull();
+        assertThat(ReflectionTestUtils.<UUID>invokeMethod(wecomService, "claimJob", firstId)).isNull();
+        jdbcTemplate.update("UPDATE t_wecom_sync_job SET lease_expires_at = now() - interval '1 second' WHERE id = ?",
+            firstId);
+        UUID replacement = ReflectionTestUtils.invokeMethod(wecomService, "claimJob", firstId);
+        assertThat(replacement).isNotNull().isNotEqualTo(firstClaim);
+        assertThat(jdbcTemplate.update("""
+            UPDATE t_wecom_sync_job SET phase = 'STALE_WRITE'
+            WHERE id = ? AND claim_token = ? AND lease_expires_at > now()
+            """, firstId, firstClaim)).isZero();
+        jdbcTemplate.update("""
+            UPDATE t_wecom_sync_job SET status = 'SUCCESS', claim_token = NULL, lease_expires_at = NULL
+            WHERE id = ? AND claim_token = ?
+            """, firstId, replacement);
 
         long nextId = jdbcTemplate.queryForObject("""
             INSERT INTO t_wecom_sync_job(company_id, initiated_by) VALUES (?, ?) RETURNING id
@@ -2039,7 +3112,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {
             assertThat(roleAdminService.roles()).isNotEmpty();
-            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20).getRecords())
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20, null).getRecords())
                 .isNotEmpty();
             assertThat(formDefinitionMapper.selectSummaryPage(Page.of(1, 20), null, null,
                 adminId, true).getRecords())
@@ -2080,6 +3153,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
             insertInstance(processId, dataIds.get(2), "REJECTED", bobId, started, started.plusHours(4));
             insertInstance(processId, dataIds.get(3), "APPROVED", scopedUser, started,
                 started.plusHours(2));
+            confirmFixtureCompany(formId, anyCompanyId());
+            moveUserToDepartment(scopedUser, insertDepartment(anyCompanyId(), "report-company"));
 
             LocalDate from = started.toLocalDate();
             LocalDate to = LocalDate.now();
@@ -2286,6 +3361,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long scopedRole = insertRole("export_scoped");
         long mine = insertSubmittedData(formId, scopedUser);
         long theirs = insertSubmittedData(formId, bobId);
+        confirmFixtureCompany(formId, anyCompanyId());
+        moveUserToDepartment(scopedUser, insertDepartment(anyCompanyId(), "export-company"));
         try {
             // 行级范围跟着**读**能力走，所以受限角色两个能力都要有（只有导出权限会被挡在 403，
             // 见下面那条断言）。
@@ -2343,10 +3420,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void allScopeUserSearchAlsoReturnsMembersWithoutADepartment() {
-        // ALL 范围不能被"按部门列举"收窄：manageableDepartments 只返回**存在**的部门 id，
-        // 拿它做 dept_id IN (...) 会把 dept_id IS NULL 的成员（种子里 admin/bob 就是）挡在外面，
-        // 而单条的 inCurrentDataScope 对 ALL 是放行的——两条路径口径不一致，通讯录搜人时会直接看出来。
+    void allScopeUserWithoutCompanyCannotEnumerateDirectory() {
+        // 组织管理的 ALL 仍需有效公司；无归属账号不能枚举通讯录。
         long userId = insertUser("all-scope-people-" + UUID.randomUUID());
         long roleId = insertRole("all_scope_people_" + UUID.randomUUID().toString().replace("-", ""));
         long deptless = jdbcTemplate.queryForObject(
@@ -2358,9 +3433,130 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 + "VALUES (?, 'org:user:read', 'ALL')", roleId);
             setPrincipal(userId);
 
-            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100).getRecords())
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100, null).getRecords())
                 .extracting(User::getId)
-                .contains(deptless);
+                .isEmpty();
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void organizationEndpointsIntersectAllAndCustomWithCompanyAndRollbackBadMoves() {
+        long companyA = insertCompany("org-a-" + UUID.randomUUID());
+        long companyB = insertCompany("org-b-" + UUID.randomUUID());
+        long deptA = insertDepartment(companyA, "甲部门");
+        long deptB = insertDepartment(companyB, "乙部门");
+        long operator = insertUser("org-operator-" + UUID.randomUUID());
+        long memberA = insertUser("org-a-" + UUID.randomUUID());
+        long memberB = insertUser("org-b-" + UUID.randomUUID());
+        long role = insertRole("org_" + UUID.randomUUID().toString().replace("-", ""));
+        moveUserToDepartment(operator, deptA);
+        moveUserToDepartment(memberA, deptA);
+        moveUserToDepartment(memberB, deptB);
+        assignRole(operator, role);
+        for (String permission : List.of("console:entry:access", "org:company:read",
+            "org:department:read", "org:department:manage", "org:user:read", "org:user:manage")) {
+            // 非 scopeable 能力不接受范围覆盖。
+            var catalog = com.antflow.authz.PermissionCatalog.require(permission);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission(role_id, permission_code, scope_override)
+                VALUES (?, ?, ?)
+                """, role, permission, catalog.scopeable() ? "ALL" : null);
+        }
+        setPrincipal(operator);
+        try {
+            assertThat(companyController.all()).extracting(com.antflow.org.Company::getId)
+                .containsExactly(companyA);
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100, null).getRecords())
+                .extracting(User::getId).contains(operator, memberA).doesNotContain(memberB);
+            assertThat(userService.listAuthorized(UserService.UserQuery.of(
+                null, null, null, null, null, null))).extracting(User::getId).doesNotContain(memberB);
+            assertThatThrownBy(() -> departmentController.tree(companyB)).isInstanceOf(HiddenResourceException.class);
+            assertThatThrownBy(() -> userService.update(memberB, Map.of("displayName", "不能修改")))
+                .isInstanceOf(HiddenResourceException.class);
+            assertThatThrownBy(() -> userService.update(memberA, Map.of("deptId", deptB)))
+                .isInstanceOf(HiddenResourceException.class);
+            jdbcTemplate.update("""
+                UPDATE t_role_permission SET scope_override = 'CUSTOM'
+                WHERE role_id = ? AND permission_code = 'org:user:read'
+                """, role);
+            jdbcTemplate.update("""
+                INSERT INTO t_role_permission_department(role_id, permission_code, department_id)
+                VALUES (?, 'org:user:read', ?)
+                """, role, deptB);
+            authorizationService.evict(operator);
+            setPrincipal(operator);
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 100, null).getRecords()).isEmpty();
+            setPrincipal(userId("admin"));
+            assertThatThrownBy(() -> departmentController.update(deptA,
+                Map.of("parentId", deptB, "name", "不应保留", "leaderIds", List.of(memberA))))
+                .isInstanceOf(BizException.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT name FROM t_department WHERE id = ?",
+                String.class, deptA)).isEqualTo("甲部门");
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_department_leader WHERE department_id = ?",
+                Long.class, deptA)).isZero();
+            assertThatThrownBy(() -> departmentController.update(deptA, Map.of("companyId", companyB)))
+                .isInstanceOf(BizException.class);
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
+    void departmentRootOrderingAndMemberTransferKeepCompanyBoundaries() {
+        setPrincipal(userId("admin"));
+        long companyA = insertCompany("root-a-" + UUID.randomUUID());
+        long companyB = insertCompany("root-b-" + UUID.randomUUID());
+        com.antflow.org.Department first = new com.antflow.org.Department();
+        first.setName("甲根一"); first.setCompanyId(companyA);
+        first = departmentService.create(first);
+        com.antflow.org.Department other = new com.antflow.org.Department();
+        other.setName("乙根"); other.setCompanyId(companyB);
+        other = departmentService.create(other);
+        com.antflow.org.Department second = new com.antflow.org.Department();
+        second.setName("甲根二"); second.setCompanyId(companyA);
+        second = departmentService.create(second);
+        long deptA = first.getId(), deptB = other.getId(), secondId = second.getId();
+        try {
+            assertThat(first.getSortOrder()).isEqualTo(1);
+            assertThat(other.getSortOrder()).isEqualTo(1);
+            assertThat(second.getSortOrder()).isEqualTo(2);
+            departmentService.moveOrder(secondId, "UP");
+            assertThat(jdbcTemplate.queryForObject("SELECT sort_order FROM t_department WHERE id = ?",
+                Integer.class, deptB)).isEqualTo(1);
+            assertThatThrownBy(() -> departmentService.movePosition(deptA, deptB, "AFTER"))
+                .isInstanceOf(BizException.class);
+            long member = insertUser("transfer-" + UUID.randomUUID());
+            moveUserToDepartment(member, deptA);
+            long manager = insertUser("transfer-manager-" + UUID.randomUUID());
+            moveUserToDepartment(manager, deptA);
+            userService.update(member, Map.of("managerId", manager));
+            departmentService.setLeaders(deptA, List.of(member));
+            assertThatThrownBy(() -> userService.update(member, Map.of("deptId", deptB)))
+                .isInstanceOf(BizException.class);
+            departmentService.setLeaders(deptA, List.of());
+            assertThat(jdbcTemplate.queryForObject("SELECT leader_id FROM t_department WHERE id = ?",
+                Long.class, deptA)).isNull();
+            long version = jdbcTemplate.queryForObject("SELECT authz_version FROM t_user WHERE id = ?",
+                Long.class, member);
+            java.util.Map<String, Object> transfer = new java.util.HashMap<>();
+            transfer.put("deptId", deptB);
+            transfer.put("managerId", null);
+            userService.update(member, transfer);
+            assertThat(jdbcTemplate.queryForObject("SELECT manager_id FROM t_user WHERE id = ?",
+                Long.class, member)).isNull();
+            setPrincipal(member);
+            assertThat(PrincipalHolder.current().orElseThrow().departmentId()).isEqualTo(deptB);
+            assertThat(PrincipalHolder.current().orElseThrow().authzVersion()).isGreaterThan(version);
+            setPrincipal(userId("admin"));
+            jdbcTemplate.update("""
+                INSERT INTO t_wecom_user_mapping(company_id, wecom_user_id, user_id) VALUES (?, ?, ?)
+                """, companyB, "mapped-" + member, member);
+            assertThatThrownBy(() -> userService.update(member, Map.of("deptId", deptA)))
+                .isInstanceOf(BizException.class).hasMessageContaining("企微");
+            assertThat(jdbcTemplate.queryForObject("SELECT dept_id FROM t_user WHERE id = ?",
+                Long.class, member)).isEqualTo(deptB);
         } finally {
             PrincipalHolder.clear();
         }
@@ -2402,7 +3598,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             "员工" + keyword, nameMember);
         try {
             PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
-            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords()
+            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50, null).getRecords()
                 .stream().map(User::getId).collect(java.util.stream.Collectors.toSet());
             assertThat(found).contains(childMember, nameMember);
             assertThat(found).doesNotContain(unrelatedMember);
@@ -2410,11 +3606,12 @@ class PostgresTransactionalIntegrityIntegrationTest {
             // 新增的 OR 分支不能把数据范围冲掉：受限账号搜同一个词，命中的部门成员一个都不该漏进来。
             jdbcTemplate.update("UPDATE t_user SET display_name = ? WHERE id = ?",
                 "受限" + keyword, scopedUser);
+            moveUserToDepartment(scopedUser, unrelatedDept);
             jdbcTemplate.update("INSERT INTO t_role_permission(role_id, permission_code, scope_override)"
                 + " VALUES (?, 'org:user:read', 'SELF')", scopedRole);
             assignRole(scopedUser, scopedRole);
             setPrincipal(scopedUser);
-            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords())
+            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50, null).getRecords())
                 .extracting(User::getId).containsExactly(scopedUser);
         } finally {
             PrincipalHolder.clear();
@@ -2458,7 +3655,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             WecomService wecomTarget = AopTestUtils.getTargetObject(wecomService);
             List<User> users = userService.listAuthorizedPage(
-                null, departmentId, false, 1, 20).getRecords();
+                null, departmentId, false, 1, 20, null).getRecords();
             assertThat(users).extracting(User::getId).containsExactly(leaderId, memberId);
             assertThat(users.get(0).getDepartmentLeader()).isTrue();
             assertThat(users.get(0).getWecomStatus()).isEqualTo(4);
@@ -2556,6 +3753,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                                approval_mode, task_type, approved_at)
             VALUES (?, 'approved-node', ?, ?, 'APPROVED', 'OR_SIGN', 'APPROVAL', now())
             """, visibleInstanceId, ownerId, viewerId);
+        confirmFixtureCompany(formId, anyCompanyId());
 
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
             "authorized", null, ownerId, null, null, null, 1, 0))
@@ -2576,6 +3774,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                                            started_by, started_at)
             VALUES (?, ?, 'RUNNING', '__rework__', ?, now() + interval '1 minute')
             """, processId, reworkDataId, viewerId);
+        confirmFixtureCompany(formId, anyCompanyId());
         assertThat(processInstanceMapper.selectInstancePage(viewerId, false, true, false,
             "mine", null, null, null, null, null, 10, 0))
             .extracting(com.antflow.task.ProcessInstance::getId)
@@ -2631,6 +3830,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     VALUES (?, 'record_manager', ?, 'PENDING', 'OR_SIGN', 'APPROVAL')
                     """, instanceId, viewerId);
             }
+            confirmFixtureCompany(formId, companyId);
             long visibleId = instanceIds.get(0);
             String businessNo = jdbcTemplate.queryForObject("""
                 SELECT data.business_no FROM t_form_data data
@@ -2774,6 +3974,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, 'cc1', ?, 'CC', 'OR', 'APPROVAL', 0)
             RETURNING id
             """, Long.class, instanceId, bobId);
+        confirmFixtureCompany(formId, anyCompanyId());
 
         assertThat(authorizationService.instanceVisibility(instanceId, bobId))
             .isEqualTo(AuthorizationService.InstanceVisibility.FULL);
@@ -2837,6 +4038,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    @org.springframework.transaction.annotation.Transactional
     void mobileNotificationsAreUserScopedAndReadIdempotently() {
         long adminId = userId("admin");
         long bobId = userId("bob");
@@ -3292,6 +4494,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
             INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
             VALUES (?, ?, 'RUNNING', ?) RETURNING id
             """, Long.class, processId, dataId, ownerId);
+        confirmFixtureCompany(formId, anyCompanyId());
+        moveUserToDepartment(viewerId, insertDepartment(anyCompanyId(), "instance-reader-company"));
         try {
             assignRole(viewerId, roleId);
             jdbcTemplate.update("""
@@ -3447,7 +4651,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 try {
                     return transactions.execute(status -> {
                         mobileFileLinkService.append(dataId, List.of(
-                            new com.antflow.mobile.workflow.MobileFileRef(fileId, "f1", 0)), ownerId);
+                            new com.antflow.attachment.MobileFileRef(fileId, "f1", 0)), ownerId);
                         return null;
                     });
                 } catch (Throwable throwable) {
@@ -3490,7 +4694,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     void uploadInsertsFreshRowWhenDuplicateIsDeletedWhileLocked() throws Exception {
         long ownerId = userId("admin");
         byte[] png = TINY_PNG;
-        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+        com.antflow.attachment.MobileFileDto first = mobileFileService.upload(
             new MockMultipartFile("file", "dup.png", "image/png", png), ownerId);
         assertThat(first.status()).isEqualTo("READY");
         UUID freshId = null;
@@ -3513,13 +4717,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     first.id());
             }));
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
-            Future<com.antflow.mobile.workflow.MobileFileDto> reupload = executor.submit(
+            Future<com.antflow.attachment.MobileFileDto> reupload = executor.submit(
                 () -> mobileFileService.upload(
                     new MockMultipartFile("file", "dup.png", "image/png", png), ownerId));
             // 让它走到加锁点，再放行 t1 提交。
             Thread.sleep(300);
             release.countDown();
-            com.antflow.mobile.workflow.MobileFileDto again = reupload.get(20, TimeUnit.SECONDS);
+            com.antflow.attachment.MobileFileDto again = reupload.get(20, TimeUnit.SECONDS);
             freshId = again.id();
             assertThat(again.id()).as("去重把已删文件还给了客户端（没走行锁）").isNotEqualTo(first.id());
             assertThat(jdbcTemplate.queryForObject(
@@ -3546,7 +4750,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Test
     void uploadToleratesDuplicateReadyRowsForTheSameBytes() throws Exception {
         long ownerId = userId("admin");
-        com.antflow.mobile.workflow.MobileFileDto first = mobileFileService.upload(
+        com.antflow.attachment.MobileFileDto first = mobileFileService.upload(
             new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
         String sha = jdbcTemplate.queryForObject(
             "SELECT sha256 FROM t_mobile_file WHERE id = ?", String.class, first.id());
@@ -3558,7 +4762,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, ?, 'dup.png', ?, 'image/png', ?, ?, 'READY', now() + interval '1 minute')
             """, twin, ownerId, "image/" + twin + "-dup.png", (long) TINY_PNG.length, sha);
         try {
-            com.antflow.mobile.workflow.MobileFileDto again = mobileFileService.upload(
+            com.antflow.attachment.MobileFileDto again = mobileFileService.upload(
                 new MockMultipartFile("file", "dup.png", "image/png", TINY_PNG), ownerId);
             // 固定取最早那行，而不是抛 TooManyResultsException
             assertThat(again.id()).isEqualTo(first.id());
@@ -3583,12 +4787,15 @@ class PostgresTransactionalIntegrityIntegrationTest {
             UUID other = UUID.randomUUID();
             assertThat(mobileFileMapper.claimProcessing(fileId, other)).isEqualTo(1);
             assertThat(mobileFileMapper.publishProcessed(fileId, UUID.randomUUID(),
-                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4")).isZero();
+                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4", 2d)).isZero();
             assertThat(mobileFileMapper.publishProcessed(fileId, other,
-                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4")).isEqualTo(1);
+                "video/x.mp4", "video/mp4", 10L, "hash", "clip.mp4", 2d)).isEqualTo(1);
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT status FROM t_mobile_file WHERE id = ?", String.class, fileId))
                 .isEqualTo("READY");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT duration_seconds FROM t_mobile_file WHERE id = ?", Double.class, fileId))
+                .isEqualTo(2d);
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT processing_claim_token FROM t_mobile_file WHERE id = ?", UUID.class, fileId))
                 .isNull();
@@ -3617,7 +4824,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     List<Throwable> failures = runConcurrently(ownerId,
                         () -> mobileFileService.delete(fileId, ownerId),
                         () -> mobileFileLinkService.append(dataId,
-                            List.of(new com.antflow.mobile.workflow.MobileFileRef(fileId, "f1", 0)),
+                            List.of(new com.antflow.attachment.MobileFileRef(fileId, "f1", 0)),
                             ownerId));
                     long links = jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ? AND file_id = ?",
@@ -3657,8 +4864,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         UUID fileId = insertMobileFile(ownerId, "READY", null);
         try {
             mobileFileLinkService.append(dataId, List.of(
-                new com.antflow.mobile.workflow.MobileFileRef(fileId, "fieldA", 0),
-                new com.antflow.mobile.workflow.MobileFileRef(fileId, "fieldB", 1)), ownerId);
+                new com.antflow.attachment.MobileFileRef(fileId, "fieldA", 0),
+                new com.antflow.attachment.MobileFileRef(fileId, "fieldB", 1)), ownerId);
 
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_form_data_file WHERE form_data_id = ?", Long.class, dataId))
@@ -3669,7 +4876,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
             // 再插一次同一个文件但换了字段：DO UPDATE 让新字段胜出（reconcileEditable 的迁移语义）
             mobileFileLinkService.append(dataId, List.of(
-                new com.antflow.mobile.workflow.MobileFileRef(fileId, "editableField", 2)), ownerId);
+                new com.antflow.attachment.MobileFileRef(fileId, "editableField", 2)), ownerId);
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT field_id FROM t_form_data_file WHERE form_data_id = ?", String.class, dataId))
                 .isEqualTo("editableField");
@@ -3710,12 +4917,36 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     private long insertForm(String status, String schema, long creatorId) {
         String code = "IT_" + UUID.randomUUID().toString().replace("-", "");
-        return jdbcTemplate.queryForObject("""
+        long formId = jdbcTemplate.queryForObject("""
             INSERT INTO t_form_definition(code, name, version, schema, settings, status,
                                           created_by, deleted)
             VALUES (?, 'Integration form', 1, ?::jsonb, '{}'::jsonb, ?, ?, 0)
             RETURNING id
             """, Long.class, code, schema, status, creatorId);
+        // Existing fixtures model forms predating the company gate; dedicated gate tests replace these rows.
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+            SELECT ?, 'COMPANY', id FROM t_company
+            """, formId);
+        return formId;
+    }
+
+    private void grantCompany(long formId, long companyId) {
+        jdbcTemplate.update("""
+            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id)
+            VALUES (?, 'COMPANY', ?) ON CONFLICT DO NOTHING
+            """, formId, companyId);
+    }
+
+    /** Attribution is explicit only in fixtures testing reads; migration fixtures retain their NULLs. */
+    private void confirmFixtureCompany(long formId, long companyId) {
+        jdbcTemplate.update("""
+            UPDATE t_form_data SET company_id = ?, company_inferred = false WHERE form_def_id = ?
+            """, companyId, formId);
+        jdbcTemplate.update("""
+            UPDATE t_process_instance pi SET company_id = ?, company_inferred = false
+            FROM t_form_data data WHERE data.id = pi.form_data_id AND data.form_def_id = ?
+            """, companyId, formId);
     }
 
     private long insertSubmittedData(long formId, long creatorId) {
@@ -3737,7 +4968,11 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     private StartedV2 startV2(String flow, long starterId) {
-        long formId = insertForm("DRAFT", VALID_SCHEMA);
+        return startV2(flow, starterId, VALID_SCHEMA);
+    }
+
+    private StartedV2 startV2(String flow, long starterId, String schema) {
+        long formId = insertForm("DRAFT", schema);
         long processId = insertProcess(formId, "DRAFT", flow);
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
@@ -3745,7 +4980,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> result = processEngine.start(
-                new StartCmd(code, Map.of("subject", "v2"), Map.of()), starterId);
+                new StartCmd(code, Map.of("subject", "v2"), Map.of(), anyCompanyId()), starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());
         } finally {
@@ -3771,7 +5006,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 WHERE process_definition_id = ?
                 """, compatibleLegacyFlow, compatibleLegacyFlow, processId);
             Map<String, Object> result = processEngine.start(
-                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of()), starterId);
+                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of(), anyCompanyId()),
+                starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());
         } finally {
@@ -3866,6 +5102,36 @@ class PostgresTransactionalIntegrityIntegrationTest {
         PrincipalHolder.set(authorizationService.principalForRequest(userId, null).orElseThrow());
     }
 
+    private long insertCompany(String name) {
+        return jdbcTemplate.queryForObject(
+            "INSERT INTO t_company(name) VALUES (?) RETURNING id", Long.class, name);
+    }
+
+    private void moveUserToDepartment(long userId, long departmentId) {
+        jdbcTemplate.update("UPDATE t_user SET dept_id = ? WHERE id = ?", departmentId, userId);
+        // 身份是从 t_user 读出来并缓存的：调岗后不 evict 的话，下一次 setPrincipal 还是旧部门。
+        authorizationService.evict(userId);
+    }
+
+    private Long companyOfFormData(long dataId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_form_data WHERE id = ?", Long.class, dataId);
+    }
+
+    private Boolean companyInferredOf(long dataId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT company_inferred FROM t_form_data WHERE id = ?", Boolean.class, dataId);
+    }
+
+    /**
+     * P4a：引擎现在要求调用方给出**已解析**的归属（{@code company_id} 有外键，不能随便塞数字）。
+     * 这些用例验的是别的东西，随便取一个存在的公司即可。
+     */
+    private long anyCompanyId() {
+        return jdbcTemplate.queryForObject(
+            "SELECT id FROM t_company ORDER BY id LIMIT 1", Long.class);
+    }
+
     /**
      * 监控概览要能在三种范围下都跑通。这条用**真库**跑，因为上一次的教训正是：单测把 JdbcTemplate
      * mock 掉、只断言 SQL 里 contains("1 = 1")，于是 `AND1 = 1`（Java 文本块吞掉行尾空格）照样"通过"，
@@ -3875,7 +5141,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     void workflowMonitorOverviewRunsUnderEveryDataScope() {
         // 直接 new 一个控制器：这里验的是 SQL 拼装，不是 @PreAuthorize 那条门（测试里没有代理）。
         WorkflowMonitoringController controller =
-            new WorkflowMonitoringController(jdbcTemplate, authorizationService);
+            new WorkflowMonitoringController(jdbcTemplate, authorizationService, auditService);
         long adminId = userId("admin");
         long scopedUser = insertUser("monitor-scoped");
         long scopedRole = insertRole("monitor_scoped");

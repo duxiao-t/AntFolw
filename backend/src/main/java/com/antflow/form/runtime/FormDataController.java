@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import com.antflow.mobile.workflow.MobileFileRef;
+import com.antflow.attachment.MobileFileRef;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
@@ -84,20 +84,16 @@ public class FormDataController {
 
     @PostMapping
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_RUNTIME_READ + "')")
-    public Map<String, Object> submit(@RequestBody SubmitRequest body) {
+    public FormDataService.SubmitResult submit(@RequestBody SubmitRequest body) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        FormDataService.SubmitResult result = service.submit(
+        return service.submit(
             body.formCode(),
             body.status(),
             body.data(),
             p.userId(),
             body.files() == null ? List.of() : body.files(),
-            body.draftId());
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("dataId", result.dataId());
-        response.put("businessNo", result.businessNo());
-        return response;
+            body.draftId(), body.companyId());
     }
 
     @GetMapping
@@ -132,5 +128,7 @@ public class FormDataController {
     }
 
     public record SubmitRequest(String formCode, String status, Object data,
-                                List<MobileFileRef> files, Long draftId) { }
+                                List<MobileFileRef> files, Long draftId,
+                                // P4a：仅无部门的全局管理员该用它；带 draftId 时忽略（取草稿快照）。
+                                Long companyId) { }
 }

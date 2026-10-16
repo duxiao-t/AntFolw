@@ -1,0 +1,62 @@
+{
+  "H1": {
+    "backend": 26,
+    "desktop": 26,
+    "mobile": 26,
+    "missingDesktop": [],
+    "missingMobile": []
+  },
+  "H2": {
+    "declared": [
+      "desktop",
+      "mobile",
+      "java",
+      "sql"
+    ],
+    "union": [
+      "desktop",
+      "java",
+      "mobile",
+      "sql"
+    ],
+    "byDimension": {
+      "visibility": [
+        "desktop",
+        "mobile"
+      ],
+      "fieldTypes": [
+        "desktop",
+        "java",
+        "mobile"
+      ],
+      "displayText": [
+        "java",
+        "sql"
+      ],
+      "validation": [
+        "desktop",
+        "java",
+        "mobile"
+      ]
+    }
+  },
+  "H3": {
+    "declarations": [],
+    "derived": []
+  },
+  "H4": {
+    "writableRuntimes": 2,
+    "activeV1Instances": null,
+    "how": "SELECT engine_version, status, count(*) FROM t_process_instance GROUP BY 1,2;"
+  },
+  "H5": {
+    "javaGates": 3,
+    "tsGates": 3,
+    "requiredFalseRuntimeInjections": 0
+  },
+  "H6": {
+    "entryBudgetKiB": 160,
+    "lazyBudgetKiB": 180,
+    "measured": null
+  }
+}

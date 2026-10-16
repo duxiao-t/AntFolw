@@ -30,7 +30,7 @@ public class LoginController {
 
     @PostMapping("/login")
     @PublicEndpoint
-    public Map<String, Object> login(@RequestBody LoginReq body,
+    public SessionPayload login(@RequestBody LoginReq body,
                                      @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
                                      HttpServletRequest request,
                                      HttpServletResponse response) {
@@ -51,7 +51,7 @@ public class LoginController {
 
     @PostMapping("/refresh")
     @PublicEndpoint
-    public Map<String, Object> refresh(
+    public SessionPayload refresh(
             @RequestHeader(name = "X-CSRF-Token", required = false) String csrfHeader,
             @RequestParam(defaultValue = "false") boolean includeMobileBootstrap,
             HttpServletRequest request, HttpServletResponse response) {
@@ -95,26 +95,15 @@ public class LoginController {
         return ResponseEntity.noContent().build();
     }
 
-    private Map<String, Object> payload(AuthService.Authenticated auth,
+    private SessionPayload payload(AuthService.Authenticated auth,
                                         boolean includeMobileBootstrap) {
         var snapshot = authorizationService.snapshot(auth.user().getId());
-        Map<String, Object> result = new java.util.LinkedHashMap<>();
-        result.put("accessToken", auth.accessToken());
-        result.put("user", Map.of(
-                "id", auth.user().getId(),
-                "username", auth.user().getUsername(),
-                "displayName", auth.user().getDisplayName(),
-                "email", auth.user().getEmail() == null ? "" : auth.user().getEmail(),
-                "roles", auth.roles(),
-                "permissions", snapshot.permissions(),
-                "authzVersion", auth.user().getAuthzVersion()));
-        result.put("permissions", snapshot.permissions());
-        result.put("authzVersion", auth.user().getAuthzVersion());
-        if (includeMobileBootstrap) {
-            result.put("mobileBootstrap", mobileBootstrapService.bootstrap(
-                auth.user().getId(), auth.roles()));
-        }
-        return result;
+        SessionUser user = new SessionUser(auth.user().getId(), auth.user().getUsername(),
+            auth.user().getDisplayName(), auth.user().getEmail() == null ? "" : auth.user().getEmail(),
+            auth.roles(), snapshot.permissions(), auth.user().getAuthzVersion());
+        return new SessionPayload(auth.accessToken(), user, snapshot.permissions(),
+            auth.user().getAuthzVersion(), includeMobileBootstrap
+                ? mobileBootstrapService.bootstrap(auth.user().getId(), auth.roles()) : null);
     }
 
     private PrincipalHolder.Principal auditPrincipal(AuthService.Authenticated auth) {
@@ -161,4 +150,12 @@ public class LoginController {
     }
 
     public record LoginReq(String username, String password) {}
+    public record SessionUser(Long id, String username, String displayName, String email,
+                               List<String> roles, java.util.Set<String> permissions,
+                               Long authzVersion) { }
+    public record SessionPayload(String accessToken, SessionUser user,
+                                  java.util.Set<String> permissions, Long authzVersion,
+                                  @com.fasterxml.jackson.annotation.JsonInclude(
+                                      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                  com.antflow.mobile.workflow.MobileBootstrapDto mobileBootstrap) { }
 }

@@ -46,17 +46,6 @@ import FormGrantUserPicker, {
 import MobileFormPreview from './MobileFormPreview';
 import BusinessNumberEditor from './BusinessNumberEditor';
 
-type FormDefinition = {
-  id: number;
-  code: string;
-  name: string;
-  status: string;
-  version: number;
-  description?: string;
-  schema?: any[] | string;
-  settings?: Record<string, any> | string;
-};
-
 type ProcessDefinition = {
   id: number;
   formDefId: number;
@@ -79,11 +68,14 @@ type FormGrant = {
   userIds: number[];
   roleIds: number[];
   departmentIds: number[];
+  companyIds: number[];
+  companies: { id: number; name: string }[];
   users: GrantUser[];
   roles: { id: number; code: string; name: string }[];
   departments: GrantDepartment[];
 };
 type FormGrantCandidates = {
+  companies: { id: number; name: string }[];
   roles: { id: number; code: string; name: string }[];
   departments: GrantDepartment[];
 };
@@ -311,9 +303,10 @@ export default function FormManagementWizard() {
   // 能打开 /designer/form/new，一路填完，最后 POST /api/forms/definitions 才 403——"存不了"。
   const canCreateForm = isAdmin || hasCapability(currentUser, CAPABILITY.formDefinitionManage);
 
-  const { data: definition } = useQuery<FormDefinition>({
+  const { data: definition } = useQuery<AntFlowAPI.FormDefinition>({
     queryKey: ['form-management-definition', formId],
-    queryFn: () => request<FormDefinition>(`/api/forms/definitions/${formId}`),
+    queryFn: () =>
+      request<AntFlowAPI.FormDefinition>(`/api/forms/definitions/${formId}`),
     enabled: !!formId,
   });
 
@@ -322,6 +315,7 @@ export default function FormManagementWizard() {
   const watchedUserIds = Form.useWatch('userIds', form);
   const watchedRoleIds = Form.useWatch('roleIds', form);
   const watchedDepartmentIds = Form.useWatch('departmentIds', form);
+  const watchedCompanyIds = Form.useWatch('companyIds', form);
   // 回填做一次就够，键是「哪张表单 + 候选角色是否已知」。
   const syncedGrantKey = useRef<string | null>(null);
   const syncedDefinitionId = useRef<number | null>(null);
@@ -373,7 +367,7 @@ export default function FormManagementWizard() {
   });
   const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'employee')?.id;
   const visibilitySummary = allCompanyRoleId && formGrant?.roleIds.includes(allCompanyRoleId)
-    ? '全公司'
+    ? '已授权公司内全部员工'
     : [
         formGrant?.departmentIds.length ? `${formGrant.departmentIds.length} 个部门` : '',
         formGrant?.roleIds.length ? `${formGrant.roleIds.length} 个角色` : '',
@@ -388,6 +382,7 @@ export default function FormManagementWizard() {
     !sameIds(watchedUserIds, formGrant.userIds)
     || !sameIds(watchedRoleIds, formGrant.roleIds.filter((id) => id !== allCompanyRoleId))
     || !sameIds(watchedDepartmentIds, formGrant.departmentIds)
+    || (isAdmin && !sameIds(watchedCompanyIds, formGrant.companyIds))
     || (!!allCompanyRoleId
       && watchedAllCompany !== formGrant.roleIds.includes(allCompanyRoleId))
   );
@@ -557,7 +552,7 @@ export default function FormManagementWizard() {
 
   useEffect(() => {
     if (definition && syncedDefinitionId.current !== definition.id) {
-      syncedDefinitionId.current = definition.id;
+      syncedDefinitionId.current = definition.id ?? null;
       form.setFieldsValue({
         code: definition.code,
         name: definition.name,
@@ -578,6 +573,7 @@ export default function FormManagementWizard() {
           roleIds: formGrant.roleIds.filter((id) => id !== allCompanyRoleId),
           allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
           departmentIds: formGrant.departmentIds,
+          companyIds: formGrant.companyIds ?? [],
         });
       }
     }
@@ -597,6 +593,7 @@ export default function FormManagementWizard() {
         roleIds: [],
         allCompany: false,
         departmentIds: [],
+        companyIds: [],
       });
     }
   }, [
@@ -626,16 +623,17 @@ export default function FormManagementWizard() {
         workflowEnabled: !!values.workflowEnabled,
         businessNumber: values.businessNumber,
       };
-      const saved = await request<FormDefinition>('/api/forms/definitions', {
-        method: 'POST',
-        data: {
-          id: formId,
-          code: values.code,
-          name: values.name,
-          schema,
-          settings,
-        },
-      });
+      const body: AntFlowAPI.SaveBody = {
+        id: formId ?? undefined,
+        code: values.code,
+        name: values.name,
+        schema,
+        settings,
+      };
+      const saved = await request<AntFlowAPI.FormDefinition>(
+        '/api/forms/definitions',
+        { method: 'POST', data: body },
+      );
       if (!isNew || !canManageGrants) return saved;
 
       try {
@@ -671,6 +669,7 @@ export default function FormManagementWizard() {
               userIds,
               roleIds,
               departmentIds,
+              ...(isAdmin ? { companyIds: values.companyIds ?? latestGrant.companyIds ?? [] } : {}),
               version: latestGrant.version,
             },
           },
@@ -720,7 +719,7 @@ export default function FormManagementWizard() {
   const saveUsageScope = useMutation({
     mutationFn: async () => {
       if (!formId || !formGrant) throw new Error('请先保存表单属性');
-      const values = await form.validateFields(['userIds', 'roleIds', 'departmentIds', 'allCompany']);
+      const values = await form.validateFields(['userIds', 'roleIds', 'departmentIds', 'allCompany', ...(isAdmin ? ['companyIds'] : [])]);
       let roleIds = Array.isArray(values.roleIds) ? values.roleIds : formGrant.roleIds;
       if (isAdmin && allCompanyRoleId) {
         roleIds = values.allCompany
@@ -737,6 +736,7 @@ export default function FormManagementWizard() {
           roleIds,
           departmentIds: Array.isArray(values.departmentIds)
             ? values.departmentIds : formGrant.departmentIds,
+          ...(isAdmin ? { companyIds: values.companyIds ?? formGrant.companyIds ?? [] } : {}),
         },
       });
     },
@@ -772,16 +772,17 @@ export default function FormManagementWizard() {
   const saveDraft = useMutation({
     mutationFn: () => {
       if (!definition) throw new Error('请先保存表单属性');
-      return request<FormDefinition>('/api/forms/definitions', {
+      const body: AntFlowAPI.SaveBody = {
+        id: definition.id,
+        code: definition.code,
+        name: definition.name,
+        description: definition.description ?? '',
+        schema,
+        settings: parseJsonValue(definition.settings, {}),
+      };
+      return request<AntFlowAPI.FormDefinition>('/api/forms/definitions', {
         method: 'POST',
-        data: {
-          id: definition.id,
-          code: definition.code,
-          name: definition.name,
-          description: definition.description ?? '',
-          schema,
-          settings: parseJsonValue(definition.settings, {}),
-        },
+        data: body,
       });
     },
     onSuccess: () => {
@@ -825,17 +826,18 @@ export default function FormManagementWizard() {
       if (!formId) throw new Error('请先保存表单属性');
       // 先落库再发布：不然画布上没保存的改动会连同发布一起被丢掉，而且"已发布的表单再点发布"
       // 在后端是空操作——用户会以为发布成功了，其实什么都没发生。
-      const saved = await request<FormDefinition>('/api/forms/definitions', {
-        method: 'POST',
-        data: {
-          id: formId,
-          code: definition?.code,
-          name: definition?.name,
-          description: definition?.description ?? '',
-          schema,
-          settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
-        },
-      });
+      const body: AntFlowAPI.SaveBody = {
+        id: formId,
+        code: definition?.code,
+        name: definition?.name,
+        description: definition?.description ?? '',
+        schema,
+        settings: parseJsonValue<Record<string, any>>(definition?.settings, {}),
+      };
+      const saved = await request<AntFlowAPI.FormDefinition>(
+        '/api/forms/definitions',
+        { method: 'POST', data: body },
+      );
       // 内容没变时后端会原样返回 PUBLISHED。但**流程**可能还有未发布的草稿改动，这时不能
       // 直接返回——否则"只改了流程"的发布会永远停在草稿，界面却提示发布成功。
       if (saved?.status === 'PUBLISHED'
@@ -983,19 +985,29 @@ export default function FormManagementWizard() {
               <span className={styles.sectionMarker} aria-hidden="true" />
               <div>
                 <h2 className={styles.sectionTitle}>表单使用范围</h2>
-                <span className={styles.sectionDescription}>控制手机端目录、打开和发起；不授予模板维护或业务数据查看权限。各范围取并集，部门包含所有下级部门。</span>
+                <span className={styles.sectionDescription}>先限定允许使用的公司，再按人员、角色或部门授权。公司未获准时不能使用；不授予模板维护或业务数据查看权限。</span>
               </div>
             </div>
+            {isAdmin ? (
+              <Form.Item label="允许使用的公司" name="companyIds">
+                <Select mode="multiple" allowClear placeholder="未选择公司时，仅全局管理员可使用"
+                  options={(grantCandidates?.companies ?? []).map((company) => ({
+                    value: company.id, label: company.name,
+                  }))} />
+              </Form.Item>
+            ) : (
+              <p>允许使用的公司：{formGrant?.companies?.map((company) => company.name).join('、') || '未授权'}（由全局管理员设置）</p>
+            )}
             {isAdmin && (
               <div className={styles.settingRow} style={{ marginTop: 0 }}>
                 <div className={styles.settingCopy}>
-                  <span className={styles.settingLabel}>全公司可见</span>
-                  <span className={styles.settingHint}>允许所有有效成员查看并发起此表单。</span>
+                  <span className={styles.settingLabel}>已授权公司内全部员工</span>
+                  <span className={styles.settingHint}>授予已授权公司内的员工角色，不会向其他公司开放。</span>
                 </div>
                 <div className={styles.settingControl}>
                   <span>{!allCompanyRoleId ? '不可用' : watchedAllCompany ? '已启用' : '未启用'}</span>
                   <Form.Item name="allCompany" valuePropName="checked" noStyle>
-                    <Switch aria-label="全公司可见" disabled={!allCompanyRoleId} />
+                    <Switch aria-label="已授权公司内全部员工" disabled={!allCompanyRoleId} />
                   </Form.Item>
                 </div>
               </div>
@@ -1022,7 +1034,7 @@ export default function FormManagementWizard() {
                   <Select mode="multiple" maxTagCount="responsive"
                     showSearch={{ optionFilterProp: 'label' }}
                     placeholder="选择可查看表单的角色"
-                    options={(grantCandidates?.roles ?? []).filter((role) => role.code !== 'user').map((role) => ({
+                    options={(grantCandidates?.roles ?? []).filter((role) => role.id !== allCompanyRoleId).map((role) => ({
                       value: role.id, label: `${role.name} · ${role.code}`,
                     }))} />
                 </Form.Item>

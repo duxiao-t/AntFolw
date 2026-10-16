@@ -40,6 +40,7 @@ public class UserService {
     private final AuthorizationService authorizationService;
     private final AuthSessionService authSessionService;
     private final AuditService auditService;
+    private final OrgCompanyAccess companyAccess;
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(User u, List<Long> roleIds, String rawPassword) {
@@ -54,6 +55,7 @@ public class UserService {
         validateUsernameAvailable(u.getUsername(), null);
         validateDisplayName(u.getDisplayName());
         validateDepartment(u.getDeptId());
+        companyAccess.requireDepartment(u.getDeptId());
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, u.getDeptId());
         validateManager(null, u.getManagerId(), u.getDeptId());
@@ -116,6 +118,7 @@ public class UserService {
         if (u == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
         }
+        companyAccess.requireUserSource(u.getDeptId());
         List<String> currentRoles = rolesOf(userId);
         if (!authorizationService.isAdmin() && currentRoles.contains("admin")) {
             throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
@@ -263,11 +266,17 @@ public class UserService {
      * 都调它们，免得两处各写一份慢慢漂移。
      */
     public record UserQuery(String keyword, Long departmentId, boolean includeDescendants,
-                            boolean leaderOnly, String position, List<Long> userIds) {
+                            boolean leaderOnly, String position, List<Long> userIds, Long companyId) {
         public static UserQuery of(String keyword, Long departmentId, Boolean includeDescendants,
                                    Boolean leaderOnly, String position, List<Long> userIds) {
             return new UserQuery(keyword, departmentId, Boolean.TRUE.equals(includeDescendants),
-                Boolean.TRUE.equals(leaderOnly), position, userIds);
+                Boolean.TRUE.equals(leaderOnly), position, userIds, null);
+        }
+
+        public static UserQuery of(String keyword, Long departmentId, Boolean includeDescendants,
+                                   Boolean leaderOnly, String position, List<Long> userIds, Long companyId) {
+            return new UserQuery(keyword, departmentId, Boolean.TRUE.equals(includeDescendants),
+                Boolean.TRUE.equals(leaderOnly), position, userIds, companyId);
         }
 
         /** 职务过滤的最终值：自由文本优先，否则取「部门领导」的预设称谓；都没有则不过滤。 */
@@ -290,6 +299,7 @@ public class UserService {
     public List<User> listAuthorized(UserQuery request) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_READ);
         QueryWrapper<User> query = new QueryWrapper<>();
+        companyAccess.constrainUsers(query, request.companyId());
         if (request.keyword() != null && !request.keyword().isBlank()) {
             String keyword = request.keyword().trim();
             query.and(wrapper -> {
@@ -331,12 +341,13 @@ public class UserService {
     }
 
     public Page<User> listAuthorizedPage(String keyword, Long departmentId,
-                                         boolean includeDescendants, long page, long size) {
+                                         boolean includeDescendants, long page, long size, Long companyId) {
         String permission = com.antflow.authz.PermissionCodes.ORG_USER_READ;
         authorizationService.requirePermission(permission);
         long safePage = Math.max(page, 1);
         long safeSize = Math.min(Math.max(size, 1), 100);
         QueryWrapper<User> query = new QueryWrapper<>();
+        companyAccess.constrainUsers(query, companyId);
         if (keyword != null && !keyword.isBlank()) {
             String normalized = keyword.trim();
             // 关键字也匹配部门名（含下级）：通讯录里搜"研发部"要出人，不能只过滤左树。
@@ -384,6 +395,7 @@ public class UserService {
     }
 
     public List<User> managerCandidates(Long departmentId, Long excludedUserId, String keyword) {
+        companyAccess.requireDepartment(departmentId);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
         Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);
@@ -431,7 +443,9 @@ public class UserService {
             .collect(Collectors.toMap(User::getId, Function.identity()));
         String placeholders = String.join(",", Collections.nCopies(users.size(), "?"));
         jdbcTemplate.query("""
-            SELECT user_row.id, mapping.user_id IS NOT NULL AS wecom_mapped,
+            SELECT user_row.id, EXISTS (
+                       SELECT 1 FROM t_wecom_user_mapping synced WHERE synced.user_id = user_row.id
+                   ) AS wecom_mapped,
                    mapping.wecom_status, mapping.directory_present,
                    EXISTS (
                        SELECT 1 FROM t_department_leader department_leader
@@ -508,6 +522,7 @@ public class UserService {
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
         }
+        companyAccess.requireUserSource(user.getDeptId());
         if (body.containsKey("status") && hasWecomMapping(userId)) {
             throw new BizException("WECOM_LOGIN_ACCESS_REQUIRED", "企业微信成员请使用登录权限操作");
         }
@@ -537,6 +552,7 @@ public class UserService {
             Long departmentId = body.get("deptId") == null
                 ? null : ((Number) body.get("deptId")).longValue();
             validateDepartment(departmentId);
+            companyAccess.requireDepartment(departmentId);
             authorizationService.requireManageableDepartment(
                 com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
             user.setDeptId(departmentId);
@@ -562,12 +578,38 @@ public class UserService {
             lockReportingRelations(originalDepartmentId, user.getDeptId());
             validateManager(userId, user.getManagerId(), user.getDeptId());
             if (body.containsKey("deptId")) {
+                validateCompanyTransfer(userId, originalDepartmentId, user.getDeptId());
                 validateDirectReportsCompany(userId, user.getDeptId());
             }
         }
         userMapper.updateById(user);
+        if (body.containsKey("managerId") && user.getManagerId() == null) {
+            userMapper.update(null, new UpdateWrapper<User>().eq("id", userId).set("manager_id", null));
+        }
         authorizationChanged(userId);
         return user;
+    }
+
+    private void validateCompanyTransfer(Long userId, Long originalDepartmentId, Long targetDepartmentId) {
+        Department original = originalDepartmentId == null ? null : departmentMapper.selectById(originalDepartmentId);
+        Department target = targetDepartmentId == null ? null : departmentMapper.selectById(targetDepartmentId);
+        if (original != null && target != null
+            && Objects.equals(original.getCompanyId(), target.getCompanyId())) return;
+        if (Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM t_wecom_user_mapping WHERE user_id = ?)", Boolean.class, userId))) {
+            throw new BizException("WECOM_COMPANY_TRANSFER_FORBIDDEN", "企微同步成员的跨公司归属请在企业微信维护");
+        }
+        if (target != null && Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+            SELECT EXISTS (
+                SELECT 1 FROM t_department department
+                WHERE department.company_id <> ?
+                  AND (department.leader_id = ? OR EXISTS (
+                      SELECT 1 FROM t_department_leader leader
+                      WHERE leader.department_id = department.id AND leader.user_id = ?))
+            )
+            """, Boolean.class, target.getCompanyId(), userId, userId))) {
+            throw new BizException("LEADER_COMPANY_MISMATCH", "该成员仍是其他公司的部门负责人，请先调整负责人");
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)

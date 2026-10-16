@@ -1,0 +1,225 @@
+{
+  "note": "字段「值 → 显示文本」的共用口径。两侧都必须对同一条期望负责：Java 是 form/runtime/FormValueDisplay.cell()（列表/导出用），SQL 是 v_form_ledger 的 value_label / value_text 两列（BI 用）。期望值来自各层真实契约，不取自某一侧的实现细节——尤其注意台账是**脱敏投影**，不是显示渲染器：自由文本不在它的类型白名单里，value_text 就是 NULL（V49 的 CASE WHEN 白名单）。",
+  "consumers": {
+    "java": "backend/src/main/java/com/antflow/form/runtime/FormValueDisplay.java",
+    "sql": "backend/src/main/resources/db/migration/V49__ledger_row_version_and_options.sql (v_form_ledger)"
+  },
+  "cases": [
+    {
+      "id": "free-text-is-not-carried-by-the-ledger",
+      "intent": "自由文本（text/textarea/search）不在台账类型白名单内：Java 显示原文，台账两列都是 NULL。这是脱敏契约，不是遗漏。",
+      "schema": [
+        {
+          "id": "memo",
+          "type": "text",
+          "label": "备注"
+        }
+      ],
+      "data": {
+        "memo": "原文"
+      },
+      "fieldId": "memo",
+      "expect": {
+        "java": "原文",
+        "sql": {
+          "row": true,
+          "label": null,
+          "text": null
+        }
+      }
+    },
+    {
+      "id": "option-value-resolves-to-its-label-on-both-sides",
+      "intent": "选项字段命中时，Java 给标签、台账 value_label 给同一个标签、value_text 给**原始值**（不是标签）。",
+      "schema": [
+        {
+          "id": "kind",
+          "type": "select",
+          "label": "类型",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "kind": "a"
+      },
+      "fieldId": "kind",
+      "expect": {
+        "java": "甲",
+        "sql": {
+          "row": true,
+          "label": "甲",
+          "text": "a"
+        }
+      }
+    },
+    {
+      "id": "multi-select-joins-labels-with-an-ideographic-comma",
+      "intent": "多选：两侧都把各个值的标签用「、」连起来。台账的 value_text 是**原始 JSON 数组文本**，所以断言要按解析后的 JSON 比，不能把 jsonb 的空格格式当成业务口径（V49 第 ④ 类 bug 就出在这一列）。",
+      "schema": [
+        {
+          "id": "tags",
+          "type": "multi_select",
+          "label": "标签",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "tags": [
+          "a",
+          "b"
+        ]
+      },
+      "fieldId": "tags",
+      "expect": {
+        "java": "甲、乙",
+        "sql": {
+          "row": true,
+          "label": "甲、乙",
+          "textJson": [
+            "a",
+            "b"
+          ]
+        }
+      }
+    },
+    {
+      "id": "unknown-option-value-falls-back-to-the-raw-value",
+      "intent": "值不在选项里：Java 回退原文，台账认不出标签（value_label = NULL）但原始值照旧保留在 value_text。",
+      "schema": [
+        {
+          "id": "kind",
+          "type": "select",
+          "label": "类型",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "kind": "old"
+      },
+      "fieldId": "kind",
+      "expect": {
+        "java": "old",
+        "sql": {
+          "row": true,
+          "label": null,
+          "text": "old"
+        }
+      }
+    },
+    {
+      "id": "explicit-json-null-is-an-empty-cell-not-a-missing-row",
+      "intent": "显式 JSON null：**有台账行**、列值为 NULL；Java 给空串。要和「字段整条缺失」区分开——那是**没有行**。",
+      "schema": [
+        {
+          "id": "kind",
+          "type": "select",
+          "label": "类型",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "kind": null
+      },
+      "fieldId": "kind",
+      "expect": {
+        "java": "",
+        "sql": {
+          "row": true,
+          "label": null,
+          "text": null
+        }
+      }
+    },
+    {
+      "id": "missing-field-produces-no-ledger-row",
+      "intent": "数据里压根没有这个字段：台账**没有行**（不是「有行但列为空」）。Java 侧同样不该在 values() 里出现，所以这条不写 java 期望。",
+      "schema": [
+        {
+          "id": "memo",
+          "type": "text",
+          "label": "备注"
+        }
+      ],
+      "data": {},
+      "fieldId": "memo",
+      "expect": {
+        "sql": {
+          "row": false
+        }
+      }
+    },
+    {
+      "id": "checkbox-resolves-each-selected-label",
+      "intent": "checkbox stores an array; both projections resolve labels while BI preserves the original array text.",
+      "schema": [
+        {
+          "id": "checks",
+          "type": "checkbox",
+          "props": {
+            "options": [
+              {
+                "value": "a",
+                "label": "甲"
+              },
+              {
+                "value": "b",
+                "label": "乙"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "checks": [
+          "b",
+          "a"
+        ]
+      },
+      "fieldId": "checks",
+      "expect": {
+        "java": "乙、甲",
+        "sql": {
+          "row": true,
+          "label": "乙、甲",
+          "textJson": ["b", "a"]
+        }
+      }
+    }
+  ]
+}

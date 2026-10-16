@@ -90,7 +90,8 @@ class InstanceControllerTest {
                                               AuthorizationService authorization) {
         return new InstanceController(mock(ProcessEngine.class), instances, mock(TaskMapper.class),
             mock(TaskHistoryMapper.class), mock(WorkflowJobService.class), authorization,
-            mock(AuditService.class), mock(FormDefinitionService.class), mock(FormDataMapper.class));
+            mock(AuditService.class), mock(FormDefinitionService.class), mock(FormDataMapper.class),
+            mock(com.antflow.org.CompanyAttribution.class));
     }
 
     @Test
@@ -127,7 +128,7 @@ class InstanceControllerTest {
 
         InstanceController controller = new InstanceController(mock(ProcessEngine.class),
             instances, tasks, history, jobs, authorization, mock(AuditService.class), forms,
-            formData);
+            formData, mock(com.antflow.org.CompanyAttribution.class));
 
         Map<String, Object> result = controller.detail(41L);
 

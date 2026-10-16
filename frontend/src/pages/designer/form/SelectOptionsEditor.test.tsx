@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SelectOptionsEditor } from './SelectOptionsEditor';
+import { SelectOptionsEditor } from '../../../components/form-fields/SelectOptionsEditor';
 
 describe('SelectOptionsEditor', () => {
   it('sets defaults, hides options, and creates the other option', () => {

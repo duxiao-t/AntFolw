@@ -53,7 +53,9 @@ function jsonResponse(body: unknown) {
 }
 
 function renderDrafts() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/forms/drafts']}>
@@ -64,27 +66,64 @@ function renderDrafts() {
 }
 
 beforeEach(() => {
-  useAuthStore.setState({ status: 'authenticated', accessToken: 't', user: AUTH_USER });
+  useAuthStore.setState({
+    status: 'authenticated',
+    accessToken: 't',
+    user: AUTH_USER,
+  });
   vi.unstubAllGlobals();
   setupFetch();
 });
 
 describe('DraftListPage', () => {
+  it('explains pending company attribution without discarding the draft', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse([
+        {
+          id: 101,
+          formCode: 'leave',
+          formName: '请假申请',
+          formVersion: 3,
+          data: {},
+          schema: [],
+          readOnly: true,
+          companyId: null,
+        },
+      ]),
+    );
+    renderDrafts();
+    expect(
+      await screen.findByText('公司归属待确认，请联系管理员'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '请假申请 已不可用' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: '删除 请假申请' })).toBeEnabled();
+  });
+
   it('keeps a revoked form draft visible for deletion but disables continuation', async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse([{
-      id: 101,
-      formCode: 'leave',
-      formName: '请假申请',
-      formVersion: 3,
-      data: {},
-      schema: [],
-      readOnly: true,
-    }]));
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse([
+        {
+          id: 101,
+          formCode: 'leave',
+          formName: '请假申请',
+          formVersion: 3,
+          data: {},
+          schema: [],
+          readOnly: true,
+        },
+      ]),
+    );
 
     renderDrafts();
 
-    expect(await screen.findByText('使用权限已撤销，仅可删除')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '请假申请 已不可用' })).toBeDisabled();
+    expect(
+      await screen.findByText('使用权限已撤销，仅可删除'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '请假申请 已不可用' }),
+    ).toBeDisabled();
     expect(screen.getByRole('button', { name: '删除 请假申请' })).toBeEnabled();
   });
 
@@ -92,8 +131,12 @@ describe('DraftListPage', () => {
     renderDrafts();
 
     expect(await screen.findByText('请假申请')).toBeInTheDocument();
-    expect(screen.getByText((text) => text.includes('步骤 1/2'))).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '继续填写 请假申请' })).toBeInTheDocument();
+    expect(
+      screen.getByText((text) => text.includes('步骤 1/2')),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '继续填写 请假申请' }),
+    ).toBeInTheDocument();
   });
 
   it('confirms delete and removes server and local recovery draft', async () => {
@@ -101,14 +144,21 @@ describe('DraftListPage', () => {
     renderDrafts();
 
     await screen.findByText('请假申请');
-    await userEvent.click(screen.getByRole('button', { name: '删除 请假申请' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: '删除 请假申请' }),
+    );
     fireEvent.click(await screen.findByRole('button', { name: '删除' }));
 
     await waitFor(() => {
-      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
-      expect(calls.some(([url, init]) =>
-        String(url).includes('/api/mobile/drafts/101') && (init as RequestInit).method === 'DELETE',
-      )).toBe(true);
+      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock
+        .calls;
+      expect(
+        calls.some(
+          ([url, init]) =>
+            String(url).includes('/api/mobile/drafts/101') &&
+            (init as RequestInit).method === 'DELETE',
+        ),
+      ).toBe(true);
     });
     expect(localStorage.getItem(buildRecoveryKey(7, 'leave', 101))).toBeNull();
     expect(screen.queryByText('请假申请')).not.toBeInTheDocument();

@@ -1,20 +1,16 @@
+import type { AntFlowAPI } from '../../../../shared/api.generated';
+import type { Contract } from '../../shared/api/types';
 import { apiRequest } from '../../shared/api/http';
 
-export interface UserNotification {
-  id: number;
-  eventType: string;
-  title: string;
-  instanceId?: number;
-  taskId?: number;
-  createdAt: string;
-  readAt?: string;
-}
+export type UserNotification = Contract<
+  AntFlowAPI.NotificationRow,
+  'id' | 'eventType' | 'title' | 'createdAt'
+>;
 
-export interface NotificationPage {
-  items: UserNotification[];
-  hasMore: boolean;
-  unreadCount: number;
-}
+export type NotificationPage = Contract<
+  Omit<AntFlowAPI.NotificationPage, 'items'>,
+  'hasMore' | 'unreadCount'
+> & { items: UserNotification[] };
 
 export function fetchNotifications(page: number) {
   return apiRequest<NotificationPage>(

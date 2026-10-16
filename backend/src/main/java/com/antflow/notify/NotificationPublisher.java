@@ -1,11 +1,11 @@
 package com.antflow.notify;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 通知发布器 — Sprint 3 C6：引擎通过此 service 发布事件。
@@ -16,23 +16,21 @@ import java.util.List;
  */
 @Component
 @RequiredArgsConstructor
-@Slf4j
 public class NotificationPublisher {
 
     private final ApplicationEventPublisher publisher;
     private final List<NotificationListener> syncListeners;
+    private final JdbcTemplate jdbc;
 
     /** Spring 事件总线（监听器通过 @EventListener 或 @TransactionalEventListener 接） */
     public void publish(NotificationEvent e) {
-        publisher.publishEvent(e);
-        // 同步 listener（用于 log 兜底 / 单测）
-        for (NotificationListener l : syncListeners) {
-            try {
-                if (l.accepts(e)) l.onEvent(e);
-            } catch (Exception ex) {
-                log.warn("Notification listener {} failed: {}", l.name(), ex.toString());
-            }
-        }
+        jdbc.update("""
+            INSERT INTO t_workflow_outbox(aggregate_type, aggregate_id, event_type, recipient_id, payload)
+            VALUES ('PROCESS_INSTANCE', ?, ?, ?,
+                jsonb_strip_nulls(jsonb_build_object('instanceId', ?::bigint,
+                    'taskId', ?::bigint, 'message', ?::text)))
+            """, e.getProcInstId(), e.getType(), e.getUserId(), e.getProcInstId(),
+            e.getTaskId(), e.getMessage());
     }
 
     /** Outbox delivery path: listener failure must remain visible so it can be retried. */

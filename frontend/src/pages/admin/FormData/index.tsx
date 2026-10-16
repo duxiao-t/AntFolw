@@ -1,8 +1,11 @@
+import { ExportOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
-import { Link, request, useLocation } from '@umijs/max';
-import { Drawer, Typography } from 'antd';
+import { Link, request, useLocation, useModel } from '@umijs/max';
+import { Button, Drawer, Typography } from 'antd';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { CAPABILITY, hasCapability } from '../../../authz';
+import ExportModal, { type ExportDefaults } from './ExportModal';
 import { fieldColumns, type FormDataFieldValue } from './fieldValues';
 
 type FormDataRecord = {
@@ -37,6 +40,12 @@ export default function AdminFormDataPage() {
   const [current, setCurrent] = useState<FormDataRecord | null>(null);
   // 台账的字段列由本页数据推导——这个接口不回 schema，取不到字段清单与类型。
   const [fields, setFields] = useState<Array<{ id: string; label: string }>>([]);
+  const [exportOpen, setExportOpen] = useState(false);
+  // 导出弹窗默认沿用表格当前的筛选；表格的搜索状态由 ProTable 自己拿着，这里只在请求时留一份。
+  const lastQuery = useRef<ExportDefaults>({});
+  const { initialState } = useModel('@@initialState');
+  const currentUser = initialState?.currentUser as any;
+  const canExport = hasCapability(currentUser, CAPABILITY.formDataExport);
   const searchParams = new URLSearchParams(location.search);
   const initialFormDefId = searchParams.get('formDefId') ?? undefined;
 
@@ -116,6 +125,11 @@ export default function AdminFormDataPage() {
   }, [fields, initialFormDefId]);
 
   const loadRecords = useCallback(async (params: Record<string, any>) => {
+    lastQuery.current = {
+      formDefId: params.formDefId == null ? undefined : Number(params.formDefId),
+      status: params.status ?? undefined,
+      submitterKeyword: params.submitterKeyword ?? undefined,
+    };
     const result = await request<PageResult<FormDataRecord>>('/api/forms/data/admin', {
       params: {
         page: params.current,
@@ -149,7 +163,15 @@ export default function AdminFormDataPage() {
         scroll={{ x: 'max-content' }}
         onRow={(record) => ({ onClick: () => setCurrent(record), style: { cursor: 'pointer' } })}
         request={loadRecords}
+        toolBarRender={() => (canExport ? [
+          <Button key="export" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
+            导出
+          </Button>,
+        ] : [])}
       />
+      {exportOpen && (
+        <ExportModal defaults={lastQuery.current} onClose={() => setExportOpen(false)} />
+      )}
       <Drawer
         title={`提交数据 #${current?.id ?? ''}`}
         open={!!current}

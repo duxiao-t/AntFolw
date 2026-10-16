@@ -1,3 +1,4 @@
+import { DateField } from './DateField';
 import { DatePicker } from 'antd';
 import type { FieldType } from '../../registry/types';
 
@@ -6,6 +7,7 @@ export const DateRangeField: FieldType = {
   label: '日期范围',
   icon: 'calendar',
   defaultProps: { required: false, format: 'YYYY-MM-DD' },
+  ConfigPanel: DateField.ConfigPanel,
   Component: ({ node, mode, value, onChange }) => {
     const v = Array.isArray(value) ? value : [];
     const dayjs = (window as any).dayjs;
@@ -29,11 +31,4 @@ export const DateRangeField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: ({ node, onChange }) => (
-    <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-      <div>标签</div>
-      <input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })}
-        style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }} />
-    </div>
-  ),
 };

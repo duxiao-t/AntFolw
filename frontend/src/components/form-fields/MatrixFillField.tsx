@@ -1,3 +1,6 @@
+import { Space, Divider, Segmented } from 'antd';
+import { MatrixAxisEditor } from './MatrixAxisEditor';
+import { PanelField } from './panelField';
 import {
   DeleteOutlined,
   EditOutlined,
@@ -14,7 +17,6 @@ import {
   normalizeMatrixValue,
   removeMatrixAxis,
   setMatrixCell,
-  validateMatrixValue,
   type MatrixAxis,
   type MatrixAxisItem,
 } from './matrixFill';
@@ -76,6 +78,110 @@ export const MatrixFillField: FieldType = {
     maxColumns: 10,
     maxLength: 2000,
     precision: 0,
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    const matrix = normalizeMatrixProps(props);
+
+    return (
+      <Space
+        direction="vertical"
+        style={{ width: '100%' }}
+        size={16}
+        separator={<Divider style={{ margin: 0 }} />}
+      >
+        <div style={{ display: 'grid', gap: 10 }}>
+          <Typography.Text strong>矩阵行</Typography.Text>
+          <MatrixAxisEditor
+            axis="row"
+            items={matrix.rows}
+            max={matrix.maxRows}
+            onChange={(rows) => updateProps({ rows })}
+          />
+          <PanelField label="最大行数（含填报时新增）">
+            <InputNumber
+              min={matrix.rows.length}
+              precision={0}
+              style={{ width: '100%' }}
+              value={matrix.maxRows}
+              onChange={(value) => updateProps({ maxRows: Math.max(value ?? 20, matrix.rows.length) })}
+            />
+          </PanelField>
+        </div>
+
+        <div style={{ display: 'grid', gap: 10 }}>
+          <Typography.Text strong>矩阵列</Typography.Text>
+          <MatrixAxisEditor
+            axis="column"
+            items={matrix.columns}
+            max={matrix.maxColumns}
+            onChange={(columns) => updateProps({ columns })}
+          />
+          <PanelField label="最大列数（含填报时新增）">
+            <InputNumber
+              min={matrix.columns.length}
+              precision={0}
+              style={{ width: '100%' }}
+              value={matrix.maxColumns}
+              onChange={(value) => updateProps({ maxColumns: Math.max(value ?? 10, matrix.columns.length) })}
+            />
+          </PanelField>
+        </div>
+
+        <div style={{ display: 'grid', gap: 12 }}>
+          <PanelField label="单元格类型">
+            <Segmented
+              block
+              value={matrix.cellType}
+              options={[
+                { label: '多行文本', value: 'textarea' },
+                { label: '数字', value: 'number' },
+              ]}
+              onChange={(cellType) => updateProps({ cellType })}
+            />
+          </PanelField>
+          {matrix.cellType === 'textarea' ? (
+            <PanelField label="最大字符数">
+              <InputNumber
+                min={1}
+                precision={0}
+                style={{ width: '100%' }}
+                value={matrix.maxLength}
+                onChange={(value) => updateProps({ maxLength: value ?? 2000 })}
+              />
+            </PanelField>
+          ) : (
+            <>
+              <PanelField label="最小值">
+                <InputNumber
+                  style={{ width: '100%' }}
+                  value={matrix.min}
+                  max={matrix.max}
+                  onChange={(value) => updateProps({ min: value ?? undefined })}
+                />
+              </PanelField>
+              <PanelField label="最大值">
+                <InputNumber
+                  style={{ width: '100%' }}
+                  value={matrix.max}
+                  min={matrix.min}
+                  onChange={(value) => updateProps({ max: value ?? undefined })}
+                />
+              </PanelField>
+              <PanelField label="小数位数">
+                <InputNumber
+                  min={0}
+                  precision={0}
+                  style={{ width: '100%' }}
+                  value={matrix.precision}
+                  onChange={(value) => updateProps({ precision: value ?? 0 })}
+                />
+              </PanelField>
+            </>
+          )}
+        </div>
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange }) => {
     const props = normalizeMatrixProps(node.props);
@@ -360,6 +466,4 @@ export const MatrixFillField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: () => null,
-  validate: (value, props) => validateMatrixValue(value, props, '矩阵'),
 };

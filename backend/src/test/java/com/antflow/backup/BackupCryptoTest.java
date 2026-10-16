@@ -7,7 +7,7 @@ import static org.mockito.Mockito.mock;
 import com.antflow.authz.AuthorizationService;
 import com.antflow.audit.AuditService;
 import com.antflow.audit.TrustedProxyProperties;
-import com.antflow.mobile.workflow.MobileFileProperties;
+import com.antflow.attachment.MobileFileProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

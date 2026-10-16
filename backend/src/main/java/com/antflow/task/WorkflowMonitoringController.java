@@ -10,8 +10,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.UUID;
+import java.time.OffsetDateTime;
+import com.antflow.audit.AuditService;
+import com.antflow.authz.HiddenResourceException;
+import com.antflow.engine.BizException;
 
 /**
  * 运维视角：卡死、超时、驳回热点、兜底积压、事务消息积压。
@@ -28,6 +36,79 @@ import org.springframework.security.access.prepost.PreAuthorize;
 public class WorkflowMonitoringController {
     private final JdbcTemplate jdbc;
     private final AuthorizationService authorization;
+    private final AuditService audit;
+
+    @GetMapping("/outbox")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_MONITOR_READ + "')")
+    public OutboxPage outbox(@RequestParam(defaultValue = "DEAD") String status,
+                             @RequestParam(defaultValue = "1") int page,
+                             @RequestParam(defaultValue = "20") int size) {
+        authorization.requirePermission(PermissionCodes.WORKFLOW_MONITOR_READ);
+        if (!List.of("DEAD", "PENDING", "RUNNING", "DELIVERED").contains(status)) {
+            throw new BizException("BAD_QUERY", "不支持的事务消息状态");
+        }
+        int safePage = Math.max(1, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        InstanceScopeSql.Scope scope = InstanceScopeSql.forPermission(
+            authorization, PermissionCodes.WORKFLOW_MONITOR_READ, "instance");
+        String from = """
+            FROM t_workflow_outbox event JOIN t_process_instance instance
+              ON event.aggregate_type = 'PROCESS_INSTANCE' AND instance.id = event.aggregate_id
+            WHERE event.status = ? AND
+            """ + scope.sql();
+        var args = new java.util.ArrayList<Object>();
+        args.add(status);
+        args.addAll(scope.args());
+        Long total = jdbc.queryForObject("SELECT count(*) " + from, Long.class, args.toArray());
+        args.add(safeSize);
+        args.add((long) (safePage - 1) * safeSize);
+        List<OutboxEvent> rows = jdbc.query("""
+            SELECT event.id, event.aggregate_id, event.event_type, event.status, event.attempts,
+                   event.created_at, event.next_attempt_at, event.delivered_at,
+                   event.last_error IS NOT NULL AS failed
+            """ + from + " ORDER BY event.created_at DESC, event.id LIMIT ? OFFSET ?",
+            (rs, row) -> new OutboxEvent(rs.getObject("id", UUID.class),
+                rs.getLong("aggregate_id"), rs.getString("event_type"), rs.getString("status"),
+                rs.getInt("attempts"), rs.getObject("created_at", OffsetDateTime.class),
+                rs.getObject("next_attempt_at", OffsetDateTime.class),
+                rs.getObject("delivered_at", OffsetDateTime.class),
+                rs.getBoolean("failed") ? "投递失败，请查看受限服务日志" : null), args.toArray());
+        return new OutboxPage(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    @PostMapping("/outbox/{id}/retry")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_OUTBOX_RETRY + "')")
+    @Transactional
+    public void retryOutbox(@PathVariable UUID id) {
+        authorization.requirePermission(PermissionCodes.WORKFLOW_OUTBOX_RETRY);
+        InstanceScopeSql.Scope scope = InstanceScopeSql.forPermission(
+            authorization, PermissionCodes.WORKFLOW_OUTBOX_RETRY, "instance");
+        var args = new java.util.ArrayList<Object>();
+        args.add(id);
+        args.addAll(scope.args());
+        Long instanceId = jdbc.query("""
+            SELECT instance.id FROM t_workflow_outbox event JOIN t_process_instance instance
+              ON event.aggregate_type = 'PROCESS_INSTANCE' AND instance.id = event.aggregate_id
+            WHERE event.id = ? AND
+            """ + scope.sql(), rs -> rs.next() ? rs.getLong(1) : null, args.toArray());
+        if (instanceId == null) throw new HiddenResourceException("outbox event not found");
+        authorization.requireManageInstance(instanceId, PermissionCodes.WORKFLOW_OUTBOX_RETRY);
+        if (jdbc.update("""
+            UPDATE t_workflow_outbox SET status = 'PENDING', attempts = 0, next_attempt_at = now(),
+                locked_at = NULL, locked_by = NULL, last_error = NULL, delivered_at = NULL
+            WHERE id = ? AND status = 'DEAD'
+            """, id) != 1) {
+            throw new BizException("OUTBOX_STATE_CONFLICT", "仅能重放失败事务消息，请刷新");
+        }
+        audit.success("workflow.outbox.retry", "PROCESS_INSTANCE", instanceId,
+            AuditService.RiskLevel.HIGH, Map.of("status", "PENDING"),
+            Map.of("eventId", id.toString()));
+    }
+
+    public record OutboxEvent(UUID id, long instanceId, String eventType, String status,
+                              int attempts, OffsetDateTime createdAt, OffsetDateTime nextAttemptAt,
+                              OffsetDateTime deliveredAt, String error) { }
+    public record OutboxPage(List<OutboxEvent> records, long total, int page, int size) { }
 
     @GetMapping
     @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_MONITOR_READ + "')")

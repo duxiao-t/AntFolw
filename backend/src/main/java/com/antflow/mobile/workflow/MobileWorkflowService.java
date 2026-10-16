@@ -1,5 +1,14 @@
 package com.antflow.mobile.workflow;
 
+import com.antflow.form.runtime.MobileDraftDto;
+
+import com.antflow.form.runtime.MobileDraftService;
+
+import com.antflow.attachment.MobileFile;
+import com.antflow.attachment.MobileFileLinkService;
+import com.antflow.attachment.MobileFileRef;
+import com.antflow.attachment.MobileFileDto;
+
 import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.HiddenResourceException;
 import com.antflow.authz.PermissionCodes;
@@ -12,6 +21,7 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.org.CompanyAttribution;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
 import com.antflow.process.DefinitionVersionRepository;
@@ -52,6 +62,7 @@ public class MobileWorkflowService {
     private final ProcessEngine engine;
     private final MobileDraftService draftService;
     private final MobileWorkflowMapper workflowMapper;
+    private final com.antflow.attachment.FormDataFileMapper fileLinks;
     private final FormDefinitionService formDefinitionService;
     private final ProcessDefinitionService processDefinitionService;
     private final FormDataMapper formDataMapper;
@@ -61,15 +72,32 @@ public class MobileWorkflowService {
     private final MobileFileLinkService fileLinkService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    private final CompanyAttribution companyAttribution;
     @Autowired(required = false)
     private DefinitionVersionRepository definitionVersions;
 
     public MobileFormDto getMobileForm(String code) {
+        return getMobileForm(code, null, null);
+    }
+
+    public MobileFormDto getMobileForm(String code, Long draftId, Long reworkTaskId) {
         FormDefinition form = formDefinitionService.getByCode(code);
         if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
         }
-        authorizationService.requireFormUse(form.getId());
+        if (draftId != null && reworkTaskId != null) {
+            throw new BizException("BAD_REQUEST", "choose a draft or a rework task");
+        }
+        if (draftId != null) {
+            draftService.requireUsableDraft(draftId, form.getId(), authorizationService.currentUserId());
+        } else if (reworkTaskId != null) {
+            ReworkTaskDto rework = getReworkTask(reworkTaskId, authorizationService.currentUserId());
+            if (!Objects.equals(rework.formCode(), code)) {
+                throw new BizException("BAD_REQUEST", "rework task does not belong to form");
+            }
+        } else {
+            authorizationService.requireFormUse(form.getId());
+        }
         ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
         JsonNode processTree = readJsonObject(
             process == null ? null : process.getProcess(), "BAD_FLOW_JSON");
@@ -87,7 +115,8 @@ public class MobileWorkflowService {
         if (currentForm == null || !PUBLISHED_STATUS.equals(currentForm.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
         }
-        authorizationService.requireFormUse(currentForm.getId());
+        // P4a：带草稿时**归属取草稿行的快照**（调岗后重提也不改归属）；新发起才按身份解析。
+        Long companyId;
         if (request.draftId() != null) {
             MobileDraftDto draft = draftService.get(request.draftId(), userId);
             if (!Objects.equals(draft.formCode(), request.formCode())) {
@@ -100,12 +129,16 @@ public class MobileWorkflowService {
                 throw new BizException("DRAFT_VERSION_MISMATCH",
                     "表单已改版，请基于新版本重新填写");
             }
+            companyId = companyAttribution.forDraft(draft.companyId(), request.companyId());
+        } else {
+            companyId = companyAttribution.resolve(request.companyId());
         }
+        authorizationService.requireFormUse(currentForm.getId(), companyId);
 
         Map<String, List<Long>> selfSelected = request.selfSelected() == null
             ? Map.of() : request.selfSelected();
-        Map<String, Object> result = engine.start(new StartCmd(request.formCode(), data, selfSelected),
-            userId);
+        Map<String, Object> result = engine.start(
+            new StartCmd(request.formCode(), data, selfSelected, companyId), userId);
         Long formDataId = asLong(result.get("formDataId"));
         Long instanceId = asLong(result.get("instanceId"));
         String businessNo = Objects.toString(result.get("businessNo"), null);
@@ -287,6 +320,7 @@ public class MobileWorkflowService {
             return;
         }
         TaskEntity task = requireExistingTask(taskId);
+        authorizationService.requireConfirmedInstance(task.getProcInstId());
         if (!Objects.equals(task.getAssigneeId(), userId)) {
             throw new AccessDeniedException("not your task");
         }
@@ -362,6 +396,7 @@ public class MobileWorkflowService {
 
     private TaskEntity requireOwnedReworkTask(Long taskId, long userId) {
         TaskEntity task = requireExistingTask(taskId);
+        authorizationService.requireConfirmedInstance(task.getProcInstId());
         if (!"PENDING".equals(task.getStatus()) || !"REWORK".equals(task.getTaskType())) {
             throw new BizException("TASK_NOT_PENDING", "待修改任务已处理");
         }
@@ -376,7 +411,14 @@ public class MobileWorkflowService {
         if (request == null) {
             throw new BizException("BAD_REQUEST", "表单内容不能为空");
         }
-        ProcessInstance instance = requireExistingInstance(task.getProcInstId());
+        ProcessInstance instance = instanceMapper.selectForUpdate(task.getProcInstId());
+        TaskEntity current = taskMapper.selectForUpdate(task.getId());
+        if (instance == null || !"RUNNING".equals(instance.getStatus())
+            || current == null || !Objects.equals(current.getProcInstId(), instance.getId())
+            || !"PENDING".equals(current.getStatus()) || !"REWORK".equals(current.getTaskType())
+            || !Objects.equals(current.getAssigneeId(), userId)) {
+            throw new BizException("BAD_REWORK_STATE", "待修改任务已失效，请刷新");
+        }
         FormData formData = requireFormData(instance.getFormDataId());
         JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
         FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
@@ -391,7 +433,7 @@ public class MobileWorkflowService {
             formDefinitionService.canonicalizeStarterRevision(effectiveSchema, data,
                 formData.getData(), instance.getProcessSnapshot());
         if (validate) {
-            formDefinitionService.validateStarterSubmission(effectiveSchema, canonicalData,
+            formDefinitionService.validateStarterRevision(effectiveSchema, canonicalData,
                 instance.getProcessSnapshot());
         }
         formData.setData(writeJson(objectMapper.valueToTree(canonicalData)));
@@ -423,7 +465,7 @@ public class MobileWorkflowService {
     }
 
     private FormData requireFormData(Long formDataId) {
-        FormData formData = formDataMapper.selectById(formDataId);
+        FormData formData = formDataMapper.selectRuntimeById(formDataId);
         if (formData == null) {
             throw new BizException("NOT_FOUND", "form data not found");
         }
@@ -598,7 +640,7 @@ public class MobileWorkflowService {
     }
 
     private List<MobileFileDto> files(Long formDataId) {
-        return workflowMapper.selectFilesByFormDataId(formDataId).stream()
+        return fileLinks.selectFilesByFormDataId(formDataId).stream()
             .map(MobileWorkflowService::toFileDto)
             .toList();
     }
@@ -606,13 +648,13 @@ public class MobileWorkflowService {
     private List<MobileFileDto> starterFiles(Long formDataId, JsonNode processSnapshot) {
         Map<String, String> modes = formDefinitionService.starterFieldModes(processSnapshot);
         Set<UUID> visibleFileIds = new LinkedHashSet<>();
-        for (MobileWorkflowMapper.FormDataFileLink link
-                : workflowMapper.selectFileLinks(formDataId)) {
+        for (com.antflow.attachment.FormDataFileMapper.FormDataFileLink link
+                : fileLinks.selectFileLinks(formDataId)) {
             if (!"HIDDEN".equals(modes.get(link.fieldId()))) {
                 visibleFileIds.add(link.fileId());
             }
         }
-        return workflowMapper.selectFilesByFormDataId(formDataId).stream()
+        return fileLinks.selectFilesByFormDataId(formDataId).stream()
             .filter(file -> visibleFileIds.contains(file.getId()))
             .map(MobileWorkflowService::toFileDto)
             .toList();

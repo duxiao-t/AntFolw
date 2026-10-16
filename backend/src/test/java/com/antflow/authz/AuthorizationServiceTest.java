@@ -241,7 +241,7 @@ class AuthorizationServiceTest {
 
         AuthorizationService spied = Mockito.spy(service);
         Mockito.doReturn(assignee).when(spied).snapshot(8L);
-        Mockito.doReturn(new AuthorizationService.InstanceAccess(99L, 42L))
+        Mockito.doReturn(new AuthorizationService.InstanceAccess(99L, 42L, 2L, false))
             .when(spied).instanceAccess(501L);
         Mockito.doReturn(true).when(spied).isReadableTaskAssignee(501L, 8L);
 

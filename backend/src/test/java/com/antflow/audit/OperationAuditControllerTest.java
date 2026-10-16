@@ -153,13 +153,17 @@ class OperationAuditControllerTest {
     void workflowStartAuditsCountsWithoutSubmittedFormValues() {
         ProcessEngine engine = Mockito.mock(ProcessEngine.class);
         AuditService auditService = mockAuditService();
+        var attribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
         InstanceController controller = new InstanceController(engine,
             Mockito.mock(ProcessInstanceMapper.class), Mockito.mock(TaskMapper.class),
             Mockito.mock(TaskHistoryMapper.class), Mockito.mock(WorkflowJobService.class),
             Mockito.mock(AuthorizationService.class), auditService,
             Mockito.mock(FormDefinitionService.class),
-            Mockito.mock(com.antflow.form.runtime.FormDataMapper.class));
-        StartCmd command = new StartCmd("leave", Map.of("salary", "private-value"), Map.of());
+            Mockito.mock(com.antflow.form.runtime.FormDataMapper.class), attribution);
+        long companyId = 1L;
+        when(attribution.resolve(companyId)).thenReturn(companyId);
+        StartCmd command = new StartCmd("leave", Map.of("salary", "private-value"), Map.of(),
+            companyId);
         when(engine.start(command, 7L)).thenReturn(Map.of(
             "instanceId", 61L, "businessNo", "PRIVATE-BUSINESS-NO"));
 

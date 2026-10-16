@@ -1,8 +1,8 @@
+import { SelectField } from './SelectField';
 import { Input, Select } from 'antd';
 import { useEffect, useState } from 'react';
 import type { FieldType } from '../../registry/types';
 import { isDynamicOption, useDynamicOptions } from './dynamicOptions';
-import { SelectField } from './SelectField';
 import {
   customValuesFrom,
   InlineSelectOptions,
@@ -28,6 +28,7 @@ export const MultiSelectField: FieldType = {
       { id: 'option_3', label: '选项3', value: 'option_3' },
     ],
   },
+  ConfigPanel: SelectField.ConfigPanel,
   Component: ({ node, mode, value, onChange, values, optionContext }) => {
     // Hooks below always run: a node can switch between static and external options while editing.
     const options = visibleSelectOptions(node.props?.options);
@@ -126,7 +127,6 @@ export const MultiSelectField: FieldType = {
       </div>
     );
   },
-  ConfigPanel: SelectField.ConfigPanel,
 };
 
 function DynamicMultiSelect({ node, mode, value, onChange, values, optionContext }: any) {

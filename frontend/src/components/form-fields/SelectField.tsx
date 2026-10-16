@@ -1,3 +1,7 @@
+import { Space, Checkbox, InputNumber } from 'antd';
+import { isBoundOptionSource } from './dynamicOptions';
+import { SelectOptionsEditor } from './SelectOptionsEditor';
+import { PanelField } from './panelField';
 import { Input, Select } from 'antd';
 import { useEffect, useState } from 'react';
 import type { FieldType } from '../../registry/types';
@@ -26,6 +30,47 @@ export const SelectField: FieldType = {
       { id: 'option_2', label: '选项2', value: 'option_2' },
       { id: 'option_3', label: '选项3', value: 'option_3' },
     ],
+  },
+  ConfigPanel: ({ node, updateProps }) => {
+    const props = node.props ?? {};
+    return (
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        {!isBoundOptionSource(node.props) && <SelectOptionsEditor
+          value={props.options}
+          multiple={node.type === 'multi_select'}
+          defaultValue={props.defaultValue}
+          enableColors={props.enableOptionColor === true}
+          onChange={(options) => updateProps({ options })}
+          onDefaultChange={(defaultValue) => updateProps({ defaultValue })}
+          onEnableColorsChange={(enableOptionColor, options) =>
+            updateProps({ enableOptionColor, options })
+          }
+        />}
+        <Checkbox
+          checked={props.allowClear !== false}
+          onChange={(event) => updateProps({ allowClear: event.target.checked })}
+        >
+          允许清空
+        </Checkbox>
+        <Checkbox
+          checked={!!props.showSearch}
+          disabled={normalizeSelectDisplayStyle(props.displayStyle) !== 'dropdown'}
+          onChange={(event) => updateProps({ showSearch: event.target.checked })}
+        >
+          支持搜索
+        </Checkbox>
+        {node.type === 'multi_select' && (
+          <PanelField label="最多选择数">
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              value={props.maxCount}
+              onChange={(value) => updateProps({ maxCount: value })}
+            />
+          </PanelField>
+        )}
+      </Space>
+    );
   },
   Component: ({ node, mode, value, onChange, values, optionContext }) => {
     // Hooks below always run: a node can switch between static and external options while editing.
@@ -132,33 +177,6 @@ export const SelectField: FieldType = {
             style={{ marginTop: 8 }}
           />
         )}
-      </div>
-    );
-  },
-  ConfigPanel: ({ node, onChange }) => {
-    const opts = normalizeSelectOptions(node.props?.options);
-    const updateOpts = (next: any[]) => onChange({ ...node, props: { ...node.props, options: next } });
-    return (
-      <div style={{ padding: 16, display: 'grid', gap: 8 }}>
-        <div>标签</div>
-        <Input value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} />
-        <div>选项（每行一条：value|label，多行）</div>
-        <textarea
-          rows={5}
-          value={opts.map((o) => `${o.value}|${o.label}`).join('\n')}
-          style={{ padding: 8, border: '1px solid #d9d9d9', borderRadius: 4 }}
-          onChange={(e) => {
-            const next = e.target.value
-              .split('\n')
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .map((line) => {
-                const [v, l] = line.split('|');
-                return { value: v ?? '', label: l ?? v ?? '' };
-              });
-            updateOpts(next);
-          }}
-        />
       </div>
     );
   },

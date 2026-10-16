@@ -85,6 +85,33 @@ describe('mobile field registry', () => {
     expect(errors).toEqual({});
   });
 
+  it('skips readonly rework fields inside rows and retains their values for conditions', () => {
+    const schema: MobileSchemaNode[] = [
+      { id: 'legacy', type: 'switch' },
+      { id: 'detail', type: 'text', label: '详情', props: {
+        required: true, displayCondition: { fieldId: 'legacy', operator: 'eq', value: 'true' },
+      } },
+      { id: 'items', type: 'table_list', children: [
+        { id: 'old', type: 'switch' },
+        { id: 'name', type: 'text', label: '名称', props: { required: true } },
+      ] },
+    ];
+    const values = { legacy: 'true', detail: '', items: [{ old: 'true', name: '' }] };
+    expect(validateSchemaValues(schema, values, { legacy: 'readonly', old: 'readonly' }))
+      .toEqual({ detail: '请填写详情', items: '第1行: 请填写名称' });
+    expect(validateSchemaValues(schema,
+      { ...values, detail: '说明', items: [{ old: 'true', name: '有效名称' }] },
+      { legacy: 'readonly', old: 'readonly' })).toEqual({});
+  });
+
+  it('does not revalidate a table whose fields are all readonly', () => {
+    const schema: MobileSchemaNode[] = [{ id: 'items', type: 'table_list',
+      props: { required: true, minRows: 2 },
+      children: [{ id: 'old', type: 'switch' }] }];
+    expect(validateSchemaValues(schema, { items: [{ old: 'true' }] }, { old: 'readonly' }))
+      .toEqual({});
+  });
+
   it('keys span-layout child validation errors by child field id', () => {
     const schema: MobileSchemaNode[] = [
       {

@@ -21,6 +21,8 @@ const AUTH_USER: MobileUser = {
   username: 'zhangsan',
   displayName: '张三',
   roles: ['user'],
+  // 有部门 → 归属由服务端按身份推导，填写页不出现公司选择器（P4a）。
+  deptId: 20,
 };
 
 const FORM_WITHOUT_SELF_SELECT = {
@@ -371,6 +373,23 @@ describe('mobile form submit flow', () => {
     await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .some(([url, init]) => String(url).includes('/approval-preview')
         && JSON.parse(String((init as RequestInit).body)).reworkTaskId === 401)).toBe(true));
+  });
+
+  it('keeps the owned draft context through form loading and approval preview', async () => {
+    useSubmitFlowStore.setState({
+      formCode: 'leave', draftId: 101, companyId: 20, reworkTaskId: null,
+      values: { reason: '原公司草稿' }, selfSelected: {},
+    });
+    renderSubmitFlow('/forms/leave/confirm');
+    expect(await screen.findByText('原公司草稿')).toBeInTheDocument();
+    await waitFor(() => {
+      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+      expect(calls.some(([url]) => String(url).includes('/api/mobile/forms/leave?draftId=101'))).toBe(true);
+      expect(calls.some(([url, init]) => String(url).includes('/approval-preview')
+        && JSON.parse(String((init as RequestInit).body)).draftId === 101)).toBe(true);
+    });
+    expect(queryKeys.form('leave', 101)).not.toEqual(queryKeys.form('leave'));
+    expect(queryKeys.form('leave', 101)).not.toEqual(queryKeys.form('leave', 102));
   });
 
   it('clears stale workflow caches and refetches pending tasks after rework', async () => {

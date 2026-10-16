@@ -37,5 +37,4 @@ export const ScanCodeField: FieldType = {
   type: 'scan_code', label: '扫码', icon: 'scan',
   defaultProps: { required: false, placeholder: '扫描或输入二维码/条码内容' },
   Component: ScanCodeInput,
-  ConfigPanel: () => null,
 };
