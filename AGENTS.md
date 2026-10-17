@@ -2,7 +2,8 @@
 
 > 本文件是仓库**唯一的 agent 协作入口**，整合自原 `agent.md`、`codex.md` 与旧版 `AGENTS.md`（26 行），
 > 并从 `ant-design-pro-master/CLAUDE.md` 提取适用于本仓库的条目（2026-10-17）。读者仅凭本文件即可掌握
-> 四份源文件的全部要点与约束；合并时的取舍与依据见文末[第 14 节](#14-冲突与差异说明)。
+> 四份源文件的全部要点与约束；合并时的取舍与依据见
+> [docs/agent-merge-record-2026-10-17.md](docs/agent-merge-record-2026-10-17.md)。
 
 ## 0. 命名与兼容性
 
@@ -10,20 +11,24 @@
 - 本文件是仓库**唯一的 agent 协作入口**；项目领域事实的权威文件仍是根 `CLAUDE.md`（流程树模型、引擎、
   权限审计细节）与 `frontend/CLAUDE.md`，本文件与其不重复。
 - 改前端或流程引擎前，仍应先读上述两份 `CLAUDE.md`。
+- 四份原文件的合并取舍、命名变更与原文回溯方式见
+  [`docs/agent-merge-record-2026-10-17.md`](docs/agent-merge-record-2026-10-17.md)（一次性档案，不随仓库演进更新）。
 
 ## 1. 项目速览
 
 **AntFlow** —— 企业级表单与审批平台（对标钉钉：可视化表单设计 + 审批流编排 + 审批运行时 + 权限/审计/自动化），
 单仓多模块，含桌面管理端与移动审批端。
 
-| 模块 | 技术栈与职责 |
+| 模块 | 职责 |
 | --- | --- |
-| `backend/` | Spring Boot 3 + Java 17 + MyBatis-Plus + Flyway + PostgreSQL + MinIO；自研树形审批引擎 + RBAC / 审计 / 自动化 |
-| `frontend/` | Umi Max 4 桌面管理端（ant-design-pro 底座）：表单/流程设计、组织、任务、权限安全、报表、系统设置 |
-| `mobile/` | 独立移动端（Vite + React + Ant Design Mobile），部署 base `/mobile/`，企业级审批闭环 |
+| `backend/` | 审批引擎、RBAC / 审计 / 自动化、Flyway 迁移与 REST API |
+| `frontend/` | 桌面管理端：表单/流程设计、组织、任务、权限安全、报表、系统设置 |
+| `mobile/` | 移动审批端，部署 base `/mobile/`，企业级审批闭环 |
 | `infra/` | Nginx 配置示例 |
 | `docs/` | 设计规格与计划、企业级验收记录、会话交接总结 |
 | `shared/` | 两端共享契约（`api.generated.d.ts`、`form-validation.ts`） |
+
+技术栈、依赖与版本要求见 `README.md` §一、§四。
 
 ## 2. 开工前：优先读取
 
@@ -43,51 +48,35 @@
   业务数据与实例读取只看自身能力与数据范围。
 - **不提交任何密钥**；生产配置没有数据库口令、JWT、MinIO 或集成密钥默认值，种子账号只在 `local` profile 有默认值。
 
-## 4. 常用命令
+## 4. 开发期命令
 
-> **先 `cd` 进对应模块再执行命令**，不要在仓库根直接跑 `mvn` / `npm`（部署脚本除外）。
+> 依赖与版本要求见 `README.md` §四；本地启动、部署、隔离测试栈与压测见 `README.md` §5、§十一。
+> 命令形态：在仓库根执行用 `npm --prefix <dir> run …`；在模块内执行用 `cd <dir> && …`。以下命令块均注明所在目录。
 
-### 4.1 后端
+### 4.1 后端（`backend/`）
 
 ```bash
-cd backend && mvn -B spring-boot:run     # 默认 8080；移动端联调常用 8081（PORT=8081）
 cd backend && mvn -B test                # 单元测试（不需要 PostgreSQL）
 cd backend && bash build.sh package      # 宿主机无 JDK/Maven 时用容器编译
 ```
 
-本地运行用 `local` profile，种子账号 `admin / ant.design`、`bob / ant.design`。
 **非 local 环境必须通过 `ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD` 一次性初始化管理员，不存在公开默认密码。**
 
-### 4.2 移动端
+### 4.2 移动端（`mobile/`）
 
 ```bash
-cd mobile && npm ci
-npm run dev                               # http://localhost:5173/mobile/login
-npm run check:enterprise                  # lint + unit + build + bundle 预算
-npm run test:e2e                          # Playwright 四视口；E2E 端口优先 5174（E2E_PORT）
-npm run lint && npm test && npm run build # 任一改动的最低门槛
+cd mobile && npm run check:enterprise     # lint + unit + build + bundle 预算
+cd mobile && npm run test:e2e             # Playwright 四视口；E2E 端口优先 5174（E2E_PORT）
+cd mobile && npm run lint && npm test && npm run build   # 任一改动的最低门槛
+cd mobile && npm run test:e2e -- key-pages.visual.spec.ts  # 视觉基线刷新（四视口同步）
 ```
 
-### 4.3 桌面端
+### 4.3 桌面端（`frontend/`）
 
 ```bash
-cd frontend && npm ci
-npm start                                 # http://localhost:8000，代理 /api → 8080
-npm run biome:lint && npm run tsc && npm test && npm run build
-npx antd lint ./src                       # antd 专项检查，提交前必须通过
+cd frontend && npm run lint && npm test && npm run build   # lint = biome:lint && tsc
+cd frontend && npx antd lint ./src
 ```
-
-### 4.4 部署与压测（仓库根）
-
-```bash
-bash deploy.sh                            # Linux 增量部署（自动识别变化模块）
-mvn -B -f backend/pom.xml test            # 后端测试
-npm --prefix frontend run tsc && npm --prefix frontend test && npm --prefix frontend run build
-npm --prefix mobile test && npm --prefix mobile run build
-bash scripts/test-docker.sh up            # 隔离测试栈（默认 17070）
-```
-
-本地完整环境、Docker 一体化启动与验证清单见 `README.md`。
 
 ## 5. 后端能力与数据模型
 
@@ -175,12 +164,14 @@ bash scripts/test-docker.sh up            # 隔离测试栈（默认 17070）
 - **不修改** `shared/api`、`shared/platform`、`shared/recovery`、`shared/telemetry`。
 - **不修改** `auth.store`、`recoveryDraft.store`、`submitFlow.store`、`apps.store` 等核心 store 接口（仅允许新增派生 selector）。
 - 所有改动必须通过 `npm run lint && npm test && npm run build`。
-- 视觉基线刷新：`npm run test:e2e -- key-pages.visual.spec.ts`，需同步刷新四个视口
-  （android-360 / iphone-375 / iphone-390 / iphone-430）；**改动设计而不是放宽基线**。
+- 视觉基线刷新命令见 §4.2，需同步刷新四个视口（android-360 / iphone-375 / iphone-390 / iphone-430）；
+  **改动设计而不是放宽基线**。
 
 ## 7. 桌面端（frontend）工程约定
 
-- `frontend/` 以 ant-design-pro 为底座，细则见 `frontend/CLAUDE.md`；以下为必须遵守的硬规则：
+- `frontend/` 以 ant-design-pro 为底座，细则见 `frontend/CLAUDE.md`；以下为必须遵守的硬规则。
+- 仓库内 `ant-design-pro-master/` 是**上游脚手架副本**（已 .gitignore、不参与构建），其中的 `utoopack` 构建、
+  `/pro-upgrade` 与 `/antd` skill、Cloudflare Worker、mock 体系、8 语言 i18n 等只对脚手架本身有效，与本项目无关。
 - **只使用 Biome**——不用 ESLint、不用 Prettier；`npm run biome:lint` 与 `npx antd lint ./src` 都必须通过。
 - **写 antd 代码前先 `npx antd info <Component>`** 查 API，不要凭记忆猜。
 - `npm run simple` **不可逆**，执行前必须先提交或建分支。
@@ -216,8 +207,6 @@ bash scripts/test-docker.sh up            # 隔离测试栈（默认 17070）
 - **代码、配置、schema 和测试优先于文档**；文档与实现对不上时，以代码为准并修正文档。
 - 持久架构事实变化时更新 `docs/PROJECT.md`；重要决策写入 `docs/DECISIONS.md`。
 - 不记录秘密或生产数据。
-- 合并时实测到的文档滞后项（已按实测修正）：曾有文件写 Flyway「V1–V21」「V1–V43」，实际为 **V58**；
-  曾有文件写移动端 bundle 预算 250 KiB，实际为 **entry 160 / lazy 180 KiB**。
 
 ## 11. 验收与自检
 
@@ -230,47 +219,13 @@ bash scripts/test-docker.sh up            # 隔离测试栈（默认 17070）
 
 验收文档：`docs/mobile-enterprise-verification.md`。
 
-## 12. 已知非目标与待验证
+## 12. 开发侧非目标与待验证
 
-**移动端一期非目标**：手机端表单/流程设计；组织权限管理；企业微信免登 / JS-SDK / 应用消息（**仅保留 adapter 边界**）；
-完整主题编辑器与报表看板；依赖 PWA 安装或 Service Worker 才能完成的核心审批路径。
+**移动端开发侧非目标**：企业微信免登 / JS-SDK / 应用消息**仅保留 `PlatformAdapter` 边界**，页面里不得直接判断运行环境；
+不引入 antd-mobile 之外的 UI 库；不实现完整主题编辑器与报表看板。
 
 **待验证 / 未完成**：干净 PostgreSQL 17 上完整执行全部迁移；真实后端二级及更高层驳回、
 AND / 多审批人与复杂条件分支、附件删除 / 新增 / 重提一致性。
 
-## 13. 上游脚手架文件（`ant-design-pro-master/CLAUDE.md`）的取舍
-
-该文件描述的是仓库内**上游脚手架副本**（`ant-design-pro-master/`，已 .gitignore），其中
-`utoopack` 构建、`/pro-upgrade` 与 `/antd` skill、Cloudflare Worker、mock 体系、8 语言 i18n、
-`GET /api/currentUser` 鉴权、`src/services/ant-design-pro/` 自动生成目录等只对脚手架本身有效。
-本次仅提取其中**同样适用于 AntFlow `frontend/` 的硬规则**（见第 7 节）与**通用编码行为准则**（见第 8 节），
-其余标注为脚手架专用、未纳入。
-
-## 14. 冲突与差异说明
-
-| # | 条目 | 各文件表述 | 采用的版本 | 依据 |
-| --- | --- | --- | --- | --- |
-| 1 | Flyway 版本 | `codex.md`：V1–V43；根 `CLAUDE.md`（不在本次四份内，仅备注）：V1–V21 | **V58** | 实测 `backend/src/main/resources/db/migration/` 最高为 `V58__wecom_sync_lease.sql`；「只前滚」不变量保留 |
-| 2 | 迁移冻结边界 | `codex.md`：V40–V42 已冻结、V43 前滚；`AGENTS.md`：已执行迁移只前滚 | 统一为「**已执行迁移只前滚，不改历史文件，新变更新增版本**」，不写死具体版本号 | 避免版本号再次过期，`AGENTS.md` 的表述更稳定 |
-| 3 | 移动端 bundle 预算 | `codex.md`：≤250 KiB、入口 181.12 KiB（2026-07-31 基线） | **entry 160 KiB / lazy 180 KiB** | 实测 `mobile/scripts/check-bundle-budget.mjs` 常量 `ENTRY_BUDGET_KIB=160`、`LAZY_BUDGET_KIB=180` |
-| 4 | 设计基线路径 | `agent.md`：`.superpowers/brainstorm/mobile-design-20260718/content/all-key-pages-gallery.html`；`codex.md`：`_preview/` 与 `docs/superpowers` | **`_preview/` + `docs/superpowers`** | `.superpowers/brainstorm/mobile-design-*` 实测**已不存在**；`_preview/` 已入库且页面齐全 |
-| 5 | 预览页数量 | `agent.md`：18 页 + 1 离线态；`codex.md`：19 页 | **20 页 + `index.html` 总目录** | 实测 `_preview/*.html` 共 21 个（编号 01–13、15–21，缺 14） |
-| 6 | 前端依赖安装 | `agent.md` / 根 `CLAUDE.md`：`npm install`；`codex.md`：`npm ci` | **`npm ci`** | 仓库有 `package-lock.json`，`ci` 才能与锁定版本一致（CI 亦用 `npm ci`） |
-| 7 | 前端历史 tsc 错误 | 根 `CLAUDE.md`（不在四份内，仅备注）：存在历史 tsc 错误、构建不因类型错误失败 | **以当前 CI 为准：`npm run tsc` 是阻断门禁且近期全绿** | `.github/workflows/ci.yml` 的 frontend job 把 `npm run tsc` 列为必须通过的步骤 |
-| 8 | 种子账号 | `codex.md` / 根 `CLAUDE.md`：`admin`、`bob` + `ant.design`；`AGENTS.md` / `README.md`：生产必须 `ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD` | **两者并存，按 profile 区分**（非真冲突） | `local` 为待初始化账号设默认值；非 local 必须显式初始化 |
-| 9 | 文件角色定位 | `agent.md` 自称「与 `codex.md` 互补的任务上下文」 | 合并后**不再保留双文件结构** | 移动端 UI 整改已完成，`agent.md` 的剩余价值是设计基线与工程约束，已并入第 6 节 |
-| 10 | 脚手架内容适用范围 | `ant-design-pro-master/CLAUDE.md` 通篇按脚手架自身描述 | **只提取适用于 `frontend/` 与通用的部分** | 该目录已 .gitignore、不参与 AntFlow 构建，其 `utoopack` / `/pro-upgrade` / Cloudflare Worker 等与本项目无关 |
-
-## 15. 原文件处置
-
-旧版 `AGENTS.md`（26 行）、`agent.md`、`codex.md` 的内容已全部并入**本文件**并从仓库移除；本文件即由它们整合而来
-（整合期曾用名 `AGENT.md`，2026-10-17 为恢复 agent 工具自动发现能力改名为 `AGENTS.md`，正文未变）。
-`ant-design-pro-master/CLAUDE.md` 未入库，已移入回收目录 `E:/code/_antflow-trash-20261017/agent-files-20261017/`。
-
-回溯合并前的原文（固定基线 `de982a0`，即整合前的最后一次提交）：
-
-```bash
-git show de982a0:AGENTS.md
-git show de982a0:agent.md
-git show de982a0:codex.md
-```
+> 产品对外边界（单租户、OIDC、企业微信入口数量与验收依赖、HTTPS 依赖、移动端不提供设计器与组织管理、
+> 节假日工作日历、PWA）见 `README.md` §十二。

@@ -22,7 +22,7 @@
 - [八、目录结构](#八目录结构)
 - [九、常见问题（FAQ）](#九常见问题faq)
 - [十、避坑指南](#十避坑指南)
-- [十一、开发与质量检查](#十一开发与质量检查)
+- [十一、CI 与质量门禁](#十一ci-与质量门禁)
 - [十二、已知边界](#十二已知边界)
 - [十三、相关文档](#十三相关文档)
 - [十四、待补充信息](#十四待补充信息)
@@ -45,6 +45,8 @@ AntFlow 是一套自研的**企业表单与审批平台**。它把「表单设�
 
 一句话概括：给「不想为每类审批各买一套系统」的团队，一套**自己可改、自己可部署**的审批底座。
 
+> 要改代码请先读 [`AGENTS.md`](AGENTS.md)（开发约定、不变量与自检清单）。
+
 ---
 
 ## 二、核心特性与适用场景
@@ -59,7 +61,7 @@ AntFlow 是一套自研的**企业表单与审批平台**。它把「表单设�
 | **运行时** | 定义版本快照、表单数据修订、节点实例与审批轮次；新版本不影响在途实例，审批记录可关联当时的表单版本 |
 | **流程操作** | 同意、驳回、撤回、原单修改重提、转交、委托代理、前/后加签、同意追回、管理员改派、强制终止 |
 | **并行与一致性** | ALL/ANY 汇聚、并行驳回仲裁、实例与节点级串行化、乐观锁、幂等校验；任务流转、下游生成、历史记录与事务消息在同一本地事务内 |
-| **桌面管理端** | 表单/流程设计、组织与角色权限、待办/已办/我发起、审批记录、报表、审计、OIDC 身份提供方、企业微信集成、流程运行监控；列表在 SQL 权限过滤后分页 |
+| **桌面管理端** | 表单/流程设计、组织与角色权限、待办/已办/我发起、审批记录、报表、审计、OIDC 身份提供方、企业微信集成、流程运行监控 |
 | **移动端** | 工作台、动态表单、草稿、自选审批人、任务处理、流程详情、审批记录、待修改重提、站内通知、SSE 实时刷新、离线恢复、品牌配置 |
 | **身份与安全** | 本地账号、标准 OIDC（Authorization Code + PKCE）、企业微信内部应用免登，最终统一进入 JWT 会话；登录限流、细粒度 RBAC、接口级数据权限、可归档审计事件 |
 | **企业微信** | 通讯录同步、应用内免登、JS-SDK 选图/拍照/录音/扫码/定位/附件预览，带重试与去重的审批文本卡片消息 |
@@ -301,7 +303,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 ### 6.3 移动端
 
-浏览器打开 http://127.0.0.1:7070/mobile/login （或手机扫码访问同一地址）。移动端也支持在浏览器中离线恢复与 SSE 实时刷新；在企业微信内打开时会自动切换到 JS-SDK 适配的选图、拍照、录音、扫码与定位能力。
+浏览器打开 http://127.0.0.1:7070/mobile/login （或手机扫码访问同一地址）；与桌面端同域部署在 `/mobile/`，提供工作台、动态表单、草稿、任务审批、流程详情与待修改重提，在企业微信内打开时自动切换到 JS-SDK 的选图、拍照、录音、扫码与定位能力。架构、路由与工程约束见 [`AGENTS.md`](AGENTS.md) §6。
 
 ---
 
@@ -492,17 +494,16 @@ docker compose --env-file .env.docker.local up -d --force-recreate backend web
 
 ---
 
-## 十一、开发与质量检查
+## 十一、CI 与质量门禁
+
+CI（`.github/workflows/ci.yml`）在 `push` / `pull_request` 到 `master`、`main` 时跑四个 job：`metrics`（六个健康指标，只禁止变差）、`backend`（含 ffmpeg 真机水印用例与真实 PostgreSQL）、`frontend`（Biome lint、类型检查、导入边界、契约一致性、测试、构建）、`mobile`（lint、测试、构建、bundle 预算）。**后端测试、桌面端类型检查/测试/构建、移动端全部检查为阻断门禁。**
+
+本地开发命令（后端测试、桌面端 lint / tsc、移动端 `check:enterprise` 与 E2E、视觉基线刷新、容器编译）见 [`AGENTS.md`](AGENTS.md) §4。
 
 | 范围 | 命令 |
 | --- | --- |
-| 后端测试 | `mvn -B -f backend/pom.xml test`。涉及 PostgreSQL 事务、并行仲裁或分页权限的改动，请确保本机 Docker 可用，以运行 Testcontainers 集成测试 |
-| 桌面端 | `npm --prefix frontend run lint && npm --prefix frontend test && npm --prefix frontend run build`，另有 `npx antd lint ./src` |
-| 移动端 | `npm --prefix mobile run check:enterprise`（lint + 单测 + 类型检查 + 生产构建 + bundle 预算），E2E 用 `npm --prefix mobile run test:e2e` |
 | 隔离测试栈 | `bash scripts/test-docker.sh up` 起栈（对正式库做只读逻辑导出、复制 MinIO 对象到 `antflow-test_*` 卷，默认入口 http://127.0.0.1:17070，不占用正式环境的端口与卷）；测试栈默认保留，不再需要时用 `bash scripts/test-docker.sh destroy` 销毁 |
 | 写路径压测 | `./backend/perf/run-write-load.ps1 -Quick` |
-
-CI（`.github/workflows/ci.yml`）在 `push` / `pull_request` 到 `master`、`main` 时跑四个 job：`metrics`（六个健康指标，只禁止变差）、`backend`（含 ffmpeg 真机水印用例与真实 PostgreSQL）、`frontend`（Biome lint、类型检查、导入边界、契约一致性、测试、构建）、`mobile`（lint、测试、构建、bundle 预算）。**后端测试、桌面端类型检查/测试/构建、移动端全部检查为阻断门禁。**
 
 ---
 
@@ -523,6 +524,7 @@ CI（`.github/workflows/ci.yml`）在 `push` / `pull_request` 到 `master`、`ma
 
 - [项目上下文与架构事实](docs/PROJECT.md)
 - [关键决策记录](docs/DECISIONS.md)
+- [仓库 Agent 协作说明（开发约定、不变量与自检）](AGENTS.md)
 - [本机发布与验收记录](docs/local-release-architecture-2026-10-15.md)
 - [部署 runbook（含报错排查与验证清单）](docs/deploy-master-runbook-2026-10-17.md)
 - [移动端运行说明](mobile/README.md)
