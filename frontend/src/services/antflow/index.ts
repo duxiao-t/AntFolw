@@ -30,6 +30,7 @@ import * as reportController from "./reportController";
 import * as roleController from "./roleController";
 import * as optionRuntimeController from "./optionRuntimeController";
 import * as securityAuthorizationController from "./securityAuthorizationController";
+import * as storageConfigController from "./storageConfigController";
 import * as backupController from "./backupController";
 import * as taskController from "./taskController";
 import * as userController from "./userController";
@@ -64,6 +65,7 @@ export default {
   roleController,
   optionRuntimeController,
   securityAuthorizationController,
+  storageConfigController,
   backupController,
   taskController,
   userController,

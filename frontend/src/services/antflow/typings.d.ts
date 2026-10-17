@@ -246,6 +246,7 @@ declare namespace AntFlowAPI {
 
   type Company = {
     createdAt?: string;
+    deleted?: number;
     id?: number;
     name?: string;
   };
@@ -315,6 +316,10 @@ declare namespace AntFlowAPI {
   };
 
   type delete7Params = {
+    id: number;
+  };
+
+  type delete8Params = {
     id: number;
   };
 
@@ -1176,6 +1181,10 @@ declare namespace AntFlowAPI {
     unreadOnly?: boolean;
   };
 
+  type oneParams = {
+    id: number;
+  };
+
   type OptionPage = {
     items?: OptionValue[];
     level?: number;
@@ -1817,6 +1826,26 @@ declare namespace AntFlowAPI {
     running?: boolean;
   };
 
+  type StorageConfigView = {
+    accessKeyMasked?: string;
+    bucket?: string;
+    createBucket?: boolean;
+    endpoint?: string;
+    maxFileBytes?: number;
+    maxVideoBytes?: number;
+    region?: string;
+    secretConfigured?: boolean;
+    storage?: string;
+  };
+
+  type StorageProbeResult = {
+    bucketExists?: boolean;
+    detail?: string;
+    elapsedMs?: number;
+    ok?: boolean;
+    writable?: boolean;
+  };
+
   type submissionParams = {
     id: number;
   };
@@ -1935,6 +1964,14 @@ declare namespace AntFlowAPI {
 
   type update4Params = {
     id: number;
+  };
+
+  type update5Params = {
+    id: number;
+  };
+
+  type UpdateCompanyRequest = {
+    name?: string;
   };
 
   type updateDraftParams = {
