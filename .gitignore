@@ -49,6 +49,8 @@ mobile/test-results/
 .worktrees/
 # Agent workspace memory (project-local assistant data; never commit, never delete)
 .workbuddy/
+# Dev-expert skill session memory (daily logs + requirement locks)
+.ai-memory/
 
 backend/smoke-backend*.log
 backend/probe*.java
