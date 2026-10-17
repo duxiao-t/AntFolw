@@ -27,6 +27,10 @@ public class WorkflowOutboxDispatcher {
                 Event event = claim();
                 if (event == null) return;
                 deliver(event);
+                // 每投递一条就续一次租：单次投递最长 5s，绝不会把 2 分钟的租约拖过；
+                // **不能只靠 renewLeases() 那个定时点**——调度线程池只有几条线程，长任务（企微同步、
+                // 备份、转码 reaper）一旦占满，续租会被排到租约之后，那正是重复投递的来源。
+                renewOwnedLeases();
             }
         } catch (Exception error) {
             log.warn("Workflow outbox polling failed: {}", error.toString());
@@ -37,9 +41,21 @@ public class WorkflowOutboxDispatcher {
      * 投递期间的续租。**只续本 worker 自己持有的行**——崩掉的进程续不了，它的行照样会在 2 分钟后
      * 变成可抢的（恢复路径不受影响），而"还活着但某个外部调用卡了很久"的 worker 不会被另一个
      * 实例抢走同一行、把通知投两遍。视频转码那条租约用的是同一套思路（renewProcessingClaim）。
+     *
+     * <p>这个定时点只是兜底：投递循环里每条之间也会直接续（见 {@link #poll()}），否则线程池被长任务
+     * 占满时续租会被排队，租约照样会过期。
      */
     @Scheduled(fixedDelayString = "${antflow.outbox.lease-renew-interval-ms:30000}")
     public void renewLeases() {
+        renewOwnedLeases();
+    }
+
+    /**
+     * 续租语句本身。`locked_at > now() - interval '2 minutes'` 是**过期不得续活**：已经掉出租约的行
+     * 属于别人，续回来等于把对方正在投递的那条通知再投一遍。异常只记日志，投递循环里调用时不能
+     * 因为一次续租失败就把这一轮的剩余事件全丢掉。
+     */
+    private void renewOwnedLeases() {
         try {
             jdbc.update("""
                 UPDATE t_workflow_outbox SET locked_at = now()

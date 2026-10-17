@@ -16,6 +16,20 @@ export type UploadProgressEvent =
   | { phase: 'done'; progress: 100 };
 export type UploadProgressHandler = (event: UploadProgressEvent) => void;
 
+/**
+ * 客户端轮询窗口用完，但服务端**没有失败**（行还在 PROCESSING，只是队列排得久）。
+ * 带上最后一次看到的文件，调用方可据此续等，而不是把它当失败让用户重传（视频不走去重）。
+ */
+export class FileStillProcessingError extends Error {
+  readonly file: MobileFileDto;
+
+  constructor(file: MobileFileDto) {
+    super('视频仍在服务端处理中，请勿重复上传，可点「继续等待」刷新状态');
+    this.name = 'FileStillProcessingError';
+    this.file = file;
+  }
+}
+
 export type MobilePickerUser = Omit<
   Contract<AntFlowAPI.MobilePickerUserDto, 'id' | 'displayName'>,
   'department' | 'employeeNo'
@@ -272,7 +286,7 @@ function uploadMobileFileWithProgress(
   });
 }
 
-async function waitForProcessedFile(
+export async function waitForProcessedFile(
   file: MobileFileDto,
   onProgress?: UploadProgressHandler,
 ) {
@@ -281,6 +295,7 @@ async function waitForProcessedFile(
     return file;
   }
   onProgress?.({ phase: 'processing', progress: 97 });
+  let latest = file;
   // 30 分钟（1s/次）。转码并发只有几路，几十个视频一起传时排在后面的要等很久——服务端现在**不会**
   // 因为队列满就失败（它保持 PROCESSING 等空位），所以这里的上限不该比"真正处理完"更早放弃。
   for (let attempt = 0; attempt < 1800; attempt += 1) {
@@ -288,6 +303,7 @@ async function waitForProcessedFile(
     const current = await apiRequest<MobileFileDto>(
       `/api/mobile/files/${encodeURIComponent(file.id)}`,
     );
+    latest = current;
     // 服务端会给出可读原因（"转码队列忙"/"存储失败"…），别吞掉换成一句通用文案——
     // 用户看到的提示要能指导下一步（重试 / 换更小更短的视频）。
     if (current.status === 'FAILED') {
@@ -298,7 +314,7 @@ async function waitForProcessedFile(
       return current;
     }
   }
-  throw new Error('视频处理超时，请稍后重试');
+  throw new FileStillProcessingError(latest);
 }
 
 async function fetchMobileFileBlobWithAuth(

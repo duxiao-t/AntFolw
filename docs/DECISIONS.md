@@ -339,6 +339,13 @@
 - **决策：** **保持现状**。把它变成保密边界等于**改口径**：要对哪些视图、哪些角色、哪些字段过滤，都没定；而一旦过滤，有权限读者拿到的载荷会全部改变。
 - **影响：** 谁要把它当保密手段是误解——权限的正确表达是"这条记录你读不到"，不是"这个字段我藏起来"。真要做这件事，先定清上面三个维度，且必须逐视图验证。
 
+## D-20261016-my-submissions-returns-a-page
+
+- **状态：** accepted
+- **背景：** `GET /api/forms/data`（本人提交列表）从 `List<FormData>` 改成分页对象（`Page`：`records/total/...`）——提交多的人一次全量返回已经是几十 MB。
+- **决策：** 保留分页返回，不做旧形状兼容层。仓库内消费方已同步（桌面 `frontend/src/pages/runtime/form/List.tsx` 读 `records`；`Fill.tsx` 走 POST 不受影响），移动端走自己的 `/api/mobile/submissions`。
+- **影响：** 外部脚本或缓存住的旧前端包按数组解析会静默拿到 `undefined`（不是报错）。`page/size` 有缺省值（1/20），所以"只取第一页"的调用方是**少返回**而不是失败——外部集成不要再假设"一次拿全"。
+
 ## D-20260930-unhandled-errors-in-frontend-tests-keep-the-flag
 
 - **状态：** accepted（先收回过一次，被 CI 打回，最终保留）
@@ -797,3 +804,21 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
 - **通知：** 旧写路径的通知也落同一事务 outbox，不直接调用外部渠道；消费失败回到既有重试/DEAD。保留原 UUID、轮次抄送幂等与至少一次语义。
 - **重放：** GET `/api/workflow-monitor/outbox` 默认 DEAD，按监控能力公司范围分页且不回 payload/原始错误；POST `/{id}/retry` 要求 `workflow:outbox:retry`（默认 SELF、不自动授非管理员）与实例管理范围，只允许 DEAD→PENDING、重置次数/租约并写 HIGH 审计。缺能力403、越界404、状态冲突422。
 - **兼容：** V58 只加列，升级先停旧 worker；真实企业账号联调、生产窗口和 V1 退役仍须独立证据。
+
+## D-20261016-outbox-lease-renewal-restart-policy-and-still-processing-uploads
+
+- **状态：** accepted（本分支 4 个提交 + 合并 origin/master 的收口改动）。
+- **背景：** ①outbox 在 2 分钟租约内同步投递（webhook 超时 5s、一轮最多 50 条），续租原来只挂在 `@Scheduled` 上：
+  Spring 默认调度线程池只有 1 条，长任务（企微同步、备份、转码 reaper）排队时续租跑不到，投递中的行会被另一个
+  实例抢走重复投递。②移动端/桌面端轮询 30 分钟窗口用完时把"服务端还在转码"判成失败，用户重传同一个视频即多出
+  一份副本（服务端**只对非视频**按 sha256 去重）。③正式栈没有重启策略，宿主重启后整套服务留在 Exited。
+- **决策：** ①**续租不依赖调度线程**：`WorkflowOutboxDispatcher.poll()` 每投递一条之间自己续一次租（单次投递 ≤5s，
+  绝不会拖过 2 分钟），`@Scheduled` 版本降级为兜底；`spring.task.scheduling.pool.size=4` 只是"别让定时任务互相
+  饿死"的缓解，不是租约正确性的前提。②`t_workflow_job` 仍**没有**续租，因此保留一条硬约束：单次自动化投递必须在
+  `antflow.automation.stale-lock-timeout`（默认 2 分钟）内结束，要放宽投递上限就连阈值一起改。③两端上传语义对齐：
+  轮询窗口用完但服务端仍在 PROCESSING 时抛 `FileStillProcessingError`（带服务端文件），条目保持"处理中"、值仍算
+  未完成上传（提交被拦），按钮从"重试"变"继续等待"——只续查状态，不再上传第二份。④`compose.yaml` 四个常驻服务加
+  `restart: unless-stopped`；`backup-init` 是一次性容器（只 chown 备份目录），**有意不加**。
+- **影响：** 转码中的条目允许本地移除：服务端对 PROCESSING 行按设计拒绝删除（`BAD_FILE_STATE`），那种残留对象要
+  等服务端支持"吊销"才清得掉（客户端留了 `shortcut:` 注释）。崩溃循环的容器现在表现为 `Restarting` 而不是
+  `Exited`，排障要看 `docker compose ps` 而不是"有没有退出"。

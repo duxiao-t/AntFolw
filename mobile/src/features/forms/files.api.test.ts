@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setAuthController } from '../../shared/api/auth';
-import { fetchMobileFileBlob, uploadMobileFile, type UploadProgressEvent } from './files.api';
+import {
+  fetchMobileFileBlob,
+  FileStillProcessingError,
+  uploadMobileFile,
+  type UploadProgressEvent,
+} from './files.api';
 
 const noop = async () => {
   /* noop */
@@ -192,6 +197,33 @@ describe('mobile file api', () => {
     const rejection = expect(upload).rejects.toThrow('转码队列忙，请稍后重试');
     await vi.advanceTimersByTimeAsync(1200);
     await rejection;
+  });
+
+  it('keeps the server file (not a failure) when the client polling window runs out', async () => {
+    vi.useFakeTimers();
+    setAuthController({
+      authorizationHeader: () => ({}),
+      refresh: noop,
+      isAuthEndpoint: () => false,
+    });
+    const dto = (extra: Record<string, unknown>) => JSON.stringify({
+      id: 'file-1', name: 'clip.mp4', contentUrl: '/api/mobile/files/file-1/content',
+      contentType: 'video/mp4', size: 10, ...extra,
+    });
+    // 服务端一直 PROCESSING（队列排得久）：30 分钟轮询窗口用完也**不能**当失败——
+    // 用户重传会多出一份视频（视频不走去重）。抛出的错误要带上服务端文件，供界面续等。
+    vi.stubGlobal('fetch', async () => new Response(dto({ status: 'PROCESSING' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    const upload = uploadMobileFile(
+      '/api/mobile/files',
+      new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+    );
+    const rejection = expect(upload).rejects.toBeInstanceOf(FileStillProcessingError);
+    await vi.advanceTimersByTimeAsync(1800 * 1000 + 100);
+    await rejection;
+    await expect(upload.catch((error: unknown) => (error as FileStillProcessingError).file))
+      .resolves.toMatchObject({ id: 'file-1', status: 'PROCESSING' });
   });
 
   it('settles uploads that only report completion through readyState changes', async () => {

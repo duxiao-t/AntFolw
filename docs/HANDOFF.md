@@ -18,6 +18,22 @@
 
 # 任务交接
 
+**本机收口（2026-10-16，分支 `fix/upload-poll-and-outbox-lease`）：** `master` 上 4 个未推送提交与
+`origin/master`（`8d249d1`，38 个提交）合并后的收口。合并唯一冲突是 `mobile/src/features/forms/files.api.ts`
+（远端 biome 重排 + 生成契约类型 vs 本地新增 `FileStillProcessingError`）：解法=保留远端格式与 import，
+保住本地的 `export waitForProcessedFile` / `latest` / 新错误——解错会让"继续等待"永不出现、行为静默退回修复前。
+合并后补三处：**①outbox 续租不再依赖调度线程**（`poll()` 每投递一条之间自己续租，`@Scheduled` 降级为兜底，
+`spring.task.scheduling.pool.size=4` 只是缓解）；**②桌面端与移动端同语义**：轮询窗口用完时抛
+`FileStillProcessingError`，条目保持"处理中"、按钮变"继续等待"，不再让用户重传第二份视频（服务端只对非视频去重）；
+**③转码中的条目允许本地移除**（服务端按设计拒绝删除 PROCESSING 行，残留对象待服务端支持"吊销"）。
+口径写入 `D-20261016-outbox-lease-renewal-restart-policy-and-still-processing-uploads`。
+
+验证：移动 449、桌面 423 全绿，两端 `tsc`/`build`/`biome` 通过（lint 维持既有基线 10/4 warning）；
+后端走容器（本机无 JDK/Maven）+ 一次性 PostgreSQL；新守护 4 条（后端续租、桌面抛错、桌面"继续等待"、移动"继续等待"）
+均已"去掉修复即失败"反向验证。注意：`backend/target/classes` 里可能残留别的分支的迁移文件，后端测试要用
+`clean test`，否则 Flyway 会报 "Found more than one migration with version 53"。
+
+
 **审计修复状态（2026-10-16）：** PR #6 的三个已确认问题已修复并完成本机隔离验收：
 V2 强制同意/驳回按任务受理人记票并校验更新行数；重提只验证可编辑字段、解析持久化 JSON
 以保留受限历史值，移动填写页同步权限校验；`build.sh` 补 fixtures/infra 挂载与数据库测试排除项。

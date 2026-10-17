@@ -5,8 +5,10 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -15,6 +17,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class WorkflowOutboxDispatcherTest {
 
@@ -89,6 +92,26 @@ class WorkflowOutboxDispatcherTest {
         verify(jdbc).update(contains("locked_by = ?"), worker.capture());
         assertThat(worker.getValue()).isNotBlank();
         verify(jdbc).update(contains("status = 'RUNNING'"), anyString());
+    }
+
+    /**
+     * 续租不能只挂在定时点上：调度线程池只有几条线程，长任务（企微同步、备份、reaper）占满时
+     * renewLeases() 会被排到 2 分钟租约之后，投递中的行就被别的实例抢走重复投递。
+     * 所以投递循环里每条之间自己续一次——去掉那次调用这条用例就会红。
+     */
+    @Test
+    void pollRenewsItsLeaseBetweenDeliveries() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        WorkflowOutboxDispatcher dispatcher = new WorkflowOutboxDispatcher(
+            jdbc, new ObjectMapper(), mock(NotificationPublisher.class));
+        when(jdbc.query(anyString(),
+            ArgumentMatchers.<ResultSetExtractor<WorkflowOutboxDispatcher.Event>>any(), anyString()))
+            .thenReturn(new WorkflowOutboxDispatcher.Event(
+                UUID.randomUUID(), 501L, "TASK_ASSIGNED", 8L, "{\"instanceId\":501}", 1), null);
+
+        dispatcher.poll();
+
+        verify(jdbc).update(contains("SET locked_at = now()"), anyString());
     }
 
     @Test

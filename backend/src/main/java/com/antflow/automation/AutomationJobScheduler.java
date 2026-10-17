@@ -34,6 +34,12 @@ public class AutomationJobScheduler {
         }
     }
 
+    /**
+     * shortcut: `t_workflow_job` 没有租约续租（与 outbox 不同），所以**单次投递必须在
+     * `antflow.automation.stale-lock-timeout`（默认 2 分钟）内结束**，否则这里会把还在投递中的 job
+     * 置回 SCHEDULED 再投一遍（webhook/完成动作重复）。投递本身有界（webhook 10s + 连接 3s），
+     * 要放宽投递上限时请连这个阈值一起改，或照 outbox 的做法给 job 加续租。
+     */
     @Scheduled(fixedDelayString = "${antflow.automation.recovery-interval-ms:60000}")
     public void recoverStaleJobs() {
         jobs.recoverStale();

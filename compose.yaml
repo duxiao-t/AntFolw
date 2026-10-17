@@ -9,6 +9,7 @@ services:
 
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: antflow
       POSTGRES_USER: antflow
@@ -23,6 +24,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
@@ -43,6 +45,7 @@ services:
       context: .
       dockerfile: Dockerfile.local
       target: backend
+    restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/antflow?stringtype=unspecified
@@ -90,6 +93,7 @@ services:
       context: .
       dockerfile: Dockerfile.local
       target: web
+    restart: unless-stopped
     ports:
       - "7070:80"
     depends_on:
