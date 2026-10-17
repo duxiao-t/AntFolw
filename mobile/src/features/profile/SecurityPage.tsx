@@ -25,6 +25,7 @@ export function SecurityPage() {
   return (
     <AppPage title="账号安全" contentStyle={{ paddingBottom: 0 }}>
       <section className="section"><div className="list-card">
+        <SecurityRow icon={<LockIcon />} title="修改密码" hint="修改后其它设备需重新登录" onClick={() => navigate("/profile/password")} />
         <SecurityRow icon={<PhoneIcon />} title="登录设备" hint={`${sessions.length} 台 · 含本机`} onClick={() => setShowSessions((value) => !value)} />
       </div></section>
       {showSessions ? <section className="security-sessions">{sessions.map((session) => <div className="security-session" key={session.id}><div><b>{session.deviceName}</b><small>{session.platform === "wecom" ? "企业微信" : "浏览器"} · {session.lastActiveAt}</small></div>{session.isCurrent ? <span className="badge-soft badge-soft--on">当前设备</span> : <button type="button" className="link" disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate(session.id)}>移除</button>}</div>)}</section> : null}
@@ -36,5 +37,6 @@ export function SecurityPage() {
 function SecurityRow({ icon, title, hint, badge, off, onClick }: { icon: React.ReactNode; title: string; hint: string; badge?: string; off?: boolean; onClick?: () => void }) { return <button className="list-item" type="button" onClick={onClick}><span className="list-item__icon">{icon}</span><div className="list-item__main"><b>{title}</b><small>{hint}</small></div>{badge ? <span className={`badge-soft badge-soft--${off ? "off" : "on"}`}>{badge}</span> : null}<span className="list-item__chev">›</span></button>; }
 const Svg = ({ children }: { children: React.ReactNode }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 const PhoneIcon = () => <Svg><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" /></Svg>;
+const LockIcon = () => <Svg><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></Svg>;
 
 export default SecurityPage;

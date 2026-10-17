@@ -102,6 +102,11 @@ const routes: RouteObject[] = [
         HydrateFallback: NoHydrate,
       },
       {
+        path: '/profile/password',
+        lazy: () => import('../features/profile/PasswordPage').then(({ PasswordPage }) => ({ Component: PasswordPage })),
+        HydrateFallback: NoHydrate,
+      },
+      {
         path: '/profile/notifications',
         lazy: () => import('../features/profile/NotificationCenterPage').then(({ NotificationCenterPage }) => ({ Component: NotificationCenterPage })),
         HydrateFallback: NoHydrate,

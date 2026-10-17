@@ -258,7 +258,7 @@ npm --prefix frontend ci --no-audit --no-fund && npm --prefix frontend start
 npm --prefix mobile ci --no-audit --no-fund && npm --prefix mobile run dev
 ```
 
-`local` profile 会为待初始化的 `admin`、`bob` 开发账号设置默认密码；非 `local` 环境不会启用该默认值。
+`local` profile **不再提供任何默认密码**：库中存在待初始化的种子账号（`admin`、`bob`）时，必须配置 `ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD`（可选 `ANTFLOW_BOOTSTRAP_BOB_PASSWORD`）才能启动，否则应用会 fail-closed 拒绝启动；未配置口令的账号会停留在「待初始化」状态，既无法登录也无法改密（后端启动日志会点名提示）。
 
 ---
 
@@ -461,7 +461,7 @@ BACKUP_ENCRYPTION_SECRET='与备份时相同的密钥' \
 | 登录接口返回 429 | 触发登录限流（默认每分钟 5 次、每小时 30 次） | 等待窗口恢复；压测或联调时按需调整 `antflow.login.per-minute` / `per-hour` |
 | 修改了历史 Flyway 迁移文件后启动失败 | 迁移一旦执行即冻结，只允许前滚 | 恢复历史文件，新增 `V59__xxx.sql` 等新迁移；`flyway_schema_history` 中有校验和，改历史文件必然校验失败 |
 | 非管理员登录后看到的表单/实例很少 | 三层鉴权 + 公司使用门槛 + 主体授权的预期表现，不是缺陷 | 由全局管理员为该角色补齐公司门槛与 USER/ROLE/DEPARTMENT 授权 |
-| 生产环境用弱密码启动 | `ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD` 只在 `local` profile 有默认值，其他 profile 必须显式提供；弱口令属于自查范围 | 使用高强度随机值，并在首次登录后立即改密；生产不要复用示例值 |
+| 账号登不进去 / 改密报「原密码不正确」 | 账号可能停留在「待初始化」状态（`password_hash` 为哨兵值，见 `t_user`）：`admin` 或 `bob` 未配置对应的 `ANTFLOW_BOOTSTRAP_*_PASSWORD` 时就是这种状态，改密接口也会因原密码校验失败而 422 | 配好 `ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD` / `ANTFLOW_BOOTSTRAP_BOB_PASSWORD` 后重启（后端启动日志会点名未初始化的账号）；或由管理员在「系统管理 → 用户管理」中重置该账号密码。另：`ant.design` 是 V48 之前的旧公开口令，**已作废**，不要再用 |
 | 备份文件“生成了但恢复失败” | 恢复所需的 `BACKUP_ENCRYPTION_SECRET` 与备份时不一致 | 妥善保存密钥；恢复命令必须传入与备份时相同的 `BACKUP_ENCRYPTION_SECRET` |
 
 ### 10.3 部署后再验证一次（推荐固化到发布流程）

@@ -1,5 +1,6 @@
 package com.antflow.auth;
 
+import java.util.List;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -9,7 +10,9 @@ import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Component
 public class BootstrapCredentialInitializer implements ApplicationRunner, InitializingBean {
     static final String MARKER = "!ANTFLOW_BOOTSTRAP_REQUIRED!";
@@ -59,6 +62,28 @@ public class BootstrapCredentialInitializer implements ApplicationRunner, Initia
     public void run(ApplicationArguments args) {
         initialize("admin", adminPassword);
         initialize("bob", bobPassword);
+        warnOnRemainingMarkers();
+    }
+
+    /**
+     * 初始化后仍有哨兵账号：应用能正常启动，但相关账号既登不进去也改不了密码。
+     * 典型场景是种子账号 bob 没配 {@code ANTFLOW_BOOTSTRAP_BOB_PASSWORD}——
+     * 只靠"登不上"很难定位，这里显式打印出来。
+     *
+     * <p>刻意选择 WARN 而不是抛异常：存量部署里 bob 可能本来就没人用，直接拒绝启动会把
+     * "某个账号不可用"升级成"整个服务不可用"，故障面反而扩大。真正致命的场景
+     * （有哨兵账号却没配 admin 口令）在 {@link #afterPropertiesSet()} 里已经 fail-closed。
+     */
+    private void warnOnRemainingMarkers() {
+        List<String> remaining = jdbc.queryForList(
+            "SELECT username FROM t_user WHERE password_hash = ? ORDER BY username",
+            String.class, MARKER);
+        if (!remaining.isEmpty()) {
+            log.warn("仍有 {} 个账号停留在待初始化状态（哨兵口令），无法登录：{}。"
+                    + "请在环境变量中配置 ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD / ANTFLOW_BOOTSTRAP_BOB_PASSWORD 后重启，"
+                    + "或由管理员在「系统管理 → 用户管理」中重置这些账号的密码。",
+                remaining.size(), String.join(", ", remaining));
+        }
     }
 
     private void initialize(String username, String rawPassword) {

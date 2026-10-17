@@ -43,6 +43,13 @@ export default function AccountSettings() {
       form.resetFields();
       message.success('密码已修改，其它设备需要重新登录');
     },
+    // 全局错误处理已经弹过后端 message；这里只补"接下来怎么办"，
+    // 避免用户反复试原密码（最常见原因是账号尚未初始化，或原密码已由管理员重置过）。
+    onError: (error: { code?: string } | undefined) => {
+      if (error?.code === 'PASSWORD_INCORRECT') {
+        message.info('若已忘记原密码，请联系组织管理员在「系统管理 → 用户管理」中重置');
+      }
+    },
   });
 
   return (
@@ -175,7 +182,7 @@ export default function AccountSettings() {
                   type="secondary"
                   style={{ display: 'block', marginTop: 8, fontSize: 12 }}
                 >
-                  修改后，其它已登录的设备需要重新登录。
+                  修改后，其它已登录的设备需要重新登录。忘记原密码请联系组织管理员重置。
                 </Typography.Text>
               </Form.Item>
             </Form>
