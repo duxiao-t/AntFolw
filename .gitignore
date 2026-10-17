@@ -47,6 +47,8 @@ mobile/playwright-report/
 mobile/test-results/
 .superpowers/
 .worktrees/
+# Agent workspace memory (project-local assistant data; never commit, never delete)
+.workbuddy/
 
 backend/smoke-backend*.log
 backend/probe*.java

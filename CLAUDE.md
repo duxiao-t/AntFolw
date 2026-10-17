@@ -94,4 +94,4 @@ cd mobile && npm run test:e2e              # Playwright 四视口
 - 路由：工作台/待办/我的壳层 + 表单填写/草稿/自选/确认、任务详情、流程详情、账号安全。
 - 品牌：`BrandProvider` + 公开品牌 DTO；失败 fallback；不接受任意服务端 CSS。
 - 企业微信：**仅** `PlatformAdapter` 边界，一期不实现免登/JS-SDK/应用消息。
-- 验收：`docs/mobile-enterprise-verification.md`；代理速查：`codex.md`。
+- 验收：`docs/mobile-enterprise-verification.md`；代理速查：`AGENTS.md`。
