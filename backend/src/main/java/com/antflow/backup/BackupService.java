@@ -108,14 +108,20 @@ public class BackupService {
         return files();
     }
 
-    public Status create() {
+    /**
+     * @param databaseOnly true 时只打包数据库（跳过 MinIO 对象）。
+     *                     媒体占归档 99.96%（实测 1.3GB 里 dump 只有 520KB），灾备演练/异地传输
+     *                     只需要库时，用它把恢复路径从 GB 级降到百 KB 级；媒体本身应走对象存储的
+     *                     复制/版本化，不要每次备份都整桶重传。
+     */
+    public Status create(boolean databaseOnly) {
         require();
         if (!running.compareAndSet(false, true)) {
             throw new BizException("BACKUP_RUNNING", "已有备份任务正在执行");
         }
         lastError = null;
         CompletableFuture.runAsync(() -> {
-            try { createArchive(); }
+            try { createArchive(databaseOnly); }
             catch (RuntimeException error) { lastError = "备份失败，请检查服务日志"; log.error("system backup failed", error); }
             finally { running.set(false); }
         }, executor);
@@ -154,7 +160,8 @@ public class BackupService {
         if (due && !already && running.compareAndSet(false, true)) {
             lastError = null;
             CompletableFuture.runAsync(() -> {
-                try { createArchive(); }
+                // 定时任务永远做全量备份：只备份库会给人"有媒体副本"的错觉。
+                try { createArchive(false); }
                 catch (RuntimeException error) { lastError = "备份失败，请检查服务日志"; log.error("scheduled system backup failed", error); }
                 finally { running.set(false); }
             }, executor);
@@ -162,12 +169,13 @@ public class BackupService {
         cleanup(setting.retentionDays());
     }
 
-    private void createArchive() {
+    private void createArchive(boolean databaseOnly) {
         validateSecret();
         Path target = null;
         try {
             Files.createDirectories(properties.getDirectory());
-            String name = "antflow-" + OffsetDateTime.now().format(
+            String name = "antflow" + (databaseOnly ? "-db" : "") + "-"
+                + OffsetDateTime.now().format(
                 DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".afbackup";
             target = properties.getDirectory().resolve(name);
             try (OutputStream file = new BufferedOutputStream(Files.newOutputStream(target,
@@ -176,12 +184,16 @@ public class BackupService {
                     properties.getEncryptionSecret().toCharArray()))) {
                 List<ManifestEntry> entries = new ArrayList<>();
                 entries.add(database(zip));
-                long mobileCount = bucket(zip, "mobile", mobileFiles.getMinio().getEndpoint(),
-                    mobileFiles.getMinio().getAccessKey(), mobileFiles.getMinio().getSecretKey(),
-                    mobileFiles.getMinio().getBucket(), entries);
-                long auditCount = bucket(zip, "audit", auditProperties.getArchiveEndpoint(),
-                    auditProperties.getArchiveAccessKey(), auditProperties.getArchiveSecretKey(),
-                    auditProperties.getArchiveBucket(), entries);
+                long mobileCount = 0;
+                long auditCount = 0;
+                if (!databaseOnly) {
+                    mobileCount = bucket(zip, "mobile", mobileFiles.getMinio().getEndpoint(),
+                        mobileFiles.getMinio().getAccessKey(), mobileFiles.getMinio().getSecretKey(),
+                        mobileFiles.getMinio().getBucket(), entries);
+                    auditCount = bucket(zip, "audit", auditProperties.getArchiveEndpoint(),
+                        auditProperties.getArchiveAccessKey(), auditProperties.getArchiveSecretKey(),
+                        auditProperties.getArchiveBucket(), entries);
+                }
                 entry(zip, "manifest.json", json.writeValueAsBytes(new Manifest(1,
                     OffsetDateTime.now(), mobileCount, auditCount, entries)));
             }

@@ -2,68 +2,46 @@ package com.antflow.backup;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
 
-import com.antflow.authz.AuthorizationService;
-import com.antflow.audit.AuditService;
-import com.antflow.audit.TrustedProxyProperties;
-import com.antflow.attachment.MobileFileProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.lang.reflect.Method;
-import java.nio.ByteBuffer;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.concurrent.Executor;
-import javax.crypto.Cipher;
-import javax.crypto.CipherInputStream;
-import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.PBEKeySpec;
-import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
 
+/**
+ * 归档的机密性与完整性：AFBK2 写出的字节必须能读回原文，且**任何一个字节被改动都要失败**。
+ *
+ * <p>这个类原来用反射调 `BackupService#encrypt`（加密逻辑曾内联在服务里）；格式抽到
+ * {@link BackupArchiveCipher} 之后直接测它——反射测私有方法本就是权宜之计。
+ */
 class BackupCryptoTest {
+    private static final String SECRET = "0123456789abcdef0123456789abcdef";
+
     @Test
     void encryptsAndRejectsTamperedBackupBytes() throws Exception {
-        String secret = "0123456789abcdef0123456789abcdef";
-        BackupProperties properties = new BackupProperties();
-        properties.setEncryptionSecret(secret);
-        BackupService service = new BackupService(mock(JdbcTemplate.class),
-            mock(AuthorizationService.class), mock(AuditService.class), properties,
-            new MobileFileProperties(), new TrustedProxyProperties(), new ObjectMapper(),
-            Runnable::run);
-        Method encrypt = BackupService.class.getDeclaredMethod("encrypt", java.io.OutputStream.class);
-        encrypt.setAccessible(true);
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        try (var encrypted = (java.io.OutputStream) encrypt.invoke(service, output)) {
-            encrypted.write("backup-content".getBytes(StandardCharsets.UTF_8));
+        byte[] plain = "backup-body-with-enough-bytes-to-fill-one-chunk".getBytes(
+            StandardCharsets.UTF_8);
+        ByteArrayOutputStream archive = new ByteArrayOutputStream();
+        try (OutputStream out = BackupArchiveCipher.encrypt(archive, SECRET.toCharArray())) {
+            out.write(plain);
         }
-        byte[] bytes = output.toByteArray();
+        byte[] encrypted = archive.toByteArray();
+        assertThat(Arrays.copyOf(encrypted, 5)).isEqualTo(BackupArchiveCipher.MAGIC_V2);
 
-        assertThat(decrypt(bytes, secret)).isEqualTo("backup-content");
-        bytes[bytes.length - 1] ^= 1;
-        assertThatThrownBy(() -> decrypt(bytes, secret)).isInstanceOf(Exception.class);
-    }
+        ByteArrayOutputStream decrypted = new ByteArrayOutputStream();
+        BackupArchiveCipher.decrypt(new ByteArrayInputStream(encrypted), decrypted,
+            SECRET.toCharArray());
+        assertThat(decrypted.toByteArray()).isEqualTo(plain);
 
-    private static String decrypt(byte[] bytes, String secret) throws Exception {
-        try (InputStream input = new ByteArrayInputStream(bytes)) {
-            assertThat(input.readNBytes(5)).isEqualTo("AFBK1".getBytes(StandardCharsets.US_ASCII));
-            int saltLength = ByteBuffer.wrap(input.readNBytes(4)).getInt();
-            byte[] salt = input.readNBytes(saltLength);
-            byte[] iv = input.readNBytes(12);
-            PBEKeySpec spec = new PBEKeySpec(secret.toCharArray(), salt, 210_000, 256);
-            byte[] key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-                .generateSecret(spec).getEncoded();
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
-                new GCMParameterSpec(128, iv));
-            try (CipherInputStream decrypted = new CipherInputStream(input, cipher)) {
-                return new String(decrypted.readAllBytes(), StandardCharsets.UTF_8);
-            }
-        }
+        // 篡改最后一个字节附近（落在末块的密文/标签区，终止标记在最后 4 字节）
+        byte[] tampered = encrypted.clone();
+        tampered[tampered.length - 20] ^= 0x01;
+        assertThatThrownBy(() -> BackupArchiveCipher.decrypt(new ByteArrayInputStream(tampered),
+            new ByteArrayOutputStream(), SECRET.toCharArray()))
+            .isInstanceOf(IOException.class)
+            .hasMessageContaining("认证");
     }
 }

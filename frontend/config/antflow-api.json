@@ -10324,6 +10324,17 @@
       },
       "post" : {
         "operationId" : "create_1",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "databaseOnly",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {

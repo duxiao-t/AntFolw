@@ -39,7 +39,10 @@ public class BackupController {
 
     @PostMapping
     @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
-    public BackupService.Status create() { return service.create(); }
+    public BackupService.Status create(
+        @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean databaseOnly) {
+        return service.create(databaseOnly);
+    }
 
     @GetMapping("/status")
     @PreAuthorize("@authz.console('" + PermissionCodes.SYSTEM_BACKUP_MANAGE + "')")
