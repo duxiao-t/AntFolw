@@ -15,13 +15,11 @@ import io.minio.MinioClient;
 import java.io.BufferedOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
-import java.security.SecureRandom;
 import java.security.MessageDigest;
 import java.security.DigestInputStream;
 import java.time.LocalDate;
@@ -40,12 +38,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import javax.crypto.Cipher;
-import javax.crypto.CipherOutputStream;
 import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.PBEKeySpec;
-import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Qualifier;import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -57,7 +50,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class BackupService {
-    private static final byte[] MAGIC = "AFBK1".getBytes(StandardCharsets.US_ASCII);
     private final JdbcTemplate jdbc;
     private final AuthorizationService authorization;
     private final AuditService audit;
@@ -68,7 +60,6 @@ public class BackupService {
     private final Executor executor;
     private final AtomicBoolean running = new AtomicBoolean();
     private volatile String lastError;
-    private final SecureRandom random = new SecureRandom();
     @Value("${spring.datasource.url}") private String jdbcUrl;
     @Value("${spring.datasource.username}") private String username;
     @Value("${spring.datasource.password}") private String password;
@@ -181,7 +172,8 @@ public class BackupService {
             target = properties.getDirectory().resolve(name);
             try (OutputStream file = new BufferedOutputStream(Files.newOutputStream(target,
                     StandardOpenOption.CREATE_NEW));
-                 ZipOutputStream zip = new ZipOutputStream(encrypt(file))) {
+                 ZipOutputStream zip = new ZipOutputStream(BackupArchiveCipher.encrypt(file,
+                    properties.getEncryptionSecret().toCharArray()))) {
                 List<ManifestEntry> entries = new ArrayList<>();
                 entries.add(database(zip));
                 long mobileCount = bucket(zip, "mobile", mobileFiles.getMinio().getEndpoint(),
@@ -251,20 +243,6 @@ public class BackupService {
             count++;
         }
         return count;
-    }
-
-    private OutputStream encrypt(OutputStream output) throws Exception {
-        byte[] salt = random.generateSeed(16);
-        byte[] iv = random.generateSeed(12);
-        output.write(MAGIC);
-        output.write(ByteBuffer.allocate(4).putInt(salt.length).array());
-        output.write(salt);
-        output.write(iv);
-        PBEKeySpec spec = new PBEKeySpec(properties.getEncryptionSecret().toCharArray(), salt, 210_000, 256);
-        byte[] key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(128, iv));
-        return new CipherOutputStream(output, cipher);
     }
 
     private void entry(ZipOutputStream zip, String name, byte[] value) throws Exception {
