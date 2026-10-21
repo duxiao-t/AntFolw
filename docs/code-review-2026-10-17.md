@@ -247,7 +247,11 @@ Docker 恢复后补跑被阻塞的验证，并把"发布/回滚/恢复"三条安
 | ④ | AFBK2 分块加密格式 | **完成** | 新增 `BackupArchiveCipher`（每块 4MB、独立 IV+tag、`int 0` 终止），`BackupService` 改用它；两个解密工具都支持 v1+v2。**Java 写 v2 → Node 解：10MB 往返 sha256 逐字节一致**；200MB 归档用 `-Xmx256m` **6s** 解完（v1 需 2.6× 内存，必 OOM）；真实 1.3GB **v1** 归档仍可解（Node pipeline 11.1s） |
 | ⑤ | 备份拆分 DB/媒体 | **完成** | `POST /api/system/backups?databaseOnly=true` 跳过两个桶，文件名带 `-db`；定时任务仍全量（避免"有媒体副本"的错觉）。实测产物 **330KB**（全量 1.33GB，**4000×** 差距）；`AFBK2` 解 0.13s、manifest `mobileObjects=0/entries=1`、`pg_restore` 后行数**完全一致**（task 152 / form 62 / inst 45 / user 33，flyway=61） |
 
-**验证汇总**：后端全量（真库+契约）**749 用例 0 失败**（③④⑤ 各自提交后复跑）；端到端部署 `bc72eeb` → `{"status":"UP"}`；契约 diff 仅新增一个可选 query 参数（11 行）。
+**验证汇总（按实际跑到的口径，不夸大）**：
+- ②③ 提交后：真库全量 **746 用例 0 失败**（含 `ApiContractSnapshotTest` 2 例）。
+- ④⑤ 提交后：**非容器 627 用例 0 失败** + 定向类（`BackupArchiveCipherTest`/`BackupCryptoTest`/`ApiContractSnapshotTest` 共 6 例）绿；④ 另做跨语言往返（Java 写 v2 → Node 解，sha256 逐字节一致）与 `-Xmx256m` 内存验证；⑤ 另做端到端真实验证（330KB 归档 → 恢复后行数一致）。
+- **未跑通**：④⑤ 之后的"真库全量"复跑（`PostgresTransactionalIntegrityIntegrationTest` + `ApiContractSnapshotTest`）——Docker Desktop 今天第 4 次不稳定，Testcontainers 起 `postgres:17-alpine` 卡在 starting（关 Ryuk 也无效）、连续 3 次重试超时后停手。这两类在 `a44ddcd` 时是绿的，④⑤ 的改动面（归档格式、备份参数）已由上述定向与端到端用例覆盖。
+- 端到端部署 `bc72eeb` → `{"status":"UP"}`；契约 diff 仅新增一个可选 query 参数（11 行）。
 
 **遗留（不属于本轮五项）**：另一路的 6 个文件仍未提交；`.build-stale` 需要时用 `scripts/prune-build-stale.sh` 回收。
 
