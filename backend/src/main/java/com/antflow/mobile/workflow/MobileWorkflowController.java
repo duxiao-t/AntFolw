@@ -237,6 +237,8 @@ public class MobileWorkflowController {
                         @RequestBody(required = false) MobileTaskActionRequest request) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_APPROVE);
         long userId = principal().userId();
+        // 手机端审批也能改带媒体的字段：事务外先把缺时长的音视频探测完（A5）。
+        mediaValidator.preloadMediaDurations(request == null ? null : request.data());
         auditService.execute(() -> workflowService.approve(id, request, userId),
             () -> auditService.success("workflow.task.approve", "TASK", id,
                 AuditService.RiskLevel.HIGH,

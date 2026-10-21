@@ -16,7 +16,9 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -156,6 +158,16 @@ class ApiContractSnapshotTest {
     @Autowired
     private MockMvc mockMvc;
 
+    /**
+     * 用真实的路由表当"端点全集"，比手写清单可靠——新增 controller 时不需要改测试。
+     *
+     * <p>必须指名 {@code requestMappingHandlerMapping}：actuator 也注册了一个
+     * {@code controllerEndpointHandlerMapping}，按类型注入会撞 NoUniqueBeanDefinitionException。
+     */
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("requestMappingHandlerMapping")
+    private org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping handlerMappings;
+
     @Test
     void matchesTheCommittedContract() throws Exception {
         String actual = normalized(exportedDocument());
@@ -177,6 +189,53 @@ class ApiContractSnapshotTest {
         }
 
         assertKeySurface(JSON.readTree(actual));
+    }
+
+    /**
+     * 端点覆盖率下限（C6 后半）：**路由表里的每个 /api 端点**都必须出现在提交的契约里。
+     *
+     * <p>为什么需要：{@link #matchesTheCommittedContract()} 只保证"实时导出的文档 == 提交的文件"，
+     * 如果某个 controller 被 {@code @Hidden}、被 springdoc 的 paths 过滤器排除、或干脆没被扫到，
+     * 两条文档会一起"少一条"——两边相等，门禁却是绿的，前端 codegen 也拿不到这个端点。
+     *
+     * <p>口径：路径按原文比对（springdoc 的 `{id}` 与 Spring 的 `{id}` 写法一致），
+     * 方法按 {@code RequestMethod} 比对；无方法条件的映射（任意方法）只要求路径存在。
+     * 本仓库没有任何 {@code @Hidden}，所以下限是**全覆盖**；将来真要隐藏端点，
+     * 在这里加显式白名单并写明原因，别把断言放宽成"比例够了就行"。
+     */
+    @Test
+    void everyApiMappingAppearsInTheCommittedContract() throws Exception {
+        JsonNode contract = JSON.readTree(Files.readString(contractPath(), StandardCharsets.UTF_8));
+        JsonNode paths = contract.path("paths");
+        Set<String> missing = new TreeSet<>();
+        int endpoints = 0;
+        for (Map.Entry<org.springframework.web.servlet.mvc.method.RequestMappingInfo,
+                org.springframework.web.method.HandlerMethod> entry
+                : handlerMappings.getHandlerMethods().entrySet()) {
+            var info = entry.getKey();
+            var methods = info.getMethodsCondition().getMethods();
+            for (String pattern : info.getPatternValues()) {
+                if (!pattern.startsWith("/api/")) continue;
+                endpoints++;
+                JsonNode path = paths.path(pattern);
+                if (path.isMissingNode()) {
+                    missing.add(pattern + "（整条路径缺失）← " + entry.getValue().getBeanType().getSimpleName());
+                    continue;
+                }
+                for (var method : methods) {
+                    if (!path.has(method.name().toLowerCase())) {
+                        missing.add(pattern + " " + method + " ← " + entry.getValue().getBeanType().getSimpleName());
+                    }
+                }
+            }
+        }
+        assertThat(missing)
+            .withFailMessage("以下端点在后端存在、但提交的契约里没有：\n%s\n%s",
+                String.join("\n", missing), REWRITE_HINT)
+            .isEmpty();
+        // 防"路由表读空了导致上面必然通过"：/api 端点数必须达到下限量级。
+        assertThat(endpoints).withFailMessage("路由表里只解析出 %d 个 /api 端点，明显不对", endpoints)
+            .isGreaterThan(150);
     }
 
     /** 取文档走**跟线上同一条路**（连带 springdoc 的 writer 设置一起测到）；`/v3/api-docs` 是 permitAll。 */

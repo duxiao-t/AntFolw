@@ -77,7 +77,7 @@ public class MediaSubmissionValidator {
                     if (file.getContentType() == null || !file.getContentType().startsWith(prefix)) {
                         throw new BizException("BAD_FILE_REF", "媒体文件类型不匹配");
                     }
-                    double seconds = duration(file);
+                    double seconds = requiredDuration(file);
                     if (!Double.isFinite(max) || max < 0 || seconds > max) {
                         throw new BizException("FORM_DATA_INVALID",
                             node.path("label").asText("媒体") + "不能超过" + max + "秒");
@@ -156,7 +156,7 @@ public class MediaSubmissionValidator {
         // 过滤条件全部下推到 SQL（只取缺时长的音视频），不把整批文件捞回来再判断。
         for (MobileFile file : files.selectMissingDuration(java.util.List.copyOf(candidates))) {
             try {
-                duration(file);
+                measure(file);
             } catch (BizException ignored) {
                 // 预热失败留给事务内的 validate 报错，这里不吞掉语义、只跳过
             }
@@ -181,17 +181,37 @@ public class MediaSubmissionValidator {
         node.forEach(child -> collectIds(child, collected));
     }
 
-    private double duration(MobileFile file) {
-        if (file.getDurationSeconds() != null) {
-            if (!Double.isFinite(file.getDurationSeconds()) || file.getDurationSeconds() < 0) {
-                throw new BizException("MEDIA_DURATION_UNAVAILABLE", "媒体时长无效，请重新上传");
-            }
-            return file.getDurationSeconds();
+    /**
+     * 事务内的只读校验：只认已经测好的时长，**绝不**现场拉流探测。
+     *
+     * <p>为什么这么切（A5 阶段三）：{@link #validate} 是在持实例/任务行锁的事务里被调的，
+     * 一旦这里去拉 MinIO + ffprobe（最长 15s），锁就跟着占用十几秒。测量动作已全部前移到
+     * 入口的 {@code preload*}（事务外）。这里若继续兜底探测，"某个入口漏接预热"就永远
+     * 发现不了（它总能自愈）。所以改成 fail-closed：没有测量值即报错，由入口预热保证
+     * 正常路径不会走到这里。
+     */
+    private double requiredDuration(MobileFile file) {
+        Double measured = file.getDurationSeconds();
+        if (measured == null) throw new BizException("MEDIA_DURATION_UNAVAILABLE",
+            "媒体时长尚未就绪，请重新上传或稍后重试");
+        if (!Double.isFinite(measured) || measured < 0) throw new BizException(
+            "MEDIA_DURATION_UNAVAILABLE", "媒体时长无效，请重新上传");
+        return measured;
+    }
+
+    /**
+     * 测量并回写时长：**只允许在事务外调用**（目前唯一调用方是 {@link #preloadNode}）。
+     * 拉流体积受 {@code maxProbeBytes} 限制，超限直接失败，避免大视频落满临时盘。
+     */
+    private double measure(MobileFile file) {
+        // 幂等：SQL 已过滤 duration_seconds IS NULL，但并发/重放仍可能把已测量的行送进来，
+        // 这里直接返回，别再拉一次流（否则同一个文件会被探测两次）。
+        Double existing = file.getDurationSeconds();
+        if (existing != null) {
+            if (!Double.isFinite(existing) || existing < 0) throw new BizException(
+                "MEDIA_DURATION_UNAVAILABLE", "媒体时长无效，请重新上传");
+            return existing;
         }
-        // 走到这里说明入口预热没命中：要么调用方没接 preload，要么文件是刚上传还没预热过。
-        // 合法但要警惕——它会在持锁事务里拉流 + ffprobe（A5）。日志用于观察漏接的入口。
-        log.warn("media duration probed inside transaction: file={} key={}",
-            file.getId(), file.getStorageKey());
         Path temporary = null;
         try {
             temporary = Files.createTempFile("antflow-media-check-", ".bin");

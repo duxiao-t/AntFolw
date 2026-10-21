@@ -50,9 +50,15 @@ class MediaSubmissionValidatorTest {
         assertThatCode(() -> validator.validate(11L)).doesNotThrowAnyException();
     }
 
+    /**
+     * A5 阶段三：`validate` 是只读的——没有测量值时直接拒绝，**绝不**现场拉流探测。
+     *
+     * <p>这条替换了原来断言"validate 会顺手测量"的用例：那个行为正是"持锁事务里跑 ffprobe"
+     * 的来源。现在测量只在事务外的 preload 里发生，漏接预热的入口会立刻暴露成用户可见的拒绝。
+     */
     @Test
     @SuppressWarnings("unchecked")
-    void legacyMediaIsMeasuredAndMissingProbeFailsClosedWhileReadonlyIsPreserved() throws Exception {
+    void legacyMediaWithoutMeasuredDurationIsRejectedWithoutProbing() throws Exception {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         MobileFileMapper files = mock(MobileFileMapper.class);
         FileStorage storage = mock(FileStorage.class);
@@ -71,22 +77,20 @@ class MediaSubmissionValidatorTest {
         file.setStatus("READY");
         file.setStorageKey("audio/legacy");
         when(files.selectById(id)).thenReturn(file);
-        when(storage.get("audio/legacy")).thenReturn(
-            new org.springframework.core.io.ByteArrayResource(new byte[]{1, 2, 3}));
-        when(probe.seconds(any())).thenAnswer(call -> {
-            assertThatCode(() -> org.assertj.core.api.Assertions.assertThat(
-                Files.readAllBytes(call.getArgument(0, Path.class))).containsExactly(1, 2, 3))
-                .doesNotThrowAnyException();
-            return 1d;
-        });
         MediaSubmissionValidator validator = new MediaSubmissionValidator(jdbc, files, storage,
             probe, new ObjectMapper(), new MobileMediaProperties());
-        validator.validate(12L);
-        verify(jdbc).update(contains("duration_seconds IS NULL"), eq(1d), eq(id));
-        doReturn(null).when(probe).seconds(any());
+
         assertThatThrownBy(() -> validator.validate(12L)).isInstanceOfSatisfying(
             BizException.class, error -> org.assertj.core.api.Assertions.assertThat(error.getCode())
                 .isEqualTo("MEDIA_DURATION_UNAVAILABLE"));
+        // 关键：没有拉流、没有探测、没有回写
+        verifyNoInteractions(probe);
+        verify(storage, never()).get(anyString());
+        verify(jdbc, never()).update(anyString(), any(), any());
+
+        // 已有测量值的文件照常通过；只读模式仍然完全不碰文件
+        file.setDurationSeconds(1d);
+        validator.validate(12L);
         clearInvocations(files);
         validator.validate(12L, Map.of("clip", "READONLY"));
         verifyNoInteractions(files);
