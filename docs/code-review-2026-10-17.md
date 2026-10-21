@@ -138,8 +138,8 @@ Docker 恢复后补跑被阻塞的验证，并把"发布/回滚/恢复"三条安
 | A2 UNKNOWN 三态 | 完成 | 本会话 | V61 + `IDEMPOTENCY_RESULT_UNKNOWN` |
 | A6 事务边界 | 完成（守卫式） | 本会话 | `requireTransaction()` 覆盖 10 个写入口；**不加**全类 `@Transactional` |
 | C5 首屏 + 详情页 N+1 | 完成 | 本会话 | me/navigation 并行；操作人 N→1（`/pickers/users/selected`） |
-| A5 事务内 ffprobe | **阶段二完成，阶段三待观察** | 本会话 | 已做：事务外预热（5 个入口全覆盖）+ 下载上限 512MB + revision/task 反查；**未做**：`validate` 改纯只读。**卡点**：需先用新加的 `media duration probed inside transaction` 告警观察一段时间，确认没有漏接入口再切 fail-closed |
-| C6 契约使用门禁 | **部分完成** | 本会话 | 前端字面量 ↔ 契约门禁已落地并全绿；后端端点覆盖率下限未做，详见 §0.3 |
+| A5 事务内 ffprobe | **完成** | 本会话 | 阶段一：事务外预热；阶段二：下载上限 512MB + revision/task 反查；阶段三：`validate` 改纯只读（6 个入口全覆盖），详见 §0.5 |
+| C6 契约门禁 | **完成** | 本会话 | 前端字面量 ↔ 契约 + 后端端点覆盖率下限（100%），详见 §0.3/§0.5 |
 | **AFBK2 分块加密格式** | 未开始（新 P1） | 本会话 | 阻塞点：格式变更需向后兼容旧归档；不阻塞当前恢复能力（已有 Node 流式工具） |
 | **备份拆分 DB dump / 媒体** | 未开始（新 P1） | 本会话 + 产品 | 媒体占 99.96%、DB dump 仅 520KB；拆分可把灾备恢复路径从 1.3GB 降到 520KB，需确认"媒体是否随库一起灾备"的产品口径 |
 | V59–V61 落到真实栈 | **完成（2026-10-21）** | 本会话 | 已提交 `aa110eb` 并部署：flyway=61、healthy、数据未动，详见 §0.3 |
@@ -235,6 +235,21 @@ Docker 恢复后补跑被阻塞的验证，并把"发布/回滚/恢复"三条安
 | 镜像 | `antflow-local-backend`/`-web` 均 **4 分钟内重建**（旧镜像保留可回滚） |
 | 前端产物上栈 | 容器内 `index.html` 的 sha256 与本地 `frontend/dist/index.html` **完全一致**；最新 chunk 在镜像内 |
 | 迁移/数据 | flyway **59 条、latest=61**（部署前后一致）；`/mobile/` 200 且引用的 `assets/index-*.js` 200 |
+
+---
+
+## 0.5 遗留项收口（2026-10-21，按优先级）
+
+| 序 | 项 | 结果 | 关键证据 |
+| --- | --- | --- | --- |
+| ② | C6 后半：端点覆盖率下限 | **完成** | `ApiContractSnapshotTest` 新增 `everyApiMappingAppearsInTheCommittedContract`：用真实 `requestMappingHandlerMapping` 当端点全集（指名 bean，否则撞 actuator 的 `controllerEndpointHandlerMapping`），逐个比对提交契约的 path+method，**100% 覆盖**；并断言端点数 > 150 防"路由表读空导致假绿" |
+| ③ | A5 阶段三：`validate` 纯只读 | **完成** | 拆成 `requiredDuration`（只读，缺测量值即 `MEDIA_DURATION_UNAVAILABLE`）与 `measure`（探测+回写，仅事务外 `preload*` 使用，保留幂等快路径）；补上移动端审批入口的预热 → **6 个写入口全覆盖**。用例改为断言"没拉流/没探测/没回写"。真库全量 **746 用例 0 失败** |
+| ④ | AFBK2 分块加密格式 | **完成** | 新增 `BackupArchiveCipher`（每块 4MB、独立 IV+tag、`int 0` 终止），`BackupService` 改用它；两个解密工具都支持 v1+v2。**Java 写 v2 → Node 解：10MB 往返 sha256 逐字节一致**；200MB 归档用 `-Xmx256m` **6s** 解完（v1 需 2.6× 内存，必 OOM）；真实 1.3GB **v1** 归档仍可解（Node pipeline 11.1s） |
+| ⑤ | 备份拆分 DB/媒体 | **完成** | `POST /api/system/backups?databaseOnly=true` 跳过两个桶，文件名带 `-db`；定时任务仍全量（避免"有媒体副本"的错觉）。实测产物 **330KB**（全量 1.33GB，**4000×** 差距）；`AFBK2` 解 0.13s、manifest `mobileObjects=0/entries=1`、`pg_restore` 后行数**完全一致**（task 152 / form 62 / inst 45 / user 33，flyway=61） |
+
+**验证汇总**：后端全量（真库+契约）**749 用例 0 失败**（③④⑤ 各自提交后复跑）；端到端部署 `bc72eeb` → `{"status":"UP"}`；契约 diff 仅新增一个可选 query 参数（11 行）。
+
+**遗留（不属于本轮五项）**：另一路的 6 个文件仍未提交；`.build-stale` 需要时用 `scripts/prune-build-stale.sh` 回收。
 
 ---
 
