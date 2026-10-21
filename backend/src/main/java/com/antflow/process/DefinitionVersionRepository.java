@@ -151,6 +151,11 @@ public class DefinitionVersionRepository {
 
     public long createRevision(FormData data, String status, String reason, long actorId) {
         long formVersionId = formVersionId(data.getFormDefId(), data.getFormDefVersion());
+        // 取号（MAX+1）不是原子操作：并发下会撞 UNIQUE(form_data_id, revision_no)，
+        // 而调用方拿到的会是"数据存在重复"这种误导性 409。先锁住这条 form_data 再取号，
+        // 让同一份表单数据的修订号串行产生（同一事务内加锁，不引入额外事务）。
+        jdbc.queryForList("SELECT id FROM t_form_data WHERE id = ? FOR UPDATE", Long.class,
+            data.getId());
         Long id = jdbc.query("""
             INSERT INTO t_form_data_revision(
                 form_data_id, revision_no, form_definition_version_id, data,

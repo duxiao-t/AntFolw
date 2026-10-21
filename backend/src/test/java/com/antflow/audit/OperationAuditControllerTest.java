@@ -118,7 +118,8 @@ class OperationAuditControllerTest {
         AuditService auditService = mockAuditService();
         TaskController controller = new TaskController(engine, operations,
             Mockito.mock(AuthorizationService.class), Mockito.mock(TaskMapper.class),
-            Mockito.mock(ProcessInstanceMapper.class), auditService);
+            Mockito.mock(ProcessInstanceMapper.class), auditService,
+            Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
         when(operations.transfer(10L, 12L, "private approval comment")).thenReturn(11L);
 
         controller.transfer(10L, Map.of("targetUserId", 12L,
@@ -137,9 +138,9 @@ class OperationAuditControllerTest {
     void failedWorkflowOperationDoesNotEmitSuccessAudit() {
         ProcessEngine engine = Mockito.mock(ProcessEngine.class);
         AuditService auditService = mockAuditService();
-        TaskController controller = new TaskController(engine,
-            Mockito.mock(TaskOperationService.class), Mockito.mock(AuthorizationService.class),
-            Mockito.mock(TaskMapper.class), Mockito.mock(ProcessInstanceMapper.class), auditService);
+        TaskController controller = new TaskController(engine, Mockito.mock(TaskOperationService.class), Mockito.mock(AuthorizationService.class),
+            Mockito.mock(TaskMapper.class), Mockito.mock(ProcessInstanceMapper.class), auditService,
+            Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
         Mockito.doThrow(new BizException("TASK_NOT_PENDING", "task not pending"))
             .when(engine).approve(any(), eq(7L));
 
@@ -159,7 +160,8 @@ class OperationAuditControllerTest {
             Mockito.mock(TaskHistoryMapper.class), Mockito.mock(WorkflowJobService.class),
             Mockito.mock(AuthorizationService.class), auditService,
             Mockito.mock(FormDefinitionService.class),
-            Mockito.mock(com.antflow.form.runtime.FormDataMapper.class), attribution);
+            Mockito.mock(com.antflow.form.runtime.FormDataMapper.class), attribution,
+            Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
         long companyId = 1L;
         when(attribution.resolve(companyId)).thenReturn(companyId);
         StartCmd command = new StartCmd("leave", Map.of("salary", "private-value"), Map.of(),

@@ -20,6 +20,8 @@ public class WorkflowJob {
     private String nodeId;
     private String jobType;
     private String actionKey;
+    /** 幂等键的一部分：同一节点在每一轮都可以各有一条 DELAY/TRIGGER 作业（见 V60）。 */
+    private Integer roundNo;
     private OffsetDateTime scheduledAt;
     private String status;
     private Integer attempts;

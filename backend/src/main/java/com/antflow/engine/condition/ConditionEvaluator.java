@@ -76,10 +76,13 @@ public class ConditionEvaluator {
         return switch (op) {
             case "==" -> nodeEquals(actual, expected);
             case "!=" -> !nodeEquals(actual, expected);
-            case ">"  -> cmp(actual, expected) > 0;
-            case ">=" -> cmp(actual, expected) >= 0;
-            case "<"  -> cmp(actual, expected) < 0;
-            case "<=" -> cmp(actual, expected) <= 0;
+            // 关系比较先排除空值：空串和任何值比大小都没有业务含义，
+            // 而 cmp() 的兜底会把 "" 按字典序判成"小于一切"——字段未填/被隐藏时
+            // 会让 `金额 < 5000` 之类的条件成立、分支走错（见 code-review A8）。
+            case ">"  -> comparable(actual, expected) && cmp(actual, expected) > 0;
+            case ">=" -> comparable(actual, expected) && cmp(actual, expected) >= 0;
+            case "<"  -> comparable(actual, expected) && cmp(actual, expected) < 0;
+            case "<=" -> comparable(actual, expected) && cmp(actual, expected) <= 0;
             case "in" -> expected.isArray()
                 ? arrayContains(expected, actual)
                 : nodeEquals(expected, actual);
@@ -93,6 +96,15 @@ public class ConditionEvaluator {
             return cmp(a, b) == 0;
         }
         return a.asText().equals(b.asText());
+    }
+
+    /** 关系比较的前提：两侧都有值。空/缺失一律"不满足"，而不是按字典序碰运气。 */
+    private static boolean comparable(JsonNode a, JsonNode b) {
+        return !blank(a) && !blank(b);
+    }
+
+    private static boolean blank(JsonNode node) {
+        return node == null || node.isMissingNode() || node.isNull() || node.asText().isBlank();
     }
 
     private int cmp(JsonNode a, JsonNode b) {

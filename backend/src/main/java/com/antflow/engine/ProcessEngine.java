@@ -213,6 +213,16 @@ public class ProcessEngine {
     }
 
     private void approveInternal(CompleteCmd cmd, long operatorId, boolean force) {
+        approveInternal(cmd, operatorId, force, null);
+    }
+
+    /**
+     * @param historyAction 非空时覆盖历史 action（用于把"系统代批"与人工通过区分开）。
+     *                      审计口径见 code-review A9：approved_by 仍是审批人本人，
+     *                      但历史里能明确看到这是超时自动通过、不是人工点的。
+     */
+    private void approveInternal(CompleteCmd cmd, long operatorId, boolean force,
+                                 String historyAction) {
         LockedTask locked = lockPendingTask(cmd.taskId());
         TaskEntity t = locked.task();
         ProcessInstance pi = locked.instance();
@@ -242,7 +252,8 @@ public class ProcessEngine {
             t.setActionFormRevisionId(pi.getCurrentFormRevisionId());
         }
         updateTaskOrConflict(t);
-        insertHistory(t, null, t.getNodeId(), force ? "FORCE_APPROVE" : "APPROVE",
+        insertHistory(t, null, t.getNodeId(),
+            historyAction != null ? historyAction : force ? "FORCE_APPROVE" : "APPROVE",
             operatorId, cmd.comment());
 
         if (runtimeV2 != null && runtimeV2.active(pi) && t.getNodeInstanceId() != null) {
@@ -566,13 +577,19 @@ public class ProcessEngine {
                 "cannot withdraw after a task has been acted on");
         }
         String previousNodeId = pi.getCurrentNodeId();
+        boolean v2 = runtimeV2 != null && runtimeV2.active(pi);
         List<TaskEntity> active = taskMapper.selectList(new QueryWrapper<TaskEntity>()
             .eq("proc_inst_id", pi.getId()).in("status", List.of("PENDING", "CC")));
         for (TaskEntity task : active) {
             task.setStatus("SKIPPED");
             taskMapper.updateById(task);
+            // V2 实例必须留痕：原来只改状态，审批人侧任务凭空消失（无历史、无通知）。
+            if (v2) runtimeV2.taskSkippedByWithdraw(pi, task);
         }
         workflowJobMapper.cancelActive(pi.getId());
+        // 节点/参与者与任务一起收口：只置任务 SKIPPED 会留下 ACTIVE 节点 + PENDING 参与者，
+        // 让"在办/超时"统计长期偏高（见 code-review A3）。
+        if (v2) runtimeV2.withdrawToRework(pi);
 
         TaskEntity rework = newReturnedTask(pi.getId(), "__rework__", "REWORK",
             "OR", pi.getStartedBy(), null, null);
@@ -710,8 +727,10 @@ public class ProcessEngine {
                 if (!"LOW".equals(policy.path("riskLevel").asText())) {
                     runtimeV2.timeoutReminder(job, task);
                 } else {
+                    // 历史 action 单独标出来：审计时能区分"人工通过"与"系统超时代批"（A9）。
                     approveInternal(new CompleteCmd(task.getId(), "APPROVE",
-                        "超时自动通过", null), task.getAssigneeId(), true);
+                        "超时自动通过（系统代批）", null), task.getAssigneeId(), true,
+                        "TIMEOUT_AUTO_APPROVE");
                 }
             }
             default -> runtimeV2.timeoutReminder(job, task);

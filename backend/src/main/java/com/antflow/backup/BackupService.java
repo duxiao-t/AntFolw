@@ -46,8 +46,7 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -321,6 +320,26 @@ public class BackupService {
     private void validateSecret() {
         if (properties.getEncryptionSecret() == null || properties.getEncryptionSecret().length() < 32) {
             throw new BizException("BACKUP_KEY_INVALID", "BACKUP_ENCRYPTION_SECRET 至少需要 32 个字符");
+        }
+    }
+
+    /**
+     * 启动期校验，与 JWT/MinIO/归档/集成密钥的 fail-closed 口径对齐（见 code-review B5）。
+     *
+     * <p>原状：`BACKUP_ENCRYPTION_SECRET` 在 application.yml 里是空默认值，应用能正常启动，
+     * 直到第一次点"备份"才在用户面前失败。这里把两类问题提前：
+     * 配了但太短 → 直接启动失败（配置错误）；完全没配 → 明确告警"备份不可用"（不阻断启动，
+     * 因为备份是通过设置页开启的可选能力）。
+     */
+    @jakarta.annotation.PostConstruct
+    void validateSecretOnStartup() {
+        String secret = properties.getEncryptionSecret();
+        if (secret == null || secret.isBlank()) {
+            log.warn("BACKUP_ENCRYPTION_SECRET 未配置：系统备份不可用（备份接口会拒绝执行）");
+            return;
+        }
+        if (secret.length() < 32) {
+            throw new IllegalStateException("BACKUP_ENCRYPTION_SECRET 至少需要 32 个字符");
         }
     }
 

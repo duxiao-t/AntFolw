@@ -2896,6 +2896,151 @@ class PostgresTransactionalIntegrityIntegrationTest {
             .containsEntry("last_error", "task already completed");
     }
 
+    /**
+     * 撤回后重提必须给延时节点**重新装弹**。
+     *
+     * <p>回归 A1：撤回时 cancelActive 把 DELAY 作业置 CANCELLED，而作业幂等键原本不含轮次，
+     * 重提后 findNodeJob 命中那条已取消的行 → DelayHandler 看到非 SUCCEEDED 就 halt 且不建任务
+     * → 实例停在 RUNNING：无待办、无作业、无恢复入口（retryFailed 只认 FAILED）。
+     * 去掉 V60 的轮次幂等键 + 重建逻辑，本用例会红。
+     */
+    /**
+     * 撤回必须把 任务 / 节点 / 参与者 三态一起收口，并给被跳过的任务留一条 CANCEL 历史。
+     *
+     * <p>回归 A3：`withdraw` 原来只把任务置 SKIPPED、写一条 WITHDRAW 历史，
+     * `t_process_node_instance` 仍 ACTIVE、`t_node_participant` 仍 PENDING——
+     * 按参与者聚合的"在办/超时"统计会长期偏高，审批人侧也看不到任务是怎么消失的。
+     */
+    @Test
+    void v2WithdrawClosesNodeAndParticipantState() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        StartedV2 started = startV2(approvalFlow(bobId), adminId);
+        assertThat(pendingTaskCount(started.instanceId(), "a1")).isEqualTo(1);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            processEngine.withdraw(started.instanceId(), adminId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE proc_inst_id = ? AND node_id = 'a1'",
+            String.class, started.instanceId())).isEqualTo("SKIPPED");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT status FROM t_process_node_instance
+            WHERE proc_inst_id = ? AND node_id = 'a1'
+            """, String.class, started.instanceId())).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT participant.status FROM t_node_participant participant
+            JOIN t_process_node_instance node ON node.id = participant.node_instance_id
+            WHERE node.proc_inst_id = ? AND node.node_id = 'a1'
+            """, String.class, started.instanceId())).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT count(*) FROM t_task_history
+            WHERE proc_inst_id = ? AND action = 'CANCEL'
+            """, Long.class, started.instanceId())).isEqualTo(1L);
+    }
+
+    /**
+     * 超时自动通过必须在审计上可区分：历史 action 是 TIMEOUT_AUTO_APPROVE，不是 FORCE_APPROVE。
+     *
+     * <p>回归 A9：原来复用人工强制的 FORCE_APPROVE，事后无法区分"人工通过"与"系统代批"。
+     */
+    @Test
+    void timeoutAutoApproveIsAuditedAsSystemAction() {
+        long adminId = userId("admin");
+        long bobId = userId("bob");
+        StartedV2 started = startV2(approvalFlow(bobId), adminId);
+        long taskId = taskIdForAssignee(started.instanceId(), "a1", bobId);
+        long jobId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_workflow_job(proc_inst_id, task_id, node_instance_id, node_id, job_type,
+                                       action_key, scheduled_at, status, attempts, max_attempts,
+                                       payload, blocking)
+            SELECT ?, ?, task.node_instance_id, 'a1', 'TASK_TIMEOUT', 'AUTO_APPROVE',
+                   now(), 'RUNNING', 1, 8, ?::jsonb, false
+            FROM t_task task WHERE task.id = ?
+            RETURNING id
+            """, Long.class, started.instanceId(), taskId,
+            "{\"action\":\"AUTO_APPROVE\",\"riskLevel\":\"LOW\"}", taskId);
+
+        assertThat(processEngine.completeTaskTimeout(jobId)).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT status FROM t_task WHERE id = ?", String.class, taskId)).isEqualTo("APPROVED");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT action FROM t_task_history
+            WHERE task_id = ? AND action IN ('TIMEOUT_AUTO_APPROVE', 'FORCE_APPROVE')
+            ORDER BY id DESC LIMIT 1
+            """, String.class, taskId)).isEqualTo("TIMEOUT_AUTO_APPROVE");
+    }
+
+    /**
+     * 预热用的批量查询（R4 / A5）：UUID 集合绑定在真库上要成立，且过滤条件必须生效。
+     *
+     * <p>直接打 mapper 而不是走 `preloadMediaDurations`：后者会吞掉异常（尽力而为语义），
+     * SQL 层面的失败会被日志掩盖，测不出来。
+     */
+    @Test
+    void preloadQuerySelectsOnlyReadyMediaWithoutMeasuredDuration() {
+        long owner = userId("admin");
+        UUID video = UUID.randomUUID();
+        UUID measured = UUID.randomUUID();
+        UUID document = UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                size_bytes, sha256, status, duration_seconds)
+            VALUES (?, ?, 'clip.mp4', ?, 'video/mp4', 100, ?, 'READY', NULL)
+            """, video, owner, "video/" + video, "b".repeat(64));
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                size_bytes, sha256, status, duration_seconds)
+            VALUES (?, ?, 'measured.mp4', ?, 'video/mp4', 100, ?, 'READY', 12)
+            """, measured, owner, "video/" + measured, "c".repeat(64));
+        jdbcTemplate.update("""
+            INSERT INTO t_mobile_file(id, owner_id, original_name, storage_key, content_type,
+                size_bytes, sha256, status, duration_seconds)
+            VALUES (?, ?, 'note.pdf', ?, 'application/pdf', 100, ?, 'READY', NULL)
+            """, document, owner, "doc/" + document, "d".repeat(64));
+
+        assertThat(mobileFileMapper.selectMissingDuration(List.of(video, measured, document)))
+            .extracting(com.antflow.attachment.MobileFile::getId)
+            .containsExactly(video);
+    }
+
+    @Test
+    void v2WithdrawThenResubmitRearmsDelayJob() {
+        long adminId = userId("admin");
+        StartedV2 started = startV2(delayThenApprovalFlow("d1", adminId, 60), adminId);
+        assertThat(pendingTaskCount(started.instanceId(), "a1")).isZero();
+        assertThat(latestDelayJob(started.instanceId(), "d1"))
+            .containsEntry("status", "SCHEDULED")
+            .containsEntry("round_no", 1);
+
+        PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
+        try {
+            processEngine.withdraw(started.instanceId(), adminId);
+            assertThat(latestDelayJob(started.instanceId(), "d1")).containsEntry("status", "CANCELLED");
+
+            long reworkId = pendingReworkTaskId(started.instanceId());
+            processEngine.resubmitRework(reworkId, adminId);
+        } finally {
+            PrincipalHolder.clear();
+        }
+
+        Map<String, Object> job = latestDelayJob(started.instanceId(), "d1");
+        assertThat(job).containsEntry("status", "SCHEDULED");
+        assertThat((Integer) job.get("round_no")).isGreaterThanOrEqualTo(2);
+        // JdbcTemplate 的 queryForMap 对 TIMESTAMPTZ 返回 java.sql.Timestamp，不是 OffsetDateTime。
+        assertThat(((java.sql.Timestamp) job.get("scheduled_at")).toInstant())
+            .isAfter(java.time.Instant.now().plusSeconds(50 * 60));
+        // 未到点不应建审批任务，实例仍应在跑（而不是空转在 RUNNING 且没有任何作业）
+        assertThat(pendingTaskCount(started.instanceId(), "a1")).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM t_workflow_job WHERE proc_inst_id = ? AND node_id = 'd1'"
+                + " AND status = 'SCHEDULED'", Long.class, started.instanceId())).isEqualTo(1L);
+    }
+
     @Test
     void v2ResubmitSupportsFullReplayAndDiffContinue() {
         long adminId = userId("admin");
@@ -5271,6 +5416,26 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 "assignedType":"ASSIGN_USER","assignedUser":[%d],"mode":"OR"},
               "children":null}}
             """.formatted(assigneeId);
+    }
+
+    /** 延时节点在最前：实例发起后会停在延时上，等待 DELAY 作业到期。 */
+    private static String delayThenApprovalFlow(String delayNodeId, long assigneeId, int minutes) {
+        return """
+            {"id":"root","type":"ROOT","children":{
+              "id":"%s","type":"DELAY","props":{"mode":"DURATION","amount":%d,"unit":"MINUTES"},
+              "children":{"id":"a1","type":"APPROVAL","props":{
+                "assignedType":"ASSIGN_USER","assignedUser":[%d],"mode":"OR"},
+              "children":null}}}
+            """.formatted(delayNodeId, minutes, assigneeId);
+    }
+
+    /** 该实例某延时节点的最新一条作业（历史行会被保留，所以要按 id 取最新）。 */
+    private Map<String, Object> latestDelayJob(long instanceId, String nodeId) {
+        return jdbcTemplate.queryForMap("""
+            SELECT status, round_no, scheduled_at FROM t_workflow_job
+            WHERE proc_inst_id = ? AND node_id = ? AND job_type = 'DELAY'
+            ORDER BY id DESC LIMIT 1
+            """, instanceId, nodeId);
     }
 
     private static String allSignFlow(long first, long second, long downstream) {

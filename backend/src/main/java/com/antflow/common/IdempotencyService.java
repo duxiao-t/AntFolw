@@ -54,6 +54,10 @@ public class IdempotencyService {
         if ("PROCESSING".equals(row.getStatus())) return acquired
             ? new Claim(row, null, null)
             : new Claim(null, null, "IDEMPOTENCY_IN_PROGRESS");
+        if ("UNKNOWN".equals(row.getStatus())) {
+            // 上一轮可能已经生效：拒绝重放，让客户端去查询结果（见 V61）。
+            return new Claim(null, null, "IDEMPOTENCY_RESULT_UNKNOWN");
+        }
         return new Claim(null, null, "IDEMPOTENCY_IN_PROGRESS");
     }
 
@@ -67,6 +71,17 @@ public class IdempotencyService {
         if (claim == null || claim.record() == null) return;
         if (mapper == null) return;
         mapper.markFailed(claim.record().getId(), hash(requestBody));
+    }
+
+    /**
+     * 处理链抛异常时的收尾：业务可能已经提交（事务提交后才抛/后续过滤器抛），
+     * 结果对客户端**不可知**。这里不能标 FAILED——`tryClaim` 会允许 FAILED + 同 body 重放，
+     * 那就等于把"可能已生效"的请求再执行一次（见 V61 与 code-review A2）。
+     */
+    public void markUnknown(Claim claim, byte[] requestBody) {
+        if (claim == null || claim.record() == null) return;
+        if (mapper == null) return;
+        mapper.markUnknown(claim.record().getId(), hash(requestBody));
     }
 
     public CachedResponse executeOrReplay(String key, long userId,

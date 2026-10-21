@@ -1,0 +1,19 @@
+# 质量基线、数据库迁移与 CI 定义需要"第二双眼睛"：
+# 这些文件一旦被顺手放宽/改写，所有门禁都会静默失效（见 docs/code-review-2026-10-17.md C7）。
+#
+# 注意：CODEOWNERS 只有在仓库开启 "Require review from Code Owners" 后才具备强制力；
+# 在此之前它仍是明确的责任人信号。
+
+# 健康指标与导入边界的基线（只允许收紧）
+/docs/health-metrics.baseline.json          @duxiao-t
+/frontend/import-boundaries.baseline.json   @duxiao-t
+
+# Flyway 迁移只前滚：历史文件不可修改
+/backend/src/main/resources/db/migration/   @duxiao-t
+
+# CI 门禁本身
+/.github/workflows/                         @duxiao-t
+
+# 发布与恢复脚本（最后一道防线）
+/deploy.sh                                  @duxiao-t
+/backend/backup/                            @duxiao-t

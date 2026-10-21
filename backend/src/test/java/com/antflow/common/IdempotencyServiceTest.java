@@ -36,8 +36,7 @@ class IdempotencyServiceTest {
     }
 
     @Test
-    void executeOrReplay_differentKeys_executeSeparately() {
-        var counter = new AtomicInteger(0);
+    void executeOrReplay_differentKeys_executeSeparately() {        var counter = new AtomicInteger(0);
         java.util.function.Supplier<IdempotencyService.CachedResponse> action = () ->
             new IdempotencyService.CachedResponse(200,
                 "{\"n\":" + counter.incrementAndGet() + "}");
@@ -67,5 +66,39 @@ class IdempotencyServiceTest {
         svc.executeOrReplay("", 42L, action);
         svc.executeOrReplay("   ", 42L, action);
         assertThat(counter.get()).isEqualTo(3);
+    }
+
+    /**
+     * UNKNOWN 结果不允许重放（回归 A2 第三条）。
+     *
+     * <p>处理链抛异常时业务可能已经生效；旧实现标 FAILED，而 tryClaim 允许 FAILED + 同 body
+     * 重新抢占 → 客户端重试会再执行一次副作用。现在标 UNKNOWN：拿不到缓存响应，也抢不到锁，
+     * 只能收到明确的"结果未知"冲突码。
+     */
+    @Test
+    void unknownResultIsNotReplayable() {
+        IdempotencyRecordMapper mapper = org.mockito.Mockito.mock(IdempotencyRecordMapper.class);
+        byte[] body = "{\"formCode\":\"leave\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        IdempotencyRecord row = new IdempotencyRecord();
+        row.setId(7L);
+        row.setStatus("UNKNOWN");
+        row.setRequestHash(IdempotencyService.hash(body));
+
+        org.mockito.Mockito.when(mapper.tryClaim(
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(0);
+        org.mockito.Mockito.when(mapper.find(
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(row);
+
+        IdempotencyService service = new IdempotencyService(new ObjectMapper(), mapper);
+        IdempotencyService.Claim claim = service.claim(1L, "POST", "/api/instances/start", "k", body);
+
+        assertThat(claim.replay()).isNull();
+        assertThat(claim.claimed()).isFalse();
+        assertThat(claim.conflict()).isEqualTo("IDEMPOTENCY_RESULT_UNKNOWN");
     }
 }

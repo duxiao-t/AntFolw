@@ -214,7 +214,7 @@ docker compose --env-file .env.docker.local ps
 | 移动端 | http://127.0.0.1:7070/mobile/login |
 | 后端健康检查 | http://127.0.0.1:7070/actuator/health |
 | MinIO 控制台 | http://127.0.0.1:7073 |
-| 接口文档（Swagger UI） | 网关默认**未反代**该路径。源码模式下直连后端访问 http://localhost:8080/swagger-ui ；如需在 Docker 部署中暴露，请在 `infra/docker/nginx.conf` 中为 `/swagger-ui` 与 `/v3/api-docs` 增加反代 |
+| 接口文档（Swagger UI） | 网关默认**未反代**该路径，且 `prod` profile 默认**不注册**接口文档（`application-prod.yml`）。源码模式下直连后端访问 http://localhost:8080/swagger-ui ；如需在 Docker 部署中临时开启，需同时设置 `ANTFLOW_OPENAPI_ENABLED=true` 并在 `infra/docker/nginx.conf` 为 `/swagger-ui` 与 `/v3/api-docs` 增加反代 |
 
 首次启动会自动执行 Flyway 迁移。管理员账号为 `admin`，密码取自 `ANTFLOW_BOOTSTRAP_ADMIN_PASSWORD`——**该变量只用于初始化待设置凭据，不会覆盖后续改密**。
 

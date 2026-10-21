@@ -312,7 +312,9 @@ public class TaskOperationService {
     }
 
     private void updateOrConflict(TaskEntity task) {
-        if (taskMapper.updateById(task) == 0 && task.getVersion() != null) {
+        // 0 行更新只可能是"这行已经不在了/被并发改走"——不因 version 为 null 就放过
+        // （原来 `&& task.getVersion() != null` 会把 0 行更新当成功，见 code-review A10）。
+        if (taskMapper.updateById(task) == 0) {
             throw new BizException("CONCURRENT_CONFLICT", "task changed concurrently");
         }
     }

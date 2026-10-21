@@ -89,7 +89,22 @@ services:
       minio:
         condition: service_healthy
     volumes:
+      # 必须给**宿主机绝对路径**：Linux 用 /srv/antflow/backups 之类；
+      # Docker Desktop（Windows/macOS）上留成 `/www/...` 会被当成 VM 内路径，
+      # 落在那块约 200MB 的根盘上 → 备份写到一半 ENOSPC（实测踩过）。
+      # 例如 Windows：BACKUP_DIRECTORY=D:/antflow-backups
+      # 属主由 deploy.sh 的 ensure_backup_directory 每次部署兜一遍（10001:10001, 700）。
       - ${BACKUP_DIRECTORY:-/www/antflow/backups}:/backups
+    # 健康检查是发布脚本回滚判据的一部分：没有它，web 会在 backend 还没 ready 时就开始接流量，
+    # 部署脚本也只能靠一条外部 curl 判断成败（见 deploy.sh 的 wait_healthy / rollback）。
+    # 依赖镜像里的 curl（Dockerfile.local 已装）。**升级时务必带 --build 重建 backend 镜像**，
+    # 否则旧镜像没有 curl，healthcheck 永远不健康、web 会因 service_healthy 起不来。
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   web:
     build:
@@ -99,8 +114,15 @@ services:
     restart: unless-stopped
     ports:
       - "7070:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:

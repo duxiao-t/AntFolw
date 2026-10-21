@@ -241,16 +241,26 @@ export default function DetailPage() {
   const actorsQuery = useQuery<Record<number, PersonView>>({
     queryKey: ['instance-actors', id, actorIds.join(',')],
     queryFn: async () => {
-      const people = await Promise.all(actorIds.map(async (actorId) => {
-        try {
-          return await request<PersonView>(`/api/pickers/users/${actorId}`, {
-            skipErrorHandler: true,
-          });
-        } catch {
-          return { id: actorId } satisfies PersonView;
-        }
-      }));
-      return Object.fromEntries(people.map((person) => [person.id, person]));
+      if (actorIds.length === 0) return {};
+      // 一次批量取人：原来按 history 里的每个 operatorId 各发一条
+      // /api/pickers/users/{id}，20 条历史就是 20 个并发请求（见 code-review C5）。
+      // 后端已有批量入口（单条 SQL + SELECTED_LIMIT 防翻目录），这里改成一发一收。
+      const placeholders = () =>
+        Object.fromEntries(actorIds.map((actorId) => [actorId, { id: actorId }]));
+      try {
+        const people = await request<PersonView[]>('/api/pickers/users/selected', {
+          method: 'GET',
+          params: { ids: actorIds.join(',') },
+          skipErrorHandler: true,
+        });
+        const byId = new Map((people ?? []).map((person) => [person.id, person]));
+        // 账号被删或不在可见范围时补占位，避免整块历史因为缺一个人而空白
+        return Object.fromEntries(
+          actorIds.map((actorId) => [actorId, byId.get(actorId) ?? { id: actorId }]),
+        );
+      } catch {
+        return placeholders();
+      }
     },
     enabled: actorIds.length > 0,
     retry: 0,

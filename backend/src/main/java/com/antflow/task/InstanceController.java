@@ -37,6 +37,7 @@ public class InstanceController {
     private final FormDefinitionService formDefinitionService;
     private final FormDataMapper formDataMapper;
     private final CompanyAttribution companyAttribution;
+    private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
     @Autowired(required = false)
     private DefinitionVersionRepository definitionVersions;
 
@@ -50,6 +51,8 @@ public class InstanceController {
         Long companyId = companyAttribution.resolve(cmd.companyId());
         StartCmd resolved = new StartCmd(cmd.formCode(), cmd.data(), cmd.selfSelected(),
             companyId);
+        // 事务外预热媒体时长：进引擎后 validate 只读已回写的 duration，不再持锁拉流跑 ffprobe（见 A5）。
+        mediaValidator.preloadMediaDurations(resolved.data());
         return auditService.execute(() -> engine.start(resolved, p.userId()), result ->
             auditService.success("workflow.instance.start", "PROCESS_INSTANCE",
                 result.get("instanceId"), AuditService.RiskLevel.NORMAL,

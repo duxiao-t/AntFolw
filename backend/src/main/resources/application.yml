@@ -41,7 +41,10 @@ server:
   port: ${PORT:8080}
   forward-headers-strategy: framework
   error:
-    include-message: always
+    # never：过滤器链（幂等、限流等）抛出的异常不走 GlobalExceptionHandler，而是落到容器的
+    # /error；include-message=always 会把异常原文（Spring 的 DataAccessException 含 SQL 片段）
+    # 直接回吐给客户端。业务错误文案由 GlobalExceptionHandler 自己维护，不受这里影响。
+    include-message: never
 antflow:
   jwt:
     secret: ${JWT_SECRET}
@@ -96,6 +99,9 @@ antflow:
   media:
     ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
     watermark-font: ${WATERMARK_FONT:}
+    # 提交校验兜底探测时长时，从 MinIO 拉流的体积上限（默认 512MB）。超限直接判失败，
+    # 避免大视频在持锁校验里落满临时盘；已测量过时长的文件走快路径，不受此限影响。
+    max-probe-bytes: ${MEDIA_MAX_PROBE_BYTES:536870912}
   automation:
     zone-id: ${ANTFLOW_TIME_ZONE:Asia/Shanghai}
     allowed-hosts: ${ANTFLOW_WEBHOOK_ALLOWED_HOSTS:}

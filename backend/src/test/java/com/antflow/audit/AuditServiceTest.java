@@ -43,11 +43,21 @@ class AuditServiceTest {
         AuditService service = new AuditService(Mockito.mock(JdbcTemplate.class),
             new ObjectMapper(), properties);
 
+        // 多跳时取**最右**值：它是我们自己的代理追加的、代理实际看到的对端地址。
+        // （旧断言取的是最左的 203.0.113.9，那正是客户端自带、可伪造的值——
+        //   用最左会让登录限流按伪造 IP 分桶、审计 client_ip 同时失真。）
         MockHttpServletRequest trusted = new MockHttpServletRequest();
         trusted.setRemoteAddr("10.2.3.4");
         trusted.addHeader("X-Forwarded-For", "203.0.113.9, 10.2.3.4");
-        assertThat(service.clientIp(trusted)).isEqualTo("203.0.113.9");
+        assertThat(service.clientIp(trusted)).isEqualTo("10.2.3.4");
 
+        // nginx 改成覆写后只有一个值：取最右 == 唯一值。
+        MockHttpServletRequest single = new MockHttpServletRequest();
+        single.setRemoteAddr("10.2.3.4");
+        single.addHeader("X-Forwarded-For", "203.0.113.9");
+        assertThat(service.clientIp(single)).isEqualTo("203.0.113.9");
+
+        // 非可信来源直接用自己的 remoteAddr，头一律不信。
         MockHttpServletRequest untrusted = new MockHttpServletRequest();
         untrusted.setRemoteAddr("192.0.2.10");
         untrusted.addHeader("X-Forwarded-For", "203.0.113.9");

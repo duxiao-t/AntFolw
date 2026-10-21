@@ -47,6 +47,10 @@ class TaskOperationServiceTest {
             if (t.getId() == null) t.setId(System.nanoTime() & 0xFFFFFF);
             return 1;
         }).when(taskMapper).insert(any(TaskEntity.class));
+        // 默认 update 行为：1 = 命中一行。生产里 updateById 返回 0 表示"行不在/被并发改走"，
+        // 服务层会抛 CONCURRENT_CONFLICT（见 TaskOperationService#updateOrConflict），
+        // 所以 mock 必须给出真实语义，否则测的是一条走不到的分支。
+        Mockito.when(taskMapper.updateById(any(TaskEntity.class))).thenReturn(1);
     }
 
     private TaskEntity parentTask(long id, long assigneeId, String status) {

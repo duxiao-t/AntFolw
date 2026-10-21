@@ -1,5 +1,6 @@
 package com.antflow.authz;
 
+import com.antflow.auth.SecurityConfig;
 import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -9,8 +10,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -73,6 +76,75 @@ class AuthorizationCoverageTest {
             }
         }
         assertThat(unknown).isEmpty();
+    }
+
+    /**
+     * 免登录白名单与 {@code @PublicEndpoint} 必须一一对账。
+     *
+     * <p>为什么要这条：注解没有运行时切面，真正放行由 {@code SecurityConfig} 里硬编码的
+     * permitAll 路径决定。只校验"注解存在"的话，把新端点写进 {@code /api/public/**}
+     * 就会静默变成匿名可访问，而注解仍写着"需要登录"。
+     *
+     * <p>两件事一起钉：
+     * <ol>
+     *   <li>每个 {@code @PublicEndpoint} 端点都必须落在声明的放行集合内；</li>
+     *   <li>放行集合本身被冻结——新增放行必须显式改这里的期望值，改动会被 review 看到。</li>
+     * </ol>
+     */
+    @Test
+    void publicEndpointsMatchDeclaredPermitAllPatterns() throws Exception {
+        AntPathMatcher matcher = new AntPathMatcher();
+        List<String> uncovered = new ArrayList<>();
+        for (Class<?> controller : controllers()) {
+            boolean classLevelPublic = controller.isAnnotationPresent(PublicEndpoint.class);
+            for (Method method : controller.getDeclaredMethods()) {
+                if (!isEndpoint(method)) {
+                    continue;
+                }
+                if (!classLevelPublic && !method.isAnnotationPresent(PublicEndpoint.class)) {
+                    continue;
+                }
+                String path = endpointPath(controller, method);
+                boolean covered = SecurityConfig.PUBLIC_PATH_MATCHERS.stream()
+                        .anyMatch(pattern -> matcher.match(pattern, path))
+                    || SecurityConfig.PUBLIC_POST_ENDPOINTS.contains(path);
+                if (!covered) {
+                    uncovered.add(controller.getSimpleName() + "#" + method.getName() + " -> " + path);
+                }
+            }
+        }
+        assertThat(uncovered)
+            .as("@PublicEndpoint 端点必须落在 SecurityConfig 声明的免登录路径里")
+            .isEmpty();
+
+        // 冻结清单：改动放行范围必须同时改这里（review 时一眼可见）。
+        assertThat(SecurityConfig.PUBLIC_PATH_MATCHERS).containsExactlyElementsOf(
+            List.of("/api/public/**", "/actuator/**", "/v3/api-docs/**", "/swagger-ui/**"));
+        assertThat(SecurityConfig.PUBLIC_POST_ENDPOINTS).containsExactlyElementsOf(
+            List.of("/api/auth/login", "/api/auth/refresh", "/api/auth/logout"));
+    }
+
+    /** 类级 {@code @RequestMapping} 与方法级映射拼出端点路径（方法级带全路径时以它为准）。 */
+    private static String endpointPath(Class<?> controller, Method method) {
+        // 必须用 findMergedAnnotation：@GetMapping/@PostMapping 的 value 是靠 @AliasFor 合并出来的，
+        // 直接 getAnnotation(RequestMapping.class).value() 拿到的是空数组。
+        String base = firstPath(AnnotatedElementUtils.findMergedAnnotation(controller, RequestMapping.class));
+        String path = firstPath(AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class));
+        if (path == null || path.isBlank()) {
+            return base == null ? "" : base;
+        }
+        if (base == null || base.isBlank() || path.startsWith(base)) {
+            return path;
+        }
+        return base.endsWith("/") ? base.substring(0, base.length() - 1) + path : base + path;
+    }
+
+    private static String firstPath(RequestMapping mapping) {
+        if (mapping == null) {
+            return null;
+        }
+        String[] paths = mapping.value().length > 0 ? mapping.value() : mapping.path();
+        return paths.length == 0 ? null : paths[0];
     }
 
     @Test

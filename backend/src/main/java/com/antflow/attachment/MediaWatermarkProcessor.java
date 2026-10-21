@@ -196,6 +196,9 @@ public class MediaWatermarkProcessor {
         filter.append("textfile='")
             .append(escapeFilterPath(watermarkFile.toString().replace('\\', '/')))
             .append("'")
+            // expansion=none：水印文字来自用户配置，默认的 normal 会把 %{...} 当 ffmpeg 表达式展开
+            // （见 code-review B9）。文字本身是原样画上去的，不需要任何展开。
+            .append(":expansion=none")
             .append(":fontcolor=white@0.55:fontsize=h/40:shadowcolor=black@0.4:shadowx=2:shadowy=2")
             .append(":x=w-tw-24:y=h-th-24");
         return filter.toString();

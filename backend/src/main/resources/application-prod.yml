@@ -1,0 +1,12 @@
+# 生产 profile 的差异化配置。
+#
+# 只放"生产必须有别于默认"的项，其余继续由 application.yml 提供（profile 文件是覆盖，不是替换）。
+springdoc:
+  # 接口文档是信息收集面：生产默认关闭（与 code-review B4 对应）。
+  # 需要临时排障时用 ANTFLOW_OPENAPI_ENABLED=true 打开，用完再关。
+  api-docs:
+    enabled: ${ANTFLOW_OPENAPI_ENABLED:false}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${ANTFLOW_OPENAPI_ENABLED:false}
+    path: /swagger-ui

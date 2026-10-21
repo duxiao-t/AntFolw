@@ -108,8 +108,12 @@ public class AuditService {
         if (isTrustedProxy(remote)) {
             String forwarded = request.getHeader("X-Forwarded-For");
             if (forwarded != null && !forwarded.isBlank()) {
-                String first = forwarded.split(",", 2)[0].trim();
-                if (isIp(first)) return first;
+                // 取**最右**一跳：它由我们自己的代理（nginx）追加，是代理实际看到的对端地址；
+                // 最左值是客户端自带、可随意伪造的——用最左会让登录限流被绕过、审计 IP 失真。
+                // nginx 已改成覆写（只有一个值），此时最右 == 唯一值，语义不变。
+                int lastComma = forwarded.lastIndexOf(',');
+                String candidate = (lastComma >= 0 ? forwarded.substring(lastComma + 1) : forwarded).trim();
+                if (isIp(candidate)) return candidate;
             }
             String realIp = request.getHeader("X-Real-IP");
             if (realIp != null && isIp(realIp.trim())) return realIp.trim();

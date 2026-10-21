@@ -27,6 +27,7 @@ public class TaskController {
     private final TaskMapper taskMapper;
     private final ProcessInstanceMapper instanceMapper;
     private final AuditService auditService;
+    private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
     @Autowired(required = false)
     private ProcessDefinitionService processDefinitionService;
 
@@ -90,6 +91,9 @@ public class TaskController {
     public void approve(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_TASK_APPROVE);
         var p = PrincipalHolder.current().orElseThrow();
+        // 审批时可能改带媒体的字段：先在**事务外**把缺时长的音视频探测完，
+        // 否则引擎里的 validate 会在持锁事务中拉 MinIO + 跑 ffprobe（A5）。
+        mediaValidator.preloadMediaDurations(body == null ? null : body.get("data"));
         auditService.execute(() -> engine.approve(new CompleteCmd(id, "APPROVE",
                 body == null ? null : asString(body.get("comment")), null,
                 body == null ? null : body.get("data")), p.userId()),

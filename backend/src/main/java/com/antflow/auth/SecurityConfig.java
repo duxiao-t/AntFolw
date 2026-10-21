@@ -26,6 +26,20 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    /**
+     * 免登录放行的**前缀集合**（除下面三个 POST 认证端点外的全部匿名入口）。
+     *
+     * <p>手工注解（{@code @AuthenticatedOnly}/{@code @PublicEndpoint}）只是声明，没有运行时切面——
+     * 真正决定放行的是这里。改这个列表必须同时改 {@code AuthorizationCoverageTest} 的冻结断言，
+     * 否则就出现"注解说需要登录、实际匿名可访问"的漂移（见 code-review-2026-10-17 B6）。
+     */
+    public static final List<String> PUBLIC_PATH_MATCHERS =
+        List.of("/api/public/**", "/actuator/**", "/v3/api-docs/**", "/swagger-ui/**");
+
+    /** 免登录的 POST 端点：登录/刷新/登出（会话与 CSRF 语义自带，不需要 JWT）。 */
+    public static final List<String> PUBLIC_POST_ENDPOINTS =
+        List.of("/api/auth/login", "/api/auth/refresh", "/api/auth/logout");
+
     private final JwtService jwtService;
     private final AuthSessionService authSessionService;
     private final AuthorizationService authorizationService;
@@ -73,9 +87,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(registry -> registry
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
-                .requestMatchers("/api/public/**").permitAll()
-                .requestMatchers("/actuator/**", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+                .requestMatchers(HttpMethod.POST, PUBLIC_POST_ENDPOINTS.toArray(String[]::new)).permitAll()
+                .requestMatchers(PUBLIC_PATH_MATCHERS.toArray(String[]::new)).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .anyRequest().authenticated()
             )

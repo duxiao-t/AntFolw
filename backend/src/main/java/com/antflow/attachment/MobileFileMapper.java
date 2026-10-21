@@ -125,6 +125,25 @@ public interface MobileFileMapper extends BaseMapper<MobileFile> {
     List<MobileFile> selectByIdsForUpdate(@Param("ids") List<UUID> ids);
 
     /**
+     * 提交前预热用：批量取"已就绪但还没有测量时长"的音视频文件（只读、不加锁）。
+     *
+     * <p>把筛选条件全部下推到 SQL：调用方只关心"哪些文件需要探测"，不该把整批行捞回来再过滤。
+     * foreach 写法与 {@link #selectByIdsForUpdate} 一致（UUID 集合绑定在 PG 上已验证）。
+     */
+    @Select("""
+        <script>
+        SELECT * FROM t_mobile_file
+        WHERE id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+          AND duration_seconds IS NULL
+          AND status = 'READY'
+          AND deleted_at IS NULL
+          AND (content_type LIKE 'video/%' OR content_type LIKE 'audio/%')
+        ORDER BY id
+        </script>
+        """)
+    List<MobileFile> selectMissingDuration(@Param("ids") List<UUID> ids);
+
+    /**
      * 带着 claim token 把转码结果发布出去：改指针（storage_key/content_type/size/sha256/名字）并置 READY。
      * 返回 0 = 租约已不在自己手上（或行已被删）→ 调用方**必须丢弃自己的结果对象**，不能碰这一行。
      */

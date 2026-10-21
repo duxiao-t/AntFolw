@@ -13,6 +13,10 @@ export const USERS = {
     username: 'bob',
     displayName: 'Bob',
     roles: ['user'],
+    // 有部门：表单页不需要选归属公司（P4a）。缺 deptId 会让"提交"按钮一直 disabled，
+    // 主流程用例会在点击处超时——这是公司归属上线后 fixture 没跟上留下的坑。
+    deptId: 20,
+    department: '研发部',
   } satisfies MobileUser,
   admin: {
     id: 1,
@@ -25,11 +29,21 @@ export const USERS = {
     username: 'alice',
     displayName: 'Alice',
     roles: ['user'],
+    deptId: 20,
+    department: '研发部',
   } satisfies MobileUser,
 } as const;
 
-export const BRANDING = {
-  version: 'e2e-approval-1',
+/**
+ * 审批/驳回意见预设：后端没有内置默认值，全部来自流程定义节点的 props.commentPresets。
+ * 流程 JSON 与 taskDetail 共用同一份，避免"面板里有、详情里没有"的漂移。
+ */
+const COMMENT_PRESETS = {
+  approve: ['同意'],
+  reject: ['数据不一致', '材料不全'],
+};
+
+export const BRANDING = {  version: 'e2e-approval-1',
   appName: 'AntFlow 审批',
   companyName: '安',
   primaryColor: '#0b57d0',
@@ -66,6 +80,7 @@ export function createLeaveForm(code: string) {
             { id: USERS.admin.id, name: USERS.admin.displayName },
             { id: 22, name: '李经理' },
           ],
+          commentPresets: COMMENT_PRESETS,
         },
       },
     },
@@ -413,6 +428,7 @@ function taskDetail(task: TaskRecord, world: MockWorld) {
     history: task.history,
     allowedActions: task.allowedActions,
     rejectTargets: [{ nodeId: 'root', name: '发起人' }],
+    commentPresets: COMMENT_PRESETS,
     files: [
       {
         id: 'd2cecb38-11a8-4d2e-9f43-96ce6f4a7e60',
@@ -617,6 +633,16 @@ export async function installApiMocks(page: Page, world: MockWorld) {
 
       if (path === '/api/mobile/preferences/apps' && method === 'PUT') {
         return empty(route, 204);
+      }
+
+      // 公司列表：手机端"无部门账号"发起时要选归属公司（P4a）。缺这条会落到末尾兜底的 `{}`，
+      // 页面 `(companiesQuery.data ?? []).map(...)` 拿到对象直接崩 —— 这正是 full-approval-flow
+      // 四个视口全红的根因（见 docs/code-review-2026-10-17.md C3）。
+      if (path === '/api/companies' && method === 'GET') {
+        if (!authUser) {
+          return error(route, 401, 'UNAUTHORIZED', '未登录');
+        }
+        return json(route, [{ id: 1, name: 'AntFlow' }]);
       }
 
       if (path === '/api/mobile/users' && method === 'GET') {

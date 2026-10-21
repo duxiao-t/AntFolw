@@ -64,6 +64,12 @@ function startBody() {
   return (first[1] as { data: Record<string, unknown> }).data;
 }
 
+function keyOf(call: unknown[] | undefined) {
+  if (!call) throw new Error('start call missing');
+  const options = call[1] as { headers?: Record<string, string> } | undefined;
+  return options?.headers?.['Idempotency-Key'];
+}
+
 describe('runtime Fill company attribution', () => {
   beforeEach(() => {
     requestMock.mockReset();
@@ -108,5 +114,41 @@ describe('runtime Fill company attribution', () => {
 
     await waitFor(() => expect(startPosts()).toHaveLength(1));
     expect(startBody().companyId).toBe(1);
+  });
+
+  it('reuses the same idempotency key on retry and rotates it after success', async () => {
+    modelRef.current = { initialState: { currentUser: { id: 7, departmentId: 20 } } };
+    let attempts = 0;
+    requestMock.mockImplementation((url: string) => {
+      if (url.includes('/api/mobile/forms/')) return Promise.resolve(FORM);
+      if (url === '/api/mobile/instances') {
+        attempts += 1;
+        // 第一次当作"客户端超时"：服务端可能已经落库了，用户重按必须带同一个 key，
+        // 否则就是两份实例（回归 A2：原来每次调用都现生成 key，等于没有幂等）。
+        return attempts === 1
+          ? Promise.reject(new Error('network timeout'))
+          : Promise.resolve({ instanceId: 9 });
+      }
+      return Promise.resolve(null);
+    });
+
+    const page = renderPage();
+    await page.typeReason();
+    const submit = screen.getByRole('button', { name: '提交并发起审批' });
+
+    fireEvent.click(submit);
+    await waitFor(() => expect(startPosts()).toHaveLength(1));
+    fireEvent.click(submit);
+    await waitFor(() => expect(startPosts()).toHaveLength(2));
+
+    const firstKey = keyOf(startPosts()[0]);
+    expect(firstKey).toBeTruthy();
+    expect(keyOf(startPosts()[1])).toBe(firstKey);
+
+    // 成功后换新键：下一次提交是新操作，不能被上一次的响应重放掉。
+    await waitFor(() => expect(historyPush).toHaveBeenCalled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(startPosts()).toHaveLength(3));
+    expect(keyOf(startPosts()[2])).not.toBe(firstKey);
   });
 });

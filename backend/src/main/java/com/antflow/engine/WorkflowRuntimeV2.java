@@ -18,17 +18,17 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /** Runtime state that exists only for engine_version=2 instances. */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class WorkflowRuntimeV2 {
     private static final int MAX_FALLBACK_ASSIGNEES = 100;
-    private final JdbcTemplate jdbc;
-    private final DefinitionVersionRepository versions;
+    private final JdbcTemplate jdbc;    private final DefinitionVersionRepository versions;
     private final ObjectMapper json;
 
     public boolean active(ProcessInstance instance) {
@@ -65,7 +65,24 @@ public class WorkflowRuntimeV2 {
         return new StartState(processVersionId, revisionId);
     }
 
+    /**
+     * 写入口的事务守卫。
+     *
+     * <p>这个类一口气写多张表（节点实例、参与者、任务、outbox、作业），**必须**由调用方开启事务。
+     * 原来只靠"调用方恰好都加了 @Transactional"这一约定：一旦有人从调度器或 controller 直接调用，
+     * 多语句会逐条自动提交，留下半成品状态且无任何报错（见 code-review A6）。
+     * 与其给全类硬加 @Transactional（会和调用方事务嵌套、语义纠缠），不如在入口快速失败。
+     */
+    private static void requireTransaction() {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager
+            .isActualTransactionActive()) {
+            throw new IllegalStateException(
+                "WorkflowRuntimeV2 的写操作必须在事务内调用：请给调用方补 @Transactional");
+        }
+    }
+
     public long enterNode(ProcessInstance instance, JsonNode node, NodeContext context) {
+        requireTransaction();
         if (!active(instance)) return 0;
         String nodeId = node.path("id").asText();
         Long existing = jdbc.query("""
@@ -104,6 +121,7 @@ public class WorkflowRuntimeV2 {
     }
 
     public void completeNode(long nodeInstanceId, String status) {
+        requireTransaction();
         if (nodeInstanceId <= 0) return;
         int updated = jdbc.update("""
             UPDATE t_process_node_instance
@@ -356,6 +374,7 @@ public class WorkflowRuntimeV2 {
     }
 
     public Decision approve(TaskEntity task, JsonNode node) {
+        requireTransaction();
         if (task.getNodeInstanceId() == null) return Decision.advanceNode();
         lockNode(task.getNodeInstanceId());
         int updated = jdbc.update("""
@@ -388,6 +407,7 @@ public class WorkflowRuntimeV2 {
     }
 
     public Decision rejectVote(TaskEntity task, JsonNode node) {
+        requireTransaction();
         if (task.getNodeInstanceId() == null) return Decision.rejectNode();
         lockNode(task.getNodeInstanceId());
         int updated = jdbc.update("""
@@ -471,6 +491,7 @@ public class WorkflowRuntimeV2 {
 
     public boolean parallelBranchPassed(ProcessInstance instance, JsonNode root,
                                         String parallelId, String branchId) {
+        requireTransaction();
         if (!active(instance)) return false;
         Long gatewayId = gatewayNodeInstance(instance.getId(), parallelId, instance.getRoundNo());
         if (gatewayId == null) return false;
@@ -493,6 +514,7 @@ public class WorkflowRuntimeV2 {
 
     public ParallelDecision parallelBranchRejected(TaskEntity task, ProcessInstance instance,
                                                      JsonNode root) {
+        requireTransaction();
         if (!active(instance) || task.getParallelId() == null) return ParallelDecision.REJECT;
         Long gatewayId = gatewayNodeInstance(instance.getId(), task.getParallelId(),
             instance.getRoundNo());
@@ -703,6 +725,7 @@ public class WorkflowRuntimeV2 {
     }
 
     public void recallApproval(TaskEntity task, ProcessInstance instance, long operatorId) {
+        requireTransaction();
         if (!active(instance) || task.getNodeInstanceId() == null || task.getParallelId() != null) {
             throw new BizException("BAD_RECALL_STATE", "仅支持追回 V2 串行审批节点");
         }
@@ -763,6 +786,7 @@ public class WorkflowRuntimeV2 {
 
     public void adminReassign(TaskEntity task, long targetUserId, long operatorId,
                               String reason) {
+        requireTransaction();
         requireActiveAssignee(targetUserId);
         long previous = task.getAssigneeId();
         jdbc.update("""
@@ -788,6 +812,7 @@ public class WorkflowRuntimeV2 {
     }
 
     public void terminate(ProcessInstance instance, long operatorId, String reason) {
+        requireTransaction();
         List<TaskRow> cancelled = jdbc.query("""
             UPDATE t_task SET status = 'CANCELLED', comment = ?
             WHERE proc_inst_id = ? AND status IN ('PENDING', 'BLOCKED')
@@ -818,7 +843,53 @@ public class WorkflowRuntimeV2 {
         outbox(instance.getId(), instance.getStartedBy(), "INSTANCE_REJECTED", null);
     }
 
+    /**
+     * 撤回后的 V2 收尾：本轮仍 ACTIVE 的节点、WAITING/PENDING 的参与者、以及分支状态一并置 CANCELLED。
+     *
+     * <p>为什么必须做：{@code withdraw} 原来只把任务置 SKIPPED，节点与参与者留在 ACTIVE/PENDING——
+     * 按参与者聚合的"在办/超时"统计会长期偏高，审批人侧也看不到任务是怎么消失的（见 code-review A3）。
+     * {@code beginRound} 只在重提时收口节点、且不处理参与者，不能靠它兜底。
+     */
+    public void withdrawToRework(ProcessInstance instance) {
+        requireTransaction();
+        if (!active(instance)) return;
+        jdbc.update("""
+            UPDATE t_process_node_instance
+            SET status = 'CANCELLED', completed_at = now(), version = version + 1
+            WHERE proc_inst_id = ? AND status = 'ACTIVE'
+            """, instance.getId());
+        jdbc.update("""
+            UPDATE t_parallel_branch_state branch SET status = 'CANCELLED', completed_at = now()
+            FROM t_process_node_instance gateway
+            WHERE branch.gateway_node_instance_id = gateway.id
+              AND gateway.proc_inst_id = ? AND branch.status = 'ACTIVE'
+            """, instance.getId());
+        jdbc.update("""
+            UPDATE t_node_participant participant SET status = 'CANCELLED'
+            FROM t_process_node_instance node
+            WHERE participant.node_instance_id = node.id
+              AND node.proc_inst_id = ?
+              AND participant.status IN ('WAITING', 'PENDING')
+            """, instance.getId());
+    }
+
+    /**
+     * 撤回时被跳过的那条任务：补一条 CANCEL 历史 + outbox。
+     * 原来只把 status 改成 SKIPPED，审批人侧任务凭空消失、也没有任何记录。
+     */
+    public void taskSkippedByWithdraw(ProcessInstance instance, TaskEntity task) {
+        requireTransaction();
+        if (!active(instance)) return;
+        jdbc.update("""
+            INSERT INTO t_task_history(proc_inst_id, task_id, from_node_id, to_node_id,
+                                       action, comment)
+            VALUES (?, ?, ?, '__rework__', 'CANCEL', ?)
+            """, instance.getId(), task.getId(), task.getNodeId(), "发起人撤回");
+        outbox(instance.getId(), task.getAssigneeId(), "TASK_CANCELLED", task.getId());
+    }
+
     public void beginRound(ProcessInstance instance, String reason) {
+        requireTransaction();
         if (!active(instance)) return;
         jdbc.update("""
             UPDATE t_process_node_instance
@@ -913,15 +984,32 @@ public class WorkflowRuntimeV2 {
                 """, previous.getProcInstId(), taskId, previous.getNodeInstanceId(),
                 previous.getNodeId(), policy.path("action").asText("REMIND"), due,
                 policy.toString());
-        } catch (Exception ignored) {
-            // Invalid policies are rejected at publish; legacy snapshots simply have no timeout.
+        } catch (Exception error) {
+            // 原来这里静默吞掉：t_task.timeout_at 已写、作业却没建，任务永不提醒/升级且无痕迹。
+            // 保持"坏策略不阻断审批"的取舍，但要留日志 + 一条历史，便于事后追。
+            log.warn("schedule timeout for task {} failed: {}", taskId, error.toString());
+            insertTimeoutUnavailableHistory(previous, error);
         }
     }
 
+    /** 超时作业没能建出来时留一条历史（吞异常不再等于无痕迹）。 */
+    private void insertTimeoutUnavailableHistory(TaskEntity task, Exception error) {
+        String reason = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        if (reason.length() > 200) reason = reason.substring(0, 200);
+        jdbc.update("""
+            INSERT INTO t_task_history(proc_inst_id, task_id, from_node_id,
+                                       to_node_id, action, comment)
+            VALUES (?, ?, ?, ?, 'TIMEOUT_UNAVAILABLE', ?)
+            """, task.getProcInstId(), task.getId(), task.getNodeId(), task.getNodeId(),
+            "超时作业未创建：" + reason);
+    }
+
     private void cancelPending(TaskEntity acted, String reason) {
+        // 含 BLOCKED：前加签会把父任务置 BLOCKED，只清 PENDING 会让它永久卡住
+        // （既不在待办、也无法操作，见 code-review A7）。
         List<TaskRow> cancelled = jdbc.query("""
             UPDATE t_task SET status = 'CANCELLED', comment = COALESCE(comment, ?)
-            WHERE node_instance_id = ? AND status = 'PENDING' AND id <> ?
+            WHERE node_instance_id = ? AND status IN ('PENDING', 'BLOCKED') AND id <> ?
             RETURNING id, assignee_id
             """, (rs, rowNum) -> new TaskRow(rs.getLong(1), rs.getLong(2)),
             reason, acted.getNodeInstanceId(), acted.getId());

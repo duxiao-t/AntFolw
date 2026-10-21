@@ -11,6 +11,14 @@ RUN apt-get update \
        ffmpeg fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
+# curl 是 compose 里 backend healthcheck 与容器内排障用的：基础镜像（postgres）不带 curl/wget。
+# 单独一层，避免改动上面那层导致 ffmpeg 全量重装。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       -o Acquire::Retries=5 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=60 \
+       curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=jre /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk

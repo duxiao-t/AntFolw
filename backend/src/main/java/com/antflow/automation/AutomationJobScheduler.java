@@ -35,11 +35,20 @@ public class AutomationJobScheduler {
     }
 
     /**
-     * shortcut: `t_workflow_job` 没有租约续租（与 outbox 不同），所以**单次投递必须在
-     * `antflow.automation.stale-lock-timeout`（默认 2 分钟）内结束**，否则这里会把还在投递中的 job
-     * 置回 SCHEDULED 再投一遍（webhook/完成动作重复）。投递本身有界（webhook 10s + 连接 3s），
-     * 要放宽投递上限时请连这个阈值一起改，或照 outbox 的做法给 job 加续租。
+     * 续租：投递期间把本 worker 名下 RUNNING 作业的 locked_at 推到 now。
+     *
+     * <p>为什么需要：{@link #recoverStaleJobs()} 只看 `locked_at < now - stale-lock-timeout`。
+     * webhook 本身有界，但 `completeAutomation` 要等实例行锁（媒体校验等场景可能很久），
+     * 没有续租就会在投递中途被抢回 SCHEDULED 再投一遍（webhook/完成动作重复）。
+     * 与 outbox 的 `lease-renew-interval-ms` 是同一套做法。
      */
+    @Scheduled(fixedDelayString = "${antflow.automation.lease-renew-interval-ms:30000}")
+    public void renewLeases() {
+        int renewed = jobs.renewOwnedLeases(workerId);
+        if (renewed > 0) log.debug("Renewed {} workflow job leases", renewed);
+    }
+
+    /** 把"卡在 RUNNING 且租约过期"的作业放回队列；有续租后这只会命中真正失联的 worker。 */
     @Scheduled(fixedDelayString = "${antflow.automation.recovery-interval-ms:60000}")
     public void recoverStaleJobs() {
         jobs.recoverStale();

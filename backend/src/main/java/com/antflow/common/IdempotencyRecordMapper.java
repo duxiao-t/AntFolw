@@ -47,6 +47,18 @@ public interface IdempotencyRecordMapper extends BaseMapper<IdempotencyRecord> {
         """)
     int markFailed(@Param("id") long id, @Param("requestHash") String requestHash);
 
+    /**
+     * 标为 UNKNOWN：业务链抛异常、结果对客户端不可知。
+     *
+     * <p>与 FAILED 的区别是**不允许重放**——`tryClaim` 只对 FAILED 重新放行，
+     * UNKNOWN 会一直占着这个 key 直到过期，客户端必须改为查询结果。
+     */
+    @Update("""
+        UPDATE t_idempotency_record SET status = 'UNKNOWN', updated_at = now()
+         WHERE id = #{id} AND status = 'PROCESSING' AND request_hash = #{requestHash}
+        """)
+    int markUnknown(@Param("id") long id, @Param("requestHash") String requestHash);
+
     @Delete("DELETE FROM t_idempotency_record WHERE expires_at <= now()")
     int deleteExpired();
 }

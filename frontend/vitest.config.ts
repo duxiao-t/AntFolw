@@ -14,14 +14,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setupTests.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
-    // Exclude Umi integration tests that depend on @umijs/max test infrastructure
-    // These require Umi's Jest runner and cannot be used with Vitest directly
-    exclude: [
-      'src/pages/user/login/login.test.tsx',
-      'node_modules',
-      'dist',
-      '.umi',
-    ],
+    // 这里曾经把 src/pages/user/login/login.test.tsx 排除在外（它依赖 Umi 的 jest 运行器与
+    // @@/requestRecordMock，vitest 跑不了），后果是登录页**在 CI 里零覆盖**、还留下一份孤儿快照。
+    // 该用例已替换为 vitest 原生的 src/pages/user/login/index.test.tsx，不再需要任何排除项。
+    exclude: ['node_modules', 'dist', '.umi'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -34,9 +30,11 @@ export default defineConfig({
       ],
     },
     passWithNoTests: true,
-    // 15s 在负载下不够：app.test.tsx 这类重挂载的用例单跑 7/7 全过、在全量里跑到 18s+ 就超时，
-    // 表现成"每次红的文件都不一样"的 flake。
-    testTimeout: 30000,
+    // 45s：`app.test.tsx` 里的 `getInitialState` 用例会真实挂载整棵树，单跑 3.6s、
+    // 全量并行时在负载高的机器上会爬到 30s~43s（已在 30s 阈值上反复偶发超时）。
+    // 这不是断言变慢，是 CPU 争用；与其让门禁随机变红，不如把阈值放到 45s——
+    // 真正的死锁/挂起仍然会在 45s 被抓住。
+    testTimeout: 45000,
     // 这里挂着 `dangerouslyIgnoreUnhandledErrors: true`：环境里确实有**跑完测试之后才冒出来**的
     // 未处理错误，它们跟断言无关，但会让整个 Test 步骤以退出码 1 结束（用例全 passed 却红）。
     //

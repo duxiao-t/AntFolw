@@ -39,6 +39,7 @@ public class MobileWorkflowController {
     private final FormDataService formDataService;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
+    private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
 
     @PostMapping("/drafts")
     @AuthenticatedOnly
@@ -113,6 +114,8 @@ public class MobileWorkflowController {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         long userId = principal().userId();
+        // 事务外预热媒体时长（A5）：手机端上传完立刻提交，最可能命中"缺时长"的懒探测路径。
+        mediaValidator.preloadMediaDurations(request.data());
         return auditService.execute(() -> workflowService.start(request, userId),
             result -> auditService.success("workflow.instance.start", "PROCESS_INSTANCE",
                 result.instanceId(), AuditService.RiskLevel.NORMAL,
@@ -134,6 +137,8 @@ public class MobileWorkflowController {
     public FormDataService.SubmitResult submitDirect(@RequestBody DirectSubmitRequest request) {
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         long userId = principal().userId();
+        // 同上：直接把表单提交入库这条路径也会走 validate，先在事务外补时长。
+        mediaValidator.preloadMediaDurations(request.data());
         return formDataService.submit(request.formCode(),
             request.status(), request.data(), userId,
             request.files() == null ? List.of() : request.files(), request.draftId(),
@@ -278,6 +283,14 @@ public class MobileWorkflowController {
     public ReworkResult resubmitReworkTask(@PathVariable Long id,
                                            @RequestBody ReworkTaskRequest request) {
         long userId = principal().userId();
+        // 同上：重提也会走 engine.resubmitRework 的 validate，先在事务外把时长补齐。
+        // 只改状态的重提没有 payload，此时沿用实例当前修订里的数据，否则预热会整个跳过、
+        // 事务内又回到"持锁跑 ffprobe"的老路（A5）。
+        if (request.data() != null) {
+            mediaValidator.preloadMediaDurations(request.data());
+        } else {
+            mediaValidator.preloadForTask(id);
+        }
         return auditService.execute(() -> workflowService.resubmitRework(id, request, userId),
             result -> auditService.success("workflow.rework.resubmit", "TASK", id,
                 AuditService.RiskLevel.HIGH,

@@ -31,7 +31,9 @@ class MobileWorkflowControllerAuditTest {
     private final AuthorizationService authorizationService = Mockito.mock(AuthorizationService.class);
     private final AuditService auditService = mockAuditService();
     private final MobileWorkflowController controller = new MobileWorkflowController(
-        draftService, workflowService, approvalPreviewService, formDataService, authorizationService, auditService);
+        draftService, workflowService, approvalPreviewService, formDataService,
+        authorizationService, auditService,
+        Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
 
     private static AuditService mockAuditService() {
         AuditService service = Mockito.mock(AuditService.class, Mockito.CALLS_REAL_METHODS);

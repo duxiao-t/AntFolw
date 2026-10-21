@@ -132,8 +132,13 @@ export async function getInitialState(): Promise<{
       location.pathname,
     )
   ) {
+    // 冷启动：先确保有 token（没有才走一次 refresh），再把"取用户"与"取导航"**并行**发出去。
+    // 后者只依赖 token、不依赖用户对象，串行会白白多等一个 RTT（见 code-review C5）。
+    // 注意顺序不能反：token 还没补上时 fetchNavigation 会直接返回 undefined。
+    if (!localStorage.getItem(TOKEN_KEY)) await restoreCookieSession();
+    const navigationPromise = fetchNavigation();
     const currentUser = await fetchUserInfo();
-    const navigation = currentUser ? await fetchNavigation() : undefined;
+    const navigation = currentUser ? await navigationPromise : undefined;
     return {
       fetchUserInfo,
       currentUser,

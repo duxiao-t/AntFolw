@@ -24,16 +24,50 @@ import java.util.Set;
 public class IdempotencyFilter extends OncePerRequestFilter {
     private static final Set<String> METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final Set<String> HEADER_NAMES = Set.of("Idempotency-Key", "X-Idempotency-Key");
+    /** 不参与幂等的路径：登录/刷新/登出有自己的会话与 CSRF 语义，重放没有意义。 */
+    private static final Set<String> SKIP_PREFIXES = Set.of("/api/auth/");
+    /**
+     * 超过这个大小就不缓冲请求体：幂等是为"小 JSON 的提交/审批"设计的，
+     * 大文件上传把它整段读进内存得不偿失（上传自身的去重靠文件的 sha256）。
+     */
+    private static final long MAX_BUFFERED_BODY_BYTES = 1L << 20;
     private final IdempotencyService service;
 
     public IdempotencyFilter(IdempotencyService service) { this.service = service; }
 
+    /**
+     * 默认对所有 {@code /api/**} 的写请求开放，只显式豁免少数路径。
+     *
+     * <p>这里是**反向**判据而不是前缀白名单：原来用白名单（/api/mobile、/api/forms、/api/processes），
+     * 结果是 /api/tasks/**（审批、转交、加签、改派）与 /api/instances/**（发起、撤回、终止）
+     * 整族没有幂等保护——新端点落在白名单外就静默失去保护。
+     *
+     * <p>注意本方法只决定"要不要进入过滤器"：没有 Idempotency-Key 头的请求会在
+     * {@link #doFilterInternal} 里立刻放行，不会读 body，所以放宽范围几乎是零成本。
+     */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest req) {
+        if (!METHODS.contains(req.getMethod().toUpperCase())) {
+            return true;
+        }
         String path = req.getRequestURI();
-        return !METHODS.contains(req.getMethod().toUpperCase())
-            || !(path.startsWith("/api/mobile/") || path.startsWith("/api/forms/")
-                || path.startsWith("/api/processes/"));
+        if (path == null || !path.startsWith("/api/")) {
+            return true;
+        }
+        for (String skip : SKIP_PREFIXES) {
+            if (path.startsWith(skip)) {
+                return true;
+            }
+        }
+        return bodyTooLargeToBuffer(req);
+    }
+
+    private static boolean bodyTooLargeToBuffer(HttpServletRequest req) {
+        String contentType = req.getContentType();
+        if (contentType != null && contentType.toLowerCase().startsWith("multipart/")) {
+            return true;
+        }
+        return req.getContentLengthLong() > MAX_BUFFERED_BODY_BYTES;
     }
 
     @Override
@@ -73,8 +107,13 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             String response = new String(responseBody, StandardCharsets.UTF_8);
             if (completed && wrapped.getStatus() >= 200 && wrapped.getStatus() < 300) {
                 service.succeed(claim, wrapped.getStatus(), response, body);
-            } else {
+            } else if (completed) {
+                // 明确的 4xx/5xx：业务确实没成功，允许客户端带同一个 key 重试。
                 service.fail(claim, body);
+            } else {
+                // 处理链抛异常：可能已经提交（提交后才抛、或后续过滤器抛），结果不可知。
+                // 标 UNKNOWN 而不是 FAILED，否则重试会再执行一次副作用（见 V61）。
+                service.markUnknown(claim, body);
             }
             wrapped.copyBodyToResponse();
         }

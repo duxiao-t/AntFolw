@@ -1,5 +1,5 @@
 import { App, Button, Card, Modal, Select, Space, Typography } from 'antd';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useModel, useParams, history } from '@umijs/max';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { request } from '@umijs/max';
@@ -118,11 +118,21 @@ export default function Fill() {
     [fd?.starterFieldModes],
   );
 
+  /**
+   * 幂等键要按「一次提交」固化，不能每次调用现生成：
+   * 超时/断网后用户重按提交时，服务端必须能认出这是同一次操作，否则会落两份实例。
+   * 成功后换新键（下一次是新操作）；失败保持原键（重试继续复用）。
+   */
+  const idempotencyKeyRef = useRef(createIdempotencyKey());
+  const nextIdempotencyKey = () => {
+    idempotencyKeyRef.current = createIdempotencyKey();
+  };
+
   const startInstance = useMutation({
     mutationFn: (payload: { selfSelected: Record<string, number[]>; data: Record<string, any> }) =>
       request('/api/mobile/instances', {
         method: 'POST',
-        headers: { 'Idempotency-Key': createIdempotencyKey() },
+        headers: { 'Idempotency-Key': idempotencyKeyRef.current },
         data: {
           formCode: code,
           data: payload.data,
@@ -133,6 +143,7 @@ export default function Fill() {
         },
       }),
     onSuccess: () => {
+      nextIdempotencyKey();
       message.success('提交成功');
       history.push('/proc');
     },
@@ -142,6 +153,7 @@ export default function Fill() {
     mutationFn: (data: Record<string, any>) =>
       request('/api/forms/data', {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKeyRef.current },
         data: {
           formCode: code,
           status: 'SUBMITTED',

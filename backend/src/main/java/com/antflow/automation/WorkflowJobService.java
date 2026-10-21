@@ -31,8 +31,11 @@ public class WorkflowJobService {
 
     @Transactional
     public JobCreation scheduleDelay(ProcessInstance instance, JsonNode node, long operatorId) {
-        WorkflowJob existing = mapper.findNodeJob(instance.getId(), node.path("id").asText(), "DELAY");
-        if (existing != null) return new JobCreation(existing, false);
+        WorkflowJob existing = findNodeJob(instance, node, "DELAY");
+        if (existing != null && reusable(existing)) return new JobCreation(existing, false);
+        // 走到这里只有两种：本轮还没有作业，或既有作业是 CANCELLED（撤回取消过）。
+        // 后者必须重建——复用已取消的作业会让节点停摆（见 V60 与 DelayHandler）。
+        boolean rearmed = existing != null;
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime scheduledAt = DelaySchedule.calculate(
             node.path("props"), now, ZoneId.of(properties.getZoneId())
@@ -45,7 +48,7 @@ public class WorkflowJobService {
         }
         mapper.insert(job);
         insertHistory(instance.getId(), node.path("id").asText(), "DELAY_SCHEDULED",
-            operatorId, "scheduledAt=" + scheduledAt);
+            operatorId, "scheduledAt=" + scheduledAt + (rearmed ? "（撤回后重建）" : ""));
         if (immediate) {
             insertHistory(instance.getId(), node.path("id").asText(), "DELAY_COMPLETED",
                 null, "scheduled time already passed");
@@ -56,8 +59,9 @@ public class WorkflowJobService {
     @Transactional
     public JobCreation queueTrigger(ProcessInstance instance, JsonNode node, JsonNode formData,
                                     long operatorId) {
-        WorkflowJob existing = mapper.findNodeJob(instance.getId(), node.path("id").asText(), "TRIGGER");
-        if (existing != null) return new JobCreation(existing, false);
+        WorkflowJob existing = findNodeJob(instance, node, "TRIGGER");
+        if (existing != null && reusable(existing)) return new JobCreation(existing, false);
+        boolean rearmed = existing != null;
         JsonNode props = node.path("props");
         URI uri;
         try {
@@ -89,7 +93,7 @@ public class WorkflowJobService {
             OffsetDateTime.now(), payload);
         mapper.insert(job);
         insertHistory(instance.getId(), node.path("id").asText(), "TRIGGER_QUEUED",
-            operatorId, null);
+            operatorId, rearmed ? "撤回后重建" : null);
         return new JobCreation(job, true);
     }
 
@@ -101,6 +105,12 @@ public class WorkflowJobService {
     @Transactional
     public int recoverStale() {
         return mapper.recoverStale(OffsetDateTime.now().minus(properties.getStaleLockTimeout()));
+    }
+
+    /** 续租本 worker 正在投递的作业，避免长投递被 recoverStale 抢回重投。 */
+    @Transactional
+    public int renewOwnedLeases(String workerId) {
+        return mapper.renewOwnedLeases(workerId);
     }
 
     @Transactional
@@ -148,12 +158,39 @@ public class WorkflowJobService {
         }
     }
 
+    /**
+     * 取「本轮」该节点的作业（幂等键含轮次，见 V60）。
+     *
+     * <p>取到的行可能是终态：调用方必须用 {@link #reusable} 判断，别直接把 CANCELLED 当"已排队"。
+     */
+    private WorkflowJob findNodeJob(ProcessInstance instance, JsonNode node, String type) {
+        return mapper.findNodeJob(instance.getId(), node.path("id").asText(), type, roundOf(instance));
+    }
+
+    /**
+     * 可以原样复用的作业状态：
+     * <ul>
+     *   <li>SCHEDULED/RUNNING：等待中或投递中，交给调度器；</li>
+     *   <li>SUCCEEDED：本轮已经跑过，handler 会直接放行；</li>
+     *   <li>FAILED：等人工重试（{@code retryFailed}），不自动重建，避免掩盖持续失败；</li>
+     *   <li>CANCELLED：**不可复用**——撤回把它取消了，复用会让节点 halt 且不建任务。</li>
+     * </ul>
+     */
+    private static boolean reusable(WorkflowJob job) {
+        return !"CANCELLED".equals(job.getStatus());
+    }
+
+    private static int roundOf(ProcessInstance instance) {
+        return instance.getRoundNo() == null ? 1 : instance.getRoundNo();
+    }
+
     private WorkflowJob newJob(ProcessInstance instance, JsonNode node, String type,
                                boolean blocking, OffsetDateTime scheduledAt, JsonNode payload) {
         WorkflowJob job = new WorkflowJob();
         job.setProcInstId(instance.getId());
         job.setNodeId(node.path("id").asText());
         job.setJobType(type);
+        job.setRoundNo(roundOf(instance));
         job.setScheduledAt(scheduledAt);
         job.setStatus("SCHEDULED");
         job.setAttempts(0);

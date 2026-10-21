@@ -123,3 +123,39 @@ jobs:
           name: mobile-bundle-budget
           path: mobile/test-results/bundle-budget.json
           if-no-files-found: ignore
+
+  # 移动端 E2E 冒烟：全部是 route mock，不需要后端/数据库，也不用构建产物（webServer 起 vite）。
+  # 只跑功能用例；视觉回归（key-pages/shell-visual）依赖字体渲染，Linux 与本地基线不一致，暂不进 CI。
+  mobile-e2e:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: E2E smoke
+        run: >-
+          npx playwright test
+          e2e/full-approval-flow.spec.ts
+          e2e/rework-original-form.spec.ts
+          e2e/draft-recovery.spec.ts
+          e2e/permission-errors.spec.ts
+          e2e/selection-popup-layout.spec.ts
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-traces
+          path: mobile/test-results/
+          if-no-files-found: ignore
