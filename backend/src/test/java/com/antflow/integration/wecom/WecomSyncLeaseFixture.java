@@ -34,9 +34,11 @@ public final class WecomSyncLeaseFixture {
         var member = new WecomClient.WecomUser("sync_" + UUID.randomUUID().toString().replace("-", ""),
             "同步成员", List.of(1L), 1, "", "", "", "0", 1, List.of());
         when(client.user(any(), any())).thenReturn(member);
+        WecomSyncLease lease = new WecomSyncLease(jdbc);
         WecomService service = new WecomService(jdbc, cipher, client, mock(AuthorizationService.class),
             mock(AuditService.class), new ObjectMapper(), new BCryptPasswordEncoder(4),
-            transactions, Runnable::run, new WecomProperties(), new WecomSyncLease(jdbc));
+            transactions, Runnable::run, new WecomProperties(), lease,
+            new WecomManagerSync(jdbc, client, transactions, lease));
         when(client.users(session, List.of(1L))).thenAnswer(call -> {
             jdbc.update("UPDATE t_wecom_sync_job SET lease_expires_at = now() - interval '1 second' WHERE id = ?",
                 job);

@@ -25,9 +25,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,9 +34,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -62,8 +57,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class WecomService {
     private static final int MAX_ERROR_SUMMARIES = 10;
     private static final int USER_BATCH_SIZE = 200;
-    private static final int MANAGER_POOL_SIZE = 12;
-    private static final long MANAGER_BATCH_INTERVAL_MS = 350;
+    // 直属上级同步的并发度与限流间隔已随 WecomManagerSync 搬走（MANAGER_POOL_SIZE / MANAGER_BATCH_INTERVAL_MS）。
     private static final LocalTime DEFAULT_SCHEDULE_TIME = LocalTime.of(3, 0);
     private static final DateTimeFormatter SCHEDULE_TIME_FORMAT =
         DateTimeFormatter.ofPattern("HH:mm:ss");
@@ -79,6 +73,8 @@ public class WecomService {
     private final WecomProperties properties;
     /** 租约状态与校验都在 WecomSyncLease；本类只保留调度入口（renewSyncLeases）。 */
     private final WecomSyncLease lease;
+    /** 直属上级同步：并发拉详情、查环、批量写 manager_id。 */
+    private final WecomManagerSync managerSync;
 
     public WecomService(JdbcTemplate jdbc, WecomSecretCipher cipher, WecomClient client,
                         AuthorizationService authorization, AuditService audit, ObjectMapper json,
@@ -86,7 +82,8 @@ public class WecomService {
                         TransactionTemplate transactions,
                         @Qualifier("wecomSyncExecutor") Executor executor,
                         WecomProperties properties,
-                        WecomSyncLease lease) {
+                        WecomSyncLease lease,
+                        WecomManagerSync managerSync) {
         this.jdbc = jdbc;
         this.cipher = cipher;
         this.client = client;
@@ -98,6 +95,7 @@ public class WecomService {
         this.executor = executor;
         this.properties = properties;
         this.lease = lease;
+        this.managerSync = managerSync;
     }
 
     public SettingsDto settings(long companyId) {
@@ -402,7 +400,7 @@ public class WecomService {
                             if (memberException instanceof LeaseLostException) throw memberException;
                             failed++;
                             log.warn("WeCom member write failed: job={}, member={}", jobId,
-                                mask(user.userId()), memberException);
+                                WecomMappingRules.mask(user.userId()), memberException);
                             addError(errors, memberError(user, memberException));
                             retryContext = loadContext(initial.companyId(), externalUsers, full);
                         }
@@ -418,7 +416,11 @@ public class WecomService {
 
             stage(jobId, "RELATIONS", 88, "正在同步部门负责人和直属上级");
             syncDepartmentLeaders(initial.companyId(), departments, errors);
-            syncManagers(initial.companyId(), session, externalUsers, context, errors);
+            // 直属上级同步已搬到 WecomManagerSync；它只返回"发生了什么"，错误上限由本类统一执行。
+            for (String problem : managerSync.sync(initial.companyId(), session, externalUsers,
+                context.mappedIds, context.byId.values())) {
+                addError(errors, problem);
+            }
             int disabled = deactivateMissing(initial.companyId(), externalUsers);
             String summary = "通讯录同步完成"
                 + (disabled > 0 ? "，已停用 " + disabled + " 名成员" : "");
@@ -671,104 +673,6 @@ public class WecomService {
                 addError(errors, "部门 " + department.id() + " 的负责人同步失败");
             }
         }
-    }
-
-    private void syncManagers(long companyId, WecomClient.Session session, List<WecomUser> targets,
-                              SyncContext context, List<String> errors) {
-        if (targets.isEmpty()) return;
-        Map<String, WecomUser> usersByExternalId = targets.stream().collect(Collectors.toMap(
-            WecomUser::userId, user -> user, (first, ignored) -> first, LinkedHashMap::new));
-        ExecutorService pool = Executors.newFixedThreadPool(MANAGER_POOL_SIZE);
-        List<ManagerUpdate> updates = Collections.synchronizedList(new ArrayList<>());
-        try {
-            for (int offset = 0; offset < targets.size(); offset += MANAGER_POOL_SIZE) {
-                List<WecomUser> chunk = targets.subList(offset,
-                    Math.min(offset + MANAGER_POOL_SIZE, targets.size()));
-                List<Future<?>> futures = new ArrayList<>();
-                for (WecomUser user : chunk) {
-                    futures.add(pool.submit(() -> {
-                        try {
-                            WecomUser full = client.user(session,
-                                new WecomUserRef(user.userId(), user.departmentIds()));
-                            ManagerUpdate update = managerUpdate(companyId, full, context,
-                                usersByExternalId);
-                            if (update != null) updates.add(update);
-                        } catch (RuntimeException exception) {
-                            log.warn("WeCom manager lookup failed: company={}, member={}", companyId,
-                                mask(user.userId()), exception);
-                            addError(errors, "成员 " + displayName(user) + "（工号 " + user.userId()
-                                + "）直属上级读取失败，已保留原关系");
-                        }
-                    }));
-                }
-                for (Future<?> future : futures) {
-                    try {
-                        future.get();
-                    } catch (Exception ignored) {
-                        // Per-user errors are captured in the errors list.
-                    }
-                }
-                try {
-                    Thread.sleep(MANAGER_BATCH_INTERVAL_MS);
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        } finally {
-            pool.shutdown();
-        }
-        if (updates.isEmpty()) return;
-        updates.sort(Comparator.comparingLong(ManagerUpdate::userId));
-        Map<Long, Long> effectiveManagers = new HashMap<>();
-        context.byId.values().forEach(user -> effectiveManagers.put(user.id(), user.managerId()));
-        updates.forEach(update -> effectiveManagers.put(update.userId(), update.managerId()));
-        List<Object[]> writes = new ArrayList<>();
-        for (ManagerUpdate update : updates) {
-            Long managerId = update.managerId();
-            String issue = update.issue();
-            if (managerId != null && WecomMappingRules.createsCycle(update.userId(), effectiveManagers)) {
-                managerId = null;
-                effectiveManagers.put(update.userId(), null);
-                issue = "直属上级关系形成循环，已清空";
-            }
-            if (issue != null) addError(errors, "成员 " + displayName(update.user()) + "（工号 "
-                + update.user().userId() + "）" + issue);
-            writes.add(new Object[]{managerId, update.userId()});
-        }
-        transactions.executeWithoutResult(status -> {
-            lease.require();
-            jdbc.batchUpdate("UPDATE t_user SET manager_id = ? WHERE id = ?", writes);
-        });
-    }
-
-    private ManagerUpdate managerUpdate(long companyId, WecomUser user, SyncContext context,
-                                        Map<String, WecomUser> usersByExternalId) {
-        Long userId = context.mappedIds.get(user.userId());
-        if (userId == null) return null;
-        List<String> leaders = user.directLeaders();
-        if (leaders.isEmpty()) return new ManagerUpdate(userId, null, user, null);
-        WecomUser manager = usersByExternalId.get(leaders.get(0));
-        Long managerId = manager == null ? null : context.mappedIds.get(manager.userId());
-        String issue = leaders.size() > 1 ? "配置多位直属上级，仅同步第一位；" : "";
-        if (manager == null || manager.status() != 1 || managerId == null
-            || !activeCompanyUser(companyId, managerId)) {
-            return new ManagerUpdate(userId, null, user, issue + "直属上级未同步或已停用，已清空");
-        }
-        if (Objects.equals(userId, managerId)) {
-            return new ManagerUpdate(userId, null, user, issue + "直属上级不能为本人，已清空");
-        }
-        return new ManagerUpdate(userId, managerId, user, issue.isEmpty() ? null : issue);
-    }
-
-    private boolean activeCompanyUser(long companyId, long userId) {
-        Boolean active = jdbc.query("""
-            SELECT user_row.status = 'ACTIVE'
-            FROM t_user user_row
-            JOIN t_department department ON department.id = user_row.dept_id
-            WHERE user_row.id = ? AND department.company_id = ?
-            """, rs -> rs.next() ? rs.getBoolean(1) : null, userId, companyId);
-        return Boolean.TRUE.equals(active);
     }
 
     private int deactivateMissing(long companyId, List<WecomUser> externalUsers) {
@@ -1082,12 +986,6 @@ public class WecomService {
     private static String blankToNull(String value) { return WecomMappingRules.blankToNull(value); }
     private static String trim(String value) { return WecomMappingRules.trim(value); }
 
-    private static String mask(String value) {
-        if (value == null || value.isBlank()) return "***";
-        if (value.length() < 3) return value.charAt(0) + "***";
-        return value.charAt(0) + "***" + value.charAt(value.length() - 1);
-    }
-
     static LocalTime parseScheduleTime(String value) {
         if (value == null || !value.matches("(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d")) {
             throw new BizException("WECOM_SCHEDULE_TIME_INVALID", "自动同步时间格式必须为 HH:mm:ss");
@@ -1112,7 +1010,6 @@ public class WecomService {
                           boolean scheduleEnabled, LocalTime scheduleTime,
                           String scheduleMode) { }
     private record DepartmentState(long companyId, String path) { }
-    private record ManagerUpdate(long userId, Long managerId, WecomUser user, String issue) { }
     private static final class SyncContext {
         final Map<String, Long> mappedIds = new HashMap<>();
         final Map<String, List<Long>> byPhone = new HashMap<>();

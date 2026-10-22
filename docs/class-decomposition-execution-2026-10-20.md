@@ -180,9 +180,13 @@ H7 已在 CI 的 `metrics` job 生效：**六个口径只许下降，任一项�
 | --- | --- | --- |
 | **2.0 纯静态规则** | `changed` / `effectiveUserStatus` / `sameWhenProvided` / `sameDepartment` / `createsCycle` / `resolveMatch` / `primaryDepartment` / `orderDepartments` / `visitDepartment` + 8 个字段清洗 + `LocalUserState` + `SyncUserException` | ✅ 已拆为 `WecomMappingRules`（212 行 / 19 方法） |
 | **2.1 同步租约** | `runningClaims` / `currentLease` / `claimJob` / `requireLease` / 续租循环 / `Lease` / `LeaseLostException` | ✅ 已拆为 `WecomSyncLease`（118 行），`requireLease` 10 个调用点改为 `lease.require()` |
-| **2.2 上级与负责人** | `syncManagers` / `syncDepartmentLeaders` / `managerUpdate` / `activeCompanyUser` | 待拆（依赖 2.1 已就绪） |
-| **2.3 目录同步** | `loadContext` / `syncUsers` / `matchLocal` / `wecomEmployeeNo` / `wecomUsername` + `SyncContext`（33 处访问点） | 待拆（它才是"匹配+认领"的真实归属） |
+| **2.2 上级关系** | `syncManagers` / `managerUpdate` / `activeCompanyUser` + `MANAGER_POOL_SIZE` / `MANAGER_BATCH_INTERVAL_MS` | ✅ 已拆为 `WecomManagerSync`（约 180 行），原类 **1151 → 1048**；补 `WecomManagerSyncTest` 6 个判定用例 |
+| **2.3 目录同步** | `loadContext` / `syncUsers` / `matchLocal` / `wecomEmployeeNo` / `wecomUsername` + `SyncContext`（33 处访问点）+ **`syncDepartmentLeaders`**（见下） | 待拆 |
 | **2.4 配置/消息/查询** | `settings` / `saveSettings` / `start` / `job` / `config` / `mapped*` / `auditResult` | 留原类 |
+
+> **2.2 的边界调整**：原计划把 `syncDepartmentLeaders` 一起搬，但实测它依赖 `mappedDepartment`，
+> 而后者与 `syncDepartments` 共用——单独搬会制造第三份"部门映射查询"的归属。故它归入 2.3，
+> 与 `syncDepartments` 一起走。
 
 **为什么 2.1 必须先做**：`requireLease()` 有 10 个调用点，依赖 `runningClaims`（Map）与 `currentLease`
 （ThreadLocal）两个可变状态。不先抽走它们，任何 I/O 拆分都得让新类共享这两份状态——正是

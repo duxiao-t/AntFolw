@@ -195,6 +195,18 @@ final class WecomMappingRules {
         return value == null ? "" : value.trim();
     }
 
+    /**
+     * 日志脱敏：外部账号只留首尾字符。
+     *
+     * <p>为什么放在规则类：它是"外部值 → 可展示值"的映射，和性别/姓名清洗同一类事情。
+     * 注意**只用于日志**——写库路径必须用原始值，不要顺手拿它当校验。
+     */
+    static String mask(String value) {
+        if (value == null || value.isBlank()) return "***";
+        if (value.length() < 3) return value.charAt(0) + "***";
+        return value.charAt(0) + "***" + value.charAt(value.length() - 1);
+    }
+
     /** 本地账号的当前状态，作为 {@link #changed} 的输入。 */
     static record LocalUserState(long id, String username, String employeeNo, String phone,
                                  String email, String displayName, String position,
