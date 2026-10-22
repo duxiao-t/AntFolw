@@ -187,3 +187,173 @@ ProcessEngine（编排：锁任务 → 判分流 → 调结算）
   下次若要动并行语义，建议先补一个并行分支的单测再动。
 
 
+## 七、WorkflowRuntimeV2 拆分计划
+
+原类：`backend/src/main/java/com/antflow/engine/WorkflowRuntimeV2.java`，**1236 行 / 77 方法**
+（H7 口径实测），是当前最大类，也是 V2 运行时表（`t_process_node_instance` / `t_parallel_branch_state`
+/ `t_node_participant` / `t_workflow_outbox`）的唯一直接 JDBC 写入方；全仓唯一一条
+`UPDATE t_process_instance` 原始 SQL 也在它里面（`recallApproval`，第 768 行）。
+
+### 7.1 方法簇清单（按"变化原因"聚类，不按行号）
+
+| 簇 | 方法 | 净行数 | 变化原因（什么时候会改它） |
+| --- | --- | --- | --- |
+| A 查询 | `active` `processTree` `formSchema` | 25 | 版本树/表单 Schema 的读取口径变了才改 |
+| B 实例生命周期 | `prepareStart` `createRevision` `beginRound` `withdrawToRework` `taskSkippedByWithdraw` `invalidateApprovedNodes` `terminate` `recallApproval` | 172 | 轮次边界、终止/撤回/失效的收口规则 |
+| C 节点实例状态 | `requireTransaction` `enterNode` `completeNode` `requireActiveTask` `gatewayNodeInstance` `lockNode` | 89 | 节点实例状态机（ACTIVE/PASSED/AUTO_PASSED/CANCELLED）与 attempt_no 语义 |
+| D 决策计算 | `approve` `rejectVote` `rejectAdditional` `activateNext` `scheduleSequentialTimeout` `insertTimeoutUnavailableHistory` `cancelPending` `counts` | 176 | 审批模式（ANY/ALL/RATIO/SEQUENTIAL）与票数规则 |
+| E 并行分支 | `registerParallelBranch` `parallelBranchPassed` `parallelBranchRejected` `branchCounts` `cancelGatewayWork` | 116 | 并行 join 语义（ALL/ANY）与分支取消范围 |
+| F 字段与审批人解析 | `assignments` `previewAssignments` `bindTask` `scheduleTimeout` `fieldUsers` `ccUsers` `fallbackUsers` `fallbackUnavailable` `requiresNodeFallbackPolicy` `shouldAutoPass(+Preview)` `shouldSkipResubmittedNode(+Preview)` `changedFieldsDoNotAffect` `activeAgent(+ForForm)` `activeUsers` `roleUsers` | 263 | 委派、兜底、自动通过、DIFF_CONTINUE 的判定规则 |
+| G 纯策略解析 | `mode` `joinMode` `settings` `required` `hasNodeFallbackPolicy` `readIds` `addLong` `timeoutAt` | 43 | 流程树 JSON 的字段名/默认值（无状态、可直接单测） |
+| H 任务参与与通知 | `outbox`(2 重载) `recordCc` `timeoutReminder` `timeoutEscalate` `copyRuntimeTask` `reassignParticipant` `requireActiveAssignee` `recallChild` `addParticipant` `activateAfterSign` `completeBeforeSign` `adminReassign` | 239 | 加签/改派/超时/抄送的任务级协作规则 |
+
+### 7.2 依赖与调用关系
+
+**谁调它（全部是反向依赖，签名必须冻结）**
+
+| 调用方 | 用到的方法 |
+| --- | --- |
+| `ApprovalOrchestrator`（approve/reject 编排） | `active` `completeBeforeSign` `activateAfterSign` `approve` `rejectVote` `rejectAdditional` `mode` |
+| `V2DecisionSettler`（V2 结算） | `parallelBranchRejected` `invalidateApprovedNodes` `beginRound` `createRevision` `outbox` `mode` `Decision` `ParallelDecision` |
+| `NodeLander`（节点落地） | `enterNode` `completeNode` `parallelBranchPassed` `outbox` `active` |
+| `ApprovalHandler` / `CcHandler` / `ParallelHandler` | `assignments` `bindTask` `scheduleTimeout` `fieldUsers` `ccUsers` `fallbackUsers` `fallbackUnavailable` `requiresNodeFallbackPolicy` `shouldAutoPass` `shouldSkipResubmittedNode` `outbox` `recordCc` `registerParallelBranch` `parallelBranchPassed` `enterNode` `completeNode` `active` `mode` |
+| `ProcessStarter` / `ReworkService` / `WithdrawService` / `AutomationCompleter` / `FieldEditApplier` / `TaskLocker` / `EngineSupport` / `AdminActions` | `prepareStart` `outbox` `beginRound` `createRevision` `withdrawToRework` `taskSkippedByWithdraw` `timeoutReminder` `timeoutEscalate` `formSchema` `createRevision` `requireActiveTask` `processTree` `recallApproval` `adminReassign` `terminate` `active` |
+| `task.TaskOperationService`（边界外，不改） | `copyRuntimeTask` `reassignParticipant` `requireActiveAssignee` `recallChild` `addParticipant` |
+| `mobile.ApprovalPreviewService`（边界外，不改） | `active` `processTree` `formSchema` `shouldSkipResubmittedNodePreview` `shouldAutoPassPreview` `previewAssignments` `fieldUsers` `fallbackUsers` `fallbackUnavailable` `requiresNodeFallbackPolicy` `mode` `Assignment` |
+
+**它调谁（正向依赖，只能指向新协作者）**：`JdbcTemplate`、`DefinitionVersionRepository`、`ObjectMapper`、
+`ProcessTreeNav`（并行 join 查网关）、`NodeContext`/`FormData`/`ProcessInstance`/`TaskEntity` 等 DTO。
+
+**公开契约（46 个方法 + 3 个类型）一律不动**：方法名、参数、返回类型、`static` 修饰、
+嵌套类型全限定名（`WorkflowRuntimeV2.Decision` / `.Assignment` / `.ParallelDecision` / `.StartState`）
+都不能改——`task`/`mobile` 两个包在边界外按名调用，改一个签名就连锁破坏。
+
+### 7.3 拆分后的类清单
+
+`WorkflowRuntimeV2` 保留为**门面**：字段仍只有 `jdbc` / `versions` / `json` 三个 Spring bean，
+构造器里按依赖顺序 new 出下列协作者（不注册为 bean，也不加 `@Transactional`）；46 个公开方法全部
+改为一行委托。协作者之间只允许正向依赖（下表"构造依赖"列），**没有一个协作者持有
+`WorkflowRuntimeV2` 字段或参数**。
+
+| 类 | 职责 | 估算行 / 方法 | 构造依赖 |
+| --- | --- | --- | --- |
+| `V2RuntimeSupport` | 事务守卫、`active` 判定、版本树/表单 Schema 查询、`outbox`、节点行锁、表单修订创建 | ~120 / 7 | `JdbcTemplate` `DefinitionVersionRepository` |
+| `NodePolicies` | 纯函数：`mode` `joinMode` `settings` `required` `readIds` `addLong` `timeoutAt` 等 | ~90 / 9 | 无（全 static） |
+| `NodeInstanceState` | 节点实例显式状态迁移：`enterNode` `completeNode` `requireActiveTask` `gatewayNodeInstance` | ~130 / 4 | `V2RuntimeSupport` `JdbcTemplate` |
+| `ApprovalParticipants` | 审批人/抄送人解析、委派、兜底、自动通过、DIFF_CONTINUE、`bindTask` `scheduleTimeout` | ~330 / 15 | `V2RuntimeSupport` `JdbcTemplate` `ObjectMapper` |
+| `DecisionCalculator` | 票数计算与决策：`approve` `rejectVote` `rejectAdditional` + 顺序激活/取消/超时 | ~235 / 8 | `V2RuntimeSupport` `NodeInstanceState` `JdbcTemplate` `ObjectMapper` |
+| `ParallelBranchRuntime` | 并行分支注册/通过/驳回、分支计数、网关清理 | ~175 / 5 | `V2RuntimeSupport` `NodeInstanceState` `JdbcTemplate` |
+| `TaskParticipationOps` | 加签前后、撤回加签、改派、抄送记录、超时提醒/升级 | ~290 / 11 | `V2RuntimeSupport` `JdbcTemplate` |
+| `InstanceLifecycleOps` | 轮次/终止/撤回/失效/追回、`prepareStart` | ~240 / 7 | `V2RuntimeSupport` `ProcessInstanceWriter` `JdbcTemplate` `DefinitionVersionRepository` |
+| `ProcessInstanceWriter` | **唯一**写 `t_process_instance` 的入口 | ~45 / 1 | `JdbcTemplate` |
+| `WorkflowRuntimeV2`（门面） | 46 个委托 + 4 个嵌套类型 | ~300 / 50 | 上述 9 个 |
+
+依赖方向（无环）：
+
+```
+WorkflowRuntimeV2（只有委托，不写任何 SQL）
+  ├─ V2RuntimeSupport ── jdbc / versions
+  ├─ NodePolicies（无依赖）
+  ├─ NodeInstanceState ── support, jdbc
+  ├─ ApprovalParticipants ── support, policies, jdbc, json
+  ├─ DecisionCalculator ── support, nodeState, policies, jdbc, json
+  ├─ ParallelBranchRuntime ── support, nodeState, policies, jdbc
+  ├─ TaskParticipationOps ── support, jdbc
+  └─ InstanceLifecycleOps ── support, instanceWriter, jdbc, versions
+        └─ ProcessInstanceWriter ── jdbc
+```
+
+### 7.4 唯一写入方怎么保持
+
+`t_process_instance` 的原始 SQL 写入**只保留一处**：`ProcessInstanceWriter.repointCurrentNode`。
+`InstanceLifecycleOps.recallApproval` 把它原来内联的 `UPDATE t_process_instance SET current_node_id…`
+换成一次调用；`WorkflowRuntimeV2.recallApproval` 只委托给 `InstanceLifecycleOps`，自身不写库。
+三条可核验的约束：
+
+1. 全仓 `grep -rn "UPDATE t_process_instance" backend/src/main/java` 只命中 `ProcessInstanceWriter` 一个文件；
+2. `WorkflowRuntimeV2` 里不再出现任何 `jdbc.update` / `jdbc.query`（只做委托），因此不可能"两处都能写"；
+3. 其余实例状态（status/finishedAt/currentNodeId）仍走既有的 `processInstanceMapper.updateById`，
+   调用方（`NodeLander` / `ProcessStarter` / `V2DecisionSettler`）一行不改——那不是本次搬迁引入的第二写入方，
+   而是原有 MyBatis 路径，动它反而会改变行为。
+
+节点实例表（`t_process_node_instance`）的写入按簇归属明确到 4 个方法：`NodeInstanceState.enterNode`
+（INSERT）、`.completeNode`（单行 UPDATE）、`ParallelBranchRuntime.cancelGatewayWork`（分支范围取消）、
+`InstanceLifecycleOps.{terminate,withdrawToRework,beginRound,recallApproval,invalidateApprovedNodes}`
+（实例范围批量取消）。不新增第五个归属，也不把这些 SQL 复制到门面。
+
+### 7.5 风险与不拆的部分
+
+- **V2 只有集成测试保护**（`PostgresTransactionalIntegrityIntegrationTest`，本地无 Docker）。
+  所以本次纪律是：方法体逐字不动，只允许 ① 改可见性 ② 加协作者前缀 ③ 把 `outbox/completeNode/...`
+  改成 `support.xxx` / `nodeState.xxx`。任何"顺手优化"都不做。
+- **不把 4 个嵌套 record/enum 提为顶层类型**：外部以 `WorkflowRuntimeV2.Assignment` 等全限定名引用
+  （`task`/`mobile` 在边界外），提成顶层必然改签名。因此新协作者会引用这些**类型**，但不会引用
+  `WorkflowRuntimeV2` **实例**——这不构成反向依赖（没有字段、没有构造参数、没有回调）。
+- **不拆 `requireTransaction` 的失败语义**：保持 `IllegalStateException` + 原文案，只把位置移到
+  `V2RuntimeSupport` 并改为包内 static；不加 `@Transactional`，事务边界仍在 `ProcessEngine` 入口。
+- **不合并 `assignments` 与 `previewAssignments`**：一个写参与者表、一个只算不写，
+  合并会让"预览无副作用"这条约束消失（移动端预览直接调）。
+- **不动 `enterNode` 的网关查询**：它按 `(proc_inst_id, node_id, round_no, status='ACTIVE')`
+  + `attempt_no DESC` 取最近一次尝试，与 `attempt_no` 自增语义耦合；换写法就可能在重试轮次里拿错行。
+- **不改 `shouldSkipResubmittedNode` 的异常吞噬**：`catch (Exception ignored) { return false; }`
+  是有意的"差异算不出来就不跳过"，改成抛错会让重提直接失败。
+
+### 7.6 执行记录（2026-10-22，七刀全部落地）
+
+每刀后都跑 `mvn -B -q compile` + `mvn -B test -Dtest='ProcessEngine*'`，**33 例全绿**。
+行数/方法数按 `scripts/health-metrics.mjs` 的 H7 口径。
+
+| 阶段 | 门面行 / 方法 | 本刀产出（行 / 方法） | 职责 |
+| --- | --- | --- | --- |
+| 拆前 | 1236 / 77 | — | — |
+| 第 1 刀 | — | `V2RuntimeSupport`（98 / 8）、`NodePolicies`（80 / 9） | 事务守卫、V2 判定、版本/Schema、outbox、行锁、修订；纯策略解析 |
+| 第 2 刀 | — | `NodeInstanceState`（119 / 4） | 进入/完成/有效性校验/网关定位 |
+| 第 3 刀 | 877 / 71 | `ApprovalParticipants`（331 / 18） | 审批人/抄送/兜底/委派/自动通过/DIFF_CONTINUE |
+| 第 4 刀 | 697 / 63 | `DecisionCalculator`（243 / 11） | 票数、顺序激活、取消、顺序超时 |
+| 第 5 刀 | 592 / 57 | `ParallelBranchRuntime`（165 / 6） | 分支注册/join/跨分支清理 |
+| 第 6 刀 | 433 / 51 | `TaskParticipationOps`（244 / 11） | 抄送记录、超时、加签、改派 |
+| 第 7 刀 | 290 / 50 | `InstanceLifecycleOps`（222 / 7）、`ProcessInstanceWriter`（35 / 1）、`TaskRow`（9 / 0） | 轮次/终止/撤回/失效/追回；唯一主表写入 |
+| 收尾（删字段/导入） | **277 / 50** | — | 门面只剩委托 + 4 个嵌套类型 |
+
+**唯一写入方核验**：`grep -rn "UPDATE t_process_instance" backend/src/main/java` 只命中
+`ProcessInstanceWriter.java:30`（另一处是它自己的 javadoc）；门面里 `grep "jdbc\."` 为 0 命中，
+只剩一行注释。节点实例写入归属仍然是 4 处（`enterNode` / `completeNode` / `cancelGatewayWork` /
+生命周期批量收口），没有新增。
+
+**逐字一致性**：`backend/target/tmp-verify/verify_v2_verbatim.py`（临时，不入库）对 69 个方法体做
+token 比较（去注释、去空白、归一化协作者前缀与 `active`→`isV2`），**69/69 一致**。
+唯一的声明改写是 `recallApproval`：把内联的 `UPDATE t_process_instance …` 换成
+`instanceWriter.repointCurrentNode(...)`；脚本剔除这一条语句后比较，其余 token 完全一致（343 → 327 token）。
+公开签名用同样的脚本比对：拆前拆后 **49 个公开声明完全一致**（无新增、无缺失）。
+
+**验证**：`mvn -B compile` 通过；`ProcessEngine*` 33 例 0 失败；全量（排除 PG 集成 + 契约快照）
+**660 例，0 失败 0 错误，2 跳过**；`node scripts/health-metrics.mjs` 退出码 0，后端 >400 行超标类
+16 → **11**，最大类 811 行 / 67 方法（已不是本类）；`frontend/config/antflow-api.json` diff 为空。
+
+### 7.7 与计划的偏差（都有意为之）
+
+1. **`ApprovalParticipants` 没有注入 `V2RuntimeSupport`**：这一簇只用 `jdbc` / `json` 与静态
+   `V2RuntimeSupport.isV2`，多注入一个字段只会让它看起来"能写 outbox"。计划表里的依赖估算是保守值。
+2. **`TaskRow` 提升为包级 `record`（单独文件）**：它被决策、并行、任务参与、生命周期四簇共用；
+   留在门面里会让四个新类都无法引用，留在某一簇则形成跨簇反向依赖（与 `LockedTask` 同一处理方式）。
+3. **`Participant` / `Counts` / `BranchCounts` 跟着各自的簇走**（`DecisionCalculator`、`ParallelBranchRuntime`）：
+   它们是私有实现细节，不与外部契约耦合，没必要集中。
+4. **门面仍是 50 个方法（>25）**：46 个公开方法必须留在门面上（`task` / `mobile` 在边界外按名调用），
+   这不是"没拆干净"，而是冻结签名的必然结果。行数已从 1236 降到 277，不在 >400 清单里。
+5. **`@Slf4j` 从门面移走**：日志只发生在 `DecisionCalculator.scheduleSequentialTimeout`，
+   门面不再需要 logger（定时清理时也不会留下空 logger 字段）。
+
+### 7.8 剩余风险
+
+- **V2 路径仍只有 PostgreSQL 集成测试覆盖**（本地无 Docker，跑不了）。本次的保护是：69 个方法体
+  token 级一致 + 33 例 V1/树遍历单测 + 全量 660 例 + 编译。合并前必须让 CI 跑
+  `PostgresTransactionalIntegrityIntegrationTest`，重点看四条：`assignments`（参与者写入）、
+  `approve` 的 SEQUENTIAL 分支（新任务 + 超时作业）、`parallelBranchPassed`（ANY 收口）、
+  `recallApproval`（唯一主表写入）。
+- **`recallApproval` 是唯一有语句级改写的路径**：`ProcessInstanceWriter` 的方法体与原 SQL 完全相同，
+  但"调用点从内联变成方法调用"这件事只有集成测试能验证（参数顺序 `procInstId, nodeId, nodeInstanceId`
+  已逐字对齐原语句的 `task.getProcInstId(), task.getNodeId(), task.getNodeInstanceId()`）。
+- **门面委托多一层栈帧**：异常堆栈里会出现 `WorkflowRuntimeV2.xxx` → `XxxOps.xxx` 两行；
+  错误码与文案未变。若有基于堆栈行号的监控，需要知道这一层。
+- `TaskRow` 变成包级类型后，`com.antflow.engine` 包内新增了一个可被同包误用的名字；
+  它只有 `id/assigneeId` 两个字段，误用不会造成状态泄漏。
