@@ -135,3 +135,100 @@ DetailPage（壳：参数 / 能力 / 两个 hook / 加载与错误 / 装配）
 7. **回填语义不变**：`editableValues`、`editableBaselineRef` 与 effect（依赖 `[myPending?.id, initialFormData, editableValues]`）
    整体搬入 `useInstanceDetail`，仍在壳层作用域、只跑一次。
 8. **查询只发一次**：`['instance', id]` 只在 `useInstanceDetail` 出现，子组件全部吃 props（拆分后详情仍是 2 个并行请求）。
+
+---
+
+# 后续：detailPresentation 二次拆分
+
+上一次刻意不动它（601 行，拆分前已贴住 H7 的 `>600` 阈值）。这一轮把它拆到 10 行，同时保证上游一行不动。
+
+## 1. 调用方盘点（`grep -rn detailPresentation` 全仓）
+
+除测试与文档外，共 **10 处** import，全部经由模块路径 `./detailPresentation` / `../proc/detailPresentation`：
+
+| 调用方 | 行 | 具名导入 |
+| --- | --- | --- |
+| `pages/proc/useInstanceDetail.ts` | 6-13 | `buildActivityItems`、`buildProgressStages`、`parseProcessSnapshot`、`type HistoryView`、`type InstancePresentation`、`type PersonView` |
+| `pages/proc/DetailHero.tsx` | 5-12 | `formatDateTime`、`formatDuration`、`instanceStatus`、`nodeLabel`、`type InstancePresentation`、`type ProcessNode` |
+| `pages/proc/ActivityPanel.tsx` | 3 | `formatDateTime`、`type ActivityCategory`、`type ActivityItem` |
+| `pages/proc/AutomationJobsPanel.tsx` | 3 | `formatDateTime`、`nodeLabel`、`type ProcessNode` |
+| `pages/proc/ProcessProgressPanel.tsx` | 1 | `type ProgressStage` |
+| `pages/proc/Sent.tsx` | 5 | `nodeLabel`、`parseProcessSnapshot` |
+| `pages/proc/detailModel.ts` | 2 | `type ProcessNode` |
+| `pages/proc/detailModel.test.ts` | 3 | `type ProcessNode` |
+| `pages/approval/RecordList.tsx` | 6-11 | `formatDuration`、`instanceStatus`、`nodeLabel`、`parseProcessSnapshot` |
+| `pages/proc/detailPresentation.test.ts` | 2-8 | `buildActivityItems`、`buildProgressStages`、`formatDuration`、`instanceStatus`、`type ProcessNode` |
+
+- 除 `pages/approval/RecordList.tsx` 外全部在 `pages/proc` 内（同 zone，不算越界）；`RecordList` 那条已冻结在
+  `frontend/import-boundaries.baseline.json`，**路径不变就不用动基线**。
+- 未被任何外部文件使用的导出：`type NodeInstanceView`、`type ApprovalRecordView`（仅在内部模块与 `useInstanceDetail` 的数据流里出现）。
+- `Detail.tsx` / `DetailModals.tsx` **不直接** import 本模块（只经 `DetailHero` / `useInstanceDetail` 间接消费），清单里列出它们是溯源需要。
+
+## 2. 切分方案与理由
+
+候选三种切法叠加使用，按"变化原因"分层，依赖方向单向（types ← tree ← {formatting, progress, activity}）：
+
+| 层 | 为什么单独切 | 依据 |
+| --- | --- | --- |
+| **types 独立** | 类型被 8 个文件 import（含 `approval/RecordList` 之外的两个 test）；类型变化频率远低于逻辑，独立后 `import type` 不再拉进 500 行实现 | 9 个类型共 101 行，无任何运行时代码 |
+| **树导航独立**（`detailTree`） | `parseProcessSnapshot` / `nodeLabel` / `findNode` / `findPath` / `flowContext` / `nodeName` / `nodeTypeLabel` 被进度与轨迹**双双复用**；继续留在主文件会让两个新模块互相 import 形成环 | 拆前 `buildProgressStages` 与 `buildActivityItems` 共享 6 个私有 helper |
+| **状态与时间格式化独立** | 3 个纯函数只依赖 `Date`，被 Hero / ActivityPanel / AutomationJobs / RecordList / Sent 五处直接消费，与流程树无关 | 43 行，零 import |
+| **进度与轨迹各自独立** | 二者是两条独立的渲染数据源（左侧竖轨 vs 右侧时间线），改动互不相干；拆开后可各自单测 | 进度 122 行、轨迹 240 行 |
+
+**决定：保留 `detailPresentation.ts` 作为 re-export 入口，上游零改动。**
+
+理由：
+
+1. 10 处调用方分布在 `pages/proc` 与 `pages/approval` 两个 zone。改路径要么动 10 个文件、要么触发 `check:boundaries` 基线条目失效
+   （`no-cross-page-import | pages/approval/RecordList.tsx -> pages/proc/detailPresentation` 是按**路径字符串**匹配的）。
+2. 本轮的验收标准是"行为不变"，barrel 把所有 diff 收敛在 `pages/proc` 一个目录内，`RecordList.tsx`、`DetailHero.tsx` 等完全不受影响。
+3. barrel 用**显式具名 re-export**而不是 `export *`：`detailTree` 里的 `nodeName` / `findNode` / `findPath` / `flowContext` /
+   `BUSINESS_NODE_TYPES` 属于拆出来的内部件，不该顺带升级成公开 API。显式列表保证对外仍是 **7 个函数 + 9 个类型**，与拆前逐一对应。
+
+## 3. 新文件清单
+
+| 路径 | 职责 | 行数（实测） | 导出 |
+| --- | --- | --- | --- |
+| `pages/proc/detailTypes.ts` | 流程快照树 + 后端视图对象的数据契约 | 104 | `ProcessNode`、`NodeInstanceView`、`ApprovalRecordView`、`HistoryView`、`PersonView`、`ProgressStage`、`ActivityCategory`、`ActivityItem`、`InstancePresentation`（均 `type`） |
+| `pages/proc/detailTree.ts` | 快照解析、树遍历、节点命名、分支上下文文案 | 78 | `parseProcessSnapshot`、`nodeLabel`、`findNode`、`findPath`、`flowContext`、`nodeName`、`nodeTypeLabel`、`BUSINESS_NODE_TYPES` |
+| `pages/proc/detailFormatting.ts` | 实例状态文案 + 时间/时长格式化 | 46 | `instanceStatus`、`formatDateTime`、`formatDuration` |
+| `pages/proc/detailProgress.ts` | 进度轨 `ProgressStage[]` 构建（含网关分支摘要） | 133 | `buildProgressStages` |
+| `pages/proc/detailActivity.ts` | 轨迹 `ActivityItem[]` 构建（抄送合并、历史去重、文案映射） | 266 | `buildActivityItems` |
+| `pages/proc/detailPresentation.ts` | **兼容入口**：显式 re-export 上述契约 | 25 | 与拆前完全相同的 7 函数 + 9 类型 |
+
+行数合计 652，全部 ≤400；最大的 `detailActivity.ts` 266 行。`detailTree.ts` 里的 8 个导出中只有
+`parseProcessSnapshot` / `nodeLabel` 被 barrel 转出，其余 6 个是拆出来的内部件（原先就是文件内私有函数，
+只是加了 `export` 以便被进度/轨迹两个模块共用）。
+
+## 4. 迁移策略
+
+1. **先搬类型、再搬无依赖的格式化、最后搬两条依赖树的构建器**，每步独立跑 `tsc --noEmit`。
+2. 每个新文件都是**整段剪切**：函数体、常量字面量、中文文案逐字复制，不重排、不改名、不合并分支。
+3. 搬完后 `detailPresentation.ts` 只剩 barrel；测试文件 `detailPresentation.test.ts` 的 import 路径与断言**一字未改**——
+   barrel 让"改 import 到新路径"这件事都不需要。
+4. 回滚成本：任一步 tsc 红，直接 `git checkout -- pages/proc/` 即可回到拆前（本轮不做提交）。
+
+## 5. 实测结果
+
+| 项 | 命令 / 判据 | 结果 |
+| --- | --- | --- |
+| 类型检查 | `cd frontend && CODEBUDDY_SAFE_DELETE_ENABLED=0 npx tsc --noEmit` | 退出码 0（每抽一层各跑一次，5 次全绿） |
+| 单测 | `cd frontend && npm test -- proc` | 8 文件 / 49 用例通过，与拆前同数；`detailPresentation.test.ts` 的 import 与断言一字未改 |
+| 导入边界 | `cd frontend && npm run check:boundaries` | 存量 8 条，无新增 |
+| Lint | `npx biome lint src/pages/proc/detail*.ts` | 6 文件无告警 |
+| 契约 | 用 `tsc --emitDeclarationOnly` 对比拆前 / 拆后 `detailPresentation.d.ts` | 拆前 131 行声明**逐字**出现在新模块中（0 行缺失）；barrel 的显式导出 = 拆前 7 函数 + 9 类型 |
+| 源码 | 拆前 600 行源码与本轮 5 个新文件做逐行集合比对 | 561 非空行中 555 行逐字命中；差异 6 行仅是把原私有函数改成 `export`（`BUSINESS_NODE_TYPES` + 5 个 helper） |
+| 生成物 | `git diff -- frontend/config/antflow-api.json` | 空 |
+| H7 | `node scripts/health-metrics.mjs` | 退出码 0；两端超标文件 **6 → 6**（见下方说明），`maxFileLines` 848 不变 |
+
+### H7 为什么还是 6
+
+`health-metrics.mjs` 的计数口径是 `text.match(/\n/g).length`，且判据是**严格大于** 600。
+拆前 `detailPresentation.ts` 恰好是 600 个换行 —— 也就是说它原本就**没有**被计入"超标文件"，
+当前 6 个是 `ApprovalRecords.tsx`(848)、`FileUploadField.tsx`(845)、`org/Contacts.tsx`(750)、
+`ConfirmSummaryList.tsx`(739)、`ChecklistField.tsx`(656)、`settings/Wecom.tsx`(629)。
+
+所以本轮把 `detailPresentation.ts` 从 600 降到 25 行，**并不会**让 `frontendOverLines` 从 6 变 5 ——
+该项在拆分前后都是 6，无回归。要让这个数字真正下降，必须动 `frontend/src/pages/org/Contacts.tsx`
+或 `frontend/src/pages/settings/Wecom.tsx`（均不在本次允许范围内），或者 mobile 端的三个大文件。
+
