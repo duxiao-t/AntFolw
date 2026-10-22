@@ -822,3 +822,20 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
 - **影响：** 转码中的条目允许本地移除：服务端对 PROCESSING 行按设计拒绝删除（`BAD_FILE_STATE`），那种残留对象要
   等服务端支持"吊销"才清得掉（客户端留了 `shortcut:` 注释）。崩溃循环的容器现在表现为 `Restarting` 而不是
   `Exited`，排障要看 `docker compose ps` 而不是"有没有退出"。
+
+## D-20261020-class-size-gate-before-split
+
+- **状态：** accepted
+- **背景：** `class-decomposition-plan-2026-10-17.md` 已把类体积债务分析清楚（最大 1403 行 / 76 方法，16 个类超 400 行），
+  但三天内零落地：体检脚本、PR 模板、ArchUnit 体积规则、9 个目标类均未创建。复盘发现不是执行力问题，而是次序问题——
+  该方案把门禁放在第三期（拆完再上锁），且第 0 步要求先写一个新的体检脚本，把最容易的事做成了前置门槛。
+  另外该方案的"方法数"口径把字段声明也计入（`^\s{4}(public|private|protected)\s`），实测虚高 8%–33%，
+  据此排序会排错优先级（`ProcessEngine` 实为 48 个方法，被记为 63）。
+- **决策：** ①**门禁先于拆分**：在 `scripts/health-metrics.mjs` 增 H7（后端 >400 行类数、>25 方法类数、最大类行数/方法数、
+  两端 >600 行文件数），复用既有"冻结基线、只禁止变差"机制，不新建脚本。②方法数口径统一为必须含括号的
+  `^\s{4}(?:public|private|protected)\s[^=;]*\(`，排除字段声明；H7 与体检命令共用同一正则，避免两份数字各说各话。
+  ③拆分单元从"一个类"降为"一个方法簇"，单次改动 ≤300 行，一次提交只搬一簇。④门禁只管新增与回弹，
+  存量 16/19/8 个超标项冻结，不要求一次性清零。
+- **影响：** H7 任一项变大即 CI `metrics` job 失败；有意收紧或接受新增时须 `--write` 重建基线并在 PR 说明原因。
+  架构分层本身不做调整（`ArchitectureBoundaryTest` 守的三层鉴权与依赖方向是健康的），本次只治理类内聚。
+  执行次序与刀口见 `docs/class-decomposition-execution-2026-10-20.md`。

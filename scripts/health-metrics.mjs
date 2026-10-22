@@ -195,6 +195,110 @@ function h6() {
   };
 }
 
+// ── H7 类体积：生产代码里的巨类/巨文件，只许下降 ────────────────────────────────
+// 为什么单独立一条：H1–H6 管的是"概念漂移"（字段漏实现、DTO 副本、双运行时），
+// 管不住"一个类长到没人读得动"。体积债务不会让任何测试变红，所以必须单独计数——
+// 否则它只会在接手者离职那天才被发现。
+//
+// 阈值取自 docs/class-decomposition-plan-2026-10-17.md §2.2（后端 400 行 / 25 方法，前端 600 行）。
+// 只统计**生产代码**：生成物（services/antflow）、mock 数据、测试文件各有自己的门禁，
+// 混进来会让基线被 mock 数据淹没（map-grid.ts 有 4 万行），从此没人再看这条指标。
+// 方法声明的识别规则。两个坑都已踩过：
+//   ① 用 `^\s{4}(public|private|protected)\s` 会把**字段**也算成方法（`private final X x;` 同样匹配），
+//      实测让 FormDefinitionService 虚高 12%、WecomService 虚高 32%。
+//   ② 只认 public/private/protected 会**漏掉包内可见方法**（`List<Foo> bar(...)`，无修饰符）。
+//      这不是小数：WecomService 有 14 个包内 static 方法，实测 63 → 77。更糟的是它可被利用——
+//      把方法改成包内可见就能让门禁"看起来变好"。
+// 现在的规则：4 空格缩进 + 排除控制流关键字 + 可选修饰符/泛型 + 返回类型 + 方法名 + `(`。
+// 不要求同一行出现 `)` 与 `{`，因为长参数列表会换行。
+const JAVA_METHOD_DECL =
+  /^\s{4}(?!(?:if|for|while|switch|catch|return|throw|new|else|do|try)\b)(?:(?:public|private|protected|static|final|abstract|default|synchronized)\s+)*(?:<[^>]+>\s+)?[\w.$]+(?:<[^;()]*>)?(?:\[\])*\s+[a-zA-Z_$][\w$]*\s*\(/;
+const lineCount = (text) => (text.match(/\n/g) ?? []).length;
+
+/** 前端/移动端是否属于"该被治理的生产源码"：排除测试、mock、生成物。 */
+function isTsSource(file) {
+  const path = rel(file);
+  if (/\.(test|spec)\.(ts|tsx)$/.test(path)) return false;
+  if (path.includes('/mock/') || path.startsWith('frontend/src/services/antflow/')) return false;
+  return true;
+}
+
+// 下限取实测的约 2/3（java 222 / ts 564），正常增删不会误报。
+const H7_MIN_EXPECTED = { java: 150, ts: 300 };
+
+/**
+ * 扫描规模守卫：少于下限说明"没扫到"，不是"已经拆完"。
+ *
+ * <p>抽成纯函数是为了能在 {@code --self-test} 里验证——这条守卫守的正是"指标静默失效"，
+ * 而静默失效本身没法靠"跑一遍正常路径"发现。抛错而不是返回布尔，是因为调用方只有 h7()，
+ * 让它 fail-closed 比让每个调用点都记得判返回值更可靠。
+ */
+function assertScanComplete(javaCount, tsCount) {
+  if (javaCount < H7_MIN_EXPECTED.java || tsCount < H7_MIN_EXPECTED.ts) {
+    throw new Error(
+      `H7 扫描不完整：java ${javaCount}（期望 ≥${H7_MIN_EXPECTED.java}）、` +
+        `ts ${tsCount}（期望 ≥${H7_MIN_EXPECTED.ts}）。` +
+        '通常是目录改名或 sparse checkout 导致的——不要用 --write 绕过，先修路径。',
+    );
+  }
+}
+
+function h7() {
+  const javaFiles = walk(p('backend', 'src', 'main', 'java'), (n) => n.endsWith('.java'));
+  const tsFiles = walk(p('frontend', 'src'), (n) => /\.tsx?$/.test(n))
+    .concat(walk(p('mobile', 'src'), (n) => /\.tsx?$/.test(n)))
+    .filter(isTsSource);
+  // fail-closed：walk() 在目录不存在时**返回空数组**，于是所有计数变成 0 ——
+  // 看起来"债务全部清零"，门禁静默通过。这是本指标唯一的失效方式（目录改名、sparse checkout、
+  // 有人把 src 挪走），且失效时表现为"变好"，不会有人察觉。
+  assertScanComplete(javaFiles.length, tsFiles.length);
+
+  const classes = javaFiles.map((file) => {
+    const text = readFileSync(file, 'utf8');
+    return {
+      path: rel(file),
+      lines: lineCount(text),
+      // 方法数与 docs/class-decomposition-plan §1 的体检命令保持同一口径（4 空格缩进 + 可见性修饰符），
+      // 否则方案里的"85 个方法"和门禁里的数字对不上，两边会各说各话。
+      methods: text.split('\n').filter((line) => JAVA_METHOD_DECL.test(line)).length,
+    };
+  });
+  const files = tsFiles.map((file) => ({ path: rel(file), lines: lineCount(readFileSync(file, 'utf8')) }));
+
+  const backendOverLines = classes.filter((c) => c.lines > 400);
+  const backendOverMethods = classes.filter((c) => c.methods > 25);
+  const frontendOverLines = files.filter((f) => f.lines > 600);
+  const biggest = (list, key) => list.reduce((max, item) => Math.max(max, item[key]), 0);
+
+  return {
+    backendClasses: classes.length,
+    backendOverLines: backendOverLines.length,
+    backendOverMethods: backendOverMethods.length,
+    // 最大值单独记：只数"超标个数"会掩盖"某一个类继续膨胀"（10 个 401 行看着和 9 个 400 行差不多，
+    // 但 1403 → 2000 才是真正失控）。两个口径都要卡。
+    maxClassLines: biggest(classes, 'lines'),
+    maxClassMethods: biggest(classes, 'methods'),
+    frontendOverLines: frontendOverLines.length,
+    maxFileLines: biggest(files, 'lines'),
+  };
+}
+
+/** H7 的"待拆清单"，只打印不入基线：文件名会重命名，存进基线只会让比较抖动。 */
+function h7Offenders() {
+  const classes = walk(p('backend', 'src', 'main', 'java'), (n) => n.endsWith('.java')).map((file) => {
+    const text = readFileSync(file, 'utf8');
+    return { path: rel(file), lines: lineCount(text), methods: text.split('\n').filter((l) => JAVA_METHOD_DECL.test(l)).length };
+  });
+  const files = walk(p('frontend', 'src'), (n) => /\.tsx?$/.test(n))
+    .concat(walk(p('mobile', 'src'), (n) => /\.tsx?$/.test(n)))
+    .filter(isTsSource)
+    .map((file) => ({ path: rel(file), lines: lineCount(readFileSync(file, 'utf8')) }));
+  return [
+    ...classes.filter((c) => c.lines > 400 || c.methods > 25).map((c) => ({ ...c, kind: 'java' })),
+    ...files.filter((f) => f.lines > 600).map((f) => ({ ...f, methods: 0, kind: 'ts' })),
+  ].sort((a, b) => b.lines - a.lines);
+}
+
 // ── 比较：每条自己定义"什么是变差"，不做通用引擎 ───────────────────────────────
 function compare(base, now) {
   const worse = [];
@@ -229,10 +333,15 @@ function compare(base, now) {
   }
   if (now.H6.entryBudgetKiB > base.H6.entryBudgetKiB) worse.push('H6 入口预算被放宽');
   if (now.H6.lazyBudgetKiB > base.H6.lazyBudgetKiB) worse.push('H6 异步块预算被放宽');
+  // H7 六个口径全部"只降不升"。注意 backendClasses 总数**不比**：新增类是正常开发，
+  // 比总数等于禁止新增类；要卡的是"超标个数"和"最大值"。
+  for (const key of ['backendOverLines', 'backendOverMethods', 'maxClassLines', 'maxClassMethods', 'frontendOverLines', 'maxFileLines']) {
+    if (now.H7[key] > base.H7[key]) worse.push(`H7 ${key} ${base.H7[key]} → ${now.H7[key]}`);
+  }
   return worse;
 }
 
-const current = { H1: h1(), H2: h2(), H3: h3(), H4: h4(), H5: h5(), H6: h6() };
+const current = { H1: h1(), H2: h2(), H3: h3(), H4: h4(), H5: h5(), H6: h6(), H7: h7() };
 
 // 方向自检：这两条守的正是"比较写反了"这个已经犯过的错。用 `__probe__` 这种不存在的渠道名，
 // 免得真渠道恰好已接入时断言变成空跑。
@@ -299,6 +408,48 @@ if (process.argv.includes('--self-test')) {
     }).length === 0,
     'H3 派生别名不判变差',
   );
+  // H7 方向：最大值变大必须报；新增类（总数涨、超标数不变）不许报——否则等于禁止新增类。
+  assert(
+    compare(current, { ...current, H7: { ...current.H7, maxClassLines: current.H7.maxClassLines + 1 } }).length > 0,
+    'H7 最大类行数变大必须报变差',
+  );
+  assert(
+    compare(current, { ...current, H7: { ...current.H7, backendClasses: current.H7.backendClasses + 10 } }).length === 0,
+    'H7 新增类不判变差（只卡超标数与最大值）',
+  );
+  assert(
+    compare(current, { ...current, H7: { ...current.H7, backendOverLines: current.H7.backendOverLines - 1 } }).length === 0,
+    'H7 拆小之后不判变差（变好不拦）',
+  );
+  // 扫描守卫：目录缺失时 walk 返回空，计数全 0 会被读成"债务清零"。必须抛错而不是静默通过。
+  assert(
+    (() => {
+      try {
+        assertScanComplete(0, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+    'H7 扫描为空必须抛错（防止路径失配时静默变好）',
+  );
+  assert(
+    (() => {
+      assertScanComplete(current.H7.backendClasses, 564);
+      return true;
+    })(),
+    'H7 扫描正常时守卫不误报',
+  );
+  // 方法计数口径的两条回归保护：漏数包内可见方法会让门禁可被"改成包内可见"绕过；
+  // 把 return/if 语句算成方法会让基线虚高。两者都不该再出现。
+  assert(
+    JAVA_METHOD_DECL.test('    List<Foo> bar(Long id) {'),
+    'H7 方法计数必须包含包内可见方法（无修饰符）',
+  );
+  assert(
+    !JAVA_METHOD_DECL.test('    return foo(1);') && !JAVA_METHOD_DECL.test('    if (ready) {'),
+    'H7 方法计数不能把 return / if 语句算成方法',
+  );
   process.exit(0);
 }
 
@@ -338,3 +489,18 @@ console.log(
     `H4 ${current.H4.writableRuntimes} 套运行时、H5 Java ${current.H5.javaGates}/TS ${current.H5.tsGates} 类门禁、` +
     `H6 预算 ${current.H6.entryBudgetKiB}/${current.H6.lazyBudgetKiB} KiB${h4note}`,
 );
+// H7 把"该拆的类"直接列出来：指标只会告诉你有多少，接手者需要知道**是哪几个**。
+// 只打印前 10：超标的类多到要看完 30 个时，问题已经不是"清单不够长"。
+console.log(
+  `H7 类体积：后端超标类 ${current.H7.backendOverLines} 个（>400 行）/ ${current.H7.backendOverMethods} 个（>25 方法）、` +
+    `两端超标文件 ${current.H7.frontendOverLines} 个（>600 行）；` +
+    `最大类 ${current.H7.maxClassLines} 行 / ${current.H7.maxClassMethods} 方法`,
+);
+const offenders = h7Offenders();
+if (offenders.length) {
+  console.log(`\n待拆清单（前 10 / 共 ${offenders.length}）：`);
+  for (const item of offenders.slice(0, 10)) {
+    const size = item.kind === 'java' ? `${item.lines} 行 / ${item.methods} 方法` : `${item.lines} 行`;
+    console.log(`  - ${size}  ${item.path}`);
+  }
+}

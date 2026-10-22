@@ -58,5 +58,14 @@
     "entryBudgetKiB": 160,
     "lazyBudgetKiB": 180,
     "measured": null
+  },
+  "H7": {
+    "backendClasses": 222,
+    "backendOverLines": 16,
+    "backendOverMethods": 19,
+    "maxClassLines": 1403,
+    "maxClassMethods": 77,
+    "frontendOverLines": 8,
+    "maxFileLines": 1250
   }
 }
