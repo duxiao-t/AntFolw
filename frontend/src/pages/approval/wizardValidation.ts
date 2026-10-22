@@ -74,6 +74,39 @@ export function collectOptionErrors(nodes: SchemaNode[]) {
   return errors;
 }
 
+/**
+ * 与后端 `FormSchemaValidator` / `FormMatrixRules` 对齐的结构校验。
+ *
+ * 为什么要有：发布页原先只检查「有没有组件」，矩阵缺 rows/columns 时 UI 仍显示全绿，
+ * 但点发布会拿到 422 `BAD_SCHEMA` —— 用户看到的结论和实际能不能发是两套口径。
+ * 这里把后端会拒绝的硬性结构提前暴露，文案与后端错误信息保持同义。
+ */
+export function collectStructureErrors(nodes: SchemaNode[]) {
+  const errors: string[] = [];
+  nodes.forEach((node) => {
+    const label = getNodeLabel(node);
+    if (node.type === 'matrix_fill') {
+      const props = node.props ?? {};
+      if (!Array.isArray(props.rows) || props.rows.length === 0) errors.push(`${label} 缺少行`);
+      if (!Array.isArray(props.columns) || props.columns.length === 0) errors.push(`${label} 缺少列`);
+      const cellType = String(props.cellType ?? '');
+      if (cellType !== 'textarea' && cellType !== 'number') {
+        errors.push(`${label} 的单元格类型需为文本或数字`);
+      } else if (cellType === 'textarea' && !(Number(props.maxLength) >= 1)) {
+        errors.push(`${label} 缺少最大长度`);
+      } else if (cellType === 'number') {
+        const precision = Number(props.precision);
+        if (!Number.isInteger(precision) || precision < 0) errors.push(`${label} 缺少小数位`);
+      }
+    }
+    if (node.type === 'table_list' && (!Array.isArray(node.children) || node.children.length === 0)) {
+      errors.push(`${label} 缺少明细列`);
+    }
+    if (node.children) errors.push(...collectStructureErrors(node.children));
+  });
+  return errors;
+}
+
 export function collectUploadWarnings(nodes: SchemaNode[]) {
   const warnings: string[] = [];
   nodes.forEach((node) => {
@@ -108,6 +141,7 @@ type PublishCheckInput = {
   definition?: AntFlowAPI.FormDefinition;
   schemaLength: number;
   optionErrors: string[];
+  structureErrors: string[];
   uploadWarnings: string[];
   workflowEnabled: boolean;
   processDefinitionId?: number;
@@ -120,6 +154,7 @@ export function buildPublishChecks({
   definition,
   schemaLength,
   optionErrors,
+  structureErrors,
   uploadWarnings,
   workflowEnabled,
   processDefinitionId,
@@ -147,6 +182,15 @@ export function buildPublishChecks({
         schemaLength > 0
           ? `当前共 ${schemaLength} 个组件`
           : '请返回表单制作添加组件',
+    },
+    {
+      key: 'structure',
+      status: structureErrors.length === 0 ? 'success' : 'error',
+      title: '组件结构完整',
+      description:
+        structureErrors.length === 0
+          ? '矩阵与明细表的行列配置齐全'
+          : structureErrors.slice(0, 3).join('、'),
     },
     {
       key: 'options',

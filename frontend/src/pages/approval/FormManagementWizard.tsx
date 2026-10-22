@@ -22,6 +22,7 @@ import type { ProcessDefinition } from './wizardTypes';
 import {
   buildPublishChecks,
   collectOptionErrors,
+  collectStructureErrors,
   collectUploadWarnings,
   enrichSchemaLabels,
   getSteps,
@@ -159,12 +160,14 @@ export default function FormManagementWizard() {
     [processFormFields, processTree],
   );
   const optionErrors = useMemo(() => collectOptionErrors(schema), [schema]);
+  const structureErrors = useMemo(() => collectStructureErrors(schema), [schema]);
   const uploadWarnings = useMemo(() => collectUploadWarnings(schema), [schema]);
   const publishChecks = useMemo(
     () => buildPublishChecks({
       definition,
       schemaLength: schema.length,
       optionErrors,
+      structureErrors,
       uploadWarnings,
       workflowEnabled: !!workflowEnabled,
       processDefinitionId: processDefinition?.id,
@@ -178,6 +181,7 @@ export default function FormManagementWizard() {
       processDefinition?.id,
       processIssues,
       schema.length,
+      structureErrors,
       uploadWarnings,
       workflowEnabled,
     ],
