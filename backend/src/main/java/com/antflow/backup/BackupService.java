@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -50,6 +51,15 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class BackupService {
+
+    /**
+     * 备份文件名的唯一判定口径：全量 {@code antflow-<ts>.afbackup}、仅库 {@code antflow-db-<ts>.afbackup}。
+     *
+     * <p>这个正则被「列目录」「下载/删除的路径校验」两处共用，**必须只有一份**：
+     * 早先两处各写一遍 {@code antflow-[0-9-]+}，加 {@code -db} 前缀时只改了一处（其实一处都没改），
+     * 结果是仅库备份能生成却永远列不出来、也无法下载。抽成常量后新格式只需改这里。
+     */
+    static final Pattern BACKUP_NAME = Pattern.compile("antflow(-db)?-[0-9-]+\\.afbackup");
     private final JdbcTemplate jdbc;
     private final AuthorizationService authorization;
     private final AuditService audit;
@@ -266,7 +276,7 @@ public class BackupService {
             if (!Files.isDirectory(properties.getDirectory())) return List.of();
             try (var stream = Files.list(properties.getDirectory())) {
                 return stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().matches("antflow-[0-9-]+\\.afbackup"))
+                    .filter(path -> BACKUP_NAME.matcher(path.getFileName().toString()).matches())
                     .map(this::describe).sorted(Comparator.comparing(BackupFile::createdAt).reversed()).toList();
             }
         } catch (Exception error) { return List.of(); }
@@ -286,7 +296,7 @@ public class BackupService {
     }
 
     private Path file(String name) {
-        if (name == null || !name.matches("antflow-[0-9-]+\\.afbackup")) {
+        if (name == null || !BACKUP_NAME.matcher(name).matches()) {
             throw new BizException("BACKUP_NOT_FOUND", "备份文件不存在");
         }
         Path path = properties.getDirectory().resolve(name).normalize();
