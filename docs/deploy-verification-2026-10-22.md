@@ -128,3 +128,95 @@ bootstrap 创建的 admin/bob 未分配部门，新环境首次使用会多一�
   企业信息、S3 自检、流程详情、审批同意）全部通过**。
 - **发现 1 个真实缺陷**（备份列表正则漏 `-db`，1 行可修）与 **1 个前后端校验不一致**（发布检查不覆盖矩阵必填）。
 - **未覆盖集中在"需要特定数据状态"的路径**（驳回/撤回/幂等/媒体时长/备份解密），建议后续用集成测试或手工用例补齐。
+
+---
+
+## 七、第二轮：问题修复与复验（2026-10-22 下午）
+
+### 修复 1：备份列表正则（提交 `9a726c6`）
+
+`BackupService` 里 `files()`（列目录）与 `file()`（下载/删除的路径校验）**各写死了一份**
+`antflow-[0-9-]+\.afbackup`，`bc72eeb` 加 `-db` 前缀后两处都没跟着改。抽成唯一常量：
+
+```java
+static final Pattern BACKUP_NAME = Pattern.compile("antflow(-db)?-[0-9-]+\.afbackup");
+```
+
+两处共用；`cleanup()` 走 `files()`，过期清理也随之覆盖 `-db` 文件。
+新增 `BackupFileNameTest` 锁口径（正例 + 未知前缀/缺时间戳/扩展名不符/路径穿越/非本服务产物）。
+
+**复验**：
+
+| ID | 步骤 | 预期 | 实际 | 结论 |
+| --- | --- | --- | --- | --- |
+| W1-01 | `GET /api/system/backups` | 至少 1 条 `-db` | 全量 3 条 + **仅库 2 条**（334KB / 330KB） | ✅ |
+| W1-02 | `GET /api/system/backups/{name}/download` | 200 且非空 | **HTTP 200，334 KB** | ✅ |
+
+体积对比印证 `bc72eeb` 的目标：全量 1,295,571 KB → 仅库 **334 KB**（约 1/4000）。
+
+### 修复 2：发布检查补结构校验（提交 `dbc18a4`）
+
+新增 `collectStructureErrors(schema)`，覆盖矩阵的 `rows/columns/cellType/maxLength/precision`
+与明细表的 `children`，递归含子节点；`buildPublishChecks` 增加 `structure` 检查项（插在 `schema` 之后）。
+
+**复验**：
+
+| ID | 步骤 | 预期 | 实际 | 结论 |
+| --- | --- | --- | --- | --- |
+| W2-01 | 构造空矩阵 + 空明细表，打开发布页 | 出现「组件结构完整」且报「缺少行」 | 两项均命中（「缺少明细列」被 `slice(0,3)` 截断，属预期） | ✅ |
+| W2-02 | 换成合格矩阵（rows/columns/number/precision） | 不再报错 | 无「缺少行」，显示「行列配置齐全」 | ✅ |
+
+### 撤回 / 驳回 / 幂等（未改代码，仅验证）
+
+| ID | 动作 | 预期 | 实际 | 结论 |
+| --- | --- | --- | --- | --- |
+| W3-01 | 同一任务连续 `approve` 两次 | 一次成功、二次被拒 | 第一次 **200**，第二次 **422 `TASK_NOT_PENDING`** | ✅ |
+| W3-02 | 对待办 `reject`（带意见） | 2xx | **200** | ✅ |
+| W3-03 | 对 admin 发起的 RUNNING 实例 `withdraw` | 2xx | **200**（该账号 RUNNING 实例共 20 个） | ✅ |
+
+### 备份分块解密（`0bd3dca`）
+
+用生产同款 `BackupArchiveCipher.decrypt` 解密 `-db` 备份：
+
+| 项 | 结果 |
+| --- | --- |
+| 文件头 | **`AFBK2`**（分块 AES-GCM） |
+| 加密体积 | 334 KB |
+| 解密后 | 341,831 字节（zip） |
+| 内容 | `database.dump`（533,394 B）+ `manifest.json`（203 B） |
+| manifest | `{"version":1,...,"mobileObjects":0,"auditObjects":0,"entries":[{"path":"database.dump","sha256":"ad59a252…"}]}` |
+
+`mobileObjects:0 / auditObjects:0` 证明 `databaseOnly` 确实跳过了两个桶；`sha256` 可用于完整性校验。
+**旧格式兼容（AFBK1）未验证**——现有备份都是 AFBK2，需要一份历史 AFBK1 归档才能覆盖。
+
+### 移动端（5 个文件改动）
+
+| ID | 位置 | 预期 | 实际 | 结论 |
+| --- | --- | --- | --- | --- |
+| W4-01 | `/mobile/` | SPA 正常渲染 | `/mobile/workbench`，待办 14 / 最近流程 4 / 草稿 1 | ✅ |
+| W4-02 | `/mobile/profile/password` | 改密表单 | 三个 password 框（原密码 / 8-64 位新密码 / 确认），含「修改成功后其它设备需重新登录」提示 | ✅ |
+| W4-03 | `/mobile/profile/security` | 有「修改密码」入口 | 「账号安全 → 修改密码」存在 | ✅ |
+
+### 部署链路的一个环境问题
+
+`bash deploy.sh --all` 在本机失败：
+
+```
+fatal: unable to access 'https://github.com/duxiao-t/AntFolw.git/':
+Failed to connect to github.com:443 over proxy 127.0.0.1 after 2064 ms
+```
+
+`deploy.sh`、`scripts/build.sh`、`backend/build.sh` 里都 grep 不到 `git fetch` / `remote`，
+但脚本一启动就报此错，且三条构建命令单独执行都成功。**触发点未定位**（疑似 git 的隐式 fetch
+或本机 git 配置），本轮改为执行等价步骤完成部署：
+
+```bash
+bash scripts/build.sh frontend --no-budget
+bash scripts/build.sh mobile --no-budget
+bash backend/build.sh -Dmaven.test.skip=true package
+docker compose --env-file .env.docker.local build backend web
+docker compose --env-file .env.docker.local up -d backend web
+```
+
+部署后 backend 立即 healthy、`{"status":"UP"}`。**建议**：给 `deploy.sh` 加一个
+`ANTFLOW_SKIP_REMOTE_CHECK=1` 开关，或在无网环境显式跳过需要远程的步骤。
