@@ -1,0 +1,100 @@
+import { createStyles } from 'antd-style';
+
+/** 步骤一卡片与其两个权限 section 共用，只放布局，不放业务。 */
+export const useWizardStyles = createStyles(({ token }) => ({
+  propertiesCard: {
+    overflow: 'hidden',
+    borderColor: token.colorBorderSecondary,
+    '& .ant-card-body': { padding: 0 },
+  },
+  propertiesForm: {
+    // 不设宽度上限：窗口宽时内容会缩在中间、两侧留大片空白。跟随窗口铺满。
+    width: '100%',
+  },
+  propertiesSection: {
+    padding: '26px 30px',
+    '@media (max-width: 960px)': { padding: '22px 20px' },
+  },
+  dividedSection: { borderTop: `1px solid ${token.colorSplit}` },
+  sectionHeader: {
+    display: 'grid',
+    gridTemplateColumns: '3px minmax(0, 1fr)',
+    gap: 12,
+    marginBottom: 20,
+  },
+  sectionMarker: {
+    width: 3,
+    minHeight: 38,
+    borderRadius: 2,
+    background: token.colorPrimary,
+  },
+  sectionTitle: {
+    margin: 0,
+    color: token.colorText,
+    fontSize: 16,
+    lineHeight: 1.35,
+    fontWeight: 650,
+  },
+  sectionDescription: {
+    display: 'block',
+    marginTop: 4,
+    color: token.colorTextSecondary,
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+  fieldGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '18px 24px',
+    '& .ant-form-item': { minWidth: 0, marginBottom: 0 },
+    '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  },
+  settingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 24,
+    marginTop: 20,
+    padding: '15px 16px',
+    border: `1px solid ${token.colorBorderSecondary}`,
+    borderRadius: token.borderRadiusLG,
+    background: token.colorFillAlter,
+    '@media (max-width: 680px)': { alignItems: 'flex-start', flexDirection: 'column', gap: 12 },
+  },
+  settingCopy: { minWidth: 0 },
+  settingLabel: { display: 'block', color: token.colorText, fontSize: 14, fontWeight: 600 },
+  settingHint: { display: 'block', marginTop: 3, color: token.colorTextSecondary, fontSize: 12 },
+  settingControl: {
+    display: 'flex',
+    flex: '0 0 auto',
+    alignItems: 'center',
+    gap: 10,
+    color: token.colorTextSecondary,
+    fontSize: 12,
+  },
+  grantGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '18px 24px',
+    marginTop: 20,
+    '& .ant-form-item': { minWidth: 0, marginBottom: 0 },
+    '@media (max-width: 960px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  },
+  fullWidth: { gridColumn: '1 / -1' },
+  saveRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
+    '@media (max-width: 680px)': { flexWrap: 'wrap', gap: 6 },
+  },
+  unsavedHint: { color: token.colorWarning, fontSize: 12 },
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+    padding: '20px 30px 26px',
+    borderTop: `1px solid ${token.colorSplit}`,
+    '@media (max-width: 960px)': { padding: '18px 20px 22px' },
+  },
+}));
