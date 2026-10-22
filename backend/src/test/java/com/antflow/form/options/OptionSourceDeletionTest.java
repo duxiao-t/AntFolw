@@ -21,8 +21,11 @@ import static org.mockito.Mockito.when;
 class OptionSourceDeletionTest {
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
     private final AuditService audit = mock(AuditService.class);
+    // 引用判定已搬到 OptionBindingGuard（它只读表单侧的表），这里把同一个 jdbc mock 传进去：
+    // 原来打在 OptionSourceService 上的 jsonb_path_exists 桩，现在由 guard 消费。
+    private final OptionBindingGuard bindingGuard = new OptionBindingGuard(jdbc, new ObjectMapper());
     private final OptionSourceService service = new OptionSourceService(jdbc, new ObjectMapper(),
-        mock(AuthorizationService.class), audit);
+        mock(AuthorizationService.class), audit, bindingGuard);
 
     @SuppressWarnings("unchecked")
     private void activeSource() throws Exception {

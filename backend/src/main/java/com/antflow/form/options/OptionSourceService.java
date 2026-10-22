@@ -6,24 +6,18 @@ import com.antflow.authz.PermissionCodes;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
-import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -33,10 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 @RequiredArgsConstructor
 public class OptionSourceService {
-    private static final int MAX_BYTES = 10 * 1024 * 1024;
-    private static final int MAX_ROWS = 20_000;
-    private static final int MAX_COLUMNS = 50;
-    private static final int MAX_CELL_LENGTH = 500;
+    // 导入规模上限与表格解析已搬到 OptionTableImporter：这里是配置管理，不该混进 CSV 状态机。
     /** 版本对比每侧最多读多少行（2 万行的极端表也只在内存里比 5000 行，超出标记 truncated）。 */
     private static final int DIFF_SCAN_LIMIT = 5_000;
     /** 版本对比最多回多少行明细（界面两列并排，再多也没人看）。 */
@@ -47,6 +38,8 @@ public class OptionSourceService {
     private final ObjectMapper json;
     private final AuthorizationService authorization;
     private final AuditService audit;
+    /** 引用关系只读查询（表单侧的表），见 {@link OptionBindingGuard}：配置写入与引用判定是两套数据所有权。 */
+    private final OptionBindingGuard bindingGuard;
 
     public List<SourceSummary> list() {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
@@ -107,74 +100,15 @@ public class OptionSourceService {
             SELECT subject_id FROM t_option_data_source_grant
             WHERE source_id = ? AND subject_type = 'ROLE' ORDER BY subject_id
             """, Long.class, sourceId);
-        List<FormRef> forms = referencedForms(sourceId);
+        List<FormRef> forms = bindingGuard.referencedForms(sourceId);
         int boundForms = source.inUseFormCount();
         long publishedVersions = versions.stream().filter(v -> "PUBLISHED".equals(v.status())).count();
         // 判据必须与 delete() 一致，否则界面说不可删却能直接调 DELETE（反之亦然）。
         // 用"有没有任何已发布版本"而不是"当前可用版本"：全下架的源 publishedVersionId 为 null，
         // 但它发布过，delete() 仍然会拒。
         boolean deletable = publishedVersions == 0 && boundForms == 0 && forms.isEmpty();
-        return new SourceDetail(source, versions, userIds, roleIds, forms, versionUsage(sourceId),
-            deletable, deletable ? null : deleteBlockedReason(publishedVersions, boundForms, forms.size()));
-    }
-
-    /**
-     * 每个版本分别被哪些表单的字段绑着。表单在**发布那一刻**把 versionId 钉进快照，之后不重新
-     * 发布那张表单就一直用旧版——所以同一个源的各个版本，在用表单可以是完全不同的两批。
-     */
-    private List<VersionUsage> versionUsage(long sourceId) {
-        Map<Long, List<FormRef>> byVersion = new LinkedHashMap<>();
-        jdbc.query("""
-            WITH binding AS (
-              SELECT DISTINCT form.id AS form_id, form.code AS form_code, form.name AS form_name,
-                     (opt->>'versionId')::bigint AS version_id
-              FROM (
-                SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
-                UNION ALL
-                SELECT form_definition_id, schema FROM t_form_definition_version
-              ) s
-              JOIN t_form_definition form ON form.id = s.form_def_id
-              CROSS JOIN LATERAL jsonb_path_query(s.schema, '$.**.props.optionSource') opt
-              WHERE opt->>'sourceId' ~ '^[0-9]+$' AND opt->>'versionId' ~ '^[0-9]+$'
-                AND (opt->>'sourceId')::bigint = ?
-            )
-            SELECT version_id, form_id, form_code, form_name FROM binding
-            ORDER BY form_name, form_id
-            """, rs -> {
-            long versionId = rs.getLong("version_id");
-            byVersion.computeIfAbsent(versionId, key -> new ArrayList<>())
-                .add(new FormRef(rs.getLong("form_id"), rs.getString("form_code"),
-                    rs.getString("form_name")));
-        }, sourceId);
-        return byVersion.entrySet().stream()
-            .map(entry -> new VersionUsage(entry.getKey(), entry.getValue())).toList();
-    }
-
-    /**
-     * 删不掉的原因，按 {@link #delete} 里闸门的先后顺序给。界面要能把这句话显示出来——
-     * 今天不可删就整个不显示「删除」，用户会以为没这个功能。
-     */
-    private static String deleteBlockedReason(long publishedVersions, int boundForms, int referencedForms) {
-        if (publishedVersions > 0) {
-            return "已发布过 " + publishedVersions + " 个版本，只能停用";
-        }
-        if (boundForms > 0) {
-            // 用「绑定」而不是「引用」：这是 schema 里真的绑着，和下面那份可撤销的引用清单不是一回事。
-            return "已被 " + boundForms + " 张表单的字段绑定，不能删除";
-        }
-        return "已被 " + referencedForms + " 张表单引用，不能删除";
-    }
-
-    /** 引用了这个数据源的表单。反向读 V46 的引用表。 */
-    private List<FormRef> referencedForms(long sourceId) {
-        return jdbc.query("""
-            SELECT form.id, form.code, form.name
-            FROM t_form_option_source ref
-            JOIN t_form_definition form ON form.id = ref.form_def_id
-            WHERE ref.source_id = ? AND form.deleted = 0
-            ORDER BY form.name, form.id
-            """, (rs, row) -> new FormRef(rs.getLong("id"), rs.getString("code"),
-            rs.getString("name")), sourceId);
+        return new SourceDetail(source, versions, userIds, roleIds, forms, bindingGuard.versionUsage(sourceId),
+            deletable, deletable ? null : OptionBindingGuard.deleteBlockedReason(publishedVersions, boundForms, forms.size()));
     }
 
     @Transactional
@@ -239,7 +173,7 @@ public class OptionSourceService {
         if (request == null || request.version() == null) {
             throw new BizException("OPTION_SOURCE_VERSION_REQUIRED", "数据源版本不能为空");
         }
-        requireForms(request.formIds());
+        bindingGuard.requireForms(request.formIds());
         int updated = jdbc.update("""
             UPDATE t_option_data_source SET version = version + 1, updated_at = now()
             WHERE id = ? AND version = ?
@@ -257,17 +191,6 @@ public class OptionSourceService {
         return detail(sourceId);
     }
 
-    private void requireForms(Set<Long> formIds) {
-        formIds.forEach(id -> {
-            Long found = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM t_form_definition WHERE id = ? AND deleted = 0
-                """, Long.class, id);
-            if (found == null || found == 0) {
-                throw new BizException("OPTION_SOURCE_FORM_INVALID", "表单不存在：" + id);
-            }
-        });
-    }
-
     @Transactional
     public VersionView importDraft(long sourceId, MultipartFile file, String text, String sheetName,
                                    String note) {
@@ -275,9 +198,9 @@ public class OptionSourceService {
         lockSource(sourceId);
         try {
             boolean hasFile = file != null && !file.isEmpty();
-            ImportedTable table = readImport(file, text, sheetName);
+            OptionTableImporter.ImportedTable table = OptionTableImporter.read(file, text, sheetName);
             byte[] bytes = hasFile ? file.getBytes() : text.getBytes(StandardCharsets.UTF_8);
-            String name = hasFile ? safeName(file.getOriginalFilename()) : "pasted-text.txt";
+            String name = hasFile ? OptionTableImporter.safeName(file.getOriginalFilename()) : "pasted-text.txt";
             jdbc.update("DELETE FROM t_option_data_source_version WHERE source_id = ? AND status = 'DRAFT'",
                 sourceId);
             Integer nextVersion = jdbc.queryForObject("""
@@ -295,7 +218,7 @@ public class OptionSourceService {
             List<Object[]> batch = new ArrayList<>();
             for (int index = 0; index < table.rows().size(); index++) {
                 batch.add(new Object[] {versionId, index + 1,
-                    json.writeValueAsString(rowMap(table.columns(), table.rows().get(index)))});
+                    json.writeValueAsString(OptionTableImporter.rowMap(table.columns(), table.rows().get(index)))});
             }
             jdbc.batchUpdate("""
                 INSERT INTO t_option_data_source_row(version_id, row_no, data)
@@ -324,8 +247,8 @@ public class OptionSourceService {
         try {
             List<String> sheets = new ArrayList<>();
             if (file != null && !file.isEmpty()) {
-                if (file.getSize() > MAX_BYTES) throw new BizException("OPTION_SOURCE_TOO_LARGE", "导入文件不能超过 10 MB");
-                String name = safeName(file.getOriginalFilename()).toLowerCase(java.util.Locale.ROOT);
+                if (file.getSize() > OptionTableImporter.MAX_BYTES) throw new BizException("OPTION_SOURCE_TOO_LARGE", "导入文件不能超过 10 MB");
+                String name = OptionTableImporter.safeName(file.getOriginalFilename()).toLowerCase(java.util.Locale.ROOT);
                 if (name.endsWith(".xls") || name.endsWith(".xlsx")) {
                     try (var workbook = WorkbookFactory.create(file.getInputStream())) {
                         for (int i = 0; i < workbook.getNumberOfSheets(); i++) sheets.add(workbook.getSheetName(i));
@@ -335,28 +258,14 @@ public class OptionSourceService {
                     }
                 }
             }
-            ImportedTable table = readImport(file, text, sheetName);
+            OptionTableImporter.ImportedTable table = OptionTableImporter.read(file, text, sheetName);
             return new ImportPreview(sheets, table.columns(), table.rows().size(),
-                table.rows().stream().limit(20).map(row -> rowMap(table.columns(), row)).toList());
+                table.rows().stream().limit(20).map(row -> OptionTableImporter.rowMap(table.columns(), row)).toList());
         } catch (BizException error) {
             throw error;
         } catch (Exception error) {
             throw new BizException("OPTION_SOURCE_IMPORT_INVALID", "无法解析文件，请检查文件格式或是否加密");
         }
-    }
-
-    private ImportedTable readImport(MultipartFile file, String text, String sheetName) throws Exception {
-        boolean hasFile = file != null && !file.isEmpty();
-        if (hasFile == (text != null && !text.isBlank())) {
-            throw new BizException("OPTION_SOURCE_IMPORT_REQUIRED", "请选择一个文件或粘贴文本");
-        }
-        if (hasFile && file.getSize() > MAX_BYTES) throw new BizException("OPTION_SOURCE_TOO_LARGE", "导入文件不能超过 10 MB");
-        byte[] bytes = hasFile ? file.getBytes() : text.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAX_BYTES) throw new BizException("OPTION_SOURCE_TOO_LARGE", "导入内容不能超过 10 MB");
-        ImportedTable table = hasFile ? parseFile(safeName(file.getOriginalFilename()), bytes, sheetName)
-            : parsePastedText(stripBom(text));
-        validateTable(table);
-        return table;
     }
 
     /** 变更说明：去掉首尾空白、超长截断、空串当没填（列上不存 ""）。 */
@@ -446,7 +355,7 @@ public class OptionSourceService {
         if (target.sourceId() != sourceId) {
             throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
         }
-        int referencingForms = versionReferencingForms(versionId);
+        int referencingForms = bindingGuard.versionReferencingForms(versionId);
         if (referencingForms > 0) {
             throw new BizException("OPTION_SOURCE_VERSION_IN_USE",
                 "有 " + referencingForms + " 张表单的已发布版本在用 v" + target.versionNo()
@@ -550,23 +459,6 @@ public class OptionSourceService {
             Map.of("versionId", versionId, "versionNo", target.versionNo(), "rowCount", target.rowCount()));
     }
 
-    /** 有几张表单（草稿或已发布快照）绑定了这个具体版本。 */
-    private int versionReferencingForms(long versionId) {
-        Integer count = jdbc.queryForObject("""
-            SELECT COUNT(DISTINCT form_def_id) FROM (
-              SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
-              UNION ALL
-              SELECT form_definition_id, schema FROM t_form_definition_version
-            ) form_schema
-            WHERE jsonb_path_exists(
-              form_schema.schema,
-              '$.**.props.optionSource ? (@.versionId == $versionId)',
-              jsonb_build_object('versionId', to_jsonb(?::bigint))
-            )
-            """, Integer.class, versionId);
-        return count == null ? 0 : count;
-    }
-
     @Transactional
     public void delete(long sourceId) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
@@ -578,12 +470,12 @@ public class OptionSourceService {
         if (published != null && published > 0) {
             throw new BizException("OPTION_SOURCE_PUBLISHED", "已发布过的数据源不能删除，可以停用");
         }
-        if (isReferenced(sourceId)) {
+        if (bindingGuard.isReferenced(sourceId)) {
             throw new BizException("OPTION_SOURCE_REFERENCED", "数据源仍被表单引用，不能删除");
         }
         // 源侧那份引用清单也算：管理员特意把它引用到某张表单，删掉等于把他的配置一起抹了。
         // 之前只有 detail() 看这份清单，delete() 不看，于是界面说不可删、接口却删得掉。
-        if (!referencedForms(sourceId).isEmpty()) {
+        if (!bindingGuard.referencedForms(sourceId).isEmpty()) {
             throw new BizException("OPTION_SOURCE_REFERENCED", "数据源仍被表单引用，不能删除");
         }
         int deletedVersions = jdbc.update("DELETE FROM t_option_data_source_version WHERE source_id = ?", sourceId);
@@ -598,7 +490,7 @@ public class OptionSourceService {
         PrincipalHolder.Principal principal = PrincipalHolder.current().orElseThrow();
         // 这张表单现在钉着的版本：被停用的版本不进候选，**除非**正被它钉着，
         // 否则版本下拉会显示空白，管理员会以为绑定丢了。
-        List<Long> boundVersions = boundVersionIds(formId);
+        List<Long> boundVersions = bindingGuard.boundVersionIds(formId);
         String boundFilter = boundVersions.isEmpty() ? ""
             : " OR version_row.id IN (" + boundVersions.stream().map(String::valueOf)
                 .collect(java.util.stream.Collectors.joining(", ")) + ")";
@@ -745,67 +637,6 @@ public class OptionSourceService {
             .orElseThrow(() -> new BizException("OPTION_SOURCE_NOT_FOUND", "数据源不存在"));
     }
 
-    private boolean isReferenced(long sourceId) {
-        return bindingFormCount(sourceId) > 0;
-    }
-
-    /**
-     * 有几张表单在 schema 里真的绑着这个数据源（草稿 + 所有已发布版本快照，含已软删表单的快照）。
-     *
-     * <p>注意这和 {@code t_form_option_source}（V46 那份可在源侧撤销的引用清单）是两件事：
-     * 撤引用**不会**解绑字段。删除判定只认这个数。
-     */
-    private int bindingFormCount(long sourceId) {
-        Integer count = jdbc.queryForObject("""
-            SELECT COUNT(DISTINCT form_def_id) FROM (
-              SELECT id AS form_def_id, schema FROM t_form_definition WHERE deleted = 0
-              UNION ALL
-              SELECT form_definition_id, schema FROM t_form_definition_version
-            ) form_schema
-            WHERE jsonb_path_exists(
-              form_schema.schema,
-              '$.**.props.optionSource.sourceId ? (@ == $sourceId)',
-              jsonb_build_object('sourceId', to_jsonb(?::bigint))
-            )
-            """, Integer.class, sourceId);
-        return count == null ? 0 : count;
-    }
-
-    /**
-     * 这张表单的草稿 schema 里钉着的所有 optionSource.versionId。
-     *
-     * <p>用途只有一个：让被停用的版本在「这张表单正用着它」时仍然留在候选里。设计器编辑的是
-     * 草稿，所以只扫草稿就够。
-     */
-    private List<Long> boundVersionIds(long formId) {
-        String schema = jdbc.query("SELECT schema::text FROM t_form_definition WHERE id = ?",
-            rs -> rs.next() ? rs.getString(1) : null, formId);
-        if (schema == null) return List.of();
-        try {
-            List<Long> ids = new ArrayList<>();
-            collectVersionIds(json.readTree(schema), ids);
-            return ids;
-        } catch (Exception error) {
-            return List.of();
-        }
-    }
-
-    /** 只认 props.optionSource 里的 versionId——schema 里别处也可能有同名字段。 */
-    private static void collectVersionIds(JsonNode node, List<Long> target) {
-        if (node == null) return;
-        if (node.isArray()) {
-            node.forEach(child -> collectVersionIds(child, target));
-            return;
-        }
-        if (!node.isObject()) return;
-        JsonNode optionSource = node.path("optionSource");
-        if (optionSource.isObject()) {
-            JsonNode versionId = optionSource.path("versionId");
-            if (versionId.isIntegralNumber() && versionId.asLong() > 0) target.add(versionId.asLong());
-        }
-        node.fields().forEachRemaining(entry -> collectVersionIds(entry.getValue(), target));
-    }
-
     private VersionView version(long versionId) {
         VersionView version = jdbc.query("""
             SELECT v.id, v.source_id, v.version_no, v.status, v.columns_json::text, v.row_count,
@@ -863,129 +694,6 @@ public class OptionSourceService {
         }
     }
 
-    private ImportedTable parseFile(String name, byte[] bytes, String sheetName) throws Exception {
-        String lower = name.toLowerCase(java.util.Locale.ROOT);
-        if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return parseXlsx(bytes, sheetName);
-        String content = stripBom(StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString());
-        if (lower.endsWith(".csv")) return parseDelimited(content, ',');
-        if (lower.endsWith(".txt")) return parsePastedText(content);
-        throw new BizException("OPTION_SOURCE_TYPE_UNSUPPORTED", "仅支持 .xls、.xlsx、.csv 和 .txt（文本需为 UTF-8）");
-    }
-
-    private ImportedTable parsePastedText(String text) {
-        if (text.contains("\t")) return parseDelimited(text, '\t');
-        List<List<String>> rows = text.lines().map(String::trim).filter(value -> !value.isEmpty())
-            .map(value -> List.of(value)).toList();
-        return new ImportedTable(List.of("选项"), rows);
-    }
-
-    private ImportedTable parseDelimited(String text, char delimiter) {
-        List<List<String>> rows = csvRows(text, delimiter);
-        if (rows.isEmpty()) throw new BizException("OPTION_SOURCE_EMPTY", "导入内容为空");
-        return new ImportedTable(rows.get(0), rows.subList(1, rows.size()));
-    }
-
-    private ImportedTable parseXlsx(byte[] bytes, String sheetName) throws Exception {
-        try (var workbook = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
-            Sheet sheet;
-            if (sheetName != null && !sheetName.isBlank()) {
-                sheet = workbook.getSheet(sheetName.trim());
-                if (sheet == null) throw new BizException("OPTION_SOURCE_SHEET_NOT_FOUND", "工作表不存在");
-            } else if (workbook.getNumberOfSheets() == 1) {
-                sheet = workbook.getSheetAt(0);
-            } else {
-                List<String> names = new ArrayList<>();
-                for (int i = 0; i < workbook.getNumberOfSheets(); i++) names.add(workbook.getSheetName(i));
-                throw new BizException("OPTION_SOURCE_SHEET_REQUIRED", "请选择工作表：" + String.join("、", names));
-            }
-            DataFormatter formatter = new DataFormatter(java.util.Locale.CHINA);
-            formatter.setUseCachedValuesForFormulaCells(true);
-            List<List<String>> rows = new ArrayList<>();
-            for (Row row : sheet) {
-                int width = Math.max(0, row.getLastCellNum());
-                if (width > MAX_COLUMNS) throw new BizException("OPTION_SOURCE_COLUMNS_INVALID", "列数不能超过 50");
-                List<String> values = new ArrayList<>();
-                for (int column = 0; column < width; column++) {
-                    values.add(formatter.formatCellValue(row.getCell(column, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK)).trim());
-                }
-                if (values.stream().anyMatch(value -> !value.isBlank())) rows.add(values);
-                if (rows.size() > MAX_ROWS + 1) break;
-            }
-            if (rows.isEmpty()) throw new BizException("OPTION_SOURCE_EMPTY", "工作表为空");
-            return new ImportedTable(rows.get(0), rows.subList(1, rows.size()));
-        }
-    }
-
-    private List<List<String>> csvRows(String text, char delimiter) {
-        List<List<String>> rows = new ArrayList<>();
-        List<String> row = new ArrayList<>();
-        StringBuilder cell = new StringBuilder();
-        boolean quoted = false;
-        for (int index = 0; index < text.length(); index++) {
-            char current = text.charAt(index);
-            if (current == '"') {
-                if (quoted && index + 1 < text.length() && text.charAt(index + 1) == '"') {
-                    cell.append('"'); index++;
-                } else quoted = !quoted;
-            } else if (current == delimiter && !quoted) {
-                row.add(cell.toString().trim()); cell.setLength(0);
-            } else if ((current == '\n' || current == '\r') && !quoted) {
-                if (current == '\r' && index + 1 < text.length() && text.charAt(index + 1) == '\n') index++;
-                row.add(cell.toString().trim()); cell.setLength(0);
-                if (row.stream().anyMatch(value -> !value.isBlank())) rows.add(row);
-                row = new ArrayList<>();
-            } else cell.append(current);
-        }
-        if (quoted) throw new BizException("OPTION_SOURCE_CSV_INVALID", "CSV 引号未闭合");
-        row.add(cell.toString().trim());
-        if (row.stream().anyMatch(value -> !value.isBlank())) rows.add(row);
-        return rows;
-    }
-
-    private void validateTable(ImportedTable table) {
-        if (table.columns().isEmpty() || table.columns().size() > MAX_COLUMNS) {
-            throw new BizException("OPTION_SOURCE_COLUMNS_INVALID", "列数必须为 1 到 50");
-        }
-        Set<String> unique = new LinkedHashSet<>();
-        for (String raw : table.columns()) {
-            String column = raw == null ? "" : raw.trim();
-            if (column.isBlank() || column.length() > 100 || !unique.add(column)) {
-                throw new BizException("OPTION_SOURCE_HEADER_INVALID", "表头必须非空、唯一且不超过 100 字符");
-            }
-        }
-        if (table.rows().isEmpty() || table.rows().size() > MAX_ROWS) {
-            throw new BizException("OPTION_SOURCE_ROWS_INVALID", "数据行数必须为 1 到 20000");
-        }
-        for (int index = 0; index < table.rows().size(); index++) {
-            List<String> row = table.rows().get(index);
-            if (row.size() > table.columns().size()) {
-                throw new BizException("OPTION_SOURCE_ROW_INVALID", "第 " + (index + 2) + " 行数据列数超过表头列数");
-            }
-            for (int column = 0; column < row.size(); column++) {
-                if (row.get(column) != null && row.get(column).length() > MAX_CELL_LENGTH) {
-                    throw new BizException("OPTION_SOURCE_CELL_TOO_LONG", "第 " + (index + 2) + " 行第 " + (column + 1) + " 列超过 500 字符");
-                }
-            }
-        }
-    }
-
-    private Map<String, String> rowMap(List<String> columns, List<String> values) {
-        Map<String, String> row = new LinkedHashMap<>();
-        for (int index = 0; index < columns.size(); index++) {
-            row.put(columns.get(index).trim(), index < values.size() ? values.get(index) : "");
-        }
-        return row;
-    }
-
-    private static String safeName(String value) {
-        if (value == null || value.isBlank()) return "import";
-        String name = value.replace('\\', '/');
-        name = name.substring(name.lastIndexOf('/') + 1);
-        return name.length() > 255 ? name.substring(name.length() - 255) : name;
-    }
-
-    private static String stripBom(String value) { return value.startsWith("\uFEFF") ? value.substring(1) : value; }
-
     public record ImportPreview(List<String> sheets, List<String> columns, int rowCount, List<Map<String, String>> rows) { }
 
     private static String sha256(byte[] bytes) throws Exception {
@@ -1000,7 +708,6 @@ public class OptionSourceService {
         int value = rs.getInt(column); return rs.wasNull() ? null : value;
     }
 
-    private record ImportedTable(List<String> columns, List<List<String>> rows) { }
     public record SourceWrite(String code, String name) { }
     public record GrantWrite(Integer version, Set<Long> userIds, Set<Long> roleIds) {
         public GrantWrite {
