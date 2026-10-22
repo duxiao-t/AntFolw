@@ -25,7 +25,6 @@ import com.antflow.task.*;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -38,7 +37,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 钉钉式流程树的运行时引擎（Task 7）。
@@ -59,8 +57,7 @@ import java.util.stream.Collectors;
  * </ul>
  */
 @Service
-@RequiredArgsConstructor
-public class ProcessEngine {
+public class ProcessEngine implements FlowAdvancer {
 
     private final FormDefinitionService formDefinitionService;
     private final FormDataMapper formDataMapper;
@@ -77,10 +74,78 @@ public class ProcessEngine {
     private final AuthorizationService authorizationService;
     private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
 
+    /** 协作者共用的读写底座；与上面这些依赖是同一批实例（单测里的 mock 也就只有一份）。 */
+    private final EngineSupport support;
+    /** V1 驳回结算（历史实例兼容层）。 */
+    private final LegacyDecisionSettler legacySettler;
+    /** V2 结算（当前唯一写入运行时）。 */
+    private final V2DecisionSettler v2Settler;
+    /** 返工单重新提交。 */
+    private final ReworkService reworkService;
+    /** 发起人撤回（含轮次边界判定）。 */
+    private final WithdrawService withdrawService;
+    /** 自动化作业完成（延时 / 触发器 / 超时策略）。 */
+    private final AutomationCompleter automationCompleter;
+
     @Autowired
     private WorkflowRuntimeV2 runtimeV2;
     @Autowired(required = false)
     private BusinessNumberService businessNumbers;
+
+    /**
+     * 延迟读取：runtimeV2 是字段注入，构造期还是 null；单测也会在构造后用
+     * ReflectionTestUtils 替换它。用 Supplier 让每次调用都读到当前值。
+     */
+    private final java.util.function.Supplier<WorkflowRuntimeV2> runtimeV2Ref = () -> runtimeV2;
+
+    /**
+     * 显式构造器（替代 {@code @RequiredArgsConstructor}）：协作者要在这里被创建，
+     * 而它们又需要本实例作为 {@link FlowAdvancer} 回调口。
+     *
+     * <p>构造期就传出 {@code this} 是刻意的，也是安全的：协作者只是把引用存下来，
+     * 真正的回调发生在本实例构造完成、进入请求处理之后。
+     */
+    public ProcessEngine(FormDefinitionService formDefinitionService,
+                         FormDataMapper formDataMapper,
+                         ProcessDefinitionService processDefinitionService,
+                         TaskMapper taskMapper,
+                         ProcessInstanceMapper processInstanceMapper,
+                         TaskMapperExt taskMapperExt,
+                         TaskHistoryMapper historyMapper,
+                         List<NodeHandler> nodeHandlers,
+                         NotificationPublisher notifier,
+                         ObjectMapper json,
+                         FormalNumberService formalNumberService,
+                         WorkflowJobMapper workflowJobMapper,
+                         AuthorizationService authorizationService,
+                         com.antflow.attachment.MediaSubmissionValidator mediaValidator) {
+        this.formDefinitionService = formDefinitionService;
+        this.formDataMapper = formDataMapper;
+        this.processDefinitionService = processDefinitionService;
+        this.taskMapper = taskMapper;
+        this.processInstanceMapper = processInstanceMapper;
+        this.taskMapperExt = taskMapperExt;
+        this.historyMapper = historyMapper;
+        this.nodeHandlers = nodeHandlers;
+        this.notifier = notifier;
+        this.json = json;
+        this.formalNumberService = formalNumberService;
+        this.workflowJobMapper = workflowJobMapper;
+        this.authorizationService = authorizationService;
+        this.mediaValidator = mediaValidator;
+        this.support = new EngineSupport(json, taskMapper, formDataMapper, historyMapper,
+            formDefinitionService, processDefinitionService, runtimeV2Ref);
+        this.legacySettler = new LegacyDecisionSettler(support, taskMapper,
+            processInstanceMapper, formDataMapper, notifier, this);
+        this.v2Settler = new V2DecisionSettler(support, taskMapper, processInstanceMapper,
+            formDataMapper, runtimeV2Ref, this);
+        this.reworkService = new ReworkService(support, taskMapper, processInstanceMapper,
+            formDataMapper, formDefinitionService, mediaValidator, runtimeV2Ref, this);
+        this.withdrawService = new WithdrawService(support, processInstanceMapper, taskMapper,
+            workflowJobMapper, formDataMapper, authorizationService, notifier, runtimeV2Ref);
+        this.automationCompleter = new AutomationCompleter(support, workflowJobMapper,
+            processInstanceMapper, taskMapper, runtimeV2Ref, this);
+    }
 
     @Transactional
     public Map<String, Object> start(StartCmd cmd, long userId) {
@@ -172,6 +237,20 @@ public class ProcessEngine {
     @Transactional
     public void forceApprove(CompleteCmd cmd, long operatorId) {
         approveInternal(cmd, operatorId, true);
+    }
+
+    /**
+     * 系统代批入口（超时自动通过），供 {@link AutomationCompleter} 回调。
+     *
+     * <p>刻意不加 {@code @Transactional}：它总是在 AutomationCompleter 的事务里被调用，
+     * 再进一次事务代理没有任何收益，只会让"这段到底开没开新事务"变得需要推理。
+     *
+     * <p>**不要从控制器/其他服务直接调用**：没有外层事务时悲观锁与多表写入会各自提交。
+     * 外部要走 {@link #forceApprove}。
+     */
+    @Override
+    public void forceApproveAsSystem(CompleteCmd cmd, long operatorId, String historyAction) {
+        approveInternal(cmd, operatorId, true, historyAction);
     }
 
     @Transactional
@@ -272,18 +351,18 @@ public class ProcessEngine {
 
         String mode = WorkflowRuntimeV2.mode(cur);
         if ("ALL".equals(mode) || "RATIO".equals(mode)) {
-            List<TaskEntity> votes = legacyNodeVotes(t);
+            List<TaskEntity> votes = legacySettler.legacyNodeVotes(t);
             if (votes.stream().anyMatch(task -> "PENDING".equals(task.getStatus()))) return;
             long approved = votes.stream()
                 .filter(task -> "APPROVED".equals(task.getStatus())).count();
             boolean passed = "ALL".equals(mode)
                 ? approved == votes.size()
-                : approved >= requiredApprovals(votes.size(), cur);
+                : approved >= LegacyDecisionSettler.requiredApprovals(votes.size(), cur);
             if (!passed) {
                 TaskEntity rejection = votes.stream()
                     .filter(task -> "REJECTED".equals(task.getStatus()))
                     .findFirst().orElse(t);
-                settleLegacyRejection(
+                legacySettler.settleLegacyRejection(
                     new CompleteCmd(rejection.getId(), "REJECT", rejection.getComment(), null),
                     rejection.getApprovedBy() == null ? operatorId : rejection.getApprovedBy(),
                     force, rejection, pi, root);
@@ -313,9 +392,10 @@ public class ProcessEngine {
         resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
     }
 
-    private void advanceParallelBranch(JsonNode root, ProcessInstance instance,
-                                       JsonNode formData, String parallelId,
-                                       String branchId, JsonNode completedNode) {
+    @Override
+    public void advanceParallelBranch(JsonNode root, ProcessInstance instance,
+                                      JsonNode formData, String parallelId,
+                                      String branchId, JsonNode completedNode) {
         JsonNode node = ProcessTreeNav.next(root, completedNode, parallelId);
         NodeContext context = new NodeContext(
             instance.getStartedBy(), formData, Map.of(), completedNode.path("id").asText(null),
@@ -427,11 +507,11 @@ public class ProcessEngine {
 
         String mode = WorkflowRuntimeV2.mode(cur);
         if (!force && ("ALL".equals(mode) || "RATIO".equals(mode))) {
-            List<TaskEntity> votes = legacyNodeVotes(t);
+            List<TaskEntity> votes = legacySettler.legacyNodeVotes(t);
             if (votes.stream().anyMatch(task -> "PENDING".equals(task.getStatus()))) return;
             long approved = votes.stream()
                 .filter(task -> "APPROVED".equals(task.getStatus())).count();
-            if ("RATIO".equals(mode) && approved >= requiredApprovals(votes.size(), cur)) {
+            if ("RATIO".equals(mode) && approved >= LegacyDecisionSettler.requiredApprovals(votes.size(), cur)) {
                 JsonNode formData = readFormData(pi.getFormDataId());
                 resolveAndLand(root, pi, formData, pi.getStartedBy(), Map.of(), cur);
                 return;
@@ -439,13 +519,13 @@ public class ProcessEngine {
             TaskEntity rejection = votes.stream()
                 .filter(task -> "REJECTED".equals(task.getStatus()))
                 .findFirst().orElse(t);
-            settleLegacyRejection(
+            legacySettler.settleLegacyRejection(
                 new CompleteCmd(rejection.getId(), "REJECT", rejection.getComment(), null),
                 rejection.getApprovedBy() == null ? operatorId : rejection.getApprovedBy(),
                 false, rejection, pi, root);
             return;
         }
-        settleLegacyRejection(cmd, operatorId, force, t, pi, root);
+        legacySettler.settleLegacyRejection(cmd, operatorId, force, t, pi, root);
     }
 
     @Transactional
@@ -458,181 +538,16 @@ public class ProcessEngine {
         if (!Objects.equals(task.getAssigneeId(), operatorId)) {
             throw new AccessDeniedException("not your task");
         }
-        ProcessInstance instance = locked.instance();
-        FormData formDataRow = formDataMapper.selectRuntimeById(instance.getFormDataId());
-        mediaValidator.validate(instance.getFormDataId(),
-            formDefinitionService.starterFieldModes(instance.getProcessSnapshot()));
-        if (formDataRow == null) {
-            throw new BizException("NOT_FOUND", "form data not found");
-        }
-
-        task.setStatus("RESUBMITTED");
-        task.setApprovedBy(operatorId);
-        task.setApprovedAt(OffsetDateTime.now());
-        task.setComment("修改后重新提交");
-        if (runtimeV2 != null && runtimeV2.active(instance)) {
-            runtimeV2.beginRound(instance, "RESUBMIT");
-        }
-        updateTaskOrConflict(task);
-        formDataRow.setStatus("SUBMITTED");
-        formDataMapper.updateById(formDataRow);
-        if (runtimeV2 != null && runtimeV2.active(instance)) {
-            long revisionId = runtimeV2.createRevision(formDataRow, "SUBMITTED", "RESUBMIT",
-                operatorId);
-            instance.setCurrentFormRevisionId(revisionId);
-            task.setActionFormRevisionId(revisionId);
-            taskMapper.updateById(task);
-        }
-
-        JsonNode root = readProcessTree(instance);
-        JsonNode formData = readTreeOrEmpty(formDataRow.getData());
-        Map<String, List<Long>> previousSelections = taskMapper.selectList(
-                new QueryWrapper<TaskEntity>()
-                    .eq("proc_inst_id", instance.getId())
-                    .eq("task_type", "APPROVAL")
-                    .orderByAsc("id"))
-            .stream()
-            .collect(Collectors.groupingBy(TaskEntity::getNodeId, LinkedHashMap::new,
-                Collectors.mapping(TaskEntity::getAssigneeId,
-                    Collectors.collectingAndThen(Collectors.toList(), values -> values.stream()
-                        .distinct().toList()))));
-
-        instance.setStatus("RUNNING");
-        instance.setFinishedAt(null);
-        processInstanceMapper.updateById(instance);
-        List<Long> taskIds = resolveAndLand(root, instance, formData, instance.getStartedBy(),
-            previousSelections, root);
-        insertHistory(task, "__rework__", root.path("id").asText(null), "RESUBMIT",
-            operatorId, task.getComment());
-        return taskIds;
+        return reworkService.resubmit(task, locked.instance(), operatorId);
     }
-
-    private TaskEntity previousApproval(TaskEntity current) {
-        OffsetDateTime before = current.getCreatedAt() == null
-            ? current.getApprovedAt() : current.getCreatedAt();
-        QueryWrapper<TaskEntity> query = new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", current.getProcInstId())
-            .eq("status", "APPROVED")
-            .isNull("parallel_id")
-            .ne("node_id", current.getNodeId());
-        if (before != null) {
-            query.lt("approved_at", before);
-        }
-        query.orderByDesc("approved_at").orderByDesc("id").last("LIMIT 1");
-        return taskMapper.selectOne(query);
-    }
-
-    private List<Long> previousNodeAssignees(TaskEntity previous) {
-        List<TaskEntity> rows = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", previous.getProcInstId())
-            .eq("node_id", previous.getNodeId())
-            .eq("status", "APPROVED")
-            .isNull("parallel_id")
-            .orderByAsc("id"));
-        List<Long> assignees = rows.stream()
-            .filter(task -> Objects.equals(previous.getNodeId(), task.getNodeId())
-                && "APPROVED".equals(task.getStatus())
-                && task.getAssigneeId() != null)
-            .map(TaskEntity::getAssigneeId)
-            .distinct()
-            .collect(Collectors.toList());
-        if (assignees.isEmpty()) {
-            return previous.getAssigneeId() == null ? List.of() : List.of(previous.getAssigneeId());
-        }
-        return assignees;
-    }
-
-    private static TaskEntity newReturnedTask(Long procInstId, String nodeId, String taskType,
-                                              String approvalMode, Long assigneeId,
-                                              String parallelId, String branchId) {
-        TaskEntity task = new TaskEntity();
-        task.setProcInstId(procInstId);
-        task.setNodeId(nodeId);
-        task.setTaskType(taskType);
-        task.setStatus("PENDING");
-        task.setApprovalMode(approvalMode);
-        task.setAssigneeId(assigneeId);
-        task.setParallelId(parallelId);
-        task.setBranchId(branchId);
-        return task;
-    }
-
 
     @Transactional
     public void withdraw(long instanceId, long operatorId) {
-        ProcessInstance pi = processInstanceMapper.selectForUpdate(instanceId);
-        if (pi == null) throw new BizException("NOT_FOUND", "instance not found");
-        authorizationService.requireConfirmedInstance(instanceId);
-        if (!Objects.equals(pi.getStartedBy(), operatorId)) {
-            throw new AccessDeniedException("only starter can withdraw");
-        }
-        if (!"RUNNING".equals(pi.getStatus())) {
-            throw new BizException("BAD_STATE", "instance not running");
-        }
-        if ("__rework__".equals(pi.getCurrentNodeId())) {
-            throw new BizException("BAD_STATE", "instance already waiting for revision");
-        }
-        if (!canWithdrawCurrentRound(pi, operatorId)) {
-            throw new BizException("ALREADY_ACTED",
-                "cannot withdraw after a task has been acted on");
-        }
-        String previousNodeId = pi.getCurrentNodeId();
-        boolean v2 = runtimeV2 != null && runtimeV2.active(pi);
-        List<TaskEntity> active = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", pi.getId()).in("status", List.of("PENDING", "CC")));
-        for (TaskEntity task : active) {
-            task.setStatus("SKIPPED");
-            taskMapper.updateById(task);
-            // V2 实例必须留痕：原来只改状态，审批人侧任务凭空消失（无历史、无通知）。
-            if (v2) runtimeV2.taskSkippedByWithdraw(pi, task);
-        }
-        workflowJobMapper.cancelActive(pi.getId());
-        // 节点/参与者与任务一起收口：只置任务 SKIPPED 会留下 ACTIVE 节点 + PENDING 参与者，
-        // 让"在办/超时"统计长期偏高（见 code-review A3）。
-        if (v2) runtimeV2.withdrawToRework(pi);
-
-        TaskEntity rework = newReturnedTask(pi.getId(), "__rework__", "REWORK",
-            "OR", pi.getStartedBy(), null, null);
-        taskMapper.insert(rework);
-        FormData formData = formDataMapper.selectRuntimeById(pi.getFormDataId());
-        if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
-        formData.setStatus("NEEDS_REVISION");
-        formDataMapper.updateById(formData);
-
-        pi.setStatus("RUNNING");
-        pi.setCurrentNodeId("__rework__");
-        pi.setFinishedAt(null);
-        processInstanceMapper.updateById(pi);
-        insertHistoryOnInstance(pi.getId(), previousNodeId, "__rework__",
-            "WITHDRAW", operatorId, null);
-        notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
-            pi.getId(), rework.getId(), pi.getStartedBy(), "申请已撤回，等待修改后重新提交"));
+        withdrawService.withdraw(instanceId, operatorId);
     }
 
     public boolean canWithdraw(long instanceId, long operatorId) {
-        ProcessInstance instance = processInstanceMapper.selectById(instanceId);
-        return instance != null && canWithdrawCurrentRound(instance, operatorId);
-    }
-
-    private boolean canWithdrawCurrentRound(ProcessInstance instance, long operatorId) {
-        if (!Objects.equals(instance.getStartedBy(), operatorId)
-            || !"RUNNING".equals(instance.getStatus())
-            || "__rework__".equals(instance.getCurrentNodeId())) {
-            return false;
-        }
-        TaskEntity boundary = taskMapper.selectOne(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", instance.getId())
-            .eq("task_type", "REWORK")
-            .eq("status", "RESUBMITTED")
-            .orderByDesc("id").last("LIMIT 1"));
-        QueryWrapper<TaskEntity> acted = new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", instance.getId())
-            .eq("task_type", "APPROVAL")
-            .in("status", List.of("APPROVED", "REJECTED"))
-            .isNotNull("approved_by");
-        if (boundary != null) acted.gt("id", boundary.getId());
-        Long count = taskMapper.selectCount(acted);
-        return count == null || count == 0;
+        return withdrawService.canWithdraw(instanceId, operatorId);
     }
 
     /**
@@ -641,250 +556,28 @@ public class ProcessEngine {
      */
     @Transactional
     public boolean completeAutomation(Long jobId) {
-        WorkflowJob initial = workflowJobMapper.selectById(jobId);
-        if (initial == null) initial = workflowJobMapper.selectForUpdate(jobId);
-        if (initial == null) return false;
-        ProcessInstance instance = processInstanceMapper.selectForUpdate(initial.getProcInstId());
-        WorkflowJob job = workflowJobMapper.selectForUpdate(jobId);
-        if (job == null || !"RUNNING".equals(job.getStatus())) return false;
-        if (instance == null || (Boolean.TRUE.equals(job.getBlocking())
-            && !"RUNNING".equals(instance.getStatus()))) {
-            job.setStatus("CANCELLED");
-            job.setLockedAt(null);
-            job.setLockedBy(null);
-            workflowJobMapper.updateById(job);
-            return false;
-        }
-        JsonNode root = null;
-        if (Boolean.TRUE.equals(job.getBlocking())) {
-            root = readProcessTree(instance);
-            if (!Objects.equals(instance.getCurrentNodeId(), job.getNodeId())
-                && !ProcessTreeNav.isInsideParallel(
-                    root, instance.getCurrentNodeId(), job.getNodeId())) {
-                job.setStatus("CANCELLED");
-                job.setLastError("instance is no longer waiting at the automation node");
-                job.setLockedAt(null);
-                job.setLockedBy(null);
-                workflowJobMapper.updateById(job);
-                return false;
-            }
-        }
-
-        job.setStatus("SUCCEEDED");
-        job.setCompletedAt(OffsetDateTime.now());
-        job.setLastError(null);
-        job.setLockedAt(null);
-        job.setLockedBy(null);
-        workflowJobMapper.updateById(job);
-        String action = "DELAY".equals(job.getJobType())
-            ? "DELAY_COMPLETED" : "TRIGGER_SUCCEEDED";
-        insertHistoryOnInstance(instance.getId(), job.getNodeId(), job.getNodeId(),
-            action, null, "deliveryId=" + job.getDeliveryId());
-
-        if (Boolean.TRUE.equals(job.getBlocking())) {
-            JsonNode current = ProcessTreeNav.findById(root, job.getNodeId());
-            if (current == null) {
-                throw new BizException("BAD_FLOW", "automation node not found: " + job.getNodeId());
-            }
-            JsonNode formData = readFormData(instance.getFormDataId());
-            ProcessTreeNav.ParallelParent parent =
-                ProcessTreeNav.findParallelParent(root, current.path("id").asText());
-            if (parent == null) {
-                resolveAndLand(root, instance, formData, instance.getStartedBy(), Map.of(), current);
-            } else {
-                advanceParallelBranch(root, instance, formData,
-                    parent.parallelId(), parent.branchId(), current);
-            }
-        }
-        return true;
+        return automationCompleter.completeAutomation(jobId);
     }
 
     /** Executes a persisted timeout action; already-handled tasks are a successful no-op. */
     @Transactional
     public boolean completeTaskTimeout(Long jobId) {
-        WorkflowJob initial = workflowJobMapper.selectById(jobId);
-        if (initial == null) return false;
-        ProcessInstance instance = processInstanceMapper.selectForUpdate(initial.getProcInstId());
-        WorkflowJob job = workflowJobMapper.selectForUpdate(jobId);
-        if (job == null || !"TASK_TIMEOUT".equals(job.getJobType())
-            || !"RUNNING".equals(job.getStatus())) return false;
-        TaskEntity task = taskMapper.selectForUpdate(job.getTaskId());
-        if (instance == null || !"RUNNING".equals(instance.getStatus())
-            || task == null || !Objects.equals(task.getProcInstId(), instance.getId())
-            || !"PENDING".equals(task.getStatus())) {
-            finishTimeoutJob(job, "task already completed");
-            return false;
-        }
-        JsonNode policy = readTreeOrEmpty(job.getPayload());
-        String action = policy.path("action").asText("REMIND");
-        if (runtimeV2 == null) {
-            finishTimeoutJob(job, "legacy task ignored");
-            return false;
-        }
-        switch (action) {
-            case "ESCALATE" -> runtimeV2.timeoutEscalate(job, task);
-            case "AUTO_APPROVE" -> {
-                if (!"LOW".equals(policy.path("riskLevel").asText())) {
-                    runtimeV2.timeoutReminder(job, task);
-                } else {
-                    // 历史 action 单独标出来：审计时能区分"人工通过"与"系统超时代批"（A9）。
-                    approveInternal(new CompleteCmd(task.getId(), "APPROVE",
-                        "超时自动通过（系统代批）", null), task.getAssigneeId(), true,
-                        "TIMEOUT_AUTO_APPROVE");
-                }
-            }
-            default -> runtimeV2.timeoutReminder(job, task);
-        }
-        finishTimeoutJob(job, null);
-        return true;
+        return automationCompleter.completeTaskTimeout(jobId);
     }
 
-    private void finishTimeoutJob(WorkflowJob job, String note) {
-        job.setStatus("SUCCEEDED");
-        job.setCompletedAt(OffsetDateTime.now());
-        job.setLastError(note);
-        job.setLockedAt(null);
-        job.setLockedBy(null);
-        workflowJobMapper.updateById(job);
-        insertHistoryOnInstance(job.getProcInstId(), job.getNodeId(), job.getNodeId(),
-            note == null ? "TASK_TIMEOUT" : "TASK_TIMEOUT_SKIPPED", null, note);
-    }
 
-    private List<TaskEntity> legacyNodeVotes(TaskEntity acted) {
-        List<TaskEntity> votes = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", acted.getProcInstId())
-            .eq("node_id", acted.getNodeId())
-            .eq("task_type", "APPROVAL")
-            .eq("created_at", acted.getCreatedAt())
-            .in("status", List.of("PENDING", "APPROVED", "REJECTED"))
-            .orderByAsc("id"));
-        return votes.isEmpty() ? List.of(acted) : votes;
-    }
-
-    private static int requiredApprovals(int total, JsonNode node) {
-        int ratio = node.path("props").path("ratio").asInt(
-            node.path("props").path("passRatio").asInt(100));
-        return Math.max(1,
-            (int) Math.ceil(total * Math.min(100, Math.max(1, ratio)) / 100.0));
-    }
-
+    /** V1 驳回结算已下沉到 {@link LegacyDecisionSettler}；这里只保留调用点，便于对照分流。 */
     private void settleLegacyRejection(CompleteCmd command, long operatorId, boolean force,
                                        TaskEntity task, ProcessInstance instance, JsonNode root) {
-        List<TaskEntity> siblings;
-        if (task.getParallelId() != null) {
-            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-                .eq("proc_inst_id", instance.getId()).eq("status", "PENDING")
-                .eq("parallel_id", task.getParallelId()).ne("id", task.getId()));
-        } else {
-            siblings = taskMapper.selectList(new QueryWrapper<TaskEntity>()
-                .eq("proc_inst_id", instance.getId()).eq("status", "PENDING")
-                .eq("node_id", task.getNodeId()).ne("id", task.getId()));
-        }
-        for (TaskEntity sibling : siblings) {
-            sibling.setStatus("SKIPPED");
-            taskMapper.updateById(sibling);
-            insertHistoryOnInstance(instance.getId(), task.getNodeId(), sibling.getNodeId(),
-                "SKIP", operatorId, null);
-        }
-
-        if (force && command.rejectToNodeId() != null
-            && !command.rejectToNodeId().isBlank()) {
-            JsonNode target = ProcessTreeNav.findById(root, command.rejectToNodeId());
-            if (target == null || !"APPROVAL".equals(target.path("type").asText())
-                || ProcessTreeNav.isInsideParallelBranch(root, command.rejectToNodeId())) {
-                throw new BizException("BAD_REJECT_TARGET", "reject target is not an approval node");
-            }
-            instance.setStatus("RUNNING");
-            instance.setFinishedAt(null);
-            instance.setCurrentNodeId(target.path("id").asText());
-            processInstanceMapper.updateById(instance);
-            insertHistory(task, task.getNodeId(), target.path("id").asText(),
-                "FORCE_REJECT", operatorId, command.comment());
-            resolveAndLandFromNode(root, instance, readFormData(instance.getFormDataId()),
-                instance.getStartedBy(), Map.of(), target);
-            return;
-        }
-
-        TaskEntity previous = previousApproval(task);
-        List<TaskEntity> returnedTasks = previous == null
-            ? List.of(newReturnedTask(instance.getId(), "__rework__", "REWORK", "OR_SIGN",
-                instance.getStartedBy(), null, null))
-            : previousNodeAssignees(previous).stream()
-                .map(assigneeId -> newReturnedTask(instance.getId(), previous.getNodeId(),
-                    "APPROVAL", previous.getApprovalMode(), assigneeId, null, null))
-                .toList();
-        String returnedNodeId = previous == null ? "__rework__" : previous.getNodeId();
-        if (returnedTasks.isEmpty()) {
-            throw new BizException("BAD_FLOW", "previous approval has no assignee to return to");
-        }
-        for (TaskEntity returned : returnedTasks) taskMapper.insert(returned);
-
-        instance.setStatus("RUNNING");
-        instance.setFinishedAt(null);
-        instance.setCurrentNodeId(returnedNodeId);
-        processInstanceMapper.updateById(instance);
-        insertHistory(task, task.getNodeId(), returnedNodeId,
-            force ? "FORCE_REJECT" : "REJECT", operatorId, command.comment());
-
-        if (previous == null) {
-            FormData formData = formDataMapper.selectRuntimeById(instance.getFormDataId());
-            if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
-            formData.setStatus("NEEDS_REVISION");
-            formDataMapper.updateById(formData);
-        }
-        for (TaskEntity returned : returnedTasks) {
-            notifier.publish(new NotificationEvent(this, "TASK_RETURNED",
-                instance.getId(), returned.getId(), returned.getAssigneeId(),
-                previous == null ? "申请已退回修改" : "审批已退回上一级"));
-        }
+        legacySettler.settleLegacyRejection(command, operatorId, force, task, instance, root);
     }
 
+    /** V2 结算已下沉到 {@link V2DecisionSettler}；这里保留同名调用点，便于对照分流。 */
     private void settleV2Decision(WorkflowRuntimeV2.Decision decision, CompleteCmd command,
                                   long operatorId, boolean force, TaskEntity acted,
                                   ProcessInstance instance, JsonNode root, JsonNode current) {
-        if (!decision.advance() && !decision.reject()) return;
-        if (decision.advance()) {
-            JsonNode formData = readFormData(instance.getFormDataId());
-            if (acted.getParallelId() != null) {
-                advanceParallelBranch(root, instance, formData, acted.getParallelId(),
-                    acted.getBranchId(), current);
-            } else {
-                resolveAndLand(root, instance, formData, instance.getStartedBy(), Map.of(), current);
-            }
-            return;
-        }
-
-        TaskEntity rejection = firstRejectedTask(acted);
-        long rejectionOperator = rejection.getApprovedBy() == null
-            ? operatorId : rejection.getApprovedBy();
-        CompleteCmd rejectionCommand = fixedRejectTarget(current)
-            ? new CompleteCmd(rejection.getId(), "REJECT", rejection.getComment(), null)
-            : command;
-        if (rejection.getParallelId() != null) {
-            WorkflowRuntimeV2.ParallelDecision parallel =
-                runtimeV2.parallelBranchRejected(rejection, instance, root);
-            if (parallel == WorkflowRuntimeV2.ParallelDecision.WAIT) return;
-            if (parallel == WorkflowRuntimeV2.ParallelDecision.ADVANCE) {
-                advanceParallelBranch(root, instance, readFormData(instance.getFormDataId()),
-                    rejection.getParallelId(), rejection.getBranchId(), current);
-                return;
-            }
-        }
-        rejectV2(rejectionCommand, rejectionOperator, force, rejection, instance, root, current);
-    }
-
-    private TaskEntity firstRejectedTask(TaskEntity acted) {
-        TaskEntity rejection = taskMapper.selectOne(new QueryWrapper<TaskEntity>()
-            .eq("node_instance_id", acted.getNodeInstanceId())
-            .eq("status", "REJECTED")
-            .orderByAsc("approved_at", "id")
-            .last("LIMIT 1"));
-        return rejection == null ? acted : rejection;
-    }
-
-    private static boolean fixedRejectTarget(JsonNode node) {
-        String mode = WorkflowRuntimeV2.mode(node);
-        return "ALL".equals(mode) || "RATIO".equals(mode);
+        v2Settler.settleV2Decision(decision, command, operatorId, force, acted, instance, root,
+            current);
     }
 
     private LockedTask lockPendingTask(long taskId) {
@@ -910,9 +603,7 @@ public class ProcessEngine {
     }
 
     private void updateTaskOrConflict(TaskEntity task) {
-        if (taskMapper.updateById(task) != 1) {
-            throw new BizException("CONCURRENT_CONFLICT", "Task changed concurrently");
-        }
+        support.updateTaskOrConflict(task);
     }
 
     private record LockedTask(TaskEntity task, ProcessInstance instance) { }
@@ -1016,10 +707,11 @@ public class ProcessEngine {
      * @param fromNode      刚完成的节点（首轮 = root）
      * @return 新建的任务 id 列表
      */
-    private List<Long> resolveAndLand(JsonNode root, ProcessInstance pi,
-                                      JsonNode formData, long starterId,
-                                      Map<String, List<Long>> selfSelected,
-                                      JsonNode fromNode) {
+    @Override
+    public List<Long> resolveAndLand(JsonNode root, ProcessInstance pi,
+                                     JsonNode formData, long starterId,
+                                     Map<String, List<Long>> selfSelected,
+                                     JsonNode fromNode) {
         JsonNode node = ProcessTreeNav.next(root, fromNode, null);
         List<Long> taskIds = resolveAndLandLoop(root, pi, formData, starterId, selfSelected,
             fromNode, node);
@@ -1032,10 +724,11 @@ public class ProcessEngine {
      * 让 target 自身被重新评估（建任务 / AUTO_PASS / 继续 children）。
      * fromNode 设为 null，使 ARRIVE/CC/AUTO_PASS/COMPLETE 历史行的 from 字段为空。
      */
-    private List<Long> resolveAndLandFromNode(JsonNode root, ProcessInstance pi,
-                                               JsonNode formData, long starterId,
-                                               Map<String, List<Long>> selfSelected,
-                                               JsonNode targetNode) {
+    @Override
+    public List<Long> resolveAndLandFromNode(JsonNode root, ProcessInstance pi,
+                                             JsonNode formData, long starterId,
+                                             Map<String, List<Long>> selfSelected,
+                                             JsonNode targetNode) {
         List<Long> taskIds = resolveAndLandLoop(root, pi, formData, starterId, selfSelected,
             null, targetNode);
         notifyAssigned(pi.getId(), taskIds);
@@ -1120,44 +813,26 @@ public class ProcessEngine {
     // helpers
     // -----------------------------------------------------------------------
 
+    // -----------------------------------------------------------------------
+    // helpers —— 实现全部在 EngineSupport（同一批 mapper / 同一套错误码）。
+    // 这里保留同名薄壳而不直接写 support.xxx：调用点有几十处，改动量就是风险量。
+    // -----------------------------------------------------------------------
+
     private JsonNode readTree(String s) {
-        if (s == null || s.isBlank()) {
-            throw new BizException("BAD_FLOW_JSON", "process tree is empty");
-        }
-        try {
-            return json.readTree(s);
-        } catch (Exception e) {
-            throw new BizException("BAD_FLOW_JSON", e.getMessage());
-        }
+        return support.readTree(s);
     }
 
     private JsonNode readTreeOrEmpty(String s) {
-        if (s == null || s.isBlank()) return json.createObjectNode();
-        try {
-            return json.readTree(s);
-        } catch (Exception e) {
-            throw new BizException("BAD_JSON", e.getMessage());
-        }
+        return support.readTreeOrEmpty(s);
     }
 
     private JsonNode readFormData(Long formDataId) {
-        FormData fd = formDataMapper.selectRuntimeById(formDataId);
-        if (fd == null) return json.createObjectNode();
-        return readTreeOrEmpty(fd.getData());
+        return support.readFormData(formDataId);
     }
 
     /** 旧运行快照只在内存中按当前表单 Schema 兼容 label，绝不回写。 */
     private JsonNode readProcessTree(ProcessInstance instance) {
-        if (runtimeV2 != null && runtimeV2.active(instance)) {
-            return readTree(runtimeV2.processTree(instance));
-        }
-        FormData data = formDataMapper.selectRuntimeById(instance.getFormDataId());
-        FormDefinition form = data == null ? null
-            : formDefinitionService.getById(data.getFormDefId());
-        if (form == null) return readTree(instance.getProcessSnapshot());
-        String normalized = processDefinitionService.normalizeConditionValues(
-            instance.getProcessSnapshot(), form.getSchema());
-        return readTree(normalized == null ? instance.getProcessSnapshot() : normalized);
+        return support.readProcessTree(instance);
     }
 
     private boolean hasActiveParallelAutomation(JsonNode root, Long instanceId,
@@ -1183,95 +858,17 @@ public class ProcessEngine {
         }
     }
 
-    private void rejectV2(CompleteCmd cmd, long operatorId, boolean force, TaskEntity task,
-                          ProcessInstance instance, JsonNode root, JsonNode current) {
-        TaskEntity previous = previousApproval(task);
-        String requested = cmd.rejectToNodeId();
-        String targetId = requested == null || requested.isBlank()
-            ? (previous == null ? null : previous.getNodeId()) : requested;
-        JsonNode target = targetId == null ? null : ProcessTreeNav.findById(root, targetId);
-        if (target != null) {
-            JsonNode configuredTargets = current.path("props").path("rejectTargets");
-            boolean configured = configuredTargets.isArray() && !configuredTargets.isEmpty()
-                ? java.util.stream.StreamSupport.stream(configuredTargets.spliterator(), false)
-                    .anyMatch(value -> targetId.equals(value.asText()))
-                : previous != null && targetId.equals(previous.getNodeId());
-            if (!"APPROVAL".equals(target.path("type").asText())
-                || !ProcessTreeNav.isAncestor(root, targetId, task.getNodeId())
-                || ProcessTreeNav.isInsideParallelBranch(root, targetId)
-                || (!force && !configured)) {
-                throw new BizException("BAD_REJECT_TARGET", "reject target is not an allowed upstream approval");
-            }
-            runtimeV2.invalidateApprovedNodes(instance,
-                ProcessTreeNav.nodesBetween(root, targetId, task.getNodeId()),
-                "rejected back to " + targetId);
-            runtimeV2.beginRound(instance, "REJECT_TO_NODE");
-            instance.setStatus("RUNNING");
-            instance.setFinishedAt(null);
-            instance.setCurrentNodeId(targetId);
-            processInstanceMapper.updateById(instance);
-            insertHistory(task, task.getNodeId(), targetId,
-                force ? "FORCE_REJECT" : "REJECT_TO_NODE", operatorId, cmd.comment());
-            resolveAndLandFromNode(root, instance, readFormData(instance.getFormDataId()),
-                instance.getStartedBy(), Map.of(), target);
-            return;
-        }
-        if (targetId != null) {
-            throw new BizException("BAD_REJECT_TARGET", "reject target not found: " + targetId);
-        }
-
-        TaskEntity rework = newReturnedTask(instance.getId(), "__rework__", "REWORK",
-            "ANY", instance.getStartedBy(), null, null);
-        rework.setActionFormRevisionId(instance.getCurrentFormRevisionId());
-        rework.setOperationKind("REWORK");
-        taskMapper.insert(rework);
-
-        FormData formData = formDataMapper.selectRuntimeById(instance.getFormDataId());
-        if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
-        formData.setStatus("NEEDS_REVISION");
-        formDataMapper.updateById(formData);
-        long revisionId = runtimeV2.createRevision(formData, "NEEDS_REVISION", "REJECTED",
-            operatorId);
-        instance.setCurrentFormRevisionId(revisionId);
-        instance.setCurrentNodeInstanceId(null);
-        instance.setCurrentNodeId("__rework__");
-        instance.setStatus("RUNNING");
-        instance.setFinishedAt(null);
-        processInstanceMapper.updateById(instance);
-        insertHistory(task, task.getNodeId(), "__rework__",
-            force ? "FORCE_REJECT" : "REJECT", operatorId, cmd.comment());
-        runtimeV2.outbox(instance.getId(), rework.getAssigneeId(), "TASK_RETURNED", rework.getId());
-    }
-
     private void insertHistory(TaskEntity t, String from, String to,
                                 String action, Long operatorId, String comment) {
-        TaskHistoryEntity h = new TaskHistoryEntity();
-        h.setProcInstId(t.getProcInstId());
-        h.setTaskId(t.getId());
-        h.setFromNodeId(from);
-        h.setToNodeId(to);
-        h.setAction(action);
-        h.setOperatorId(operatorId);
-        h.setComment(comment);
-        historyMapper.insert(h);
+        support.insertHistory(t, from, to, action, operatorId, comment);
     }
 
     private void insertHistoryOnInstance(Long instId, String from, String to,
                                           String action, Long operatorId, String comment) {
-        TaskHistoryEntity h = new TaskHistoryEntity();
-        h.setProcInstId(instId);
-        h.setFromNodeId(from);
-        h.setToNodeId(to);
-        h.setAction(action);
-        h.setOperatorId(operatorId);
-        h.setComment(comment);
-        historyMapper.insert(h);
+        support.insertHistoryOnInstance(instId, from, to, action, operatorId, comment);
     }
 
     private String writeJson(Object o) {
-        try { return json.writeValueAsString(o); }
-        catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new BizException("BAD_JSON", e.getMessage());
-        }
+        return support.writeJson(o);
     }
 }
