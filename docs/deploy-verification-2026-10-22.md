@@ -220,3 +220,80 @@ docker compose --env-file .env.docker.local up -d backend web
 
 部署后 backend 立即 healthy、`{"status":"UP"}`。**建议**：给 `deploy.sh` 加一个
 `ANTFLOW_SKIP_REMOTE_CHECK=1` 开关，或在无网环境显式跳过需要远程的步骤。
+
+---
+
+## 九、第三轮：拆分后回归（2026-10-22 晚）
+
+### 部署
+
+发布 `bf19518`（51 个未推送提交，含本轮 17 个类的拆分）。四个容器 healthy，`/actuator/health` 200，
+`frontend/dist` 产物内含 `bf19518` 水印，确认跑的是最新代码。
+
+**部署过程遇到 4 个环境问题（都不是代码问题，但拖了很久）**：
+
+| # | 现象 | 原因 | 处理 |
+| --- | --- | --- | --- |
+| 1 | `backend/build.sh` 打印两行后卡住 12 分钟 | 它最后是 `docker run --rm maven:3.9-eclipse-temurin-17 mvn ...`，要在容器里跑 Maven（拉镜像/预热） | 改用本地 `mvn -B -Dmaven.test.skip=true package`（20 秒完成） |
+| 2 | `docker compose up` 报 `container ... is zombie and can not be killed` | 旧 backend 容器进程成僵尸，daemon 无法回收 | `docker rm -f` 强制删除后重建 |
+| 3 | compose 卡在 `backup-init` Starting | backend 的 `depends_on: backup-init: service_completed_successfully`，初始化容器起不来就一直阻塞 | 删除该容器后 `docker start` 直接起 backend/web |
+| 4 | `docker start` 返回 0 但容器仍是 `Created`，健康检查 504 | Docker daemon 状态异常（僵尸容器拖累） | `docker desktop restart`（57 秒）后一切恢复 |
+
+### 回归验证
+
+**页面级（17 个页面，覆盖全部拆分类）**：18/18 通过，**零 4xx/5xx**（除登录前预期的 401）。
+
+| 页面 | 覆盖的拆分 |
+| --- | --- |
+| `/workplace` | 基础 |
+| `/org/contacts` | `UserService` 6 类 + 前端 `Contacts` 7 文件 |
+| `/security/roles` | `RoleAdminService` 3 类 |
+| `/security/user-permissions`、`/security/audit-log` | `AuthorizationService` 5 类 |
+| `/approval/forms`、`/admin/form-data` | `ProcessDefinitionService` 5 类 |
+| `/tasks/inbox`、`/tasks/done`、`/approval/monitor`、`/proc` | `ProcessEngine` 6 类 + `ApprovalOrchestrator` |
+| `/approval/option-sources` | `OptionRuntimeService` 5 类 |
+| `/settings/wecom` | `WecomAppService` 7 类 |
+| `/settings/identity-providers` | `OidcService` 5 类 |
+| `/settings/backup`、`/settings/company` | 备份 + `UserService` 公司维度 |
+
+**写路径**：
+
+| ID | 操作 | 预期 | 实际 | 结论 |
+| --- | --- | --- | --- | --- |
+| R2-01 | 流程设计器保存 + 回读 | 2xx | 保存按钮可用，回读 200 | ✅ |
+| R2-02 | 发起流程（`ProcessStarter`） | 2xx | `POST /api/forms/data` **200**，跳 `/runtime/list` | ✅ |
+| R2-03 | 审批普通任务（`ApprovalOrchestrator`） | 2xx | 任务 106 **200** | ✅ |
+| R2-04 | 上传 PNG（`MobileFileService` 7 类） | 2xx | **200**，返回文件 id | ✅ |
+| R2-05 | 对返工任务 approve（守卫） | 422 `BAD_TASK_TYPE` | 任务 154/153 均 **422 `BAD_TASK_TYPE`** | ✅ |
+
+> **R2-03 首次判 FAIL 是一次误报**：待办列表第一条（154）是**返工任务**，`approve` 返回
+> `422 BAD_TASK_TYPE: Rework task must be resubmitted from the form`。这是**业务规则不是缺陷**——
+> 换普通任务（106）后 200。反过来证明 `BAD_TASK_TYPE` 守卫在拆分后仍正确。
+
+**移动端**：
+
+| 页面 | 覆盖 | 结果 |
+| --- | --- | --- |
+| `/mobile/workbench` | `MobileWorkflowService` 首页投影 | ✅ 376 字，零 API 异常 |
+| `/mobile/tasks` | 列表 + `ApprovalRecords` 5 文件 | ✅ 987 字，零 API 异常 |
+| `/mobile/forms/deploy_verify` | 填单 + `FileUploadField`/`ChecklistField` | ✅ 560 字，零 API 异常 |
+| `/mobile/profile/security` | 安全页 | ✅ 「账号安全 / 修改密码 / 登录设备 66 台」 |
+
+**选项源运行时（`OptionRuntimeService`）**：
+
+| 场景 | 结果 | 说明 |
+| --- | --- | --- |
+| 内联选项字段调 `POST /api/runtime/form-options/query` | **422 `BAD_SCHEMA: 字段没有外部数据配置`** | 正确：该字段没绑外部数据源 |
+| DRAFT 表单（id=1, version 7）的绑定字段 | **404 `field not found`** | 正确：运行时只服务已发布版本 |
+| 已发布 + 绑定选项源的表单 | **查无此数据** | ⚠️ **未覆盖**（见下） |
+
+### 仍未覆盖 / 无法验证
+
+| 项 | 原因 |
+| --- | --- |
+| **选项源运行时成功路径**（返回选项行） | 库里没有「PUBLISHED 且字段绑定 optionSource」的表单（唯一的绑定了的 id=1 是 DRAFT）。需先发布那样一张表单才能验 |
+| **V2 实例状态机**（`WorkflowRuntimeV2` 10 个类） | 需要 `engineVersion=2` 的新实例；本次发起的实例走的是当前引擎路径，V2 的 SEQUENTIAL/并行 ANY 收口仍只有集成测试覆盖 |
+| **OIDC 登录闭环** | 无 OIDC provider 配置，只能验证页面渲染与「未配置」态 |
+| **企微真实同步 / 免登** | 需真实 corpId/secret |
+| **`WecomAppMessageDispatcher` 的事件投递** | 需企微回调，且要真实群机器人 |
+| **`BAD_TASK_TYPE` 之外的任务类型守卫**（加签/委派/超时） | 需构造对应任务类型，本轮只覆盖返工 |
