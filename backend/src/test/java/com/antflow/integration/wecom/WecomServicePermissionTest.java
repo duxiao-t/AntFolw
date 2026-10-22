@@ -26,11 +26,14 @@ class WecomServicePermissionTest {
         authorization = mock(AuthorizationService.class);
         service = new WecomService(mock(JdbcTemplate.class), mock(WecomSecretCipher.class),
             mock(WecomClient.class), authorization, mock(AuditService.class), new ObjectMapper(),
-            mock(PasswordEncoder.class),
             mock(TransactionTemplate.class), mock(Executor.class), new WecomProperties(),
             new WecomSyncLease(mock(JdbcTemplate.class)),
             new WecomManagerSync(mock(JdbcTemplate.class), mock(WecomClient.class),
-                mock(TransactionTemplate.class), mock(WecomSyncLease.class)));
+                mock(TransactionTemplate.class), mock(WecomSyncLease.class)),
+            new WecomDirectorySync(mock(JdbcTemplate.class), mock(PasswordEncoder.class),
+                mock(TransactionTemplate.class), mock(WecomSyncLease.class)),
+            new WecomDepartmentSync(mock(JdbcTemplate.class), mock(TransactionTemplate.class),
+                mock(WecomSyncLease.class)));
     }
 
     @Test

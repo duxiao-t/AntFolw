@@ -181,8 +181,15 @@ H7 已在 CI 的 `metrics` job 生效：**六个口径只许下降，任一项�
 | **2.0 纯静态规则** | `changed` / `effectiveUserStatus` / `sameWhenProvided` / `sameDepartment` / `createsCycle` / `resolveMatch` / `primaryDepartment` / `orderDepartments` / `visitDepartment` + 8 个字段清洗 + `LocalUserState` + `SyncUserException` | ✅ 已拆为 `WecomMappingRules`（212 行 / 19 方法） |
 | **2.1 同步租约** | `runningClaims` / `currentLease` / `claimJob` / `requireLease` / 续租循环 / `Lease` / `LeaseLostException` | ✅ 已拆为 `WecomSyncLease`（118 行），`requireLease` 10 个调用点改为 `lease.require()` |
 | **2.2 上级关系** | `syncManagers` / `managerUpdate` / `activeCompanyUser` + `MANAGER_POOL_SIZE` / `MANAGER_BATCH_INTERVAL_MS` | ✅ 已拆为 `WecomManagerSync`（约 180 行），原类 **1151 → 1048**；补 `WecomManagerSyncTest` 6 个判定用例 |
-| **2.3 目录同步** | `loadContext` / `syncUsers` / `matchLocal` / `wecomEmployeeNo` / `wecomUsername` + `SyncContext`（33 处访问点）+ **`syncDepartmentLeaders`**（见下） | 待拆 |
-| **2.4 配置/消息/查询** | `settings` / `saveSettings` / `start` / `job` / `config` / `mapped*` / `auditResult` | 留原类 |
+| **2.3a 部门侧** | `syncDepartments` / `syncDepartmentLeaders` / `mappedDepartment` / `mappedActiveUser` + `DepartmentState` | ✅ 已拆为 `WecomDepartmentSync`（150 行） |
+| **2.3b 成员侧** | `loadContext` / `syncUsers` / `applyLoginStatus` / `matchLocal` / `wecomEmployeeNo` / `wecomUsername` / `deactivateMissing` + `SyncContext` | ✅ 已拆为 `WecomDirectorySync`（326 行），原类 **1048 → 690** |
+| **2.4 配置/任务查询** | `settings` / `saveSettings` / `start` / `job` / `recoverInterruptedJobs` / `renewSyncLeases` / `config` / `latestJob` / `activeJob` / `mapJob` / `requireCompany*` / `stage`/`progress`/`finish`/`fail`/`auditResult` | 待拆（约 300 行，含 `@Scheduled` 与权限校验） |
+
+> **2.3 为什么又拆了一次**：把部门与成员一起搬后，`WecomDirectorySync` 是 **436 行**，
+> 超过 400 阈值 → H7 的 `backendOverLines` 从 16 变 17，**门禁当场报"变差"**。
+> 当时有三个选择：改基线放水、放宽阈值、继续拆。前两个都会让门禁失去意义，所以按业务边界
+> （一个写 `t_user`、一个写 `t_department`，只共享 jdbc/事务/租约）再拆一刀，两个类分别落到
+> 326 / 150 行。**这条经验值得记住：拆分本身会产生新的超标类，门禁必须在拆分过程中持续跑。**
 
 > **2.2 的边界调整**：原计划把 `syncDepartmentLeaders` 一起搬，但实测它依赖 `mappedDepartment`，
 > 而后者与 `syncDepartments` 共用——单独搬会制造第三份"部门映射查询"的归属。故它归入 2.3，
