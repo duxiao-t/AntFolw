@@ -88,3 +88,7 @@ _preview/*.png
 
 # 构建产物隔离目录（scripts/build.sh 把 dist/.umi-production mv 到这里，避免触发宿主的删除守卫）
 /.build-stale/
+
+# 部署验证临时产物（Playwright 脚本、截图、Chrome profile）
+.verify/
+deploy.log
