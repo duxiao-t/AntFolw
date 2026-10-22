@@ -92,3 +92,5 @@ _preview/*.png
 # 部署验证临时产物（Playwright 脚本、截图、Chrome profile）
 .verify/
 deploy*.log
+build-*.log
+compose-*.log
