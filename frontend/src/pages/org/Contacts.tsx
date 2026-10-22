@@ -1,48 +1,18 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { request, useAccess } from '@umijs/max';
-import { useQuery, useMutation, useQueryClient, useIsMutating } from '@tanstack/react-query';
-import {
-  Input, Tree, Button, Dropdown, Modal, Form, Select, App,
-} from 'antd';
-import {
-  PlusOutlined, SearchOutlined, MoreOutlined,
-  DeleteOutlined, EditOutlined, TeamOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
-} from '@ant-design/icons';
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import type { DataNode } from 'antd/es/tree';
+import { useQuery, useIsMutating } from '@tanstack/react-query';
+import { Button, Select } from 'antd';
+import { useState } from 'react';
 import './Contacts.less';
-import {
-  collectTreeKeys,
-  contactsPaneMode,
-  departmentPathNames,
-  filterDepartmentTree,
-  normalizeGender,
-  PAGE_SIZE,
-  parseMembersCsv,
-  retainVisibleKeys,
-  resolveDepartmentDropAction,
-  summarizeSettledResults,
-} from './Contacts.utils';
-import { LeaderPicker, MemberFormModal, MemberSearchResults, MembersSection } from './Contacts.components';
-import { blobErrorMessage } from '@/utils/format';
-
-interface Dept {
-  id: number; companyId: number; parentId: number | null;
-  path: string; name: string; leaderId: number | null; leaderIds?: number[];
-  sortOrder?: number;
-  contextOnly?: boolean; canReadMembers?: boolean;
-  canManageDepartment?: boolean; canManageUsers?: boolean;
-}
-interface UserItem {
-  id: number; employeeNo: string; username: string; displayName: string; email: string;
-  phone: string; position: string; gender: string; deptId: number;
-  managerId?: number | null; managerDisplayName?: string | null;
-  status: string; wecomMapped?: boolean; wecomStatus?: number | null;
-  wecomDirectoryPresent?: boolean; departmentLeader?: boolean;
-}
-interface UserPage { records?: UserItem[]; total?: number; }
-interface ManagerCandidate { id: number; displayName: string; employeeNo: string; deptId: number; }
+import { MemberFormModal, MemberSearchResults, MembersSection } from './Contacts.components';
+import { ContactsDeptDialogs } from './ContactsDeptDialogs';
+import { ContactsDeptPanel } from './ContactsDeptPanel';
+import { ContactsPasswordDialog } from './ContactsPasswordDialog';
+import type { CompanyOption } from './Contacts.types';
+import { contactsPaneMode } from './Contacts.utils';
+import { useContactsDepartments } from './useContactsDepartments';
+import { useContactsMemberDialogs } from './useContactsMemberDialogs';
+import { useContactsMembers } from './useContactsMembers';
 
 export default function ContactsPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<number>();
@@ -78,514 +48,72 @@ export default function ContactsPage() {
   );
 }
 
+/**
+ * 单个公司的通讯录工作台：这里只放**跨域**的三条状态（选中部门、关键词、成员页码），
+ * 部门域与成员域各自在自己的 hook 里，视图只做装配。
+ */
 function CompanyContacts({ companyId, companies, onBusyChange }: {
   companyId: number;
-  companies: { value: number; label: string }[];
+  companies: CompanyOption[];
   onBusyChange: (busy: boolean) => void;
 }) {
   const access = useAccess();
+  const canAdmin = !!access.canAdmin;
   const [selDeptId, setSelDeptId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [memberPage, setMemberPage] = useState(1);
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
-  const qc = useQueryClient();
-  const { message: msg, modal } = App.useApp();
 
-  const [deptForm] = Form.useForm();
-  const [memberForm] = Form.useForm();
-  const [passwordForm] = Form.useForm();
-  const [deptAddOpen, setDeptAddOpen] = useState(false);           // top "+"
-  const [deptAddParentId, setDeptAddParentId] = useState<number | null>(null); // for sub-dept
-  const [deptEditOpen, setDeptEditOpen] = useState(false);
-  const [deptEditId, setDeptEditId] = useState<number | null>(null);
-  const [leaderOpen, setLeaderOpen] = useState(false);
-  const [leaderDeptId, setLeaderDeptId] = useState<number | null>(null);
-  const [memberOpen, setMemberOpen] = useState(false);
-  const [memberEdit, setMemberEdit] = useState<UserItem | null>(null);
-  const [managerKeyword, setManagerKeyword] = useState('');
-  const [passwordTarget, setPasswordTarget] = useState<UserItem | null>(null);
-  const [selectedMemberIds, setSelectedMemberIds] = useState<React.Key[]>([]);
-  const importInputRef = useRef<HTMLInputElement>(null);
-
-  // --- data ---
-  const { data: deptList = [], isError: departmentsError, refetch: refetchDepartments } = useQuery<Dept[]>({
-    queryKey: ['depts', companyId],
-    queryFn: () => request(`/api/departments?companyId=${companyId}`),
-    enabled: !!companyId,
+  const dept = useContactsDepartments({
+    companyId,
+    selDeptId,
+    onSelectDept: setSelDeptId,
+    onLeaderSaved: () => setMemberPage(1),
+  });
+  const members = useContactsMembers({
+    companyId,
+    selDeptId,
+    search,
+    memberPage,
+    setMemberPage,
+    breadcrumb: dept.breadcrumb,
+    onBusyChange,
+  });
+  const dialogs = useContactsMemberDialogs({
+    companyId,
+    selDeptId,
+    canAdmin,
+    refreshMembers: members.refreshMembers,
   });
 
-  const { data: memberResult } = useQuery<UserPage>({
-    queryKey: ['users-page', companyId, selDeptId, memberPage],
-    queryFn: () => request('/api/users/page', { params: {
-      companyId, page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
-    } }),
-    enabled: !!selDeptId,
-  });
-
-  // 同一个词过滤左树并在当前公司内跨部门搜人；后端继续叠加能力数据范围。
-  const trimmedSearch = search.trim();
-  const [searchPage, setSearchPage] = useState(1);
-  useEffect(() => setSearchPage(1), [trimmedSearch]);
-  const { data: searchResult, isFetching: searchLoading } = useQuery<UserPage>({
-    queryKey: ['users-search', companyId, trimmedSearch, searchPage],
-    queryFn: () => request('/api/users/page', { params: {
-      companyId, page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
-    } }),
-    enabled: !!trimmedSearch,
-  });
   const paneMode = contactsPaneMode(search, selDeptId);
-
-  const { data: leaderResult } = useQuery<UserPage>({
-    queryKey: ['leader-users', companyId],
-    queryFn: () => request('/api/users/page', { params: { companyId, page: 1, size: 100 } }),
-    enabled: leaderOpen,
-  });
-
-  const memberCompanyId = Form.useWatch('companyId', { form: memberForm, preserve: true }) ?? companyId;
-  const managerDepartmentId = Form.useWatch('deptId', { form: memberForm, preserve: true });
-  const memberDepartments = useQuery<Dept[]>({
-    queryKey: ['depts', memberCompanyId],
-    queryFn: () => request('/api/departments', { params: { companyId: memberCompanyId } }),
-    enabled: memberOpen,
-  });
-  const { data: managerCandidates = [], isFetching: managerCandidatesLoading } = useQuery<ManagerCandidate[]>({
-    queryKey: ['manager-candidates', memberCompanyId, managerDepartmentId, memberEdit?.id, managerKeyword],
-    queryFn: () => request('/api/users/manager-candidates', { params: {
-      deptId: managerDepartmentId,
-      excludeUserId: memberEdit?.id,
-      keyword: managerKeyword || undefined,
-    } }),
-    enabled: memberOpen && !!managerDepartmentId,
-  });
-
-  const managerOptions = useMemo(() => {
-    const options = managerCandidates.map((candidate) => ({
-      value: candidate.id,
-      label: `${candidate.displayName}（${candidate.employeeNo}）`,
-    }));
-    if (memberEdit?.managerId && !options.some((option) => option.value === memberEdit.managerId)) {
-      options.unshift({
-        value: memberEdit.managerId,
-        label: memberEdit.managerDisplayName ?? `用户 ${memberEdit.managerId}`,
-      });
-    }
-    return options;
-  }, [managerCandidates, memberEdit]);
-
-  const refreshMembers = async () => {
-    await Promise.all(['users-page', 'users-search', 'leader-users', 'manager-candidates']
-      .map((key) => qc.invalidateQueries({ queryKey: [key] })));
-  };
-
-  // --- tree data ---
-  const treeData = useMemo(() => {
-    const list = deptList as Dept[];
-    const byParent: Record<number, DataNode[]> = {};
-    for (const d of list) {
-      const key = d.parentId ?? 0;
-      if (!byParent[key]) byParent[key] = [];
-      byParent[key].push({ title: d.name, key: d.id, children: [] });
-    }
-    const walk = (n: DataNode): DataNode => {
-      n.children = (byParent[n.key as number] ?? []).map(walk);
-      return n;
-    };
-    return (byParent[0] ?? []).map(walk);
-  }, [deptList]);
-
-  const deptParentById = useMemo(() => {
-    const map: Record<number, number | null> = {};
-    for (const d of deptList as Dept[]) map[d.id] = d.parentId ?? null;
-    return map;
-  }, [deptList]);
-
-  const deptNameById = useMemo(() => {
-    const map: Record<number, string> = {};
-    for (const d of deptList as Dept[]) map[d.id] = d.name;
-    return map;
-  }, [deptList]);
-
-  const canManageUsersByDept = useMemo(() => Object.fromEntries(
-    (deptList as Dept[]).map((department) => [department.id, !!department.canManageUsers]),
-  ), [deptList]);
-
-  const selectedDepartment = useMemo(
-    () => (deptList as Dept[]).find((department) => department.id === selDeptId),
-    [deptList, selDeptId],
-  );
-
-  const members = memberResult?.records ?? [];
-
-  useEffect(() => setMemberPage(1), [selDeptId]);
-
-  useEffect(() => {
-    const visibleIds = new Set(members.map((m) => m.id));
-    setSelectedMemberIds((prev) => retainVisibleKeys(prev, visibleIds));
-  }, [members]);
-
-  const filteredTree = useMemo(() => filterDepartmentTree(treeData, search), [treeData, search]);
-
-  useEffect(() => {
-    if (search.trim()) setExpandedKeys(collectTreeKeys(filteredTree));
-  }, [filteredTree, search]);
-
-  // --- dept CRUD ---
-  const deptCreate = useMutation({
-    mutationFn: (body: any) => request('/api/departments', { method: 'POST', data: body }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['depts'] }); msg.success('部门已创建'); },
-  });
-  const deptUpdate = useMutation({
-    mutationFn: ({ id, ...body }: any) => request(`/api/departments/${id}`, { method: 'PUT', data: body }),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['depts'] }),
-        qc.invalidateQueries({ queryKey: ['dept-path'] }),
-      ]);
-      msg.success('部门已更新');
-    },
-  });
-  const deptMove = useMutation({
-    mutationFn: ({ id, parentId }: { id: number; parentId: number | null }) =>
-      request(`/api/departments/${id}`, { method: 'PUT', data: { parentId } }),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['depts'] }),
-        qc.invalidateQueries({ queryKey: ['dept-path'] }),
-      ]);
-      msg.success('部门已移动');
-    },
-  });
-  const deptMoveOrder = useMutation({
-    mutationFn: ({ id, direction }: { id: number; direction: 'UP' | 'DOWN' }) =>
-      request(`/api/departments/${id}/order`, { method: 'PUT', data: { direction } }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['depts'] });
-      msg.success('排序已更新');
-    },
-  });
-  const deptMovePosition = useMutation({
-    mutationFn: ({ id, targetId, placement }: { id: number; targetId: number; placement: 'BEFORE' | 'AFTER' }) =>
-      request(`/api/departments/${id}/position`, { method: 'PUT', data: { targetId, placement } }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['depts'] });
-      msg.success('排序已更新');
-    },
-  });
-  const deptRemove = useMutation({
-    mutationFn: (id: number) => request(`/api/departments/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => { setSelDeptId(null); await qc.invalidateQueries({ queryKey: ['depts'] }); msg.success('已删除'); },
-  });
-
-  // --- member CRUD ---
-  const memberCreate = useMutation({
-    mutationFn: (body: any) => request('/api/users', { method: 'POST', data: body }),
-    onSuccess: async () => { await refreshMembers(); msg.success('添加成功'); },
-  });
-  const memberUpdate = useMutation({
-    mutationFn: ({ id, ...body }: any) => request(`/api/users/${id}`, { method: 'PUT', data: body }),
-    onSuccess: async () => { await refreshMembers(); msg.success('已更新'); },
-  });
-  const memberRemove = useMutation({
-    mutationFn: (id: number) => request(`/api/users/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => { await refreshMembers(); msg.success('已删除'); },
-  });
-  const memberPasswordReset = useMutation({
-    mutationFn: ({ id, newPassword }: { id: number; newPassword: string }) =>
-      request(`/api/users/${id}/password`, { method: 'PUT', data: { newPassword } }),
-    onSuccess: () => { msg.success('密码已重置，用户的旧会话已失效'); },
-  });
-  const memberLoginAccess = useMutation({
-    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
-      request(`/api/users/${id}/login-access`, { method: 'PUT', data: { enabled } }),
-    onSuccess: async (_data, variables) => {
-      await qc.invalidateQueries({ queryKey: ['users-page'] });
-      msg.success(variables.enabled ? '已允许该成员登录' : '已禁止该成员登录');
-    },
-  });
-
-  // --- tree drop ---
-  const onDrop = useCallback((info: any) => {
-    const dragId = Number(info.dragNode?.key ?? info.dragNode?.props?.eventKey);
-    const dropId = Number(info.node?.key ?? info.node?.props?.eventKey);
-    const dropNodeIndex = Number(String(info.node?.pos ?? '').split('-').pop() ?? 0);
-    const relativeDropPosition = Number(info.dropPosition) - dropNodeIndex;
-    const action = resolveDepartmentDropAction({
-      dragId,
-      dropId,
-      dropToGap: !!info.dropToGap,
-      relativeDropPosition,
-      currentParentId: deptParentById[dragId] ?? null,
-      parentById: deptParentById,
-    });
-    if (action.type === 'sort') {
-      deptMovePosition.mutate({ id: dragId, targetId: action.targetId, placement: action.placement });
-      return;
-    }
-    if (action.type === 'none') {
-      return;
-    }
-    deptMove.mutate({ id: dragId, parentId: action.parentId });
-  }, [deptMove, deptMovePosition, deptParentById]);
-
-  // --- tree title render ---
-  const titleRender = (node: DataNode) => {
-    const currentDept = (deptList as Dept[]).find(x => x.id === node.key);
-    const canManage = !!currentDept?.canManageDepartment;
-    const siblings = (deptList as Dept[]).filter(x => (x.parentId ?? null) === (currentDept?.parentId ?? null));
-    const siblingIndex = siblings.findIndex(x => x.id === node.key);
-    const canMoveUp = siblingIndex > 0;
-    const canMoveDown = siblingIndex >= 0 && siblingIndex < siblings.length - 1;
-    const items = [
-      { key: 'add', label: '添加子部门', icon: <PlusOutlined />,
-        disabled: !canManage,
-        onClick: () => { setDeptAddParentId(node.key as number); setDeptAddOpen(true); } },
-      { key: 'edit', label: '修改名称', icon: <EditOutlined />,
-        disabled: !canManage,
-        onClick: () => { setDeptEditId(node.key as number); setDeptEditOpen(true); } },
-      { key: 'leader', label: '设置负责人', icon: <TeamOutlined />,
-        disabled: !canManage,
-        onClick: () => { setLeaderDeptId(node.key as number); setLeaderOpen(true); } },
-      { key: 'up', label: '上移', icon: <ArrowUpOutlined />, disabled: !canManage || !canMoveUp,
-        onClick: () => deptMoveOrder.mutate({ id: node.key as number, direction: 'UP' }) },
-      { key: 'down', label: '下移', icon: <ArrowDownOutlined />, disabled: !canManage || !canMoveDown,
-        onClick: () => deptMoveOrder.mutate({ id: node.key as number, direction: 'DOWN' }) },
-      { key: 'del', label: '删除部门', icon: <DeleteOutlined />, danger: true, disabled: !canManage,
-        onClick: () => {
-          const d = (deptList as Dept[]).find(x => x.id === node.key);
-          modal.confirm({
-            title: `确认删除「${d?.name ?? node.key}」?`,
-            content: '删除前需先处理子部门及部门成员，删除后不可恢复',
-            okType: 'danger',
-            onOk: () => deptRemove.mutate(node.key as number),
-          });
-        } },
-      { type: 'divider' as const },
-      { key: 'dept-id', label: `部门ID：${node.key}`, disabled: true },
-    ];
-    return (
-      <div className="ct-tree-node" onClick={() => { if (!currentDept?.contextOnly) setSelDeptId(node.key as number); }}>
-        <span className="ct-tree-node__name">{node.title as string}</span>
-        <Dropdown menu={{ items }} trigger={['click']}>
-          <Button type="text" size="small" icon={<MoreOutlined />} onClick={e => e.stopPropagation()} />
-        </Dropdown>
-      </div>
-    );
-  };
-
-  // --- breadcrumb ---
-  // 从**已授权的部门列表**推导，不再请求 /api/departments/{id}/path：那条只认
-  // org:department:read，而左树是它与 org:user:read 的并集——树里点得到、面包屑却 403
-  // （点跨部门搜索结果跳过去时最容易撞上）。祖先本来就带 contextOnly 在树里。
-  const breadcrumb = useMemo(() => {
-    const parts = departmentPathNames(deptList as Dept[], selDeptId);
-    return parts.join(' / ') || '请选择部门';
-  }, [deptList, selDeptId]);
-
-  // ---- dept form handlers ----
-  const handleDeptAdd = async () => {
-    try {
-      const v = await deptForm.validateFields();
-      await deptCreate.mutateAsync({ name: v.name, companyId, parentId: v.parentId ?? deptAddParentId ?? null });
-      setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-    }
-  };
-  const handleDeptEdit = async () => {
-    try {
-      const v = await deptForm.validateFields();
-      await deptUpdate.mutateAsync({ id: deptEditId, name: v.name });
-      setDeptEditOpen(false); setDeptEditId(null); deptForm.resetFields();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-    }
-  };
-  const handleLeaderSet = async (userIds: number[]) => {
-    if (leaderDeptId === null) return;
-    try {
-      await deptUpdate.mutateAsync({ id: leaderDeptId, leaderIds: userIds });
-      setMemberPage(1);
-      await qc.invalidateQueries({ queryKey: ['users-page'] });
-      setLeaderOpen(false); setLeaderDeptId(null);
-    } catch {
-      // The global request handler displays the backend business message.
-    }
-  };
-  const handleMemberOk = async () => {
-    try {
-      const v = await memberForm.validateFields();
-      const { confirmPassword: _confirmPassword, companyId: _companyId, ...payload } = v;
-      payload.managerId = payload.managerId ?? null;
-      if (memberEdit) await memberUpdate.mutateAsync({ id: memberEdit.id, ...payload });
-      else await memberCreate.mutateAsync(payload);
-      setMemberOpen(false); setMemberEdit(null); memberForm.resetFields();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-    }
-  };
-
-  const handlePasswordReset = async () => {
-    if (!passwordTarget) return;
-    try {
-      const values = await passwordForm.validateFields();
-      await memberPasswordReset.mutateAsync({
-        id: passwordTarget.id,
-        newPassword: values.newPassword,
-      });
-      setPasswordTarget(null);
-      passwordForm.resetFields();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-    }
-  };
-
-  const handleBulkMemberRemove = async () => {
-    const ids = selectedMemberIds.map(Number);
-    if (!ids.length) return;
-    onBusyChange(true);
-    try {
-      const results = await Promise.allSettled(
-        ids.map((id) => request(`/api/users/${id}`, { method: 'DELETE' })),
-      );
-      const { successCount, failedCount } = summarizeSettledResults(results);
-      if (successCount) {
-        setSelectedMemberIds([]);
-        await refreshMembers();
-      }
-      if (failedCount) msg.error(`批量删除完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
-      else msg.success(`已删除 ${successCount} 名成员`);
-    } finally {
-      onBusyChange(false);
-    }
-  };
-
-  // 导出走后端（同一条 listAuthorized：含下级部门、行级数据范围也在），以前只把**当前页**
-  // 的 15 个人拼成 CSV，一页 15 人时导出看起来"成功"却少了人。
-  const handleExportMembers = async () => {
-    if (!selDeptId) { msg.warning('请先选择部门'); return; }
-    try {
-      const blob = await request('/api/users/export', {
-        params: { companyId, deptId: selDeptId, includeDescendants: true, format: 'csv' },
-        responseType: 'blob',
-        skipErrorHandler: true,
-      });
-      const url = URL.createObjectURL(blob as Blob);
-      const anchor = document.createElement('a');
-      const deptName = breadcrumb.split(' / ').pop() || '部门成员';
-      anchor.href = url;
-      anchor.download = `${deptName}-成员.csv`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      msg.success('已开始下载');
-    } catch (error) {
-      msg.error(await blobErrorMessage(error));
-    }
-  };
-
-  const handleImportMembers = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || !selDeptId) return;
-
-    onBusyChange(true);
-    try {
-      const result = parseMembersCsv(await file.text(), selDeptId);
-      if (result.errors.length) {
-        msg.error(result.errors.slice(0, 3).join('；'));
-        return;
-      }
-      if (!result.rows.length) { msg.warning('CSV 中没有可导入的成员'); return; }
-
-      const imported = await request<{
-        successCount: number; failedCount: number; passwordResetRequired: boolean;
-      }>('/api/users/import', { method: 'POST', data: { users: result.rows } });
-      const { successCount, failedCount } = imported;
-      if (successCount) await refreshMembers();
-      // 只要建成了账号就得提醒重置密码：后端给的是随机且不返回的密码，这些人自己登不上。
-      // 部分成功时以前只报失败数，把这条盖掉了。
-      const resetHint = successCount ? '；请由管理员为新账号重置密码' : '';
-      if (failedCount) {
-        msg.error(`导入完成：成功 ${successCount} 条，失败 ${failedCount} 条${resetHint}`);
-      } else {
-        msg.success(`已导入 ${successCount} 名成员${resetHint}`);
-      }
-    } catch (_error) {
-      msg.error('批量导入失败');
-    } finally {
-      onBusyChange(false);
-    }
-  };
-
-  // ---- get edit dept name ----
-  const editDeptName = deptEditId ? (deptList as Dept[]).find(d => d.id === deptEditId)?.name : '';
-
-  useEffect(() => {
-    if (!deptAddOpen) return;
-    deptForm.resetFields();
-    deptForm.setFieldsValue({ name: undefined, parentId: deptAddParentId ?? undefined });
-  }, [deptAddOpen, deptAddParentId, deptForm]);
-
-  useEffect(() => {
-    if (!deptEditOpen) return;
-    deptForm.resetFields();
-    deptForm.setFieldsValue({ name: editDeptName });
-  }, [deptEditOpen, editDeptName, deptForm]);
 
   return (
     <>
-      {departmentsError && <Button onClick={() => refetchDepartments()}>部门加载失败，点击重试</Button>}
+      {dept.departmentsError && <Button onClick={() => dept.refetchDepartments()}>部门加载失败，点击重试</Button>}
       <div className="ct-layout">
-        {/* ===== LEFT ===== */}
-        <aside className="ct-left">
-          <div className="ct-left-top">
-            <Input prefix={<SearchOutlined />} placeholder="搜索部门或人员" allowClear
-              value={search} onChange={e => setSearch(e.target.value)} />
-            {/* 这里只是"够不够格看到按钮"的近似：建一级部门后端还要求该能力具 ALL 数据范围
-                （DepartmentController 的 requireAllDataScope），而前端看不到范围，越范围时由后端返回 403。 */}
-            <Button aria-label="新建一级部门" icon={<PlusOutlined />} disabled={!access.canOrgDepartmentManage}
-              onClick={() => { setDeptAddParentId(null); setDeptAddOpen(true); }} />
-          </div>
-          <div className="ct-tree-wrap">
-            <Tree
-              showIcon
-              treeData={filteredTree}
-              expandedKeys={expandedKeys}
-              onExpand={keys => setExpandedKeys(keys)}
-              onSelect={keys => {
-                const id = keys[0] as number | undefined;
-                if (id && !(deptList as Dept[]).find((department) => department.id === id)?.contextOnly) {
-                  setSelDeptId(id);
-                }
-              }}
-              selectedKeys={selDeptId ? [selDeptId] : []}
-              titleRender={titleRender}
-              draggable={{
-                icon: false,
-                nodeDraggable: (node) => !!(deptList as Dept[])
-                  .find((department) => department.id === node.key)?.canManageDepartment,
-              }}
-              blockNode
-              onDrop={onDrop}
-            />
-            {/* 一个词同时过滤部门与人员：部门没匹配上时左树会空着，说一句免得以为坏了
-                （右边的人员结果可能已经有了）。 */}
-            {search.trim() && filteredTree.length === 0 && (
-              <div className="ct-tree-empty">没有匹配的部门——右侧是人员搜索结果</div>
-            )}
-          </div>
-        </aside>
+        <ContactsDeptPanel
+          departments={dept.deptList}
+          treeData={dept.treeData}
+          search={search}
+          onSearchChange={setSearch}
+          canCreateRoot={!!access.canOrgDepartmentManage}
+          onAddRoot={() => dept.openAdd(null)}
+          selectedDeptId={selDeptId}
+          onSelectDept={setSelDeptId}
+          onDrop={dept.onDrop}
+          actions={dept.actions}
+        />
 
-        {/* ===== RIGHT ===== */}
         <main className="ct-right">
           {paneMode === 'search' ? (
             <MemberSearchResults
-              keyword={trimmedSearch}
-              loading={searchLoading}
-              members={searchResult?.records ?? []}
-              total={searchResult?.total ?? 0}
-              currentPage={searchPage}
-              onPageChange={setSearchPage}
-              deptNameById={deptNameById}
+              keyword={members.trimmedSearch}
+              loading={members.searchLoading}
+              members={members.searchResult?.records ?? []}
+              total={members.searchResult?.total ?? 0}
+              currentPage={members.searchPage}
+              onPageChange={members.setSearchPage}
+              deptNameById={dept.deptNameById}
               onLocate={(member) => {
                 // 定位 = 清掉关键词、选中他的部门：回到"那个部门的成员列表"。
                 setSearch('');
@@ -595,28 +123,28 @@ function CompanyContacts({ companyId, companies, onBusyChange }: {
             />
           ) : paneMode === 'members' ? (
             <MembersSection
-              breadcrumb={breadcrumb}
-              members={members}
-              total={memberResult?.total ?? 0}
+              breadcrumb={dept.breadcrumb}
+              members={members.members}
+              total={members.total}
               currentPage={memberPage}
-              selectedMemberIds={selectedMemberIds}
-              deptNameById={deptNameById}
-              importInputRef={importInputRef}
-              onSelectedMemberIdsChange={setSelectedMemberIds}
+              selectedMemberIds={members.selectedMemberIds}
+              deptNameById={dept.deptNameById}
+              importInputRef={members.importInputRef}
+              onSelectedMemberIdsChange={members.setSelectedMemberIds}
               onPageChange={setMemberPage}
-              onAdd={() => { setMemberEdit(null); setManagerKeyword(''); memberForm.resetFields(); memberForm.setFieldsValue({ companyId, deptId: selDeptId }); setMemberOpen(true); }}
-              onEdit={(member) => { setMemberEdit(member); setManagerKeyword(''); setMemberOpen(true); memberForm.setFieldsValue({ ...member, companyId, gender: normalizeGender(member.gender) }); }}
-              onRemove={(id) => memberRemove.mutate(id)}
-              onBulkRemove={handleBulkMemberRemove}
-              onExport={handleExportMembers}
-              onImport={handleImportMembers}
-              canAdd={!!selectedDepartment?.canManageUsers}
-              canResetPassword={!!access.canAdmin}
-              canControlLogin={!!access.canAdmin}
-              canManageUsersByDept={canManageUsersByDept}
-              onResetPassword={(member) => { passwordForm.resetFields(); setPasswordTarget(member); }}
-              onSetLoginAccess={(member, enabled) => memberLoginAccess.mutate({ id: member.id, enabled })}
-              loginAccessLoadingId={memberLoginAccess.isPending ? memberLoginAccess.variables?.id : undefined}
+              onAdd={dialogs.openAdd}
+              onEdit={dialogs.openEdit}
+              onRemove={members.removeMember}
+              onBulkRemove={members.bulkRemove}
+              onExport={members.exportMembers}
+              onImport={members.importMembers}
+              canAdd={!!dept.selectedDepartment?.canManageUsers}
+              canResetPassword={canAdmin}
+              canControlLogin={canAdmin}
+              canManageUsersByDept={dept.canManageUsersByDept}
+              onResetPassword={dialogs.openPasswordReset}
+              onSetLoginAccess={members.setLoginAccess}
+              loginAccessLoadingId={members.loginAccessLoadingId}
             />
           ) : (
             <div className="ct-empty">请从左侧选择部门，或在上方搜索部门与人员</div>
@@ -624,127 +152,54 @@ function CompanyContacts({ companyId, companies, onBusyChange }: {
         </main>
       </div>
 
-      {/* ===== Department Add Modal (top "+" or sub-dept) ===== */}
-      <Modal
-        title={deptAddParentId ? '添加子部门' : '新建部门'}
-        open={deptAddOpen}
-        confirmLoading={deptCreate.isPending}
-        onOk={handleDeptAdd}
-        onCancel={() => { setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields(); }}
-        destroyOnHidden
-      >
-        <Form form={deptForm} layout="vertical" preserve={false}>
-          <Form.Item label="所属公司"><Input value={companies.find((company) => company.value === companyId)?.label} disabled /></Form.Item>
-          <Form.Item label="部门名称" name="name" rules={[{ required: true, message: '请输入' }]}>
-            <Input autoFocus />
-          </Form.Item>
-          {!deptAddParentId && (
-            <Form.Item label="所属部门" name="parentId">
-              <Select allowClear placeholder="留空则为一级部门" options={
-                (deptList as Dept[]).filter(d => d.canManageDepartment).map(d => ({ value: d.id, label: d.name }))
-              } />
-            </Form.Item>
-          )}
-        </Form>
-      </Modal>
-
-      {/* ===== Department Edit (name only) ===== */}
-      <Modal
-        title="修改部门"
-        open={deptEditOpen}
-        confirmLoading={deptUpdate.isPending}
-        onOk={handleDeptEdit}
-        onCancel={() => { setDeptEditOpen(false); setDeptEditId(null); deptForm.resetFields(); }}
-        destroyOnHidden
-      >
-        <Form form={deptForm} layout="vertical" preserve={false}
-          initialValues={{ name: editDeptName }}>
-          <Form.Item label="所属公司"><Input value={companies.find((company) => company.value === companyId)?.label} disabled /></Form.Item>
-          <Form.Item label="部门名称" name="name" rules={[{ required: true }]}>
-            <Input autoFocus />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* ===== Set Leader Modal ===== */}
-      <Modal
-        title="设置部门负责人"
-        open={leaderOpen}
-        onCancel={() => { setLeaderOpen(false); setLeaderDeptId(null); }}
-        footer={null}
-        width={600}
-        confirmLoading={deptUpdate.isPending}
-        destroyOnHidden
-      >
-        <LeaderPicker
-          users={(leaderResult?.records ?? []).map(u => ({ id: u.id, name: u.displayName || u.username }))}
-          currentLeaderIds={(deptList as Dept[]).find(d => d.id === leaderDeptId)?.leaderIds
-            ?? ((deptList as Dept[]).find(d => d.id === leaderDeptId)?.leaderId
-              ? [(deptList as Dept[]).find(d => d.id === leaderDeptId)?.leaderId as number]
-              : [])}
-          onOk={handleLeaderSet}
-          onCancel={() => { setLeaderOpen(false); setLeaderDeptId(null); }}
-          saving={deptUpdate.isPending}
-        />
-      </Modal>
-
-      <MemberFormModal
-        open={memberOpen}
-        editing={memberEdit}
-        form={memberForm}
-        saving={memberCreate.isPending || memberUpdate.isPending}
-        onOk={handleMemberOk}
-        onCancel={() => { setMemberOpen(false); setMemberEdit(null); memberForm.resetFields(); }}
-        managerOptions={managerOptions}
-        managerLoading={managerCandidatesLoading}
-        onManagerSearch={setManagerKeyword}
-        companies={companies}
-        canChangeCompany={!!access.canAdmin && !!memberEdit && !memberEdit.wecomMapped}
-        onCompanyChange={() => { memberForm.setFieldValue('deptId', undefined); setManagerKeyword(''); }}
-        departments={(memberDepartments.data ?? []).map((department) => ({
-          id: department.id, pId: department.parentId ?? 0, value: department.id, title: department.name,
-          selectable: !department.contextOnly && !!department.canManageUsers,
-        }))}
-        departmentsLoading={memberDepartments.isFetching}
-        canResetPassword={!!access.canAdmin}
-        onResetPassword={() => {
-          if (!memberEdit) return;
-          setMemberOpen(false);
-          passwordForm.resetFields();
-          setPasswordTarget(memberEdit);
-        }}
+      <ContactsDeptDialogs
+        companyLabel={companies.find((company) => company.value === companyId)?.label}
+        departments={dept.deptList}
+        form={dept.deptForm}
+        addOpen={dept.deptAddOpen}
+        addParentId={dept.deptAddParentId}
+        createPending={dept.deptCreatePending}
+        onAddOk={dept.handleDeptAdd}
+        onAddCancel={dept.cancelDeptAdd}
+        editOpen={dept.deptEditOpen}
+        editName={dept.editDeptName}
+        updatePending={dept.deptUpdatePending}
+        onEditOk={dept.handleDeptEdit}
+        onEditCancel={dept.cancelDeptEdit}
+        leaderOpen={dept.leaderOpen}
+        leaderUsers={dept.leaderUsers}
+        leaderCurrentIds={dept.leaderCurrentIds}
+        leaderSaving={dept.deptUpdatePending}
+        onLeaderOk={dept.handleLeaderSet}
+        onLeaderCancel={dept.cancelLeader}
       />
 
-      <Modal
-        title={passwordTarget ? `重置密码 · ${passwordTarget.displayName}` : '重置密码'}
-        open={!!passwordTarget}
-        width={440}
-        confirmLoading={memberPasswordReset.isPending}
-        onOk={handlePasswordReset}
-        onCancel={() => { setPasswordTarget(null); passwordForm.resetFields(); }}
-        destroyOnHidden
-      >
-        <Form form={passwordForm} layout="vertical" preserve={false} className="ct-member-form">
-          <Form.Item label="新密码" name="newPassword" rules={[
-            { required: true, message: '请输入新密码' },
-            { min: 8, max: 64, message: '密码长度为 8 到 64 位' },
-          ]}>
-            <Input.Password autoComplete="new-password" />
-          </Form.Item>
-          <Form.Item label="确认新密码" name="confirmPassword" dependencies={['newPassword']} rules={[
-            { required: true, message: '请再次输入新密码' },
-            ({ getFieldValue }) => ({
-              validator(_, value) {
-                return !value || getFieldValue('newPassword') === value
-                  ? Promise.resolve()
-                  : Promise.reject(new Error('两次输入的密码不一致'));
-              },
-            }),
-          ]}>
-            <Input.Password autoComplete="new-password" />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <MemberFormModal
+        open={dialogs.memberOpen}
+        editing={dialogs.memberEdit}
+        form={dialogs.memberForm}
+        saving={dialogs.saving}
+        onOk={dialogs.handleMemberOk}
+        onCancel={dialogs.closeMember}
+        managerOptions={dialogs.managerOptions}
+        managerLoading={dialogs.managerCandidatesLoading}
+        onManagerSearch={dialogs.setManagerKeyword}
+        companies={companies}
+        canChangeCompany={dialogs.canChangeCompany}
+        onCompanyChange={dialogs.resetDepartmentOnCompanyChange}
+        departments={dialogs.memberDepartmentsReady}
+        departmentsLoading={dialogs.memberDepartments.isFetching}
+        canResetPassword={canAdmin}
+        onResetPassword={dialogs.resetPasswordFromEditor}
+      />
+
+      <ContactsPasswordDialog
+        target={dialogs.passwordTarget}
+        form={dialogs.passwordForm}
+        saving={dialogs.passwordSaving}
+        onOk={dialogs.handlePasswordReset}
+        onCancel={dialogs.closePassword}
+      />
     </>
   );
 }

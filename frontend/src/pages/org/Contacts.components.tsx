@@ -8,6 +8,7 @@ import type { FormInstance } from 'antd';
 import type { ChangeEvent, Key, RefObject } from 'react';
 import { useMemo, useState } from 'react';
 import { formatGender, normalizeGender, PAGE_SIZE } from './Contacts.utils';
+import type { MemberItem } from './Contacts.types';
 
 /**
  * 搜索结果（跨部门找人）：和成员表同一套排版，但**不带勾选框与批量操作**——
@@ -73,24 +74,8 @@ export function MemberSearchResults({ keyword, loading, members, total, currentP
   );
 }
 
-export interface MemberListItem {
-  id: number;
-  employeeNo: string;
-  username: string;
-  displayName: string;
-  email: string;
-  phone: string;
-  position: string;
-  gender: string;
-  deptId: number;
-  managerId?: number | null;
-  managerDisplayName?: string | null;
-  status: string;
-  wecomMapped?: boolean;
-  wecomStatus?: number | null;
-  wecomDirectoryPresent?: boolean;
-  departmentLeader?: boolean;
-}
+/** 行结构的唯一定义在 `Contacts.types.ts`；这里保留旧名字，调用方与测试不用改。 */
+export type MemberListItem = MemberItem;
 
 export function MemberGenderTag({ value }: { value?: string }) {
   const genderLabel = formatGender(value);
