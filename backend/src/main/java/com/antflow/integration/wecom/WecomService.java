@@ -11,6 +11,8 @@ import com.antflow.integration.wecom.WecomClient.WecomUserRef;
 // 映射规则的类型契约已搬到 WecomMappingRules；这里 import 进来，调用点保持原名。
 import com.antflow.integration.wecom.WecomMappingRules.LocalUserState;
 import com.antflow.integration.wecom.WecomMappingRules.SyncUserException;
+// 租约丢失的异常类型随租约一起搬到 WecomSyncLease；这里 import 进来，catch 处保持原名。
+import com.antflow.integration.wecom.WecomSyncLease.LeaseLostException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
@@ -38,7 +40,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -76,15 +77,16 @@ public class WecomService {
     private final TransactionTemplate transactions;
     private final Executor executor;
     private final WecomProperties properties;
-    private final Map<Long, UUID> runningClaims = new ConcurrentHashMap<>();
-    private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
+    /** 租约状态与校验都在 WecomSyncLease；本类只保留调度入口（renewSyncLeases）。 */
+    private final WecomSyncLease lease;
 
     public WecomService(JdbcTemplate jdbc, WecomSecretCipher cipher, WecomClient client,
                         AuthorizationService authorization, AuditService audit, ObjectMapper json,
                         PasswordEncoder passwords,
                         TransactionTemplate transactions,
                         @Qualifier("wecomSyncExecutor") Executor executor,
-                        WecomProperties properties) {
+                        WecomProperties properties,
+                        WecomSyncLease lease) {
         this.jdbc = jdbc;
         this.cipher = cipher;
         this.client = client;
@@ -95,6 +97,7 @@ public class WecomService {
         this.transactions = transactions;
         this.executor = executor;
         this.properties = properties;
+        this.lease = lease;
     }
 
     public SettingsDto settings(long companyId) {
@@ -314,38 +317,16 @@ public class WecomService {
 
     @Scheduled(fixedDelayString = "${antflow.wecom.lease-renew-interval-ms:30000}")
     public void renewSyncLeases() {
-        runningClaims.forEach((id, token) -> {
-            jdbc.update("""
-                UPDATE t_wecom_sync_job SET lease_expires_at = now() + interval '120 seconds'
-                WHERE id = ? AND claim_token = ? AND status = 'RUNNING' AND lease_expires_at > now()
-                """, id, token);
-        });
+        lease.renewAll();
     }
 
+    /**
+     * 保留包内入口：{@code WecomSyncLeaseFixture} 直接调用，
+     * {@code PostgresTransactionalIntegrityIntegrationTest} 用 {@code ReflectionTestUtils} 按方法名调用。
+     * 实现已搬到 {@link WecomSyncLease#claim(long)}——不要在这里加逻辑。
+     */
     UUID claimJob(long jobId) {
-        UUID token = UUID.randomUUID();
-        int claimed = jdbc.update("""
-            UPDATE t_wecom_sync_job
-            SET status = 'RUNNING', claim_token = ?, lease_expires_at = now() + interval '120 seconds',
-                started_at = COALESCE(started_at, now()), finished_at = NULL,
-                phase = 'CONNECTING', percent = 0, total_users = 0, processed_users = 0,
-                created_users = 0, updated_users = 0, failed_users = 0,
-                message = '重新拉取通讯录并继续同步', error_summary = '[]'::jsonb, updated_at = now()
-            WHERE id = ? AND (status = 'PENDING'
-                OR (status = 'RUNNING' AND (lease_expires_at IS NULL OR lease_expires_at <= now())))
-            """, token, jobId);
-        return claimed == 1 ? token : null;
-    }
-
-    private void requireLease() {
-        Lease lease = currentLease.get();
-        if (lease == null) throw new LeaseLostException();
-        Long id = jdbc.query("""
-            SELECT id FROM t_wecom_sync_job
-            WHERE id = ? AND claim_token = ? AND status = 'RUNNING' AND lease_expires_at > now()
-            FOR UPDATE
-            """, rs -> rs.next() ? rs.getLong(1) : null, lease.jobId(), lease.token());
-        if (id == null) throw new LeaseLostException();
+        return lease.claim(jobId);
     }
 
     private void submit(long jobId, PrincipalHolder.Principal actor) {
@@ -359,8 +340,8 @@ public class WecomService {
     private void run(long jobId, PrincipalHolder.Principal actor) {
         UUID token = claimJob(jobId);
         if (token == null) return;
-        currentLease.set(new Lease(jobId, token));
-        runningClaims.put(jobId, token);
+        // 必须与 finally 里的 exit 成对：租约挂在 ThreadLocal 上，漏掉会让复用线程的下一个任务继承它。
+        lease.enter(jobId, token);
         boolean terminal = false;
         try {
             JobDto initial = job(jobId, false);
@@ -380,7 +361,7 @@ public class WecomService {
             List<WecomUser> externalUsers = client.users(session,
                 departments.stream().map(WecomDepartment::id).toList());
             transactions.executeWithoutResult(status -> {
-                requireLease();
+                lease.require();
                 jdbc.update("UPDATE t_wecom_sync_job SET total_users = ?, updated_at = now() WHERE id = ?",
                     externalUsers.size(), jobId);
             });
@@ -397,7 +378,7 @@ public class WecomService {
                 try {
                     SyncContext batchContext = context;
                     int[] counts = transactions.execute(status -> {
-                        requireLease();
+                        lease.require();
                         return syncUsers(initial.companyId(), batch, departmentMappings, batchContext);
                     });
                     created += counts[0];
@@ -411,7 +392,7 @@ public class WecomService {
                         try {
                             SyncContext memberContext = retryContext;
                             int[] counts = transactions.execute(status -> {
-                                requireLease();
+                                lease.require();
                                 return syncUsers(initial.companyId(), List.of(user),
                                     departmentMappings, memberContext);
                             });
@@ -450,8 +431,7 @@ public class WecomService {
         } catch (RuntimeException exception) {
             terminal = fail(jobId, fatalError(exception), List.of(fatalError(exception)));
         } finally {
-            runningClaims.remove(jobId, token);
-            currentLease.remove();
+            lease.exit(jobId, token);
             if (terminal) auditResult(jobId, actor);
         }
     }
@@ -666,7 +646,7 @@ public class WecomService {
                 List<String> leaders = new ArrayList<>(new LinkedHashSet<>(department.leaderUserIds()));
                 Long leaderId = leaders.isEmpty() ? null : mappedActiveUser(companyId, leaders.get(0));
                 transactions.executeWithoutResult(status -> {
-                    requireLease();
+                    lease.require();
                     Long departmentId = mappedDepartment(companyId, department.id());
                     if (departmentId == null) return;
                     jdbc.update("DELETE FROM t_department_leader WHERE department_id = ?",
@@ -757,7 +737,7 @@ public class WecomService {
             writes.add(new Object[]{managerId, update.userId()});
         }
         transactions.executeWithoutResult(status -> {
-            requireLease();
+            lease.require();
             jdbc.batchUpdate("UPDATE t_user SET manager_id = ? WHERE id = ?", writes);
         });
     }
@@ -795,7 +775,7 @@ public class WecomService {
         Set<String> externalIds = externalUsers.stream()
             .map(WecomUser::userId).collect(Collectors.toSet());
         Integer disabled = transactions.execute(status -> {
-            requireLease();
+            lease.require();
             List<Object[]> targets = jdbc.query("""
                 SELECT wecom_user_id, user_id
                 FROM t_wecom_user_mapping
@@ -837,7 +817,7 @@ public class WecomService {
         Map<Long, Long> mappings = new HashMap<>();
         for (WecomDepartment department : departments) {
             Long localId = transactions.execute(status -> {
-                requireLease();
+                lease.require();
                 Long parentId = department.parentId() == 0 ? null : mappings.get(department.parentId());
                 if (department.parentId() != 0 && parentId == null) {
                     throw new WecomClient.WecomApiException("企业微信部门树缺少父部门");
@@ -889,7 +869,7 @@ public class WecomService {
 
     private void stage(long jobId, String phase, int percent, String message) {
         transactions.executeWithoutResult(status -> {
-            requireLease();
+            lease.require();
             jdbc.update("""
             UPDATE t_wecom_sync_job SET status = 'RUNNING', phase = ?, percent = ?, message = ?,
                 started_at = COALESCE(started_at, now()), updated_at = now()
@@ -901,7 +881,7 @@ public class WecomService {
     private void progress(long jobId, int percent, int total, int processed, int created,
                           int updated, int failed, String message, List<String> errors) {
         transactions.executeWithoutResult(status -> {
-            requireLease();
+            lease.require();
             jdbc.update("""
             UPDATE t_wecom_sync_job SET phase = 'USERS', percent = ?, total_users = ?,
                 processed_users = ?, created_users = ?, updated_users = ?, failed_users = ?,
@@ -913,7 +893,7 @@ public class WecomService {
 
     private void finish(long jobId, String status, String message, List<String> errors) {
         transactions.executeWithoutResult(transaction -> {
-            requireLease();
+            lease.require();
             jdbc.update("""
             UPDATE t_wecom_sync_job SET status = ?, phase = 'COMPLETED', percent = 100,
                 message = ?, error_summary = CAST(? AS jsonb), finished_at = now(), updated_at = now(),
@@ -924,18 +904,15 @@ public class WecomService {
     }
 
     private boolean fail(long jobId, String message, List<String> errors) {
-        Lease lease = currentLease.get();
-        if (lease == null) return false;
+        UUID token = lease.currentToken();
+        if (token == null) return false;
         return jdbc.update("""
             UPDATE t_wecom_sync_job SET status = 'FAILED', phase = 'COMPLETED',
                 message = ?, error_summary = CAST(? AS jsonb), finished_at = now(), updated_at = now(),
                 claim_token = NULL, lease_expires_at = NULL
             WHERE id = ? AND claim_token = ? AND status = 'RUNNING' AND lease_expires_at > now()
-            """, message, errorJson(errors), jobId, lease.token()) == 1;
+            """, message, errorJson(errors), jobId, token) == 1;
     }
-
-    private record Lease(long jobId, UUID token) { }
-    private static class LeaseLostException extends RuntimeException { }
 
     private void auditResult(long jobId, PrincipalHolder.Principal actor) {
         try {

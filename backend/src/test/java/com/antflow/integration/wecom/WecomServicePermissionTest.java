@@ -27,7 +27,8 @@ class WecomServicePermissionTest {
         service = new WecomService(mock(JdbcTemplate.class), mock(WecomSecretCipher.class),
             mock(WecomClient.class), authorization, mock(AuditService.class), new ObjectMapper(),
             mock(PasswordEncoder.class),
-            mock(TransactionTemplate.class), mock(Executor.class), new WecomProperties());
+            mock(TransactionTemplate.class), mock(Executor.class), new WecomProperties(),
+            new WecomSyncLease(mock(JdbcTemplate.class)));
     }
 
     @Test

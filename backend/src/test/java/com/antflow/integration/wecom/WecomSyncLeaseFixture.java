@@ -36,7 +36,7 @@ public final class WecomSyncLeaseFixture {
         when(client.user(any(), any())).thenReturn(member);
         WecomService service = new WecomService(jdbc, cipher, client, mock(AuthorizationService.class),
             mock(AuditService.class), new ObjectMapper(), new BCryptPasswordEncoder(4),
-            transactions, Runnable::run, new WecomProperties());
+            transactions, Runnable::run, new WecomProperties(), new WecomSyncLease(jdbc));
         when(client.users(session, List.of(1L))).thenAnswer(call -> {
             jdbc.update("UPDATE t_wecom_sync_job SET lease_expires_at = now() - interval '1 second' WHERE id = ?",
                 job);
