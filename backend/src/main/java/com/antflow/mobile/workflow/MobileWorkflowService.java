@@ -1,811 +1,183 @@
 package com.antflow.mobile.workflow;
 
-import com.antflow.form.runtime.MobileDraftDto;
-
-import com.antflow.form.runtime.MobileDraftService;
-
-import com.antflow.attachment.MobileFile;
+import com.antflow.attachment.FormDataFileMapper;
 import com.antflow.attachment.MobileFileLinkService;
-import com.antflow.attachment.MobileFileRef;
-import com.antflow.attachment.MobileFileDto;
-
 import com.antflow.authz.AuthorizationService;
-import com.antflow.authz.HiddenResourceException;
-import com.antflow.authz.PermissionCodes;
-import com.antflow.engine.BizException;
 import com.antflow.engine.ProcessEngine;
-import com.antflow.engine.dto.CompleteCmd;
-import com.antflow.engine.dto.StartCmd;
-import com.antflow.engine.tree.ProcessTreeNav;
-import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
-import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.form.runtime.MobileDraftService;
 import com.antflow.org.CompanyAttribution;
-import com.antflow.process.ProcessDefinition;
-import com.antflow.process.ProcessDefinitionService;
 import com.antflow.process.DefinitionVersionRepository;
-import com.antflow.task.ProcessInstance;
+import com.antflow.process.ProcessDefinitionService;
 import com.antflow.task.ProcessInstanceMapper;
-import com.antflow.task.TaskEntity;
-import com.antflow.task.TaskHistoryEntity;
 import com.antflow.task.TaskHistoryMapper;
 import com.antflow.task.TaskMapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
-import lombok.RequiredArgsConstructor;
+import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 移动端工作流门面：16 个公开入口，只做委托与**事务边界**，不再持有任何业务逻辑。
+ *
+ * <p>拆分的依据是"变化原因"，不是行数：
+ * <ul>
+ *   <li>{@link MobileTaskQueryService} —— 列表与分页口径（待办 / 已办 / 我发起的 / 我参与的）；</li>
+ *   <li>{@link MobileTaskDetailService} —— 详情投影与可见性（FULL/SUMMARY、发起人视角、驳回目标）；</li>
+ *   <li>{@link MobileTaskCommandService} —— 写操作（发起 / 审批 / 驳回 / 已读 / 撤回）；</li>
+ *   <li>{@link MobileReworkService} —— 退回修改的读改写（锁、修订 Schema、暂存态）；</li>
+ *   <li>{@link MobileFormFillService} —— 填单页投影（发布校验、草稿/返工上下文、starter 字段模式）；</li>
+ *   <li>{@link MobileApprovalRecordService} / {@link MobileAttachmentProjector}
+ *       / {@link MobileProjectionSupport} —— 三份被多处复用的投影口径。</li>
+ * </ul>
+ *
+ * <p>**事务边界为什么留在这里**：控制器只认识门面，公开入口一进来就落在事务里，
+ * 协作者内部再声明事务只会多一层"加入点"（单测直接 new 时还不生效）。因此新协作者一律没有
+ * {@code @Transactional}；要改事务语义，改的是本类这 7 个注解，而不是散落的实现类。
+ *
+ * <p>**依赖方向**：协作者之间只允许正向依赖（命令/返工 → 取数 → 投影），
+ * 没有任何一个协作者持有本类引用——本类对它们只是装配者与委托者。
+ */
 @Service
-@RequiredArgsConstructor
 public class MobileWorkflowService {
-    private static final long CC_TASK_ID_BASE = 8_000_000_000_000_000L;
-    private static final String PENDING_STATUS = "PENDING";
-    private static final String PUBLISHED_STATUS = "PUBLISHED";
-    private static final String RUNNING_STATUS = "RUNNING";
-    private static final String APPROVAL_NODE = "APPROVAL";
-    private static final String ADMIN_ROLE = "admin";
+    /** 填单页投影。 */
+    private final MobileFormFillService forms;
+    /** 列表查询。 */
+    private final MobileTaskQueryService queries;
+    /** 详情投影。 */
+    private final MobileTaskDetailService details;
+    /** 写操作。 */
+    private final MobileTaskCommandService commands;
+    /** 退回修改。 */
+    private final MobileReworkService reworks;
 
-    private final ProcessEngine engine;
-    private final MobileDraftService draftService;
-    private final MobileWorkflowMapper workflowMapper;
-    private final com.antflow.attachment.FormDataFileMapper fileLinks;
-    private final FormDefinitionService formDefinitionService;
-    private final ProcessDefinitionService processDefinitionService;
-    private final FormDataMapper formDataMapper;
-    private final ProcessInstanceMapper instanceMapper;
-    private final TaskMapper taskMapper;
-    private final TaskHistoryMapper historyMapper;
-    private final MobileFileLinkService fileLinkService;
-    private final ObjectMapper objectMapper;
-    private final AuthorizationService authorizationService;
-    private final CompanyAttribution companyAttribution;
+    /**
+     * 表单修订仓库是可选能力（未启用修订的环境里没有这个 bean），因此保留字段注入：
+     * 改成构造器必选依赖会让这些环境直接起不来。
+     */
     @Autowired(required = false)
     private DefinitionVersionRepository definitionVersions;
 
+    /**
+     * 延迟读取：上面的 bean 是字段注入，构造期还没赋值；协作者若直接持引用，
+     * 就永远看到 null，"带修订的表单"分支在运行时静默失效。单测里也会在构造后替换该字段。
+     */
+    private final Supplier<DefinitionVersionRepository> definitionVersionsRef =
+        () -> definitionVersions;
+
+    /**
+     * 显式构造器（替代 {@code @RequiredArgsConstructor}）：14 个参数原样保留，
+     * 只为装配协作者。测试中的 {@code new MobileWorkflowService(engine, ...)} 一行未改。
+     */
+    public MobileWorkflowService(ProcessEngine engine, MobileDraftService draftService,
+                                 MobileWorkflowMapper workflowMapper,
+                                 FormDataFileMapper fileLinks,
+                                 FormDefinitionService formDefinitionService,
+                                 ProcessDefinitionService processDefinitionService,
+                                 FormDataMapper formDataMapper,
+                                 ProcessInstanceMapper instanceMapper, TaskMapper taskMapper,
+                                 TaskHistoryMapper historyMapper,
+                                 MobileFileLinkService fileLinkService, ObjectMapper objectMapper,
+                                 AuthorizationService authorizationService,
+                                 CompanyAttribution companyAttribution) {
+        // 装配顺序 = 依赖顺序：投影底座最先，取数其次，最后是命令/返工/填单。
+        MobileProjectionSupport projection = new MobileProjectionSupport(objectMapper);
+        MobileAttachmentProjector attachments =
+            new MobileAttachmentProjector(fileLinks, formDefinitionService);
+        MobileApprovalRecordService approvals =
+            new MobileApprovalRecordService(workflowMapper, historyMapper);
+        MobileEntityLookups lookups =
+            new MobileEntityLookups(instanceMapper, taskMapper, formDataMapper);
+        this.queries = new MobileTaskQueryService(workflowMapper, projection);
+        this.details = new MobileTaskDetailService(workflowMapper, authorizationService,
+            formDefinitionService, processDefinitionService, engine, approvals, attachments,
+            projection, objectMapper);
+        this.commands = new MobileTaskCommandService(engine, draftService, workflowMapper,
+            formDefinitionService, processDefinitionService, instanceMapper, taskMapper,
+            fileLinkService, objectMapper, authorizationService, companyAttribution, attachments,
+            lookups, definitionVersionsRef);
+        this.reworks = new MobileReworkService(engine, formDefinitionService, formDataMapper,
+            instanceMapper, taskMapper, fileLinkService, objectMapper, authorizationService,
+            attachments, lookups, projection, definitionVersionsRef);
+        this.forms = new MobileFormFillService(draftService, formDefinitionService,
+            processDefinitionService, authorizationService, reworks, projection);
+    }
+
     public MobileFormDto getMobileForm(String code) {
-        return getMobileForm(code, null, null);
+        return forms.getMobileForm(code);
     }
 
     public MobileFormDto getMobileForm(String code, Long draftId, Long reworkTaskId) {
-        FormDefinition form = formDefinitionService.getByCode(code);
-        if (form == null || !PUBLISHED_STATUS.equals(form.getStatus())) {
-            throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + code);
-        }
-        if (draftId != null && reworkTaskId != null) {
-            throw new BizException("BAD_REQUEST", "choose a draft or a rework task");
-        }
-        if (draftId != null) {
-            draftService.requireUsableDraft(draftId, form.getId(), authorizationService.currentUserId());
-        } else if (reworkTaskId != null) {
-            ReworkTaskDto rework = getReworkTask(reworkTaskId, authorizationService.currentUserId());
-            if (!Objects.equals(rework.formCode(), code)) {
-                throw new BizException("BAD_REQUEST", "rework task does not belong to form");
-            }
-        } else {
-            authorizationService.requireFormUse(form.getId());
-        }
-        ProcessDefinition process = processDefinitionService.latestPublishedForForm(form.getId());
-        JsonNode processTree = readJsonObject(
-            process == null ? null : process.getProcess(), "BAD_FLOW_JSON");
-        JsonNode schema = readJsonArray(form.getSchema(), "BAD_SCHEMA_JSON");
-        return new MobileFormDto(form.getCode(), form.getName(), form.getVersion(),
-            formDefinitionService.projectStarterSchema(schema, processTree),
-            readJsonObject(form.getSettings(), "BAD_SETTINGS_JSON"),
-            processTree, formDefinitionService.starterFieldModes(processTree));
+        return forms.getMobileForm(code, draftId, reworkTaskId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public MobileStartResult start(StartMobileInstanceRequest request, long userId) {
-        JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
-        FormDefinition currentForm = formDefinitionService.getByCode(request.formCode());
-        if (currentForm == null || !PUBLISHED_STATUS.equals(currentForm.getStatus())) {
-            throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
-        }
-        // P4a：带草稿时**归属取草稿行的快照**（调岗后重提也不改归属）；新发起才按身份解析。
-        Long companyId;
-        if (request.draftId() != null) {
-            MobileDraftDto draft = draftService.get(request.draftId(), userId);
-            if (!Objects.equals(draft.formCode(), request.formCode())) {
-                throw new BizException("BAD_DRAFT", "draft does not belong to requested form");
-            }
-            if (draft.readOnly()) {
-                throw new BizException("BAD_DRAFT", "draft is read only");
-            }
-            if (draft.formVersion() != currentForm.getVersion()) {
-                throw new BizException("DRAFT_VERSION_MISMATCH",
-                    "表单已改版，请基于新版本重新填写");
-            }
-            companyId = companyAttribution.forDraft(draft.companyId(), request.companyId());
-        } else {
-            companyId = companyAttribution.resolve(request.companyId());
-        }
-        authorizationService.requireFormUse(currentForm.getId(), companyId);
-
-        Map<String, List<Long>> selfSelected = request.selfSelected() == null
-            ? Map.of() : request.selfSelected();
-        Map<String, Object> result = engine.start(
-            new StartCmd(request.formCode(), data, selfSelected, companyId), userId);
-        Long formDataId = asLong(result.get("formDataId"));
-        Long instanceId = asLong(result.get("instanceId"));
-        String businessNo = Objects.toString(result.get("businessNo"), null);
-        List<Long> firstTaskIds = asLongList(result.get("firstTaskIds"));
-
-        ProcessDefinition currentProcess =
-            processDefinitionService.latestPublishedForForm(currentForm.getId());
-        Map<String, String> starterModes = formDefinitionService.starterFieldModes(
-            currentProcess == null ? null : currentProcess.getProcess());
-        fileLinkService.append(formDataId,
-            starterEditableFiles(filesOf(request), starterModes), userId);
-        if (definitionVersions != null) {
-            ProcessInstance started = instanceMapper.selectById(instanceId);
-            if (started != null && started.getCurrentFormRevisionId() != null) {
-                definitionVersions.syncRevisionFiles(started.getCurrentFormRevisionId(), formDataId);
-            }
-        }
-        if (request.draftId() != null) {
-            draftService.deleteAfterSubmit(request.draftId(), userId);
-        }
-        return new MobileStartResult(instanceId, formDataId, businessNo, firstTaskIds);
+        return commands.start(request, userId);
     }
 
     public MobilePageDto<MobileInstanceDto> listInstances(long userId, int page, int size,
                                                           String keyword, String status) {
-        int normalizedPage = Math.max(page, 1);
-        int normalizedSize = Math.min(Math.max(size, 1), 50);
-        int fetchSize = normalizedSize + 1;
-        int offset = (normalizedPage - 1) * normalizedSize;
-        List<MobileInstanceDto> items = workflowMapper.selectInstancePage(userId,
-                normalizedText(keyword), normalizedText(status), fetchSize, offset)
-            .stream()
-            .map(this::toInstanceDto)
-            .toList();
-        boolean hasMore = items.size() > normalizedSize;
-        return new MobilePageDto<>(
-            hasMore ? items.subList(0, normalizedSize) : items,
-            hasMore
-        );
+        return queries.listInstances(userId, page, size, keyword, status);
     }
 
     public MobilePageDto<MobileInitiatedDto> listInitiated(long userId, int page, int size,
                                                             String keyword, String status) {
-        int normalizedPage = Math.max(page, 1);
-        int normalizedSize = Math.min(Math.max(size, 1), 50);
-        int fetchSize = normalizedSize + 1;
-        int offset = (normalizedPage - 1) * normalizedSize;
-        List<MobileInitiatedDto> items = workflowMapper.selectInitiatedPage(userId,
-                normalizedText(keyword), normalizedText(status), fetchSize, offset)
-            .stream().map(this::toInitiatedDto).toList();
-        boolean hasMore = items.size() > normalizedSize;
-        return new MobilePageDto<>(hasMore ? items.subList(0, normalizedSize) : items, hasMore);
+        return queries.listInitiated(userId, page, size, keyword, status);
     }
 
     public MobileDirectSubmissionDetailDto getDirectSubmission(long dataId, long userId) {
-        MobileWorkflowMapper.DirectSubmissionRow row = workflowMapper.selectDirectSubmission(dataId, userId);
-        if (row == null) throw new HiddenResourceException("submission not found");
-        return new MobileDirectSubmissionDetailDto(row.dataId(), row.status(), row.formCode(),
-            row.formName(), row.businessNo(), row.createdAt(),
-            readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON"),
-            readJsonObject(row.formDataJson(), "BAD_JSON"), files(row.dataId()));
+        return details.getDirectSubmission(dataId, userId);
     }
 
     public MobileInstanceDetailDto getInstanceDetail(Long instanceId, long userId,
                                                       java.util.Collection<String> roles) {
-        AuthorizationService.InstanceVisibility visibility =
-            authorizationService.instanceVisibility(instanceId, userId);
-        if (visibility == AuthorizationService.InstanceVisibility.NONE) {
-            throw new HiddenResourceException("instance not found");
-        }
-        MobileWorkflowMapper.InstanceDetailRow row = workflowMapper.selectInstanceDetail(instanceId);
-        if (row == null) throw new BizException("NOT_FOUND", "instance not found");
-        ProcessInstance instance = toProcessInstance(row);
-        JsonNode snapshot = readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON");
-        List<ApprovalRecordDto> records = approvalRecords(row.instanceId(), snapshot,
-            row.applicantName(), row.applicantEmployeeNo(), row.applicantDepartment(),
-            row.startedAt());
-        if (visibility == AuthorizationService.InstanceVisibility.SUMMARY) {
-            return new MobileInstanceDetailDto(
-                visibility.name(), row.instanceId(), row.instanceStatus(), null, null,
-                row.applicantName(), row.applicantEmployeeNo(), row.applicantDepartment(),
-                row.startedAt(), nodeName(snapshot, row.currentNodeId()), null, null, null,
-                history(row.instanceId()), false, List.of(), approvalSummary(instance, records), records);
-        }
-        JsonNode formSchema = readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON");
-        JsonNode formData = readJsonObject(row.formDataJson(), "BAD_JSON");
-        boolean starterView = Objects.equals(row.startedBy(), userId) && !roles.contains(ADMIN_ROLE);
-        if (starterView) {
-            formData = formDefinitionService.projectStarterData(formData, formSchema, snapshot);
-            formSchema = formDefinitionService.projectStarterSchema(formSchema, snapshot);
-        }
-        return new MobileInstanceDetailDto(
-            visibility.name(),
-            row.instanceId(),
-            row.instanceStatus(),
-            row.formName(),
-            row.businessNo(),
-            row.applicantName(),
-            row.applicantEmployeeNo(),
-            row.applicantDepartment(),
-            row.startedAt(),
-            nodeName(snapshot, row.currentNodeId()),
-            formSchema,
-            formData,
-            snapshot,
-            history(row.instanceId()),
-            canWithdraw(instance, userId),
-            starterView ? starterFiles(row.formDataId(), snapshot) : files(row.formDataId()),
-            approvalSummary(instance, records),
-            records
-        );
+        return details.getInstanceDetail(instanceId, userId, roles);
     }
 
     public MobilePageDto<MobileTaskDto> listTasks(String view, long userId, int page, int size,
                                                   String keyword, String status) {
-        int normalizedPage = Math.max(page, 1);
-        int normalizedSize = Math.min(Math.max(size, 1), 50);
-        int fetchSize = normalizedSize + 1;
-        int offset = (normalizedPage - 1) * normalizedSize;
-        String normalizedView = "done".equalsIgnoreCase(view) ? "done" : "pending";
-        List<MobileTaskDto> items = workflowMapper.selectTaskPage(userId, normalizedView,
-                normalizedText(keyword), normalizedText(status), fetchSize, offset).stream()
-            .map(this::toTaskDto)
-            .toList();
-        boolean hasMore = items.size() > normalizedSize;
-        return new MobilePageDto<>(
-            hasMore ? items.subList(0, normalizedSize) : items,
-            hasMore
-        );
+        return queries.listTasks(view, userId, page, size, keyword, status);
     }
 
     public MobileTaskDetailDto getTaskDetail(Long taskId, long userId,
                                              java.util.Collection<String> roles) {
-        MobileWorkflowMapper.TaskDetailRow row = workflowMapper.selectTaskDetail(taskId);
-        if (row == null) throw new BizException("NOT_FOUND", "task not found");
-        if (!authorizationService.canReadFullInstance(row.instanceId(), userId)) {
-            throw new HiddenResourceException("task not found");
-        }
-        TaskEntity task = toTaskEntity(row);
-        ProcessInstance instance = toProcessInstance(row);
-        JsonNode snapshot = readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON");
-        List<ApprovalRecordDto> records = approvalRecords(row.instanceId(), snapshot,
-            row.applicantName(), row.applicantEmployeeNo(), row.applicantDepartment(),
-            row.startedAt());
-        Set<String> permissions = authorizationService.snapshot(userId).permissions();
-        JsonNode formSchema = readJsonArray(row.formSchema(), "BAD_SCHEMA_JSON");
-        JsonNode formData = readJsonObject(row.formDataJson(), "BAD_JSON");
-        if (Objects.equals(row.startedBy(), userId) && !roles.contains(ADMIN_ROLE)) {
-            formData = formDefinitionService.projectStarterData(formData, formSchema, snapshot);
-            formSchema = formDefinitionService.projectStarterSchema(formSchema, snapshot);
-        }
-        return new MobileTaskDetailDto(
-            toTaskDto(row, snapshot),
-            formSchema,
-            formData,
-            snapshot,
-            history(row.instanceId()),
-            allowedActions(task, userId, permissions),
-            task.getParallelId() != null
-                && task.getNodeInstanceId() == null
-                && PENDING_STATUS.equals(task.getStatus())
-                && Objects.equals(task.getAssigneeId(), userId)
-                && permissions.contains(PermissionCodes.WORKFLOW_TASK_REJECT),
-            task.getParallelId() == null && !fixedRejectTarget(task)
-                ? rejectTargets(snapshot, task.getNodeId()) : List.of(),
-            Objects.equals(row.startedBy(), userId) && !roles.contains(ADMIN_ROLE)
-                ? starterFiles(row.formDataId(), snapshot) : files(row.formDataId()),
-            approvalSummary(instance, records),
-            records,
-            processDefinitionService.commentPresets(snapshot, task.getNodeId())
-        );
+        return details.getTaskDetail(taskId, userId, roles);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void markTaskRead(Long taskId, long userId) {
-        if (taskId != null && taskId >= CC_TASK_ID_BASE) {
-            int updated = workflowMapper.markCcRead(taskId - CC_TASK_ID_BASE, userId);
-            if (updated == 0) throw new AccessDeniedException("not your task");
-            return;
-        }
-        TaskEntity task = requireExistingTask(taskId);
-        authorizationService.requireConfirmedInstance(task.getProcInstId());
-        if (!Objects.equals(task.getAssigneeId(), userId)) {
-            throw new AccessDeniedException("not your task");
-        }
-        if (!"CC".equals(task.getStatus()) || task.getReadAt() != null) return;
-        task.setReadAt(OffsetDateTime.now());
-        taskMapper.updateById(task);
+        commands.markTaskRead(taskId, userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void approve(Long taskId, MobileTaskActionRequest request, long userId) {
-        Object data = request == null || request.data() == null
-            ? null : objectMapper.convertValue(request.data(), Map.class);
-        engine.approve(new CompleteCmd(taskId, "APPROVE",
-            request == null ? null : request.comment(), null, data), userId);
+        commands.approve(taskId, request, userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void reject(Long taskId, MobileTaskActionRequest request, long userId) {
-        engine.reject(new CompleteCmd(taskId, "REJECT",
-            request == null ? null : request.comment(),
-            request == null ? null : request.rejectToNodeId()), userId);
+        commands.reject(taskId, request, userId);
     }
 
     public ReworkTaskDto getReworkTask(Long taskId, long userId) {
-        TaskEntity task = requireOwnedReworkTask(taskId, userId);
-        ProcessInstance instance = requireExistingInstance(task.getProcInstId());
-        FormData formData = requireFormData(instance.getFormDataId());
-        FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
-        if (form == null) {
-            throw new BizException("NOT_FOUND", "form definition not found");
-        }
-        String schema = instance.getCurrentFormRevisionId() != null && definitionVersions != null
-            ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
-        String effectiveSchema = schema == null ? form.getSchema() : schema;
-        JsonNode schemaTree = readJsonArray(effectiveSchema, "BAD_SCHEMA_JSON");
-        JsonNode snapshot = readJsonObject(instance.getProcessSnapshot(), "BAD_FLOW_JSON");
-        return new ReworkTaskDto(task.getId(), instance.getId(), form.getCode(), form.getName(),
-            formData.getBusinessNo(),
-            formDefinitionService.projectStarterSchema(schemaTree, snapshot),
-            formDefinitionService.projectStarterData(formData.getData(), schemaTree, snapshot),
-            snapshot,
-            starterFiles(formData.getId(), snapshot));
+        return reworks.getReworkTask(taskId, userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public ReworkTaskDto saveRework(Long taskId, ReworkTaskRequest request, long userId) {
-        TaskEntity task = requireOwnedReworkTask(taskId, userId);
-        updateRework(task, request, userId, false);
-        return getReworkTask(taskId, userId);
+        return reworks.saveRework(taskId, request, userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public ReworkResult resubmitRework(Long taskId, ReworkTaskRequest request, long userId) {
-        TaskEntity task = requireOwnedReworkTask(taskId, userId);
-        FormData formData = updateRework(task, request, userId, true);
-        List<Long> firstTaskIds = engine.resubmitRework(taskId, userId);
-        return new ReworkResult(task.getProcInstId(), formData.getId(), formData.getBusinessNo(),
-            firstTaskIds);
+        return reworks.resubmitRework(taskId, request, userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void withdraw(Long instanceId, long userId) {
-        engine.withdraw(instanceId, userId);
-    }
-
-    private ProcessInstance requireReadableInstance(Long instanceId, long userId) {
-        ProcessInstance instance = requireExistingInstance(instanceId);
-        if (authorizationService.canReadInstance(instanceId, userId)) {
-            return instance;
-        }
-        throw new HiddenResourceException("instance not found");
-    }
-
-    private TaskEntity requireOwnedReworkTask(Long taskId, long userId) {
-        TaskEntity task = requireExistingTask(taskId);
-        authorizationService.requireConfirmedInstance(task.getProcInstId());
-        if (!"PENDING".equals(task.getStatus()) || !"REWORK".equals(task.getTaskType())) {
-            throw new BizException("TASK_NOT_PENDING", "待修改任务已处理");
-        }
-        if (!Objects.equals(task.getAssigneeId(), userId)) {
-            throw new AccessDeniedException("not your rework task");
-        }
-        return task;
-    }
-
-    private FormData updateRework(TaskEntity task, ReworkTaskRequest request, long userId,
-                                  boolean validate) {
-        if (request == null) {
-            throw new BizException("BAD_REQUEST", "表单内容不能为空");
-        }
-        ProcessInstance instance = instanceMapper.selectForUpdate(task.getProcInstId());
-        TaskEntity current = taskMapper.selectForUpdate(task.getId());
-        if (instance == null || !"RUNNING".equals(instance.getStatus())
-            || current == null || !Objects.equals(current.getProcInstId(), instance.getId())
-            || !"PENDING".equals(current.getStatus()) || !"REWORK".equals(current.getTaskType())
-            || !Objects.equals(current.getAssigneeId(), userId)) {
-            throw new BizException("BAD_REWORK_STATE", "待修改任务已失效，请刷新");
-        }
-        FormData formData = requireFormData(instance.getFormDataId());
-        JsonNode data = request.data() == null ? objectMapper.createObjectNode() : request.data();
-        FormDefinition form = formDefinitionService.getById(formData.getFormDefId());
-        if (form == null) {
-            throw new BizException("NOT_FOUND", "form definition not found");
-        }
-        String schema = instance.getCurrentFormRevisionId() != null
-            && definitionVersions != null
-            ? definitionVersions.revisionSchema(instance.getCurrentFormRevisionId()) : null;
-        String effectiveSchema = schema == null ? form.getSchema() : schema;
-        Map<String, Object> canonicalData =
-            formDefinitionService.canonicalizeStarterRevision(effectiveSchema, data,
-                formData.getData(), instance.getProcessSnapshot());
-        if (validate) {
-            formDefinitionService.validateStarterRevision(effectiveSchema, canonicalData,
-                instance.getProcessSnapshot());
-        }
-        formData.setData(writeJson(objectMapper.valueToTree(canonicalData)));
-        formData.setStatus("NEEDS_REVISION");
-        formDataMapper.updateById(formData);
-        if (request.files() != null) {
-            Map<String, String> starterModes = formDefinitionService.starterFieldModes(
-                instance.getProcessSnapshot());
-            fileLinkService.reconcileEditable(formData.getId(), request.files(), userId,
-                starterModes);
-        }
-        return formData;
-    }
-
-    private ProcessInstance requireExistingInstance(Long instanceId) {
-        ProcessInstance instance = instanceMapper.selectById(instanceId);
-        if (instance == null) {
-            throw new BizException("NOT_FOUND", "instance not found");
-        }
-        return instance;
-    }
-
-    private TaskEntity requireExistingTask(Long taskId) {
-        TaskEntity task = taskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BizException("NOT_FOUND", "task not found");
-        }
-        return task;
-    }
-
-    private FormData requireFormData(Long formDataId) {
-        FormData formData = formDataMapper.selectRuntimeById(formDataId);
-        if (formData == null) {
-            throw new BizException("NOT_FOUND", "form data not found");
-        }
-        return formData;
-    }
-
-    private boolean isParticipant(Long instanceId, long userId) {
-        return taskMapper.selectList(new QueryWrapper<TaskEntity>()
-            .eq("proc_inst_id", instanceId)
-            .eq("assignee_id", userId)
-            .last("LIMIT 1")).size() > 0;
-    }
-
-    private boolean canWithdraw(ProcessInstance instance, long userId) {
-        return engine.canWithdraw(instance.getId(), userId);
-    }
-
-    private MobileInstanceDto toInstanceDto(MobileWorkflowMapper.InstanceRow row) {
-        JsonNode snapshot = readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON");
-        return new MobileInstanceDto(row.id(), row.status(), row.formName(), row.businessNo(),
-            nodeName(snapshot, row.currentNodeId()), row.startedAt(), row.finishedAt());
-    }
-
-    private MobileInitiatedDto toInitiatedDto(MobileWorkflowMapper.InitiatedRow row) {
-        String nodeName = "DIRECT".equals(row.kind()) ? null
-            : nodeName(readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON"), row.currentNodeId());
-        return new MobileInitiatedDto(row.kind(), row.id(), row.status(), row.formName(),
-            row.businessNo(), nodeName, row.startedAt(), row.finishedAt());
-    }
-
-    private static ProcessInstance toProcessInstance(MobileWorkflowMapper.InstanceDetailRow row) {
-        ProcessInstance instance = new ProcessInstance();
-        instance.setId(row.instanceId());
-        instance.setFormDataId(row.formDataId());
-        instance.setProcessSnapshot(row.processSnapshot());
-        instance.setStatus(row.instanceStatus());
-        instance.setCurrentNodeId(row.currentNodeId());
-        instance.setStartedBy(row.startedBy());
-        instance.setStartedAt(row.startedAt());
-        instance.setFinishedAt(row.finishedAt());
-        return instance;
-    }
-
-    private static ProcessInstance toProcessInstance(MobileWorkflowMapper.TaskDetailRow row) {
-        ProcessInstance instance = new ProcessInstance();
-        instance.setId(row.instanceId());
-        instance.setFormDataId(row.formDataId());
-        instance.setProcessSnapshot(row.processSnapshot());
-        instance.setStatus(row.instanceStatus());
-        instance.setCurrentNodeId(row.currentNodeId());
-        instance.setStartedBy(row.startedBy());
-        instance.setStartedAt(row.startedAt());
-        instance.setFinishedAt(row.finishedAt());
-        return instance;
-    }
-
-    private static TaskEntity toTaskEntity(MobileWorkflowMapper.TaskDetailRow row) {
-        TaskEntity task = new TaskEntity();
-        task.setId(row.taskId());
-        task.setProcInstId(row.instanceId());
-        task.setNodeId(row.nodeId());
-        task.setAssigneeId(row.assigneeId());
-        task.setParallelId(row.parallelId());
-        task.setNodeInstanceId(row.nodeInstanceId());
-        task.setApprovalMode(row.approvalMode());
-        task.setTaskType(row.taskType());
-        task.setStatus(row.taskStatus());
-        task.setCreatedAt(row.taskCreatedAt());
-        task.setReadAt(row.readAt());
-        return task;
-    }
-
-    private MobileTaskDto toTaskDto(MobileWorkflowMapper.TaskRow row) {
-        JsonNode snapshot = readJsonObject(row.processSnapshot(), "BAD_FLOW_JSON");
-        return new MobileTaskDto(row.id(), row.instanceId(), row.nodeId(), row.formCode(),
-            row.formName(), row.businessNo(), row.applicantName(), row.applicantEmployeeNo(),
-            row.applicantDepartment(), "REWORK".equals(row.taskType()) ? "待修改原单"
-                : nodeName(snapshot, row.nodeId()), row.taskType(), row.taskStatus(),
-            row.instanceStatus(), row.createdAt(), row.readAt());
-    }
-
-    private MobileTaskDto toTaskDto(MobileWorkflowMapper.TaskDetailRow row, JsonNode snapshot) {
-        return new MobileTaskDto(row.taskId(), row.instanceId(), row.nodeId(), row.formCode(),
-            row.formName(), row.businessNo(), row.applicantName(), row.applicantEmployeeNo(),
-            row.applicantDepartment(), "REWORK".equals(row.taskType()) ? "待修改原单"
-                : nodeName(snapshot, row.nodeId()), row.taskType(), row.taskStatus(),
-            row.instanceStatus(), row.taskCreatedAt(), row.readAt());
-    }
-
-    private List<MobileHistoryDto> history(Long instanceId) {
-        return historyMapper.selectList(new QueryWrapper<TaskHistoryEntity>()
-                .eq("proc_inst_id", instanceId)
-                .ne("action", "SKIP")
-                .orderByAsc("created_at")
-                .orderByAsc("id"))
-            .stream()
-            .map(history -> new MobileHistoryDto(history.getId(), history.getFromNodeId(),
-                history.getToNodeId(), history.getTaskId(), history.getAction(),
-                history.getOperatorId(), history.getComment(), history.getCreatedAt()))
-            .toList();
-    }
-
-    private List<ApprovalRecordDto> approvalRecords(Long instanceId, JsonNode snapshot,
-                                                    String applicantName,
-                                                    String applicantEmployeeNo,
-                                                    String applicantDepartment,
-                                                    OffsetDateTime startedAt) {
-        List<ApprovalRecordDto> records = new ArrayList<>();
-        records.add(new ApprovalRecordDto(
-            "submission", null, snapshot.path("id").asText("root"), "提交申请",
-            "SUBMISSION", "ROOT", null, null, null, null, "SUBMITTED",
-            applicantName == null ? "未记录" : applicantName, applicantEmployeeNo,
-            applicantDepartment, null, startedAt, startedAt, 1));
-
-        for (MobileWorkflowMapper.ApprovalRow task : workflowMapper.selectApprovalTasks(instanceId)) {
-            String status = approvalRecordStatus(task);
-            if (status == null) {
-                continue;
-            }
-            JsonNode node = ProcessTreeNav.findById(snapshot, task.nodeId());
-            ProcessTreeNav.ParallelParent parent = ProcessTreeNav.findParallelParent(
-                snapshot, task.nodeId());
-            String taskType = "REWORK".equals(task.taskType()) ? "REWORK"
-                : "CC".equals(task.taskStatus()) ? "CC" : "APPROVAL";
-            records.add(new ApprovalRecordDto(
-                "task-" + task.taskId(), task.taskId(), task.nodeId(),
-                "REWORK".equals(task.taskType()) ? "退回修改"
-                    : nodeName(snapshot, task.nodeId()),
-                taskType, node == null ? taskType : node.path("type").asText(taskType),
-                task.parallelId() != null ? task.parallelId()
-                    : parent == null ? null : parent.parallelId(),
-                task.branchId() != null ? task.branchId()
-                    : parent == null ? null : parent.branchId(),
-                task.operationKind(), task.sourceOperatorName(), status,
-                task.operatorName(), task.employeeNo(), task.department(),
-                approvalRecordComment(task), task.receivedAt(),
-                "CC".equals(task.taskStatus()) ? task.readAt() : task.approvedAt(),
-                task.roundNo()));
-        }
-        return records;
-    }
-
-    private ApprovalSummaryDto approvalSummary(ProcessInstance instance,
-                                                List<ApprovalRecordDto> records) {
-        int processing = (int) records.stream()
-            .filter(record -> "PROCESSING".equals(record.status())
-                || "RETURNED".equals(record.status()))
-            .count();
-        int completed = records.size() - processing;
-        return new ApprovalSummaryDto(records.size(), completed, processing,
-            "APPROVED".equals(instance.getStatus()) && processing == 0);
-    }
-
-    private static String approvalRecordStatus(MobileWorkflowMapper.ApprovalRow task) {
-        if ("CC".equals(task.taskStatus())) {
-            return task.readAt() == null ? "PROCESSING" : "APPROVED";
-        }
-        if ("PENDING".equals(task.taskStatus())) {
-            return "REWORK".equals(task.taskType()) ? "RETURNED" : "PROCESSING";
-        }
-        return switch (task.taskStatus()) {
-            case "APPROVED" -> "APPROVED";
-            case "REJECTED" -> "REJECTED";
-            case "RESUBMITTED" -> "RESUBMITTED";
-            default -> null;
-        };
-    }
-
-    private static String approvalRecordComment(MobileWorkflowMapper.ApprovalRow task) {
-        if (!"CC".equals(task.taskStatus())) return task.comment();
-        return task.readAt() == null ? "等待确认抄送内容。" : "已确认抄送内容。";
-    }
-
-    private List<MobileFileDto> files(Long formDataId) {
-        return fileLinks.selectFilesByFormDataId(formDataId).stream()
-            .map(MobileWorkflowService::toFileDto)
-            .toList();
-    }
-
-    private List<MobileFileDto> starterFiles(Long formDataId, JsonNode processSnapshot) {
-        Map<String, String> modes = formDefinitionService.starterFieldModes(processSnapshot);
-        Set<UUID> visibleFileIds = new LinkedHashSet<>();
-        for (com.antflow.attachment.FormDataFileMapper.FormDataFileLink link
-                : fileLinks.selectFileLinks(formDataId)) {
-            if (!"HIDDEN".equals(modes.get(link.fieldId()))) {
-                visibleFileIds.add(link.fileId());
-            }
-        }
-        return fileLinks.selectFilesByFormDataId(formDataId).stream()
-            .filter(file -> visibleFileIds.contains(file.getId()))
-            .map(MobileWorkflowService::toFileDto)
-            .toList();
-    }
-
-    private List<String> allowedActions(TaskEntity task, long userId,
-                                        Set<String> permissions) {
-        if ("CC".equals(task.getStatus()) && task.getReadAt() == null
-            && Objects.equals(task.getAssigneeId(), userId)) {
-            return List.of("ACKNOWLEDGE");
-        }
-        if (!PENDING_STATUS.equals(task.getStatus())
-            || "REWORK".equals(task.getTaskType())
-            || !Objects.equals(task.getAssigneeId(), userId)
-            || "CC".equals(task.getStatus())) {
-            return List.of();
-        }
-        List<String> result = new ArrayList<>();
-        if (permissions.contains(PermissionCodes.WORKFLOW_TASK_APPROVE)) result.add("APPROVE");
-        if ((task.getParallelId() == null || task.getNodeInstanceId() != null)
-            && permissions.contains(PermissionCodes.WORKFLOW_TASK_REJECT)) result.add("REJECT");
-        return result;
-    }
-
-    private List<RejectTargetDto> rejectTargets(JsonNode root, String currentNodeId) {
-        List<RejectTargetDto> targets = new ArrayList<>();
-        collectRejectTargets(root, currentNodeId, targets);
-        JsonNode current = ProcessTreeNav.findById(root, currentNodeId);
-        JsonNode configured = current == null
-            ? objectMapper.missingNode() : current.path("props").path("rejectTargets");
-        if (!configured.isArray() || configured.isEmpty()) {
-            return targets.isEmpty() ? targets : List.of(targets.get(targets.size() - 1));
-        }
-        Set<String> allowed = new LinkedHashSet<>();
-        configured.forEach(value -> allowed.add(value.asText()));
-        return targets.stream().filter(target -> allowed.contains(target.nodeId())).toList();
-    }
-
-    private static boolean fixedRejectTarget(TaskEntity task) {
-        String mode = task.getApprovalMode();
-        return "AND".equals(mode) || "ALL".equals(mode) || "RATIO".equals(mode);
-    }
-
-    private boolean collectRejectTargets(JsonNode node, String currentNodeId,
-                                         List<RejectTargetDto> targets) {
-        if (node == null || node.isNull() || !node.has("id")) {
-            return false;
-        }
-        String nodeId = node.path("id").asText();
-        if (currentNodeId.equals(nodeId)) {
-            return true;
-        }
-        if (APPROVAL_NODE.equals(node.path("type").asText())) {
-            targets.add(new RejectTargetDto(nodeId, nodeName(node)));
-        }
-        if ("CONDITIONS".equals(node.path("type").asText())) {
-            for (JsonNode branch : node.withArray("branchs")) {
-                if (collectRejectTargets(branch, currentNodeId, targets)) {
-                    return true;
-                }
-            }
-        }
-        return collectRejectTargets(node.get("children"), currentNodeId, targets);
-    }
-
-    /** 节点显示名统一走 {@link ProcessTreeNav}：桌面/移动/监控同一套口径（含 `__rework__` 哨兵）。 */
-    private String nodeName(JsonNode root, String nodeId) {
-        return ProcessTreeNav.displayName(root, nodeId);
-    }
-
-    private static String nodeName(JsonNode node) {
-        return ProcessTreeNav.displayName(node);
-    }
-
-    private JsonNode readJsonObject(String value, String code) {
-        if (value == null || value.isBlank()) {
-            return objectMapper.createObjectNode();
-        }
-        try {
-            return objectMapper.readTree(value);
-        } catch (JsonProcessingException exception) {
-            throw new BizException(code, exception.getMessage());
-        }
-    }
-
-    private JsonNode readJsonArray(String value, String code) {
-        if (value == null || value.isBlank()) {
-            return objectMapper.createArrayNode();
-        }
-        try {
-            return objectMapper.readTree(value);
-        } catch (JsonProcessingException exception) {
-            throw new BizException(code, exception.getMessage());
-        }
-    }
-
-    private String writeJson(JsonNode value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException exception) {
-            throw new BizException("BAD_JSON", exception.getMessage());
-        }
-    }
-
-    private static List<MobileFileRef> filesOf(StartMobileInstanceRequest request) {
-        return request.files() == null ? List.of() : request.files();
-    }
-
-    private static List<MobileFileRef> starterEditableFiles(
-        List<MobileFileRef> files, Map<String, String> modes) {
-        return files.stream()
-            .filter(file -> "EDITABLE".equals(modes.getOrDefault(file.fieldId(), "EDITABLE")))
-            .toList();
-    }
-
-    private static boolean isAdmin(java.util.Collection<String> roles) {
-        return roles != null && roles.contains(ADMIN_ROLE);
-    }
-
-    private static String normalizedText(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return value.trim();
-    }
-
-    private static Long asLong(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        throw new BizException("BAD_ENGINE_RESULT", "engine result is missing numeric id");
-    }
-
-    private static List<Long> asLongList(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return List.of();
-        }
-        return list.stream()
-            .filter(Number.class::isInstance)
-            .map(Number.class::cast)
-            .map(Number::longValue)
-            .toList();
-    }
-
-    private static MobileFileDto toFileDto(MobileFile file) {
-        return new MobileFileDto(
-            file.getId(),
-            file.getOriginalName(),
-            file.getContentType(),
-            file.getSizeBytes(),
-            "/api/mobile/files/" + file.getId() + "/content"
-        );
+        commands.withdraw(instanceId, userId);
     }
 }
