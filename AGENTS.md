@@ -78,6 +78,19 @@ cd frontend && npm run lint && npm test && npm run build   # lint = biome:lint &
 cd frontend && npx antd lint ./src
 ```
 
+**在 WorkBuddy / CodeBuddy 桌面环境里跑类型检查，用 `npm run tsc:fast`（即 `tsc --noEmit`），不要用 `npm run tsc`。**
+原因：`npm run tsc` 会先执行 `max setup`，它用 `rimraf` 删 `.umi`；本机的 safe-delete 守卫对
+"一次删除超过 50 个文件"会拦截，导致 `.umi` 被删了一半、随后 `tsc` 报出大量与改动无关的假错误。
+`tsc:fast` 跳过重建，前提是 `.umi` 已存在（`npm run dev`/`build` 过）。
+
+若确实需要重建 `.umi`（例如首次拉代码或改了路由约定），用：
+
+```bash
+cd frontend && CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run tsc
+```
+
+CI（GitHub Actions）没有这个守卫，`npm run lint` 可正常使用。
+
 ## 5. 后端能力与数据模型
 
 - **审批引擎**：树形流程（**非 BPMN、非 nodes+edges 平面图**）+ `PARALLEL` 并行网关 + `DELAY`/`TRIGGER`
