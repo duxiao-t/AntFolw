@@ -6,6 +6,10 @@
  *   <li>{@link com.antflow.integration.wecom.WecomService} —— 同步编排入口：抢任务、拉通讯录、
  *       驱动下面几个协作者、收尾。对外 API 也在这里（Controller 只依赖它）。</li>
  *   <li>{@link com.antflow.integration.wecom.WecomConfigService} —— 连接配置与同步计划。</li>
+ *   <li>{@link com.antflow.integration.wecom.WecomAppService} —— 应用侧门面（应用状态、接入信息、JS-SDK 签名、
+ *       素材导入、投递运维）；免登在 {@code WecomAppLoginService}，消息入队与投递在
+ *       {@code WecomAppMessageDispatcher}，token/ticket 缓存在 {@code WecomAppTokenCache}，
+ *       配置读取在 {@code WecomAppConfigStore}。</li>
  *   <li>{@link com.antflow.integration.wecom.WecomJobStore} —— {@code t_wecom_sync_job} 的唯一归属。</li>
  *   <li>{@link com.antflow.integration.wecom.WecomSyncLease} —— 租约：谁抢到任务谁才能写。</li>
  *   <li>{@link com.antflow.integration.wecom.WecomMappingRules} —— 纯函数：字段映射、判定、清洗。</li>
