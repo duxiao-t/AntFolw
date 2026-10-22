@@ -1,7 +1,6 @@
 package com.antflow.form.runtime;
 
 import com.antflow.authz.AuthorizationService;
-import com.antflow.authz.FormGrantService;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.common.FormalNumberService;
 import com.antflow.form.FormDefinition;
@@ -55,8 +54,8 @@ class FormDataServiceTest {
         formalNumberService = Mockito.mock(FormalNumberService.class);
         userMapper = Mockito.mock(UserMapper.class);
         departmentMapper = Mockito.mock(com.antflow.org.DepartmentMapper.class);
-        var formDefinitionService = new FormDefinitionService(formDefinitionMapper, json,
-            Mockito.mock(FormGrantService.class));
+        var formDefinitionService = com.antflow.form.FormDefinitionServiceFixture
+            .service(formDefinitionMapper, json);
         fileLinkService = Mockito.mock(MobileFileLinkService.class);
         draftService = Mockito.mock(MobileDraftService.class);
         authorizationService = Mockito.mock(AuthorizationService.class);

@@ -1,6 +1,5 @@
 package com.antflow.form;
 
-import com.antflow.authz.FormGrantService;
 import com.antflow.engine.BizException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +15,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -30,7 +28,7 @@ class FormDefinitionServiceSchemaTest {
 
     @BeforeEach void setup() {
         mapper = Mockito.mock(FormDefinitionMapper.class);
-        service = new FormDefinitionService(mapper, json, Mockito.mock(FormGrantService.class));
+        service = FormDefinitionServiceFixture.service(mapper, json);
     }
 
     @Test void saveDraftKeepsPublishedFormWhenContentIsUnchanged() throws Exception {
@@ -714,6 +712,51 @@ class FormDefinitionServiceSchemaTest {
             """;
         assertThatThrownBy(() -> service.canonicalizeStarterSubmission(schema, Map.of(), process))
             .isInstanceOf(BizException.class).hasMessageContaining("默认值");
+    }
+
+    @Test void runtimeMatrixAxisCannotReuseConfiguredAxisId() {
+        // 运行态行由客户端生成、配置态行由设计器生成；id 撞车时无法判断单元格属于哪一行，
+        // 只能拒绝。这条以前没有用例，拆分时靠它锁住 ensureNoMatrixAxisCollision 的行为。
+        String schema = """
+            [{"id":"matrix","type":"matrix_fill","label":"矩阵","props":{
+              "rows":[{"id":"runtime_row_a","label":"行1"}],
+              "columns":[{"id":"col_1","label":"列1"}],
+              "cellType":"textarea","maxRows":20,"maxColumns":10,"maxLength":20
+            }}]
+            """;
+        var value = Map.of(
+            "customRows", List.of(Map.of("id", "runtime_row_a", "label", "运行行")),
+            "customColumns", List.of(),
+            "cells", Map.of());
+
+        assertThatThrownBy(() -> service.validateSubmission(schema, Map.of("matrix", value)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("conflicts with schema");
+    }
+
+    @Test void displayConditionSupportsEmptyAndNotEmptyOperators() {
+        // empty/notEmpty 与 eq/in 的区别：判的是"值是否为空"，不是"等于某个值"。
+        // 空值判定必须与必填校验共用同一套语义（FormVisibility.isEmpty），否则隐藏与必填会打架。
+        String schema = """
+            [{"id":"remark","type":"text","props":{"required":false}},
+             {"id":"reason","type":"text","label":"原因","props":{"required":true,
+               "displayCondition":{"fieldId":"remark","operator":"empty"}}},
+             {"id":"detail","type":"text","label":"说明","props":{"required":true,
+               "displayCondition":{"fieldId":"remark","operator":"notEmpty"}}}]
+            """;
+
+        assertThatCode(() -> service.validateSubmission(schema,
+            Map.of("remark", "有内容", "detail", "补充")))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateSubmission(schema,
+            Map.of("remark", "有内容")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("说明");
+        assertThatCode(() -> service.validateSubmission(schema, Map.of("reason", "未填写备注")))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.validateSubmission(schema, Map.of()))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("原因");
     }
 
     private String matrixSchema(String cellType, String extraProps) {

@@ -1,6 +1,5 @@
 package com.antflow.form;
 
-import com.antflow.authz.FormGrantService;
 import com.antflow.engine.BizException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,8 +18,8 @@ class SubmissionValidationFixtureTest {
     @TestFactory
     Stream<DynamicTest> clientsAndServerShareSubmissionExpectations() throws Exception {
         ObjectMapper json = new ObjectMapper();
-        FormDefinitionService service = new FormDefinitionService(
-            mock(FormDefinitionMapper.class), json, mock(FormGrantService.class));
+        FormDefinitionService service =
+            FormDefinitionServiceFixture.service(mock(FormDefinitionMapper.class), json);
         var fixture = json.readTree(Files.readString(
             Path.of("../fixtures/field-semantics/validation.json")));
         return java.util.stream.StreamSupport.stream(fixture.path("cases").spliterator(), false)
