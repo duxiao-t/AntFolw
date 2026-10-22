@@ -115,3 +115,75 @@ ProcessEngine（编排：锁任务 → 判分流 → 调结算）
 （`resolveAndLand*` + `advanceParallelBranch` + `pickHandler` + `notifyAssigned`）、字段编辑
 （`applyNodeFieldEdits` + `editableFieldIds`）。其中"节点落地"是一组，必须整体搬，不能只搬一半。
 
+## 六、第二批次执行记录（2026-10-22，六刀 + 一次收尾）
+
+按"变化原因"切，全部方法体逐字搬迁（只改可见性、协作者前缀、`runtimeV2` → 局部 `v2`）。
+每刀后跑 `mvn -B -q compile` + `mvn -B test -Dtest='ProcessEngine*'`，**每刀 33 例全绿**。
+
+| 阶段 | ProcessEngine 行 / 方法 | 本刀产出（行 / 方法） |
+| --- | --- | --- |
+| 拆前 | 874 / 40 | — |
+| 第 1 刀 | 816 / 38 | `FieldEditApplier`（124 / 2）：`applyNodeFieldEdits` + `editableFieldIds` |
+| 第 2 刀 | 645 / 34 | `NodeLander`（267 / 7）：`resolveAndLand*` + `advanceParallelBranch` + `pickHandler` + `notifyAssigned` + `hasActiveParallelAutomation` |
+| 第 3 刀 | 579 / 34 | `ProcessStarter`（172 / 1）：`start` 全流程（表单 + 实例 + 首节点 + INSTANCE_STARTED） |
+| 第 4 刀 | 545 / 32 | `TaskLocker`（102 / 3）：`lockPendingTask` + `updateTaskOrConflict` + `skipDelegatedParentIfNeeded`（+ `LockedTask`） |
+| 第 5 刀 | 527 / 32 | `AdminActions`（86 / 3）：`recallApproval` + `adminReassign` + `adminTerminate` |
+| 收尾（薄壳清理） | 473 / 21 | 删掉 11 个已无调用方的薄壳（7 个 `read*/write*/insert*` + 2 个 settle + 2 个 lock），调用点直接写 `support.xxx` / `taskLocker.xxx` |
+| 第 6 刀 | **267 / 18** | `ApprovalOrchestrator`（228 / 2）：`approveInternal`（两个重载）+ `rejectInternal` 作为**一个整体**搬走 |
+
+### 六点一、与建议方向的偏差（都有意为之）
+
+1. **`advanceParallelBranch` 选"留在引擎当门面"**，实现进 `NodeLander`。理由：它和
+   `resolveAndLand*` 共用 `pickHandler` / `NodeOutcome` 循环，必须同进同出；而调用方
+   （`V2DecisionSettler` / `AutomationCompleter`）只认 `FlowAdvancer`。若把 `NodeLander` 直接
+   暴露给结算类，`FlowAdvancer` 就名存实亡，且 `forceApproveAsSystem` 仍在引擎上，接口会裂成两半。
+   代价是每次并行推进多一次方法调用，收益是"结算类只认识一个回调口"这条约束不变。
+
+2. **第 6 刀没有只切 `approveInternal` 的推进段，而是把 `approveInternal` + `rejectInternal`
+   整体搬到 `ApprovalOrchestrator`**。理由：两者是镜像路径（同样锁任务 → 同样写一条历史 →
+   同样按 V2/V1 分流 → 同样推进），只搬其中一段会让"先锁后校验"的规则在两处各留半条。
+   这不是把编排拆成碎片——恰恰相反，是把"顺序"集中到一个 228 行的类里；V1/V2 的差异仍在两个
+   Settler，推进仍在 `NodeLander`。不这么做的话 ProcessEngine 会停在 473 行，仍 >400。
+
+3. **`ProcessEngine` 的 14 个构造参数不再落成字段**。它们现在只用于装配协作者；保留字段会让人
+   以为引擎还在直接写库。构造器签名（14 参数）保持不变，`src/test` 的 4 处 `new ProcessEngine(...)` 零改动。
+
+4. **`LockedTask` 变成文件级 `record`（放在 `TaskLocker.java` 里）**，而不是嵌套类：它同时被审批、
+   驳回、返工重提、管理改派传递，嵌套会让某一方"借用"另一方的内部类型。
+
+### 六点二、逐字一致性怎么核的
+
+用 token 级对比脚本（`backend/target/tmp-verify/verify_verbatim.py`，临时文件，未入库）：
+从 `git show HEAD:...ProcessEngine.java` 里按"方法声明"提取 17 个方法体，对搬迁后的实现做
+**去注释 + 去空白 + 分词**比较，只应用事先列出的重命名（`runtimeV2`→`v2`、
+`readTree`→`support.readTree`、`lockPendingTask`→`taskLocker.lockPendingTask` 等）。
+17/17 全部一致（`start` 763 token、`approve` 902、`reject` 709、`resolveAndLandLoop` 602、
+`advanceParallelBranch` 533、`applyNodeFieldEdits` 514 ……）。任何多/少一个 token 都会报 FAIL。
+
+唯一的**文本级**非前缀改动：`FieldEditApplier` 把 `runtimeV2 == null ? null : runtimeV2.formSchema(pi)`
+先取成局部 `v2`；`ProcessStarter` / `ApprovalOrchestrator` 同理在方法入口取一次。字段本身不会在
+一次调用中途被替换（测试只在构造后、调用前替换），语义等价。
+
+### 六点三、验证结果
+
+| 项目 | 结果 |
+| --- | --- |
+| `mvn -B compile` | 通过 |
+| `mvn -B test -Dtest='ProcessEngine*'` | 33 例，0 失败 0 错误（每刀都跑过） |
+| 全量（排除 PG 集成 + 契约快照） | **660 例，0 失败 0 错误，2 跳过** |
+| `node scripts/health-metrics.mjs` | 退出码 0；H7 后端超标类 16 → **13**，ProcessEngine 不在待拆清单里 |
+| `git diff --stat -- frontend/config/antflow-api.json` | 空 |
+| `src/test` 改动 | 0 |
+
+### 六点四、剩余风险
+
+- **V2 仍只有集成测试保护**（本地无 Docker，`PostgresTransactionalIntegrityIntegrationTest` 跑不了）。
+  这次搬迁对 V2 路径的保护只有两条：token 级逐字一致 + 编译 + V1 单测。合并前必须让 CI 跑 PG 集成。
+- `NotificationEvent.source` 的可见差异扩大了：`INSTANCE_STARTED` / `INSTANCE_APPROVED` /
+  `TASK_ASSIGNED` 的 source 也从 ProcessEngine 变成了 `ProcessStarter` / `NodeLander`。
+  全仓无 `getSource()` 读取方（已 grep 确认），类型、接收人、文案均未变。
+- 拆分后的类体积：最大 `NodeLander` 267 行 / 7 方法、`ApprovalOrchestrator` 228 行 / 2 方法，
+  全部低于 400 行 / 25 方法门禁；但 `NodeLander` 已接近"一个类装两种推进（串行 + 并行）"的上限，
+  下次若要动并行语义，建议先补一个并行分支的单测再动。
+
+
