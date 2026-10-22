@@ -25,7 +25,7 @@ class WecomServicePermissionTest {
     void setUp() {
         authorization = mock(AuthorizationService.class);
         service = new WecomService(mock(JdbcTemplate.class), mock(WecomSecretCipher.class),
-            mock(WecomClient.class), authorization, mock(AuditService.class), new ObjectMapper(),
+            mock(WecomClient.class), authorization, mock(AuditService.class),
             mock(TransactionTemplate.class), mock(Executor.class), new WecomProperties(),
             new WecomSyncLease(mock(JdbcTemplate.class)),
             new WecomManagerSync(mock(JdbcTemplate.class), mock(WecomClient.class),
@@ -33,7 +33,14 @@ class WecomServicePermissionTest {
             new WecomDirectorySync(mock(JdbcTemplate.class), mock(PasswordEncoder.class),
                 mock(TransactionTemplate.class), mock(WecomSyncLease.class)),
             new WecomDepartmentSync(mock(JdbcTemplate.class), mock(TransactionTemplate.class),
-                mock(WecomSyncLease.class)));
+                mock(WecomSyncLease.class)),
+            new WecomConfigService(mock(JdbcTemplate.class), mock(WecomSecretCipher.class),
+                // 权限校验已随配置读写搬到 WecomConfigService，必须传同一个 mock 才能观测到拒绝。
+                authorization, mock(AuditService.class),
+                mock(WecomJobStore.class), mock(WecomAccessGuard.class)),
+            new WecomJobStore(mock(JdbcTemplate.class), mock(TransactionTemplate.class),
+                mock(WecomSyncLease.class), mock(AuditService.class), new ObjectMapper()),
+            new WecomAccessGuard(mock(JdbcTemplate.class)));
     }
 
     @Test

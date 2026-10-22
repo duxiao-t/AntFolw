@@ -13,12 +13,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 class WecomServiceRulesTest {
     @Test
     void validatesDailyScheduleValues() {
-        assertThat(WecomService.parseScheduleTime("03:15:00"))
+        assertThat(WecomConfigService.parseScheduleTime("03:15:00"))
             .isEqualTo(LocalTime.of(3, 15));
-        assertThat(WecomService.normalizeScheduleMode("FULL")).isEqualTo("FULL");
-        assertThatThrownBy(() -> WecomService.parseScheduleTime("3:15"))
+        assertThat(WecomConfigService.normalizeScheduleMode("FULL")).isEqualTo("FULL");
+        assertThatThrownBy(() -> WecomConfigService.parseScheduleTime("3:15"))
             .isInstanceOf(com.antflow.engine.BizException.class);
-        assertThatThrownBy(() -> WecomService.normalizeScheduleMode("WEEKLY"))
+        assertThatThrownBy(() -> WecomConfigService.normalizeScheduleMode("WEEKLY"))
             .isInstanceOf(com.antflow.engine.BizException.class);
     }
 
@@ -67,7 +67,7 @@ class WecomServiceRulesTest {
         assertThat(WecomMappingRules.createsCycle(1L, Map.of(1L, 2L, 2L, 3L))).isFalse();
         DataIntegrityViolationException conflict = new DataIntegrityViolationException("write failed",
             new RuntimeException("constraint t_user_username_key"));
-        assertThat(WecomService.userError(conflict)).isEqualTo("企微工号与本地账号冲突");
+        assertThat(WecomSyncErrors.userError(conflict)).isEqualTo("企微工号与本地账号冲突");
     }
 
     @Test

@@ -183,7 +183,26 @@ H7 已在 CI 的 `metrics` job 生效：**六个口径只许下降，任一项�
 | **2.2 上级关系** | `syncManagers` / `managerUpdate` / `activeCompanyUser` + `MANAGER_POOL_SIZE` / `MANAGER_BATCH_INTERVAL_MS` | ✅ 已拆为 `WecomManagerSync`（约 180 行），原类 **1151 → 1048**；补 `WecomManagerSyncTest` 6 个判定用例 |
 | **2.3a 部门侧** | `syncDepartments` / `syncDepartmentLeaders` / `mappedDepartment` / `mappedActiveUser` + `DepartmentState` | ✅ 已拆为 `WecomDepartmentSync`（150 行） |
 | **2.3b 成员侧** | `loadContext` / `syncUsers` / `applyLoginStatus` / `matchLocal` / `wecomEmployeeNo` / `wecomUsername` / `deactivateMissing` + `SyncContext` | ✅ 已拆为 `WecomDirectorySync`（326 行），原类 **1048 → 690** |
-| **2.4 配置/任务查询** | `settings` / `saveSettings` / `start` / `job` / `recoverInterruptedJobs` / `renewSyncLeases` / `config` / `latestJob` / `activeJob` / `mapJob` / `requireCompany*` / `stage`/`progress`/`finish`/`fail`/`auditResult` | 待拆（约 300 行，含 `@Scheduled` 与权限校验） |
+| **2.4 配置/任务持久化/校验** | `settings`/`saveSettings`/`config`/`parseScheduleTime`/`normalizeScheduleMode`/`formatScheduleTime` → `WecomConfigService`；`stage`/`progress`/`finish`/`fail`/`job`/`latestJob`/`activeJob`/`mapJob`/`create`/`auditResult` → `WecomJobStore`；`requireCompany*` → `WecomAccessGuard`；错误文案 → `WecomSyncErrors` | ✅ 完成，原类 **690 → 382** |
+
+**`WecomService` 拆到位了**：1313 行 / 77 方法 → **382 行**（六刀累计 -931 行），拆出 9 个协作者：
+
+| 类 | 行数 | 职责 |
+| --- | --- | --- |
+| `WecomService` | 382 | 编排入口：`start`/`job`/`run`/调度/门面 |
+| `WecomConfigService` | 196 | 连接配置与同步计划 |
+| `WecomJobStore` | 185 | 任务持久化：创建/进度/收尾/查询 |
+| `WecomMappingRules` | 224 | 通讯录 → 本地组织的映射规则（纯函数） |
+| `WecomDirectorySync` | 326 | 成员加载与分批写入 |
+| `WecomManagerSync` | 182 | 直属上级同步 |
+| `WecomDepartmentSync` | 150 | 部门树与负责人 |
+| `WecomSyncLease` | 118 | 租约状态与校验 |
+| `WecomSyncErrors` | 72 | 错误文案映射 |
+| `WecomAccessGuard` | 45 | 公司存在性与归属校验 |
+
+**H7 第一次真正下降**：`backendOverLines` 16 → **15**，`backendOverMethods` 19 → **18**。
+前面五刀都在"搬结构"（净增行数），直到原类跨过 400 阈值才反映到指标上——
+这也印证了 §3.2 那条经验：**H7 是结果指标，不是过程指标，过程要靠提交信息里的行数/方法数追踪**。
 
 > **2.3 为什么又拆了一次**：把部门与成员一起搬后，`WecomDirectorySync` 是 **436 行**，
 > 超过 400 阈值 → H7 的 `backendOverLines` 从 16 变 17，**门禁当场报"变差"**。
