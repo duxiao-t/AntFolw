@@ -27,44 +27,44 @@ class WecomServiceRulesTest {
         WecomClient.WecomUser declared = user(List.of(1L, 2L), 2);
         WecomClient.WecomUser missing = user(List.of(1L, 2L), 9);
 
-        assertThat(WecomService.primaryDepartment(declared)).isEqualTo(2);
-        assertThat(WecomService.primaryDepartment(missing)).isEqualTo(1);
+        assertThat(WecomMappingRules.primaryDepartment(declared)).isEqualTo(2);
+        assertThat(WecomMappingRules.primaryDepartment(missing)).isEqualTo(1);
     }
 
     @Test
     void rejectsAmbiguousPhoneOrEmailMatches() {
-        assertThatThrownBy(() -> WecomService.resolveMatch(List.of(1L, 2L), List.of()))
-            .isInstanceOf(WecomService.SyncUserException.class);
-        assertThatThrownBy(() -> WecomService.resolveMatch(List.of(1L), List.of(2L)))
-            .isInstanceOf(WecomService.SyncUserException.class);
-        assertThat(WecomService.resolveMatch(List.of(1L), List.of(1L))).isEqualTo(1);
+        assertThatThrownBy(() -> WecomMappingRules.resolveMatch(List.of(1L, 2L), List.of()))
+            .isInstanceOf(WecomMappingRules.SyncUserException.class);
+        assertThatThrownBy(() -> WecomMappingRules.resolveMatch(List.of(1L), List.of(2L)))
+            .isInstanceOf(WecomMappingRules.SyncUserException.class);
+        assertThat(WecomMappingRules.resolveMatch(List.of(1L), List.of(1L))).isEqualTo(1);
     }
 
     @Test
     void detectsDepartmentMovesButKeepsLocallySupplementedContacts() {
-        WecomService.LocalUserState local = new WecomService.LocalUserState(
+        WecomMappingRules.LocalUserState local = new WecomMappingRules.LocalUserState(
             7L, "u1", "u1", "13800000000", "local@example.com", "User", "", null,
             "ACTIVE", "u1", 1, true, null, 2L, null);
 
-        assertThat(WecomService.changed(user(List.of(2L), 2), local)).isFalse();
-        assertThat(WecomService.changed(user(List.of(1L), 1), local)).isTrue();
+        assertThat(WecomMappingRules.changed(user(List.of(2L), 2), local)).isFalse();
+        assertThat(WecomMappingRules.changed(user(List.of(1L), 1), local)).isTrue();
     }
 
     @Test
     void appliesWecomLoginPolicyWithoutOverridingHardDisabledStates() {
-        assertThat(WecomService.effectiveUserStatus(1, null)).isEqualTo("ACTIVE");
-        assertThat(WecomService.effectiveUserStatus(1, false)).isEqualTo("DISABLED");
-        assertThat(WecomService.effectiveUserStatus(4, null)).isEqualTo("DISABLED");
-        assertThat(WecomService.effectiveUserStatus(4, true)).isEqualTo("ACTIVE");
-        assertThat(WecomService.effectiveUserStatus(2, true)).isEqualTo("DISABLED");
-        assertThat(WecomService.effectiveUserStatus(5, true)).isEqualTo("DISABLED");
-        assertThat(WecomService.effectiveUserStatus(99, true)).isEqualTo("DISABLED");
+        assertThat(WecomMappingRules.effectiveUserStatus(1, null)).isEqualTo("ACTIVE");
+        assertThat(WecomMappingRules.effectiveUserStatus(1, false)).isEqualTo("DISABLED");
+        assertThat(WecomMappingRules.effectiveUserStatus(4, null)).isEqualTo("DISABLED");
+        assertThat(WecomMappingRules.effectiveUserStatus(4, true)).isEqualTo("ACTIVE");
+        assertThat(WecomMappingRules.effectiveUserStatus(2, true)).isEqualTo("DISABLED");
+        assertThat(WecomMappingRules.effectiveUserStatus(5, true)).isEqualTo("DISABLED");
+        assertThat(WecomMappingRules.effectiveUserStatus(99, true)).isEqualTo("DISABLED");
     }
 
     @Test
     void identifiesCyclesAndSafeDatabaseConflictMessages() {
-        assertThat(WecomService.createsCycle(1L, Map.of(1L, 2L, 2L, 1L))).isTrue();
-        assertThat(WecomService.createsCycle(1L, Map.of(1L, 2L, 2L, 3L))).isFalse();
+        assertThat(WecomMappingRules.createsCycle(1L, Map.of(1L, 2L, 2L, 1L))).isTrue();
+        assertThat(WecomMappingRules.createsCycle(1L, Map.of(1L, 2L, 2L, 3L))).isFalse();
         DataIntegrityViolationException conflict = new DataIntegrityViolationException("write failed",
             new RuntimeException("constraint t_user_username_key"));
         assertThat(WecomService.userError(conflict)).isEqualTo("企微工号与本地账号冲突");
@@ -74,9 +74,9 @@ class WecomServiceRulesTest {
     void ordersParentsBeforeChildrenAndRejectsCycles() {
         WecomClient.WecomDepartment child = department(2, 1);
         WecomClient.WecomDepartment root = department(1, 0);
-        assertThat(WecomService.orderDepartments(List.of(child, root)))
+        assertThat(WecomMappingRules.orderDepartments(List.of(child, root)))
             .extracting(WecomClient.WecomDepartment::id).containsExactly(1L, 2L);
-        assertThatThrownBy(() -> WecomService.orderDepartments(
+        assertThatThrownBy(() -> WecomMappingRules.orderDepartments(
             List.of(department(1, 2), department(2, 1))))
             .isInstanceOf(WecomClient.WecomApiException.class);
     }

@@ -8,6 +8,9 @@ import com.antflow.engine.BizException;
 import com.antflow.integration.wecom.WecomClient.WecomDepartment;
 import com.antflow.integration.wecom.WecomClient.WecomUser;
 import com.antflow.integration.wecom.WecomClient.WecomUserRef;
+// 映射规则的类型契约已搬到 WecomMappingRules；这里 import 进来，调用点保持原名。
+import com.antflow.integration.wecom.WecomMappingRules.LocalUserState;
+import com.antflow.integration.wecom.WecomMappingRules.SyncUserException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
@@ -22,7 +25,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -370,7 +372,7 @@ public class WecomService {
                 cipher.decrypt(config.encryptedSecret(), initial.companyId()));
 
             stage(jobId, "DEPARTMENTS", 12, "正在同步部门树");
-            List<WecomDepartment> departments = orderDepartments(client.departments(session));
+            List<WecomDepartment> departments = WecomMappingRules.orderDepartments(client.departments(session));
             Map<Long, Long> departmentMappings = syncDepartments(initial.companyId(), departments);
             stage(jobId, "DEPARTMENTS", 25, "部门同步完成");
 
@@ -493,46 +495,9 @@ public class WecomService {
                 continue;
             }
             LocalUserState local = context.byId.get(context.mappedIds.get(user.userId()));
-            if (local == null || changed(user, local)) context.pending.add(user);
+            if (local == null || WecomMappingRules.changed(user, local)) context.pending.add(user);
         }
         return context;
-    }
-
-    static boolean changed(WecomUser external, LocalUserState local) {
-        return !Objects.equals(trim(local.displayName()), displayName(external))
-            || !Objects.equals(local.username(), external.userId())
-            || !Objects.equals(local.employeeNo(), external.userId())
-            || !Objects.equals(local.status(), external.status() == 1 ? "ACTIVE" : "DISABLED")
-            || !Objects.equals(blankToNull(local.position()), blankToNull(external.position()))
-            || !sameWhenProvided(local.phone(), external.phone())
-            || !sameWhenProvided(local.email(), external.email())
-            || !Objects.equals(gender(local.gender()), gender(external.gender()))
-            || !Objects.equals(local.wecomStatus(), external.status())
-            || !Boolean.TRUE.equals(local.directoryPresent())
-            || !Objects.equals(local.status(), effectiveUserStatus(
-                external.status(), local.loginEnabledOverride()))
-            || !sameDepartment(local, external);
-    }
-
-    static String effectiveUserStatus(int wecomStatus, Boolean loginEnabledOverride) {
-        if (wecomStatus == 1) {
-            return Boolean.FALSE.equals(loginEnabledOverride) ? "DISABLED" : "ACTIVE";
-        }
-        if (wecomStatus == 4 && Boolean.TRUE.equals(loginEnabledOverride)) return "ACTIVE";
-        return "DISABLED";
-    }
-
-    private static boolean sameWhenProvided(String local, String external) {
-        String normalized = blankToNull(external);
-        return normalized == null || Objects.equals(blankToNull(local), normalized);
-    }
-
-    private static boolean sameDepartment(LocalUserState local, WecomUser external) {
-        try {
-            return local.wecomDepartmentId() == primaryDepartment(external);
-        } catch (SyncUserException exception) {
-            return false;
-        }
     }
 
     private int[] syncUsers(long companyId, List<WecomUser> batch,
@@ -548,19 +513,19 @@ public class WecomService {
             Long localId = context.mappedIds.get(user.userId());
             if (localId == null) localId = matchLocal(context, user.phone(), user.email());
             if (localId == null) {
-                Long departmentId = departmentMappings.get(primaryDepartment(user));
+                Long departmentId = departmentMappings.get(WecomMappingRules.primaryDepartment(user));
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
                 String employeeNo = wecomEmployeeNo(context, user.userId(), null);
                 String username = wecomUsername(context, employeeNo, null);
                 String password = passwords.encode(UUID.randomUUID().toString());
                 inserts.add(new Object[]{departmentId, employeeNo, username, password,
                     displayName(user), email(user), phone(user), position(user), gender(user.gender()),
-                    effectiveUserStatus(user.status(), null)});
+                    WecomMappingRules.effectiveUserStatus(user.status(), null)});
                 insertedUsernames.add(username);
                 insertedIndexes.add(index);
                 created++;
             } else {
-                Long departmentId = departmentMappings.get(primaryDepartment(user));
+                Long departmentId = departmentMappings.get(WecomMappingRules.primaryDepartment(user));
                 if (departmentId == null) throw new SyncUserException("主部门未绑定");
                 String employeeNo = wecomEmployeeNo(context, user.userId(), localId);
                 String username = wecomUsername(context, employeeNo, localId);
@@ -665,7 +630,7 @@ public class WecomService {
             : context.byPhone.getOrDefault(trim(phone), List.of());
         List<Long> emailMatches = blankToNull(email) == null ? List.of()
             : context.byEmail.getOrDefault(trim(email).toLowerCase(), List.of());
-        return resolveMatch(phoneMatches, emailMatches);
+        return WecomMappingRules.resolveMatch(phoneMatches, emailMatches);
     }
 
     private static String wecomEmployeeNo(SyncContext context, String userId, Long localId) {
@@ -782,7 +747,7 @@ public class WecomService {
         for (ManagerUpdate update : updates) {
             Long managerId = update.managerId();
             String issue = update.issue();
-            if (managerId != null && createsCycle(update.userId(), effectiveManagers)) {
+            if (managerId != null && WecomMappingRules.createsCycle(update.userId(), effectiveManagers)) {
                 managerId = null;
                 effectiveManagers.put(update.userId(), null);
                 issue = "直属上级关系形成循环，已清空";
@@ -824,16 +789,6 @@ public class WecomService {
             WHERE user_row.id = ? AND department.company_id = ?
             """, rs -> rs.next() ? rs.getBoolean(1) : null, userId, companyId);
         return Boolean.TRUE.equals(active);
-    }
-
-    static boolean createsCycle(long userId, Map<Long, Long> managers) {
-        Set<Long> seen = new HashSet<>();
-        Long current = userId;
-        while (current != null) {
-            if (!seen.add(current)) return true;
-            current = managers.get(current);
-        }
-        return false;
     }
 
     private int deactivateMissing(long companyId, List<WecomUser> externalUsers) {
@@ -930,60 +885,6 @@ public class WecomService {
             mappings.put(department.id(), localId);
         }
         return mappings;
-    }
-
-    static Long resolveMatch(List<Long> phoneMatches, List<Long> emailMatches) {
-        if (phoneMatches.size() > 1 || emailMatches.size() > 1) {
-            throw new SyncUserException("手机号或邮箱存在重复，无法自动绑定");
-        }
-        Set<Long> matches = new LinkedHashSet<>();
-        matches.addAll(phoneMatches);
-        matches.addAll(emailMatches);
-        if (matches.size() > 1) {
-            throw new SyncUserException("手机号和邮箱指向不同成员，无法自动绑定");
-        }
-        return matches.stream().findFirst().orElse(null);
-    }
-
-    static long primaryDepartment(WecomUser user) {
-        if (user.mainDepartment() > 0 && user.departmentIds().contains(user.mainDepartment())) {
-            return user.mainDepartment();
-        }
-        if (!user.departmentIds().isEmpty()) return user.departmentIds().get(0);
-        throw new SyncUserException("成员没有所属部门");
-    }
-
-    static List<WecomDepartment> orderDepartments(List<WecomDepartment> input) {
-        Map<Long, WecomDepartment> byId = new LinkedHashMap<>();
-        input.forEach(department -> {
-            if (department.id() <= 0 || byId.put(department.id(), department) != null) {
-                throw new WecomClient.WecomApiException("企业微信部门树包含重复部门");
-            }
-        });
-        List<WecomDepartment> result = new ArrayList<>();
-        Set<Long> visiting = new HashSet<>();
-        Set<Long> visited = new HashSet<>();
-        for (WecomDepartment department : input) {
-            visitDepartment(department, byId, visiting, visited, result);
-        }
-        return result;
-    }
-
-    private static void visitDepartment(WecomDepartment department,
-                                        Map<Long, WecomDepartment> byId, Set<Long> visiting,
-                                        Set<Long> visited, List<WecomDepartment> result) {
-        if (visited.contains(department.id())) return;
-        if (!visiting.add(department.id())) {
-            throw new WecomClient.WecomApiException("企业微信部门树存在循环");
-        }
-        if (department.parentId() != 0) {
-            WecomDepartment parent = byId.get(department.parentId());
-            if (parent == null) throw new WecomClient.WecomApiException("企业微信部门树缺少父部门");
-            visitDepartment(parent, byId, visiting, visited, result);
-        }
-        visiting.remove(department.id());
-        visited.add(department.id());
-        result.add(department);
     }
 
     private void stage(long jobId, String phase, int percent, String message) {
@@ -1190,47 +1091,19 @@ public class WecomService {
         return "本地成员数据违反唯一性或关联约束";
     }
 
-    private static String displayName(WecomUser user) {
-        String name = trim(user.name());
-        return name.isBlank() ? user.userId() : name.substring(0, Math.min(128, name.length()));
-    }
-
-    private static String phone(WecomUser user) {
-        return bounded(user.phone(), 32, "手机号");
-    }
-
-    private static String email(WecomUser user) {
-        return bounded(user.email(), 255, "邮箱");
-    }
-
-    private static String position(WecomUser user) {
-        return bounded(user.position(), 64, "职务");
-    }
-
+    // 字段清洗的实现已搬到 WecomMappingRules（那里是这些口径的唯一真源）。
+    // 这里保留一行委托，是为了不让原类近 60 处调用点同时改名——它们全是 private，不构成对外契约。
+    // 下一刀收敛调用点时直接删掉这几个方法即可，不要在这里再加逻辑。
+    private static String displayName(WecomUser user) { return WecomMappingRules.displayName(user); }
+    private static String phone(WecomUser user) { return WecomMappingRules.phone(user); }
+    private static String email(WecomUser user) { return WecomMappingRules.email(user); }
+    private static String position(WecomUser user) { return WecomMappingRules.position(user); }
     private static String bounded(String value, int limit, String label) {
-        String normalized = blankToNull(value);
-        if (normalized != null && normalized.length() > limit) {
-            throw new SyncUserException(label + "超过 " + limit + " 个字符");
-        }
-        return normalized;
+        return WecomMappingRules.bounded(value, limit, label);
     }
-
-    private static String gender(String value) {
-        return switch (trim(value)) {
-            case "1" -> "男";
-            case "2" -> "女";
-            default -> null;
-        };
-    }
-
-    private static String blankToNull(String value) {
-        String normalized = trim(value);
-        return normalized.isBlank() ? null : normalized;
-    }
-
-    private static String trim(String value) {
-        return value == null ? "" : value.trim();
-    }
+    private static String gender(String value) { return WecomMappingRules.gender(value); }
+    private static String blankToNull(String value) { return WecomMappingRules.blankToNull(value); }
+    private static String trim(String value) { return WecomMappingRules.trim(value); }
 
     private static String mask(String value) {
         if (value == null || value.isBlank()) return "***";
@@ -1263,12 +1136,6 @@ public class WecomService {
                           String scheduleMode) { }
     private record DepartmentState(long companyId, String path) { }
     private record ManagerUpdate(long userId, Long managerId, WecomUser user, String issue) { }
-    static record LocalUserState(long id, String username, String employeeNo, String phone,
-                                 String email, String displayName, String position,
-                                 String gender, String status, String wecomUserId,
-                                 Integer wecomStatus, Boolean directoryPresent,
-                                 Boolean loginEnabledOverride, long wecomDepartmentId,
-                                 Long managerId) { }
     private static final class SyncContext {
         final Map<String, Long> mappedIds = new HashMap<>();
         final Map<String, List<Long>> byPhone = new HashMap<>();
@@ -1278,12 +1145,6 @@ public class WecomService {
         final Map<Long, LocalUserState> byId = new HashMap<>();
         long roleId;
         final List<WecomUser> pending = new ArrayList<>();
-    }
-
-    static class SyncUserException extends RuntimeException {
-        SyncUserException(String message) {
-            super(message);
-        }
     }
 
     public record SettingsDto(long companyId, String corpId, boolean secretConfigured,

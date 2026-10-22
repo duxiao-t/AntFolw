@@ -166,12 +166,29 @@ H7 已在 CI 的 `metrics` job 生效：**六个口径只许下降，任一项�
 **引擎类不是"先拆"，而是"先锁"**：动它之前必须先补特征测试并定案 V1/V2 唯一写入方
 （`health-metrics` H4 显示当前有 2 套可写运行时）。否则拆完仍是两套逻辑并行推进，等于把复杂度挪了个位置。
 
-#### `WecomService` 1313 行 / 63 方法
+#### `WecomService` 1313 行 / 63 方法（2026-10-22 第一刀完成）
 
 刀口非常干净，因为它混了**三种失败语义完全不同**的东西：
 `saveSettings`（配置，同步、可回滚）、`run`+`sync*`（长任务，有 job 生命周期与租约）、
 `config`/`mapped*`/`job`（纯查询与映射）。**不要**合成"微信服务"——同步失败要重试、消息失败要告警、
 配置失败要回滚，三者塞在一个类里，任何一处改错都会波及其他两条链路。
+
+**按"先纯静态规则、后有 I/O 映射"两刀走**（原方案把映射整体叫 `WecomMappingService`，但它混了无状态规则
+与 `syncManagers`/`syncDepartmentLeaders` 这类写库逻辑，需要再划一次界）：
+
+| 刀口 | 内容 | 状态 |
+| --- | --- | --- |
+| **纯静态规则** | `changed` / `effectiveUserStatus` / `sameWhenProvided` / `sameDepartment` / `createsCycle` / `resolveMatch` / `primaryDepartment` / `orderDepartments` / `visitDepartment` + 8 个字段清洗 + `LocalUserState` + `SyncUserException` | ✅ 已拆为 `WecomMappingRules`（212 行 / 19 方法），原类 **1313/77 → 1175/67** |
+| **有 I/O 的映射** | `matchLocal` / `wecomEmployeeNo` / `wecomUsername`（依赖 `SyncContext` 的 6 个映射表）+ `syncManagers` / `syncDepartmentLeaders` | 待拆 |
+| **同步编排** | `run` / `runBatch` / `loadContext` / `syncUsers` / `syncDepartments` / `deactivateMissing` + job 状态与租约 | 待拆 |
+| **配置与消息** | `settings` / `saveSettings` / `start` / `job` / 消息投递 | 待拆 |
+
+**第一刀的两个设计取舍**：
+1. `LocalUserState` 与 `SyncUserException` 一起搬，原类用 `import ...WecomMappingRules.LocalUserState` 引用——
+   这样 15+ 处 `SyncUserException` 与 `SyncContext.byId` 的类型完全不用改，避免为"搬家"制造大面积 diff。
+2. 8 个字段清洗（`displayName`/`phone`/`email`/`position`/`bounded`/`gender`/`blankToNull`/`trim`）在原类留
+   **一行委托**：原类有近 60 处调用点，逐个加前缀的收益远低于风险。它们是 private，不构成对外契约；
+   下一刀收敛调用点时直接删委托即可。
 
 #### `OptionSourceService` 1044 行 / 65 方法（2026-10-21 按实测修正）
 
