@@ -453,3 +453,57 @@ ArchUnit 体积规则**不加**：H7 已覆盖同一目标，而 ArchUnit 没有
 | `docs/class-decomposition-execution-2026-10-20.md` | 本文件 |
 
 **未改动**：任何业务代码、任何测试、`ci.yml`（当前有在途修改，避免冲突）。
+
+---
+
+## 八、最终收口（2026-10-22）
+
+### 总量
+
+本轮共拆 17 个类，后端超标类 **14 → 2**、超方法类 **17 → 8**，前端超标文件 **5 → 0**，最大类 **1403 → 751**。
+
+| 类 | 拆前 | 拆后 | 新类数 |
+| --- | --- | --- | --- |
+| `ProcessEngine`（第二批） | 874 | 267 | 6 |
+| `WorkflowRuntimeV2` | 1236 | 277 | 10 |
+| `ProcessDefinitionService` | 1018 | 227 | 5 |
+| `AuthorizationService` | 809 | 289 | 5 |
+| `MobileWorkflowService` | 811 | 183 | 9 |
+| `MobileFileService` | 786 | 96 | 7 |
+| `UserService` | 782 | 170 | 6 |
+| `OptionRuntimeService` | 579 | 157 | 5 |
+| `RoleAdminService` | 527 | 231 | 3 |
+| `FormGrantService` | 508 | 229 | 4 |
+| `OidcService` | 489 | 297 | 5 |
+| `WecomAppService` | 445 | 174 | 7 |
+| `org/Contacts.tsx` | 750 | 205 | 7 |
+| `mobile/ApprovalRecords.tsx` | 848 | 111 | 5 |
+| `mobile/FileUploadField.tsx` | 845 | 132 | 6 |
+| `mobile/ConfirmSummaryList.tsx` | 739 | 96 | 5 |
+| `mobile/ChecklistField.tsx` | 656 | 129 | 4 |
+
+### 两个「不拆」的决定
+
+**`OptionSourceService`（751）**：按 2026-10-22 的决定保留，不再拆。
+
+**`MobileWorkflowMapper`（466）**：**判定不拆**。理由是可验证的：
+- 它没有 default 组合方法，只有 12 条 `@Select`/`@Update` 注解 + 8 个结果 record（53 行）；
+- 只搬 record → 413 行（仍超标）；只搬通知簇 → 412 行；两者都搬才 356 行，
+  但那等于**把 SQL 挪到另一个接口**；
+- `MapperSqlParseGuardTest#newBusinessReadsMustDeclareSnapshotFilteringOrAnAuthorizedInternalPath`
+  按 `MobileWorkflowMapper.class.getDeclaredMethods()` 逐条检查公司范围过滤，移走会**静默削弱守卫**；
+- **Mapper 接口的膨胀是合法的**（每个方法对应一条 SQL），不该按行数硬拆。
+
+### 三条可复用的验证手法
+
+1. **唯一写入方用 grep 证明**：`WorkflowRuntimeV2` 拆完后，
+   `grep "UPDATE t_process_instance"` 只命中 `ProcessInstanceWriter` —— 一句话确认没有第二写入方。
+2. **token 级一致性脚本**：从 `git show HEAD:<原文件>` 提取方法体，剥注释/空白后与新位置逐 token 比对，
+   只允许预设的协作者前缀归一。每个类都跑，比肉眼看 diff 可靠。
+3. **区分「测试缝变化」与「断言弱化」**：拆 `AuthorizationService` 时 5 个用例的 spy 桩从门面改到协作者，
+   用「删 16 条 / 增 16 条、语义逐字未变」证明没有放水。
+
+### 遗留
+
+所有拆分只靠单测 + token 一致 + 编译保护。`WorkflowRuntimeV2`、`MobileWorkflowService` 的真实 SQL 路径
+只有 `PostgresTransactionalIntegrityIntegrationTest` 覆盖（本地无 Docker），**合并前必须让 CI 跑一次**。
