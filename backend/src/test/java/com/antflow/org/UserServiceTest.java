@@ -269,8 +269,8 @@ class UserServiceTest {
         User user = user(9L, 10L, null, "DISABLED");
         when(userMapper.selectById(9L)).thenReturn(user);
         when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
-            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserService.WecomLoginState>>any(),
-            eq(9L))).thenReturn(new UserService.WecomLoginState(1L, 4, true));
+            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserStatusService.WecomLoginState>>any(),
+            eq(9L))).thenReturn(new UserStatusService.WecomLoginState(1L, 4, true));
 
         User updated = service.setWecomLoginAccess(9L, true);
 
@@ -295,8 +295,8 @@ class UserServiceTest {
         when(userMapper.selectById(9L)).thenReturn(user);
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
         when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
-            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserService.WecomLoginState>>any(),
-            eq(9L))).thenReturn(new UserService.WecomLoginState(1L, 1, true));
+            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserStatusService.WecomLoginState>>any(),
+            eq(9L))).thenReturn(new UserStatusService.WecomLoginState(1L, 1, true));
 
         service.setWecomLoginAccess(9L, false);
 
@@ -319,8 +319,8 @@ class UserServiceTest {
         when(userMapper.selectById(9L)).thenReturn(user);
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
         when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
-            Mockito.<ResultSetExtractor<UserService.WecomLoginState>>any(), eq(9L)))
-            .thenReturn(new UserService.WecomLoginState(1L, 1, true));
+            Mockito.<ResultSetExtractor<UserStatusService.WecomLoginState>>any(), eq(9L)))
+            .thenReturn(new UserStatusService.WecomLoginState(1L, 1, true));
         when(jdbcTemplate.queryForObject(contains("t_form_maintainer"),
             eq(Boolean.class), eq(9L), eq(9L))).thenReturn(true);
 
@@ -343,8 +343,8 @@ class UserServiceTest {
             jdbcTemplate);
         when(userMapper.selectById(9L)).thenReturn(user(9L, 10L, null, "DISABLED"));
         when(jdbcTemplate.query(contains("FOR UPDATE OF mapping"),
-            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserService.WecomLoginState>>any(),
-            eq(9L))).thenReturn(new UserService.WecomLoginState(1L, 2, true));
+            Mockito.<org.springframework.jdbc.core.ResultSetExtractor<UserStatusService.WecomLoginState>>any(),
+            eq(9L))).thenReturn(new UserStatusService.WecomLoginState(1L, 2, true));
 
         BizException error = assertThrows(BizException.class,
             () -> service.setWecomLoginAccess(9L, true));
