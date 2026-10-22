@@ -122,24 +122,25 @@ class AuthorizationServiceTest {
     void requireFormUseByCodeAllowsGrantedPublishedForm() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
             Set.of("user"), Set.of("form:runtime:read"), 1L, 10L, null));
-        AuthorizationService spied = Mockito.spy(service);
-        Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
+        // 拆分后真实逻辑在 FormAccessGuard 里，桩必须打在它身上（打法与拆前一致：spy + 覆写子判定）
+        FormAccessGuard guard = Mockito.spy(formGuard());
+        Mockito.doReturn(true).when(guard).hasFormGrant(10L, 7L);
         when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
             eq("leave"))).thenReturn(10L);
 
-        assertThatCode(() -> spied.requireFormUseByCode("leave")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.requireFormUseByCode("leave")).doesNotThrowAnyException();
     }
 
     @Test
     void requireFormUseByCodeHidesUngrantedPublishedForm() {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "user", "User",
             Set.of("user"), Set.of("form:runtime:read"), 1L, 10L, null));
-        AuthorizationService spied = Mockito.spy(service);
-        Mockito.doReturn(false).when(spied).hasFormGrant(10L, 7L);
+        FormAccessGuard guard = Mockito.spy(formGuard());
+        Mockito.doReturn(false).when(guard).hasFormGrant(10L, 7L);
         when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class),
             eq("leave"))).thenReturn(10L);
 
-        assertThatThrownBy(() -> spied.requireFormUseByCode("leave"))
+        assertThatThrownBy(() -> guard.requireFormUseByCode("leave"))
             .isInstanceOf(HiddenResourceException.class);
     }
 
@@ -158,14 +159,14 @@ class AuthorizationServiceTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
             Set.of("manager"), Set.of(PermissionCodes.FORM_DEFINITION_MANAGE),
             1L, 10L, null));
-        AuthorizationService spied = Mockito.spy(service);
-        Mockito.doReturn(true).when(spied).hasFormMaintainer(10L, 7L);
+        FormAccessGuard guard = Mockito.spy(formGuard());
+        Mockito.doReturn(true).when(guard).hasFormMaintainer(10L, 7L);
 
-        assertThatCode(() -> spied.requireFormMaintenance(
+        assertThatCode(() -> guard.requireFormMaintenance(
             10L, PermissionCodes.FORM_DEFINITION_MANAGE)).doesNotThrowAnyException();
 
-        Mockito.doReturn(false).when(spied).hasFormMaintainer(10L, 7L);
-        assertThatThrownBy(() -> spied.requireFormMaintenance(
+        Mockito.doReturn(false).when(guard).hasFormMaintainer(10L, 7L);
+        assertThatThrownBy(() -> guard.requireFormMaintenance(
             10L, PermissionCodes.FORM_DEFINITION_MANAGE))
             .isInstanceOf(HiddenResourceException.class);
     }
@@ -175,12 +176,12 @@ class AuthorizationServiceTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "manager", "Manager",
             Set.of("manager"), Set.of(PermissionCodes.FORM_DEFINITION_MANAGE,
                 PermissionCodes.FORM_RUNTIME_READ), 1L, 10L, null));
-        AuthorizationService spied = Mockito.spy(service);
-        Mockito.doReturn(true).when(spied).hasFormGrant(10L, 7L);
-        Mockito.doReturn(false).when(spied).hasFormMaintainer(10L, 7L);
+        FormAccessGuard guard = Mockito.spy(formGuard());
+        Mockito.doReturn(true).when(guard).hasFormGrant(10L, 7L);
+        Mockito.doReturn(false).when(guard).hasFormMaintainer(10L, 7L);
 
-        assertThatCode(() -> spied.requireFormUse(10L)).doesNotThrowAnyException();
-        assertThatThrownBy(() -> spied.requireFormMaintenance(
+        assertThatCode(() -> guard.requireFormUse(10L)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> guard.requireFormMaintenance(
             10L, PermissionCodes.FORM_DEFINITION_MANAGE))
             .isInstanceOf(HiddenResourceException.class);
     }
@@ -190,7 +191,7 @@ class AuthorizationServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
             eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(1L);
 
-        assertThat(service.isReadableTaskAssignee(501L, 8L)).isTrue();
+        assertThat(instanceGuard().isReadableTaskAssignee(501L, 8L)).isTrue();
 
         var sql = org.mockito.ArgumentCaptor.forClass(String.class);
         Mockito.verify(jdbcTemplate).queryForObject(sql.capture(), eq(Long.class),
@@ -204,7 +205,7 @@ class AuthorizationServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
             eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(0L);
 
-        assertThat(service.isReadableTaskAssignee(501L, 8L)).isFalse();
+        assertThat(instanceGuard().isReadableTaskAssignee(501L, 8L)).isFalse();
     }
 
     @Test
@@ -212,7 +213,7 @@ class AuthorizationServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class),
             eq(501L), eq(8L), eq(8L), eq(501L), eq(8L))).thenReturn(0L);
 
-        assertThat(service.isParticipant(501L, 8L)).isFalse();
+        assertThat(instanceGuard().isParticipant(501L, 8L)).isFalse();
 
         var sql = org.mockito.ArgumentCaptor.forClass(String.class);
         Mockito.verify(jdbcTemplate).queryForObject(sql.capture(), eq(Long.class),
@@ -239,20 +240,25 @@ class AuthorizationServiceTest {
             Set.of("employee"), Set.of(PermissionCodes.WORKFLOW_TASK_READ),
             Map.of(PermissionCodes.WORKFLOW_TASK_READ, List.of(assigneeGrant)));
 
-        AuthorizationService spied = Mockito.spy(service);
-        Mockito.doReturn(assignee).when(spied).snapshot(8L);
-        Mockito.doReturn(new AuthorizationService.InstanceAccess(99L, 42L, 2L, false))
-            .when(spied).instanceAccess(501L);
-        Mockito.doReturn(true).when(spied).isReadableTaskAssignee(501L, 8L);
+        // 拆分后判定在 InstanceAccessGuard 里：spy 守卫（覆写实例取数/被指派人判定）+ spy 快照源
+        // （覆写 snapshot）。打法与拆前完全一致，只是打桩对象从门面换成了真正的判定者。
+        AuthzSnapshotStore store = Mockito.spy(new AuthzSnapshotStore(jdbcTemplate));
+        var capabilities = new CapabilityResolver(store);
+        var guard = Mockito.spy(new InstanceAccessGuard(jdbcTemplate, store, capabilities,
+            new DataScopeResolver(jdbcTemplate, store, capabilities)));
+        Mockito.doReturn(assignee).when(store).snapshot(8L);
+        Mockito.doReturn(new InstanceAccessGuard.InstanceAccess(99L, 42L, 2L, false))
+            .when(guard).instanceAccess(501L);
+        Mockito.doReturn(true).when(guard).isReadableTaskAssignee(501L, 8L);
 
-        assertThat(spied.canReadFullInstance(501L, 8L)).isTrue();
+        assertThat(guard.canReadFullInstance(501L, 8L)).isTrue();
 
         // 对照：摘掉该能力后同一实例不再全量可见，证明可见性确实来自被指派人分支。
         var withoutCapability = new AuthorizationService.AuthzSnapshot(8L, 10L, false,
             Set.of("employee"), Set.of(), Map.of());
-        Mockito.doReturn(withoutCapability).when(spied).snapshot(8L);
-        assertThat(spied.canReadFullInstance(501L, 8L)).isFalse();
-        assertThat(spied.instanceVisibility(501L, 8L))
+        Mockito.doReturn(withoutCapability).when(store).snapshot(8L);
+        assertThat(guard.canReadFullInstance(501L, 8L)).isFalse();
+        assertThat(guard.instanceVisibility(501L, 8L))
             .isEqualTo(AuthorizationService.InstanceVisibility.NONE);
     }
 
@@ -263,21 +269,21 @@ class AuthorizationServiceTest {
      */
     @Test
     void redLineNonScopeableCapabilityResolvesToUnrestrictedScope() {
-        assertThat(AuthorizationService.effectiveScope(
-            new AuthorizationService.GrantRow(PermissionCodes.WORKFLOW_TASK_READ, null)))
+        assertThat(AuthzSnapshotStore.effectiveScope(
+            new AuthzSnapshotStore.GrantRow(PermissionCodes.WORKFLOW_TASK_READ, null)))
             .isEqualTo(DataScope.ALL);
-        assertThat(AuthorizationService.effectiveScope(
-            new AuthorizationService.GrantRow(PermissionCodes.WORKFLOW_TASK_APPROVE, null)))
+        assertThat(AuthzSnapshotStore.effectiveScope(
+            new AuthzSnapshotStore.GrantRow(PermissionCodes.WORKFLOW_TASK_APPROVE, null)))
             .isEqualTo(DataScope.ALL);
 
         // 可配范围的能力取目录默认值，而不是 ALL。
-        assertThat(AuthorizationService.effectiveScope(
-            new AuthorizationService.GrantRow(PermissionCodes.FORM_DATA_READ, null)))
+        assertThat(AuthzSnapshotStore.effectiveScope(
+            new AuthzSnapshotStore.GrantRow(PermissionCodes.FORM_DATA_READ, null)))
             .isEqualTo(DataScope.SELF);
 
         // 显式覆盖值优先于目录默认。
-        assertThat(AuthorizationService.effectiveScope(
-            new AuthorizationService.GrantRow(PermissionCodes.FORM_DATA_READ, "ALL")))
+        assertThat(AuthzSnapshotStore.effectiveScope(
+            new AuthzSnapshotStore.GrantRow(PermissionCodes.FORM_DATA_READ, "ALL")))
             .isEqualTo(DataScope.ALL);
     }
 
@@ -310,11 +316,29 @@ class AuthorizationServiceTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "u", List.of("operator")));
         when(jdbcTemplate.query(contains("FROM t_user WHERE id = ?"),
             any(ResultSetExtractor.class), any(Object[].class)))
-            .thenReturn(new AuthorizationService.UserState(7L, "u", "U", "DISABLED", 1L, 10L));
+            .thenReturn(new AuthzSnapshotStore.UserState(7L, "u", "U", "DISABLED", 1L, 10L));
 
         assertThatThrownBy(() -> service.snapshot(7L))
             .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
             .hasMessageContaining("disabled");
+    }
+
+    /**
+     * 装一条与生产一致的最小链路。拆分后各判定类只依赖协作者、不互相回调门面，
+     * 所以测试可以直接构造目标组件并用 spy 覆写单个子判定——与拆分前的打法一致。
+     */
+    private InstanceAccessGuard instanceGuard() {
+        AuthzSnapshotStore store = new AuthzSnapshotStore(jdbcTemplate);
+        CapabilityResolver capabilities = new CapabilityResolver(store);
+        return new InstanceAccessGuard(jdbcTemplate, store, capabilities,
+            new DataScopeResolver(jdbcTemplate, store, capabilities));
+    }
+
+    private FormAccessGuard formGuard() {
+        AuthzSnapshotStore store = new AuthzSnapshotStore(jdbcTemplate);
+        CapabilityResolver capabilities = new CapabilityResolver(store);
+        return new FormAccessGuard(jdbcTemplate, store, capabilities,
+            new DataScopeResolver(jdbcTemplate, store, capabilities));
     }
 
     private static AuthorizationService.AuthzSnapshot snapshot(
@@ -337,7 +361,7 @@ class AuthorizationServiceTest {
 
         when(jdbcTemplate.query(contains("FROM t_user WHERE id = ?"),
             any(ResultSetExtractor.class), any(Object[].class)))
-            .thenReturn(new AuthorizationService.UserState(7L, "u", "U", "ACTIVE", 1L, 10L));
+            .thenReturn(new AuthzSnapshotStore.UserState(7L, "u", "U", "ACTIVE", 1L, 10L));
         when(jdbcTemplate.query(contains("FROM t_user_role ur"),
             any(RowMapper.class), any(Object[].class)))
             .thenAnswer(invocation -> {
@@ -345,11 +369,11 @@ class AuthorizationServiceTest {
                     // 首次装载：卡在这里，让 evictAll() 落在"装载中"，此时读到的还是旧角色。
                     inLoad.countDown();
                     release.await(5, TimeUnit.SECONDS);
-                    return List.of(new AuthorizationService.RoleBase(1L, "operator"));
+                    return List.of(new AuthzSnapshotStore.RoleBase(1L, "operator"));
                 }
                 // 失效之后重装的这一次才看得到新授予的角色。
-                return List.of(new AuthorizationService.RoleBase(1L, "operator"),
-                    new AuthorizationService.RoleBase(2L, "reporter"));
+                return List.of(new AuthzSnapshotStore.RoleBase(1L, "operator"),
+                    new AuthzSnapshotStore.RoleBase(2L, "reporter"));
             });
         when(jdbcTemplate.query(contains("FROM t_role_permission granted"),
             any(RowMapper.class), any(Object[].class)))
@@ -361,7 +385,7 @@ class AuthorizationServiceTest {
                 Object roleId = raw instanceof Object[] args
                     ? (args.length > 0 ? args[0] : null) : raw;
                 return Long.valueOf(2L).equals(roleId)
-                    ? List.of(new AuthorizationService.GrantRow("form:data:export", null))
+                    ? List.of(new AuthzSnapshotStore.GrantRow("form:data:export", null))
                     : List.of();
             });
 

@@ -10,11 +10,13 @@ import net.sf.jsqlparser.schema.Table;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
@@ -146,24 +148,33 @@ class DataPermissionPolicyHandlerTest {
         assertThat(segment).doesNotContain("t_form_resource_grant");
     }
 
+    /**
+     * 证明行级过滤取的是 {@link DataScopeResolver} 解析出的有效范围，而不是"放行一切"。
+     *
+     * <p>2026-10-22 拆分后不能再用 {@code thenCallRealMethod()} 打桩门面：真实逻辑已搬到
+     * {@code DataScopeResolver}，门面只做一行委托，Mockito mock 上的协作者字段是 null。
+     * 因此这里直接驱动 resolver——断言本身（部门范围来自快照、不是 unrestricted）一字未改。
+     */
     @Test
     void scopeRegistrationMatchesSnapshotInsteadOfAllowingEverything() {
-        org.springframework.test.util.ReflectionTestUtils.setField(authorizationService, "jdbcTemplate",
-            Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class));
-        // 证明 handler 依赖的是 AuthorizationService 的有效范围，而不是自行猜测
+        JdbcTemplate jdbc = Mockito.mock(JdbcTemplate.class);
+        AuthzSnapshotStore store = Mockito.mock(AuthzSnapshotStore.class);
         var role = new AuthorizationService.RoleGrant(1L, "dept_manager",
             DataScope.DEPARTMENT, Set.of());
         var snapshot = new AuthorizationService.AuthzSnapshot(7L, 3L, false,
             Set.of("dept_manager"), Set.of(PermissionCodes.FORM_DATA_READ),
             Map.of(PermissionCodes.FORM_DATA_READ, List.of(role)));
-        when(authorizationService.currentSnapshot()).thenReturn(snapshot);
-        when(authorizationService.manageableDepartments(snapshot, PermissionCodes.FORM_DATA_READ))
-            .thenReturn(Set.of(3L));
+        when(store.snapshot(7L)).thenReturn(snapshot);
+        when(jdbc.query(anyString(),
+            any(org.springframework.jdbc.core.ResultSetExtractor.class), eq(3L))).thenReturn(1L);
+        var resolver = Mockito.spy(
+            new DataScopeResolver(jdbc, store, new CapabilityResolver(store)));
+        Mockito.doReturn(Set.of(3L)).when(resolver)
+            .manageableDepartments(snapshot, PermissionCodes.FORM_DATA_READ);
         PrincipalHolder.set(new PrincipalHolder.Principal(7L, "u", "U", Set.of("dept_manager"),
             Set.of(PermissionCodes.FORM_DATA_READ), 1L, 3L, null));
-        when(authorizationService.currentDataScope(any())).thenCallRealMethod();
 
-        var scope = authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ);
+        var scope = resolver.currentDataScope(PermissionCodes.FORM_DATA_READ);
         assertThat(scope).isPresent();
         assertThat(scope.get().unrestricted()).isFalse();
         assertThat(scope.get().departmentIds()).containsExactly(3L);

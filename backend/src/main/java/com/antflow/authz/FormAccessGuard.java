@@ -1,0 +1,226 @@
+package com.antflow.authz;
+
+import com.antflow.auth.PrincipalHolder;
+import com.antflow.authz.AuthorizationService.AuthzSnapshot;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * 表单级授权：谁能"用"某张已发布表单、谁能"维护"它的配置。
+ *
+ * <p>从 {@link AuthorizationService} 搬出（2026-10-22 第四刀）。它与实例可见性（下一刀）虽然都叫
+ * "资源授权"，但数据来源与失效语义完全不同：这里的真源是 {@code t_form_resource_grant} 与
+ * {@code t_form_maintainer}（人工配置，改一次要 evict），实例可见性则来自流程运行时数据。
+ *
+ * <p><b>两个高频误解，改之前先读：</b>
+ * <ol>
+ *   <li>"使用授权"（{@link #hasFormGrant}）与"维护人"（{@link #hasFormMaintainer}）是两条独立路径，
+ *       互不蕴含。只有使用授权的人不能改表单配置——{@code AuthorizationServiceTest} 有专门用例。</li>
+ *   <li>{@link #usableFormIds} / {@link #maintainableFormIds} 返回 {@code Optional.empty()} 表示
+ *       "**不需要过滤**"（管理员），不是"一个都没有"。调用方若把它当空集处理，管理员会看到空列表。</li>
+ * </ol>
+ *
+ * <p>未授权一律抛 {@link HiddenResourceException}（"not found"）而不是 403：对外不泄露表单是否存在。
+ */
+@Component
+public class FormAccessGuard {
+    private static final String FORM_SUBJECT_MATCH = """
+        ((grant_row.subject_type = 'USER' AND grant_row.subject_id = ?)
+         OR (grant_row.subject_type = 'ROLE' AND grant_row.subject_id IN (
+             SELECT ur.role_id FROM t_user_role ur
+             JOIN t_role role ON role.id = ur.role_id AND role.enabled = true
+             WHERE ur.user_id = ?))
+         OR (grant_row.subject_type = 'DEPARTMENT' AND EXISTS (
+             SELECT 1 FROM t_user grant_user
+             JOIN t_department user_department ON user_department.id = grant_user.dept_id
+             JOIN t_department grant_department ON grant_department.id = grant_row.subject_id
+             WHERE grant_user.id = ?
+               AND user_department.path <@ grant_department.path)))
+        """;
+
+    private final JdbcTemplate jdbcTemplate;
+    private final AuthzSnapshotStore snapshots;
+    private final CapabilityResolver capabilities;
+    private final DataScopeResolver dataScopes;
+
+    FormAccessGuard(JdbcTemplate jdbcTemplate, AuthzSnapshotStore snapshots,
+                    CapabilityResolver capabilities, DataScopeResolver dataScopes) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.snapshots = snapshots;
+        this.capabilities = capabilities;
+        this.dataScopes = dataScopes;
+    }
+
+    public boolean hasFormGrant(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshots.snapshot(userId);
+        if (snapshot.admin()) {
+            return true;
+        }
+        return hasFormGrant(formId, userId, dataScopes.companyOf(snapshot));
+    }
+
+    /** companyId must come from the authenticated department or an owned draft snapshot. */
+    public boolean hasFormGrant(long formId, long userId, Long companyId) {
+        if (snapshots.snapshot(userId).admin()) return true;
+        if (companyId == null) return false;
+        Long count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM t_form_resource_grant grant_row
+            WHERE grant_row.form_def_id = ? AND
+            """ + FORM_SUBJECT_MATCH + """
+             AND EXISTS (
+                 SELECT 1 FROM t_form_resource_grant company_grant
+                 WHERE company_grant.form_def_id = grant_row.form_def_id
+                   AND company_grant.subject_type = 'COMPANY'
+                   AND company_grant.subject_id = ?)
+            """, Long.class, formId, userId, userId, userId, companyId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 该用户有使用授权的表单 id 集合，用于列表类的批量过滤。
+     * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"一个都没有"。
+     */
+    public Optional<Set<Long>> usableFormIds(long userId) {
+        AuthzSnapshot snapshot = snapshots.snapshot(userId);
+        if (snapshot.admin()) {
+            return Optional.empty();
+        }
+        Long companyId = dataScopes.companyOf(snapshot);
+        if (companyId == null) return Optional.of(Set.of());
+        return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
+            SELECT DISTINCT grant_row.form_def_id FROM t_form_resource_grant grant_row
+            WHERE
+            """ + FORM_SUBJECT_MATCH + """
+             AND EXISTS (
+                 SELECT 1 FROM t_form_resource_grant company_grant
+                 WHERE company_grant.form_def_id = grant_row.form_def_id
+                   AND company_grant.subject_type = 'COMPANY'
+                   AND company_grant.subject_id = ?)
+            """, Long.class, userId, userId, userId, companyId)));
+    }
+
+    /** Batch draft authorization uses each stored company, rather than today's department. */
+    public Optional<Map<Long, Set<Long>>> usableFormIdsByCompany(long userId) {
+        if (snapshots.snapshot(userId).admin()) return Optional.empty();
+        Map<Long, Set<Long>> result = new HashMap<>();
+        jdbcTemplate.query("""
+            SELECT DISTINCT company_grant.subject_id AS company_id, grant_row.form_def_id
+            FROM t_form_resource_grant grant_row
+            JOIN t_form_resource_grant company_grant
+              ON company_grant.form_def_id = grant_row.form_def_id
+             AND company_grant.subject_type = 'COMPANY'
+            WHERE
+            """ + FORM_SUBJECT_MATCH, rs -> {
+                result.computeIfAbsent(rs.getLong("company_id"), key -> new LinkedHashSet<>())
+                    .add(rs.getLong("form_def_id"));
+            }, userId, userId, userId);
+        return Optional.of(result);
+    }
+
+    /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
+    public void requireFormUse(long formId) {
+        PrincipalHolder.Principal principal = capabilities.principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        capabilities.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
+        if (!hasFormGrant(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    public void requireFormUse(long formId, Long companyId) {
+        PrincipalHolder.Principal principal = capabilities.principal();
+        if (principal.isAdmin()) return;
+        capabilities.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
+        if (!hasFormGrant(formId, principal.userId(), companyId)) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    public boolean canUseForm(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshots.snapshot(userId);
+        return snapshot.admin()
+            || (snapshot.permissions().contains(PermissionCodes.FORM_RUNTIME_READ)
+                && hasFormGrant(formId, userId));
+    }
+
+    public boolean hasFormMaintainer(long formId, long userId) {
+        AuthzSnapshot snapshot = snapshots.snapshot(userId);
+        if (snapshot.admin()) {
+            return true;
+        }
+        Long count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*)
+            FROM t_form_maintainer maintainer
+            JOIN t_form_definition form ON form.id = maintainer.form_def_id
+              AND form.deleted = 0
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+              AND user_row.status = 'ACTIVE'
+            WHERE maintainer.form_def_id = ? AND maintainer.user_id = ?
+            """, Long.class, formId, userId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 该用户维护的表单 id 集合，用于列表类的批量过滤。
+     * 返回空表示"不需要过滤"（管理员），调用方直接放行——不是"什么都不维护"。
+     */
+    public Optional<Set<Long>> maintainableFormIds(long userId) {
+        if (snapshots.snapshot(userId).admin()) {
+            return Optional.empty();
+        }
+        return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
+            SELECT maintainer.form_def_id
+            FROM t_form_maintainer maintainer
+            JOIN t_form_definition form ON form.id = maintainer.form_def_id
+              AND form.deleted = 0
+            JOIN t_user user_row ON user_row.id = maintainer.user_id
+              AND user_row.status = 'ACTIVE'
+            WHERE maintainer.user_id = ?
+            """, Long.class, userId)));
+    }
+
+    /** 模板操作入口：非管理员必须同时是维护人并持有对应原子能力。 */
+    public void requireFormMaintenance(long formId, String permission) {
+        PrincipalHolder.Principal principal = capabilities.principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        capabilities.requirePermission(permission);
+        if (!hasFormMaintainer(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    public void requireFormMaintenanceAny(long formId, String... permissions) {
+        PrincipalHolder.Principal principal = capabilities.principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        capabilities.requireAnyPermission(permissions);
+        if (!hasFormMaintainer(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    /**
+     * 发起/填报入口统一使用：表单必须已发布且当前用户具备表单使用授权。
+     * 未授权时返回资源不存在，避免泄露表单是否存在。
+     */
+    public void requireFormUseByCode(String code) {
+        Long formId = jdbcTemplate.query("""
+            SELECT id FROM t_form_definition
+            WHERE code = ? AND status = 'PUBLISHED' AND deleted = 0
+            """, rs -> rs.next() ? rs.getLong(1) : null, code);
+        if (formId == null) {
+            throw new HiddenResourceException("form not found");
+        }
+        requireFormUse(formId);
+    }
+}
