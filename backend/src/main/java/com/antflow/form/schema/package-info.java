@@ -7,8 +7,10 @@
  *       结构契约（字段类型、children 形状）与叶子字段清单。</li>
  *   <li>{@link com.antflow.form.schema.FormSchemaValidator} —— 发布期校验：选项、展示样式、
  *       清单结果色、{@code displayCondition} 环。</li>
- *   <li>{@link com.antflow.form.schema.FormSubmissionValidator} —— 提交期校验：必填、形状、
- *       长度/精度、选项值、明细行、部门选择器。</li>
+ *   <li>{@link com.antflow.form.schema.FormSubmissionValidator} —— 提交期校验：树遍历与递归骨架
+ *       （必填、选项值、明细行、矩阵）。</li>
+ *   <li>{@link com.antflow.form.schema.FormFieldValueValidator} —— 叶子字段的值校验：形状、
+ *       长度/精度、清单、用户选择器、部门选择器（不走树）。</li>
  *   <li>{@link com.antflow.form.schema.FormMatrixRules} —— {@code matrix_fill} 的行列轴与单元格
  *       （发布态与提交态共用）。</li>
  *   <li>{@link com.antflow.form.schema.FormVisibility} —— {@code displayCondition} 的运行时求值。</li>
@@ -37,6 +39,7 @@
  * FormStarterCanonicalizer → FormStarterProjector → FormSchemaParser → FormMatrixRules
  *        ↓                        ↓                      ↑
  * FormSubmissionValidator → FormVisibility          FormSchemaValidator
+ *        ├→ FormFieldValueValidator（叶子值校验，只借 FormVisibility.isEmpty）
  *        ↓
  * FormSchemaJson（唯一被所有类共享的 JSON 边界）
  * </pre>

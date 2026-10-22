@@ -259,3 +259,116 @@ public void validateStarterRevision(String schema, Object data, Object process);
 | `node scripts/health-metrics.mjs` | 退出码 0；H7 后端超标类 15→14、超标方法类 18→17、最大类 1403→1277 行 |
 | `git diff --stat -- frontend/config/antflow-api.json` | 空 |
 | 新增测试 | ①矩阵运行态行 id 与配置态撞车必须拒绝；②`displayCondition` 的 `empty`/`notEmpty` 操作符。两条都是搬迁前没有覆盖、可稳定断言的行为 |
+
+## 9. 后续：`FormSubmissionValidator` 二次拆分
+
+> 对象：`backend/src/main/java/com/antflow/form/schema/FormSubmissionValidator.java`，拆前 **399 行 / 13 方法**。
+> 触发原因：§3 已把它标成"只留 1 行余量"的类（399/400），**再加一行值校验就会顶破 H7 的 400 行门禁**。
+
+### 9.1 方法职责与调用关系
+
+| 方法 | 行数 | 职责 | 调谁 |
+| --- | --- | --- | --- |
+| `validateSubmission(schema,data)` | 8 | 入口：解析 → 算可见集 → 遍历根节点 | `validateNodeValue`(3 参) |
+| `validateSubmission(schema,data,fieldIds)` | 9 | 入口（字段权限）：同上，但只校验白名单字段 | `validateNodeValue`(4 参) |
+| `validateNodeValue`(4 参) | 26 | 递归骨架（白名单模式）：容器下钻；`table_list` 走整行校验 | `validateNodeValue`×2、`validateTableValue`、`containsAcceptedField` |
+| `validateNodeValue`(3 参) | 117 | 递归骨架（全量模式）+ 单字段值校验总装 | `validateValueShape`、`validateDepartmentPickerValue`、`validateTableValue`、`FormMatrixRules`、`OptionRuntimeService`、**自身递归** |
+| `validationNode` | 10 | 把 `rules` 摊进 `props`（新约束覆盖旧 props） | 无 |
+| `validateValueShape` | 56 | 形状 + 长度/精度/正则/计数（叶子） | `validUserPicker`、`validateChecklistValue` |
+| `validUserPicker` | 8 | 用户选择器 id 形状（叶子，`static`） | 自身（`multiple` 时逐项降级） |
+| `validateChecklistValue` | 34 | 清单逐项必填/照片上限/描述必填（叶子） | `FormVisibility.isEmpty` |
+| `containsAcceptedField` | 12 | 子树里有没有白名单字段（决定表格要不要校验） | 自身（递归，纯 schema 侧） |
+| `validateTableValue` | 35 | 明细行：行数上下限 + 逐行算可见性 + 逐行下钻 | `validateNodeValue`×2、`FormVisibility` |
+| `validateDepartmentPickerValue` | 15 | 部门选择器（叶子） | `invalidDepartmentPickerValue`、`isPositiveIntegralId` |
+| `invalidDepartmentPickerValue` | 5 | 部门选择器的错误工厂（叶子） | 无 |
+| `isPositiveIntegralId` | 8 | 正整数 id 判定（叶子，`static`） | 无 |
+
+**递归边界在哪**（这是本次切分的分水岭）：
+
+1. `validateNodeValue` ↔ `validateTableValue`：表格的**每一行**都要重跑一遍节点校验——跨方法互递归；
+2. `validateNodeValue` → 自身：容器的 `children` 下钻；
+3. `containsAcceptedField` → 自身：纯 schema 侧子树扫描，与数据无关；
+4. `validUserPicker` → 自身：`multiple` 时把列表逐项降级成单值。
+
+第 1 条是**唯一**把"树遍历"与"值校验"耦合在一起的地方，它决定了哪些方法必须留在主类。
+
+### 9.2 切分方案：按"递归骨架 vs 叶子校验"切
+
+两个候选：
+
+- **A. 按字段类型的校验器切**（`ChecklistValueValidator` / `DepartmentPickerValidator` / `UserPickerValidator`…）。
+  好处是每个类的变化原因单一；坏处是会产生 4~6 个 30~60 行的小类，每个只有 1~3 个方法，
+  而它们**共享同一套前置条件**（`value` 非空、`props` 已摊平 `rules`）与同一套错误码/文案风格，
+  改一条文案要开 4 个文件。上一次拆 `WecomService` 的教训是按"变化原因"切、不是按"名词"切
+  （见 [`class-decomposition-execution-2026-10-20.md`](class-decomposition-execution-2026-10-20.md) §6）。
+- **B. 按"递归骨架 vs 叶子校验"切**（**本次采用**）。判据只有一条：
+  **这个方法自己会不会再进 `validateNodeValue`？** 会 → 属于骨架，留在主类；不会 → 属于叶子，搬走。
+
+选 B 的四条理由：
+
+1. **叶子校验的变化原因一致**——都是"某种字段类型的值长什么样"，一起改的概率远高于分开改；
+2. **骨架必须留在一起**——`validateNodeValue` 与 `validateTableValue` 互递归，拆开就得让两边互相持引用（§9.4）；
+3. 叶子校验**零依赖**——只用 `FormVisibility.isEmpty` 这个静态判定，搬走不需要新的构造器依赖；
+4. 按 A 切会让主类同时依赖 4~6 个新协作者，构造器依赖从 6 涨到 10+，与"依赖 ≤8"的目标背道而驰。
+
+**为什么 `validateValueShape` 算叶子**：它只对"当前这一个字段的值"做形状/长度/精度/正则判定，
+不读 `children`、不碰其它节点、不递归——其中看起来最像"结构校验"的几条
+（`multi_select`/`date_range`/`file_upload` 要求 `value` 是列表）判的也是**值本身的形状**，不是子节点。
+它调用 `validateChecklistValue`，两者必须一起搬（否则要么反向依赖，要么留下半个清单校验）。
+
+**为什么 `table_list` 不搬**：`validateTableValue` 要对每一行重跑 `validateNodeValue`，
+按上面的判据它属于骨架。搬出去就得让叶子类回调骨架（或骨架把 `this` 传进去），
+把"互递归"变成"双向依赖"——这正是 §9.4 要避免的。
+
+### 9.3 新类清单
+
+| 类 | 职责 | 行数（实测） | 方法数 | 构造器依赖 |
+| --- | --- | --- | --- | --- |
+| `FormFieldValueValidator`（新） | 叶子字段的值校验：形状、长度/精度/正则/计数、清单、用户选择器、部门选择器 | 164 | 6 | **无**（只用 `FormVisibility.isEmpty` 静态判定） |
+| `FormSubmissionValidator`（留存） | 树遍历 + 递归骨架 + 必填/选项/明细行/矩阵的编排 | 274 | 7 | `FormSchemaParser`、`FormSchemaJson`、`FormVisibility`、`FormMatrixRules`、`FormFieldValueValidator`、`OptionRuntimeService`、`ObjectMapper` |
+
+搬走的 6 个方法（共 126 行）：`validateValueShape`、`validUserPicker`、`validateChecklistValue`、
+`validateDepartmentPickerValue`、`invalidDepartmentPickerValue`、`isPositiveIntegralId`。
+
+### 9.4 风险
+
+| 风险 | 判断 | 处理 |
+| --- | --- | --- |
+| **递归跨类后参数变多** | **只要 `table_list` 留在骨架就不会**。搬走的 6 个方法都是"单节点 + 单值"，签名与原样一致：`validateValueShape(node, value)` / `validateDepartmentPickerValue(node, value)`，没有新增参数 | 不搬 `validateTableValue`；**不引入回调接口、不传 `this`、不用 `@Lazy` 打破环** |
+| **错误文案漂移** | 中——这些方法里全是 `label + " exceeds maxCount"` 这类拼接文案，且含中文（`"请完成检查项"`） | 6 个方法逐字搬迁（只改可见性），搬完用脚本按方法名比对 `git show HEAD:` 版本与新位置，**忽略修饰符与空白后要求相等**；中文按字符比对，不做 token 归一 |
+| 错误码漂移 | 低，但不能漏 | `validateValueShape` 里有全类唯一一处 `BAD_SCHEMA`（`pattern` 正则编译失败），搬迁后仍必须在同一分支、同一文案；逐字比对覆盖它 |
+| `validateValueShape` / `validateDepartmentPickerValue` 的可见性 | 无外部调用方：`grep -r` 整个 `backend/src` 只有本类自调（外部只用 `validateSubmission`×2） | 在新类保持 `public`；**主类不保留转发壳**——留转发壳既无人调用，又会把刚降下去的行数顶回去 |
+| 构造器依赖 6 → 7 | 可接受 | 新协作者是无状态纯函数，不与"≤8"目标冲突；测试装配需同步（`FormDefinitionServiceFixture`） |
+| 主类仍留 7 个方法 / 274 行 | 可接受 | 已从 399 降到 274，距 400 行门禁留 126 行余量。下次再膨胀时按**同一判据**继续切：`validateNodeValue` 里那几段"字段类型专属的内联校验"（`scan_code`/`audio_upload`/`location`/`number`）也是叶子，可以整块搬进本类 |
+
+### 9.5 实施记录与验证
+
+| 刀 | 产物 | 主类行数（`wc -l`） |
+| --- | --- | --- |
+| 起点 | — | 399（13 方法） |
+| 1 | `FormFieldValueValidator`（6 方法 / 164 行）+ 主类改调用点 + 测试装配 | **274**（7 方法） |
+
+**逐字核对**（`git show HEAD:` 版本 vs 新位置，忽略修饰符与空白）：
+
+| 分类 | 数量 | 结果 |
+| --- | --- | --- |
+| 搬迁到 `FormFieldValueValidator` | 6 | 全部逐字一致（`validateValueShape` 56 行 / `validUserPicker` 8 / `validateChecklistValue` 34 / `validateDepartmentPickerValue` 15 / `invalidDepartmentPickerValue` 5 / `isPositiveIntegralId` 8） |
+| 保留在 `FormSubmissionValidator` | 7（含 2 个重载） | 6 个逐字一致；`validateNodeValue`(3 参) 有 **2 行有意差异**，只是把两处内部调用加上 `fieldValueValidator.` 前缀（见下） |
+
+```diff
+-        validateValueShape(node, value);
++        fieldValueValidator.validateValueShape(node, value);
+-            validateDepartmentPickerValue(node, value);
++            fieldValueValidator.validateDepartmentPickerValue(node, value);
+```
+
+**验证结果**
+
+| 项 | 结果 |
+| --- | --- |
+| `mvn -B compile` | BUILD SUCCESS |
+| `mvn -B test -Dtest='FormDefinition*,SubmissionValidation*'` | 120 passed，0 failed / 0 error（`FormDefinitionServiceSchemaTest` 46 + `SubmissionValidationFixtureTest` 74） |
+| 全量（排除 PG 事务与契约快照） | **658 passed**，0 failed / 0 error，2 skipped |
+| `node scripts/health-metrics.mjs` | 退出码 0；H7 后端超标类仍是 14 个（>400 行）/ 17 个（>25 方法），最大类 1277 行；`FormSubmissionValidator` 已不在 >400 清单里 |
+| `git diff --stat -- frontend/config/antflow-api.json` | 空 |
+| 新增测试 | 无（本次是纯搬迁，行为不变；覆盖由既有 120 条提交校验用例承担） |

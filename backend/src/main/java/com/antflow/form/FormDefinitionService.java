@@ -35,8 +35,11 @@ import com.fasterxml.jackson.databind.JsonNode;
  *
  * <p>**为什么保留 24 个委托方法**：{@code engine}/{@code mobile}/{@code process}/{@code task}
  * 四个包都在调用它们，且不在本次拆分边界内；把调用方改成注入协作者会让"只重构"的 diff 扩散到
- * 整个后端。代价是方法数贴着 25 的上限——**新能力请加到协作者，不要回填这里**，
- * 否则 H7 会当场报红。详见 {@code docs/class-decomposition-form-definition-2026-10-22.md}。
+ * 整个后端。代价是方法数贴着 25 的上限。详见
+ * {@code docs/class-decomposition-form-definition-2026-10-22.md}。
+ *
+ * <p>**约束**：本类是 schema 公开方法的委托入口，当前 24 个 public 方法 + 1 个私有，已达 H7 的
+ * 25 方法上限；新增能力请加到 schema 包下的协作者，不要在这里回填。
  */
 @Service
 @RequiredArgsConstructor

@@ -1,6 +1,7 @@
 package com.antflow.form;
 
 import com.antflow.authz.FormGrantService;
+import com.antflow.form.schema.FormFieldValueValidator;
 import com.antflow.form.schema.FormMatrixRules;
 import com.antflow.form.schema.FormSchemaJson;
 import com.antflow.form.schema.FormSchemaParser;
@@ -34,7 +35,9 @@ public final class FormDefinitionServiceFixture {
         var schemaJson = new FormSchemaJson(json);
         var visibility = new FormVisibility(json);
         var projector = new FormStarterProjector(schemaJson, parser, visibility, json);
-        var submission = new FormSubmissionValidator(parser, schemaJson, visibility, matrix, null, json);
+        // 叶子值校验是无状态纯函数，直接 new；它只被提交校验用，不进门面。
+        var fieldValues = new FormFieldValueValidator();
+        var submission = new FormSubmissionValidator(parser, schemaJson, visibility, matrix, fieldValues, null, json);
         // 发布期校验需要 OptionRuntimeService；单测里没有外部选项源，传 null 走"未装配"分支。
         var schemaValidator = new FormSchemaValidator(parser, null, json);
         var canonicalizer = new FormStarterCanonicalizer(
