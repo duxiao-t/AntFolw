@@ -10,11 +10,6 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
-    # 只映射到宿主机 25432：本机 5432 已被独立安装的 PostgreSQL 占用、15432 被 Docker 代理占用，
-    # 直接映射 5432 会撞端口或让图形工具连错库。
-    # 应用容器走 compose 内部网络（postgres:5432），不依赖这条映射；它只为 Navicat 等外部工具服务。
-    ports:
-      - "25432:5432"
     environment:
       POSTGRES_DB: antflow
       POSTGRES_USER: antflow
