@@ -322,7 +322,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 | `AUDIT_ARCHIVE_ENCRYPTION_SECRET` | 必填 | 审计归档加密密钥 |
 | `ANTFLOW_INTEGRATION_ENCRYPTION_KEY` | 必填 | 企业微信等集成密钥的加密密钥 |
 | `BACKUP_ENCRYPTION_SECRET` | 必填 | 系统备份加密密钥，至少 32 位随机字符 |
-| `ANTFLOW_PUBLIC_BASE_URL` | 建议 | 对外访问地址，用于生成链接（默认 `http://127.0.0.1:7070`） |
+| `ANTFLOW_PUBLIC_BASE_URL` | **非本机访问时必填** | 对外访问地址，用于生成 OIDC 回跳与企微链接（默认 `http://127.0.0.1:7070`；指向本机时启动会 WARN） |
 | `ANTFLOW_OIDC_ALLOWED_HOSTS` | 可选 | 允许的 OIDC 提供方域名白名单，逗号分隔 |
 | `ANTFLOW_OIDC_HTTPS_ONLY` | 可选 | 是否强制 OIDC 走 HTTPS，默认 `true` |
 

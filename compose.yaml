@@ -73,6 +73,9 @@ services:
       AUDIT_ARCHIVE_ENCRYPTION_SECRET: ${AUDIT_ARCHIVE_ENCRYPTION_SECRET:?set AUDIT_ARCHIVE_ENCRYPTION_SECRET}
       AUDIT_ARCHIVE_KEY_ID: docker-local-v1
       ANTFLOW_INTEGRATION_ENCRYPTION_KEY: ${ANTFLOW_INTEGRATION_ENCRYPTION_KEY:?set ANTFLOW_INTEGRATION_ENCRYPTION_KEY}
+      # 对外访问地址：OIDC 回跳、企业微信免登与「移动端应用主页」都用它拼链接。
+      # 本机访问用默认值；局域网访问填 http://<ip>:7070；域名+HTTPS 填 https://<域名>。
+      # 只要会从别的机器访问就必须改，否则那些跳转会指向 127.0.0.1 而失效（启动时会有 WARN）。
       ANTFLOW_PUBLIC_BASE_URL: ${ANTFLOW_PUBLIC_BASE_URL:-http://127.0.0.1:7070}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:*,http://127.0.0.1:*,http://[::1]:*}
       ANTFLOW_OIDC_ALLOWED_HOSTS: ${ANTFLOW_OIDC_ALLOWED_HOSTS:-}
