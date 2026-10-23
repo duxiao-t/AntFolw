@@ -30,6 +30,8 @@ public final class PermissionCodes {
     public static final String FORM_RUNTIME_READ = "form:runtime:read";
     public static final String FORM_DATA_READ = "form:data:read";
     public static final String FORM_DATA_EXPORT = "form:data:export";
+    /** 历史数据补录：直接写 SUBMITTED 台账行，不建流程实例，风险高于普通查看。 */
+    public static final String FORM_DATA_IMPORT = "form:data:import";
 
     // 流程定义与运行
     public static final String WORKFLOW_DEFINITION_READ = "workflow:definition:read";

@@ -25,14 +25,17 @@ import org.springframework.web.multipart.MultipartFile;
  * <p>**无状态、不托管 Spring**：全部方法 static，没有可注入依赖，因此不存在并发共享状态。
  * 拆出来之后不要给它加 {@code @Service}——一旦它能注入 bean，就会有人在解析里顺手查库，
  * 这个类也就退化成第二个上帝类。
+ *
+ * <p>本类同时服务**选项源**与**表单数据导入**（{@code com.antflow.form.importer}），
+ * 仍然只做纯解析：不查库、不做鉴权、不参与事务。
  */
-final class OptionTableImporter {
+public final class OptionTableImporter {
 
     /** 导入上限：文件体积、行数、列数、单元格长度。超限一律抛 BizException，由调用方转成用户可读的错误。 */
-    static final int MAX_BYTES = 10 * 1024 * 1024;
-    private static final int MAX_ROWS = 20_000;
-    private static final int MAX_COLUMNS = 50;
-    private static final int MAX_CELL_LENGTH = 500;
+    public static final int MAX_BYTES = 10 * 1024 * 1024;
+    public static final int MAX_ROWS = 20_000;
+    public static final int MAX_COLUMNS = 50;
+    public static final int MAX_CELL_LENGTH = 500;
 
     private OptionTableImporter() { }
 
@@ -44,7 +47,7 @@ final class OptionTableImporter {
      * @param sheetName 工作表名，仅 xlsx/xls 多表时需要
      * @throws BizException 二选一不满足、超限、格式不支持、内容为空或表头不合法
      */
-    static ImportedTable read(MultipartFile file, String text, String sheetName) throws Exception {
+    public static ImportedTable read(MultipartFile file, String text, String sheetName) throws Exception {
         boolean hasFile = file != null && !file.isEmpty();
         // 两者都空或都给，都是调用方传错；这里 fail-closed，避免"文件优先"掩盖前端 bug。
         if (hasFile == (text != null && !text.isBlank())) {
@@ -99,6 +102,8 @@ final class OptionTableImporter {
             // 公式单元格取缓存值：取公式表达式会把 =A1+B1 原样导进选项，用户看到的是乱码。
             formatter.setUseCachedValuesForFormulaCells(true);
             List<List<String>> rows = new ArrayList<>();
+            // 真实 Excel 行号（1 基）：空行被丢弃后，报错仍要指向用户看到的那一行。
+            List<Integer> rowNumbers = new ArrayList<>();
             for (Row row : sheet) {
                 int width = Math.max(0, row.getLastCellNum());
                 if (width > MAX_COLUMNS) throw new BizException("OPTION_SOURCE_COLUMNS_INVALID", "列数不能超过 50");
@@ -106,12 +111,17 @@ final class OptionTableImporter {
                 for (int column = 0; column < width; column++) {
                     values.add(formatter.formatCellValue(row.getCell(column, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK)).trim());
                 }
-                if (values.stream().anyMatch(value -> !value.isBlank())) rows.add(values);
+                if (values.stream().anyMatch(value -> !value.isBlank())) {
+                    rows.add(values);
+                    rowNumbers.add(row.getRowNum() + 1);
+                }
                 // 多读一行用于判断"是否超出上限"，真正的限额在 validateTable 里报错。
                 if (rows.size() > MAX_ROWS + 1) break;
             }
             if (rows.isEmpty()) throw new BizException("OPTION_SOURCE_EMPTY", "工作表为空");
-            return new ImportedTable(rows.get(0), rows.subList(1, rows.size()));
+            // 第 1 行是表头：数据行的真实行号从第 2 个记录开始。
+            return new ImportedTable(rows.get(0), rows.subList(1, rows.size()),
+                rowNumbers.subList(1, rowNumbers.size()));
         }
     }
 
@@ -172,7 +182,7 @@ final class OptionTableImporter {
     }
 
     /** 一行值按表头压成 Map；缺列补空串，避免下游 JSON 出现 key 缺失与 null 两种形态。 */
-    static Map<String, String> rowMap(List<String> columns, List<String> values) {
+    public static Map<String, String> rowMap(List<String> columns, List<String> values) {
         Map<String, String> row = new LinkedHashMap<>();
         for (int index = 0; index < columns.size(); index++) {
             row.put(columns.get(index).trim(), index < values.size() ? values.get(index) : "");
@@ -181,7 +191,7 @@ final class OptionTableImporter {
     }
 
     /** 只取文件名本身：浏览器可能传 `C:\fakepath\x.csv` 或带目录的路径，直接入库会泄露客户端路径。 */
-    static String safeName(String value) {
+    public static String safeName(String value) {
         if (value == null || value.isBlank()) return "import";
         String name = value.replace('\\', '/');
         name = name.substring(name.lastIndexOf('/') + 1);
@@ -190,6 +200,33 @@ final class OptionTableImporter {
 
     private static String stripBom(String value) { return value.startsWith("\uFEFF") ? value.substring(1) : value; }
 
-    /** 解析结果：第一行是表头，其余是数据行。包内可见即可，对外只暴露 ImportPreview。 */
-    record ImportedTable(List<String> columns, List<List<String>> rows) { }
+    /**
+     * 解析结果：第一行是表头，其余是数据行。
+     *
+     * <p>{@code sourceRows} 与 {@code rows} **一一对应**，是每行在原始 Excel 里的行号（1 基）。
+     * 为什么必须带：解析会把整行为空的行丢掉，于是 {@code rows} 的下标不再等于用户看到的行号；
+     * 表单数据导入按行报错时若用下标 +2，报出的行会随空行数量漂移，用户根本找不到问题行。
+     *
+     * <p>2 参构造器保留给 CSV/粘贴文本等"行号就是顺序"的来源，也是既有调用点的兼容入口。
+     */
+    public record ImportedTable(List<String> columns, List<List<String>> rows,
+                                List<Integer> sourceRows) {
+        public ImportedTable {
+            columns = List.copyOf(columns);
+            rows = rows == null ? List.of() : List.copyOf(rows);
+            sourceRows = sourceRows == null || sourceRows.size() != rows.size()
+                ? sequentialRows(rows.size()) : List.copyOf(sourceRows);
+        }
+
+        /** 兼容构造器：没有真实行号来源时，按"第 2 行起"顺序编号。 */
+        public ImportedTable(List<String> columns, List<List<String>> rows) {
+            this(columns, rows, null);
+        }
+
+        private static List<Integer> sequentialRows(int count) {
+            List<Integer> numbers = new ArrayList<>(count);
+            for (int index = 0; index < count; index++) numbers.add(index + 2);
+            return numbers;
+        }
+    }
 }

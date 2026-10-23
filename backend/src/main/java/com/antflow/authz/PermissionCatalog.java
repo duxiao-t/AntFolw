@@ -55,6 +55,9 @@ public final class PermissionCatalog {
         entry(PermissionCodes.FORM_RUNTIME_READ, "使用已发布表单", Risk.NORMAL),
         entry(PermissionCodes.FORM_DATA_READ, "查看填报数据", Risk.HIGH, DataScope.SELF),
         entry(PermissionCodes.FORM_DATA_EXPORT, "导出表单数据", Risk.HIGH, DataScope.SELF),
+        // 不声明数据范围：导入是写操作，范围只对读生效；给个 SELF 会让角色页显示一个
+        // 永远不会被读取的"数据范围"下拉。V40 注释已定：新增能力只改这里，由启动同步器入库。
+        entry(PermissionCodes.FORM_DATA_IMPORT, "导入表单数据（历史补录）", Risk.HIGH),
 
         entry(PermissionCodes.WORKFLOW_DEFINITION_READ, "查看流程配置", Risk.NORMAL),
         entry(PermissionCodes.WORKFLOW_DEFINITION_MANAGE, "设计流程配置", Risk.HIGH),

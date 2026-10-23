@@ -489,6 +489,30 @@
         },
         "type" : "object"
       },
+      "ColumnReport" : {
+        "properties" : {
+          "fieldId" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "order" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "required" : {
+            "type" : "boolean"
+          },
+          "supported" : {
+            "type" : "boolean"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "Company" : {
         "properties" : {
           "createdAt" : {
@@ -1317,6 +1341,142 @@
           "row" : {
             "format" : "int32",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ImportInspection" : {
+        "properties" : {
+          "columns" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ColumnReport"
+            },
+            "type" : "array"
+          },
+          "errorCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "formCode" : {
+            "type" : "string"
+          },
+          "formId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "formName" : {
+            "type" : "string"
+          },
+          "formVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "importableCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "issues" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RowIssue"
+            },
+            "type" : "array"
+          },
+          "issuesTruncated" : {
+            "type" : "boolean"
+          },
+          "missingColumns" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "previews" : {
+            "items" : {
+              "additionalProperties" : {
+                "type" : "object"
+              },
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "rowCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sheetName" : {
+            "type" : "string"
+          },
+          "sheets" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "skippedCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "templateVersion" : {
+            "type" : "string"
+          },
+          "warnings" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "ImportOutcome" : {
+        "properties" : {
+          "atomic" : {
+            "type" : "boolean"
+          },
+          "batchId" : {
+            "type" : "string"
+          },
+          "createdIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
+          "failureCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failures" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RowIssue"
+            },
+            "type" : "array"
+          },
+          "failuresTruncated" : {
+            "type" : "boolean"
+          },
+          "formId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "skippedCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "successCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalRows" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "warnings" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
           }
         },
         "type" : "object"
@@ -3373,6 +3533,27 @@
             "uniqueItems" : true
           },
           "version" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "RowIssue" : {
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "fieldId" : {
+            "type" : "string"
+          },
+          "fieldLabel" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "row" : {
             "format" : "int32",
             "type" : "integer"
           }
@@ -5648,6 +5829,164 @@
         },
         "tags" : [
           "form-data-controller"
+        ]
+      }
+    },
+    "/api/forms/data/import" : {
+      "post" : {
+        "operationId" : "importData",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "formId",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "sheetName",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "skipErrorRows",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "companyId",
+            "required" : false,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "multipart/form-data" : {
+              "schema" : {
+                "properties" : {
+                  "file" : {
+                    "format" : "binary",
+                    "type" : "string"
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ImportOutcome"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-import-controller"
+        ]
+      }
+    },
+    "/api/forms/data/import/inspect" : {
+      "post" : {
+        "operationId" : "inspect_1",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "formId",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "sheetName",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "multipart/form-data" : {
+              "schema" : {
+                "properties" : {
+                  "file" : {
+                    "format" : "binary",
+                    "type" : "string"
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ImportInspection"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-import-controller"
+        ]
+      }
+    },
+    "/api/forms/data/import/template" : {
+      "get" : {
+        "operationId" : "template",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "formId",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-import-controller"
         ]
       }
     },

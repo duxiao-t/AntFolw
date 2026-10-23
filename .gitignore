@@ -94,3 +94,4 @@ _preview/*.png
 deploy*.log
 build-*.log
 compose-*.log
+b[0-9].log
