@@ -373,4 +373,22 @@ class FormImportDetailSheetsTest {
                 return List.of();
             }
         };
+
+    /**
+     * 用户把明细表的第 2 行（标识行）删掉、数据上移：必须明确报"第 2 行"。
+     *
+     * <p>这是真实会发生的操作（看着表头碍眼就删一行）。旧判据只检查"整行没有任何标识"，
+     * 删行后那一行仍是有内容的（数据），会被当成标识行 → 所有列都对不上 → 明细静默全空，
+     * 最后只在必填校验处冒出一句「请完成检查项」，用户完全想不到是表头被删了。
+     */
+    @Test
+    void deletingTheIdRowIsRejectedInsteadOfSilentlyEmpty() throws Exception {
+        byte[] bytes = workbook(Map.of("检查项", new String[][]{
+            {"行号", "检查项", "结果", "描述"},
+            {"3", "检查项1", "通过", ""}}));
+
+        assertThatThrownBy(() -> detailSheets.parse(JSON.readTree(SCHEMA), meta(), bytes, Set.of(3)))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("第 2 行");
+    }
 }
