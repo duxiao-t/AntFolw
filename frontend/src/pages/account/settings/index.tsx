@@ -45,8 +45,10 @@ export default function AccountSettings() {
     },
     // 全局错误处理已经弹过后端 message；这里只补"接下来怎么办"，
     // 避免用户反复试原密码（最常见原因是账号尚未初始化，或原密码已由管理员重置过）。
-    onError: (error: { code?: string } | undefined) => {
-      if (error?.code === 'PASSWORD_INCORRECT') {
+    // 注意：umi request 抛的是 AxiosError，业务 code 在 response.data.code，
+    // 之前直接读 error.code 永远拿不到，这行提示从未出现。
+    onError: (error: { response?: { data?: { code?: string } } } | undefined) => {
+      if (error?.response?.data?.code === 'PASSWORD_INCORRECT') {
         message.info('若已忘记原密码，请联系组织管理员在「系统管理 → 用户管理」中重置');
       }
     },
@@ -138,7 +140,19 @@ export default function AccountSettings() {
               layout="vertical"
               requiredMark={false}
               style={{ maxWidth: 420 }}
-              onFinish={(values) => changePassword.mutate(values)}
+              // 只提交后端 DTO 认识的字段。之前的 `mutate(values)` 会把 confirmPassword 一起发过去，
+              // 后端 record 没有这个属性 → Jackson 反序列化直接失败 → 500 "internal error"。
+              // confirmPassword 仍由上面的 Form.Item 做本地一致性校验，不必进请求体。
+              onFinish={(values: {
+                currentPassword: string;
+                newPassword: string;
+                confirmPassword: string;
+              }) =>
+                changePassword.mutate({
+                  currentPassword: values.currentPassword,
+                  newPassword: values.newPassword,
+                })
+              }
             >
               <Form.Item
                 label="原密码"

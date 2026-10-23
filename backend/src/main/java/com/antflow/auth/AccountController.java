@@ -51,5 +51,15 @@ public class AccountController {
             body == null ? null : body.newPassword());
     }
 
+    /**
+     * 自助改密的请求体。
+     *
+     * <p>{@code ignoreUnknown = true} 是必需的：前端表单有「确认新密码」，早先把整个表单对象发过来，
+     * 多出的 {@code confirmPassword} 会让 Jackson 在反序列化阶段抛
+     * {@code UnrecognizedPropertyException}（HttpMessageNotReadableException），
+     * 一度被兜底处理器映射成 500 "internal error"，用户根本走不到业务校验。
+     * 只在这里放宽，不动全局 FAIL_ON_UNKNOWN_PROPERTIES——否则所有接口的字段拼写错误都会被静默吞掉。
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record PasswordChange(String currentPassword, String newPassword) { }
 }

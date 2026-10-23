@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -107,6 +108,24 @@ public class GlobalExceptionHandler {
             .map(fe -> Map.of("field", fe.getField(), "message", fe.getDefaultMessage()))
             .toList());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
+    }
+
+    /**
+     * 请求体无法反序列化（坏 JSON、字段类型不符、DTO 里没有的字段）。
+     *
+     * <p>这类错误以前落到兜底的 {@code Exception} 分支，被报成 500 "internal error"——
+     * 改密接口就因为前端多发了 {@code confirmPassword} 一直 500，用户看不到任何有用信息。
+     * 它是**客户端**的请求问题，用 400 更准确；与 422 的 VALIDATION_FAILED（能解析但字段值不合法）区分开。
+     *
+     * <p>注意：不把 Jackson 的原始消息回给客户端——那里会带类名与字段名（反射信息），
+     * 只记进审计的 failureCode 里。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleUnreadableBody(HttpMessageNotReadableException e) {
+        recordFailure("request.failed", "HTTP_RESOURCE", null,
+            AuditService.RiskLevel.NORMAL, "REQUEST_BODY_INVALID", e);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(envelope("REQUEST_BODY_INVALID", "请求内容无法解析"));
     }
 
     /** Unknown route (Spring 6.1+ throws NoResourceFoundException for unmapped paths). */
