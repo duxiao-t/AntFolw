@@ -839,3 +839,12 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
 - **影响：** H7 任一项变大即 CI `metrics` job 失败；有意收紧或接受新增时须 `--write` 重建基线并在 PR 说明原因。
   架构分层本身不做调整（`ArchitectureBoundaryTest` 守的三层鉴权与依赖方向是健康的），本次只治理类内聚。
   执行次序与刀口见 `docs/class-decomposition-execution-2026-10-20.md`。
+
+## D-20261023-flyway-reconcile-deployed-v53-v63
+
+- **状态：** accepted
+- **背景：** 2026-10-23 的运行库已由旧分支执行到 V63。其中 V53–V56（车间日报）与 V59（BI 表单目录）是已执行迁移；
+  master 的 V53–V62 包含不同内容，直接部署会在 Flyway 校验或版本解析阶段冲突。
+- **决策：** 不改历史文件、不执行 `flyway repair`。部署分支保留已执行的 V53–V56、V57–V58、V59，并把 master 迁移按原内容前滚改号：
+  V53→V60、V54→V61、V55→V62、V56→V63、V59→V64、V60→V65、V61→V66、V62→V67。
+- **影响：** 现有库只新增执行 V64–V67；全新库按 V53–V67 完整执行；后续迁移从 V68 开始。已执行的 V53–V63 内容与校验和不得再改。

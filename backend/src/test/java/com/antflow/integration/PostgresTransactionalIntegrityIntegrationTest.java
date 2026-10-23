@@ -778,10 +778,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
-    void v55PreservesExistingGrantsAndDoesNotAuthorizeCompaniesCreatedLater() {
+    void v62PreservesExistingGrantsAndDoesNotAuthorizeCompaniesCreatedLater() {
         String schema = "company_gate_" + UUID.randomUUID().toString().replace("-", "");
         try {
-            migrateTo(schema, "54");
+            migrateTo(schema, "61");
             long form = jdbcTemplate.queryForObject("INSERT INTO " + schema
                 + ".t_form_definition(code, name, schema, status, created_by) "
                 + "VALUES ('gate_existing', 'existing', '[]'::jsonb, 'PUBLISHED', 1) RETURNING id", Long.class);
@@ -790,7 +790,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 + "VALUES (?, 'USER', 1), (?, 'ROLE', 1)", form, form);
             var before = jdbcTemplate.queryForList("SELECT form_def_id, subject_type, subject_id FROM "
                 + schema + ".t_form_resource_grant ORDER BY form_def_id, subject_type, subject_id");
-            migrateTo(schema, "55");
+            migrateTo(schema, "62");
             assertThat(jdbcTemplate.queryForList("SELECT form_def_id, subject_type, subject_id FROM "
                 + schema + ".t_form_resource_grant WHERE subject_type <> 'COMPANY' "
                 + "ORDER BY form_def_id, subject_type, subject_id")).isEqualTo(before);
@@ -941,7 +941,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         String code = jdbcTemplate.queryForObject(
             "SELECT code FROM t_form_definition WHERE id = ?", String.class, formId);
         long draftId = insertDraft(formId, adminId);
-        // P4a：这条草稿要能转正，得有归属快照（V54 之前的历史草稿按口径是阻断转正的）。
+        // P4a：这条草稿要能转正，得有归属快照（V61 之前的历史草稿按口径是阻断转正的）。
         jdbcTemplate.update("UPDATE t_form_data SET company_id = ? WHERE id = ?",
             anyCompanyId(), draftId);
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
@@ -1019,7 +1019,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     /**
-     * P4a：V54 之前建的草稿没有归属快照——**保留草稿、阻断转正**。
+     * P4a：V61 之前建的草稿没有归属快照——**保留草稿、阻断转正**。
      * 提交时绝不按今天的部门猜一个公司出来。
      */
     @Test
@@ -1087,32 +1087,36 @@ class PostgresTransactionalIntegrityIntegrationTest {
 
     /**
      * P4a 迁移自查：**一份 form_data 被多个实例引用**时"归属该跟哪条"无从判定，
-     * V54 必须停下来把问题报出来，而不是随便挑一条回填。
+     * V61 必须停下来把问题报出来，而不是随便挑一条回填。
      */
     @Test
-    void migrationV54RefusesToBackfillWhenOneFormDataIsSharedByTwoInstances() throws Exception {
+    void migrationV61RefusesToBackfillWhenOneFormDataIsSharedByTwoInstances() throws Exception {
         long adminId = userId("admin");
         long formId = insertForm("DRAFT", VALID_SCHEMA);
         long processId = insertProcess(formId, "PUBLISHED", approvalFlow(adminId));
         long dataId = insertSubmittedData(formId, adminId);
-        jdbcTemplate.update("""
-            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
-            VALUES (?, ?, 'RUNNING', ?), (?, ?, 'RUNNING', ?)
-            """, processId, dataId, adminId, processId, dataId, adminId);
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO t_process_instance(proc_def_id, form_data_id, status, started_by)
+                VALUES (?, ?, 'RUNNING', ?), (?, ?, 'RUNNING', ?)
+                """, processId, dataId, adminId, processId, dataId, adminId);
 
-        assertThatThrownBy(() -> jdbcTemplate.execute(migrationV54Sql()))
-            .hasMessageContaining("被多个实例引用");
+            assertThatThrownBy(() -> jdbcTemplate.execute(migrationV61Sql()))
+                .hasMessageContaining("被多个实例引用");
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_process_instance WHERE form_data_id = ?", dataId);
+        }
     }
 
     /**
      * P4a 历史回填：**按这条记录自己的 {@code started_dept_id} 快照映射**，
      * 绝不按发起人**今天**的部门去猜（那样调过岗的单会被改归属）。
      *
-     * <p>做法：造一条"V54 之前"形态的旧记录（{@code company_id} 为空、发起部门是甲），
+     * <p>做法：造一条"V61 之前"形态的旧记录（{@code company_id} 为空、发起部门是甲），
      * 而发起人今天在乙公司；再把迁移重放一遍（迁移本身是幂等的），看它落哪家。
      */
     @Test
-    void migrationV54BackfillsFromTheRowOwnDepartmentSnapshotNotTheAuthorsCurrentOne()
+    void migrationV61BackfillsFromTheRowOwnDepartmentSnapshotNotTheAuthorsCurrentOne()
         throws Exception {
         long companyA = insertCompany("P4a 回填甲 " + UUID.randomUUID());
         long companyB = insertCompany("P4a 回填乙 " + UUID.randomUUID());
@@ -1129,7 +1133,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             VALUES (?, ?, 'RUNNING', ?, ?) RETURNING id
             """, Long.class, processId, dataId, author, deptA);
 
-        jdbcTemplate.execute(migrationV54Sql());
+        jdbcTemplate.execute(migrationV61Sql());
 
         assertThat(jdbcTemplate.queryForObject(
             "SELECT company_id FROM t_process_instance WHERE id = ?", Long.class, instanceId))
@@ -1144,9 +1148,9 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     /** 迁移文件本身就是被测对象：重放一遍看它在真实库上的行为（`ADD COLUMN IF NOT EXISTS` 等是幂等的）。 */
-    private static String migrationV54Sql() throws IOException {
+    private static String migrationV61Sql() throws IOException {
         return new String(new org.springframework.core.io.ClassPathResource(
-            "db/migration/V54__company_attribution_snapshot.sql").getInputStream().readAllBytes(),
+            "db/migration/V61__company_attribution_snapshot.sql").getInputStream().readAllBytes(),
             StandardCharsets.UTF_8);
     }
 
