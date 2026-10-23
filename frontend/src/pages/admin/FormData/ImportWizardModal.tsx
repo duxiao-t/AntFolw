@@ -1,7 +1,7 @@
-import { DownloadOutlined, FileExcelOutlined } from '@ant-design/icons';
+import { DownloadOutlined, FileExcelOutlined, FormOutlined } from '@ant-design/icons';
 import { request } from '@umijs/max';
 import { Alert, App, Button, Checkbox, Modal, Select, Space, Steps, Table, Tag, Typography } from 'antd';
-import type { DragEvent } from 'react';
+import type { CSSProperties, DragEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { blobErrorMessage } from '@/utils/format';
 import {
@@ -10,12 +10,37 @@ import {
 } from './importContract';
 import { downloadImportFailures } from './importFailures';
 import { IssueTable, Stat } from './ImportPanels';
+import ManualImportStep from './ManualImportStep';
 
 const DROP: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '28px 16px',
   border: '1px dashed var(--af-color-line)', borderRadius: 8, background: 'var(--af-color-surface)',
 };
 const STEP_ITEMS = [{ title: '选择表单' }, { title: '上传文件' }, { title: '预检结果' }, { title: '确认导入' }];
+
+/** 两种导入方式的入口卡：整块可点，选中的那张高亮。 */
+function MethodCard({ icon, title, description, selected, onClick }: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  selected: boolean;
+  onClick(): void;
+}) {
+  const style: CSSProperties = {
+    display: 'flex', gap: 12, padding: '14px 16px', textAlign: 'left', cursor: 'pointer',
+    borderRadius: 8, background: selected ? 'var(--af-color-primary-bg, #e6f4ff)' : 'var(--af-color-surface)',
+    border: `1px solid ${selected ? 'var(--af-color-primary, #1677ff)' : 'var(--af-color-line)'}`,
+  };
+  return (
+    <button type="button" aria-pressed={selected} onClick={onClick} style={style}>
+      <span style={{ fontSize: 20, lineHeight: 1.2 }}>{icon}</span>
+      <span>
+        <span style={{ display: 'block', fontWeight: 600 }}>{title}</span>
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--af-color-muted)' }}>{description}</span>
+      </span>
+    </button>
+  );
+}
 
 /**
  * 表单数据导入向导：选表单 → 传文件 → 看预检 → 确认导入。
@@ -41,6 +66,9 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
   const [skipErrorRows, setSkipErrorRows] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<ImportOutcome>();
+  // 在线填写是独立分支：自带屏幕与底部操作条，父级只负责「提交中不许关」。
+  const [manual, setManual] = useState(false);
+  const [manualBusy, setManualBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   // 预检序号：换文件/换工作表后旧响应必须作废，否则会"看着 A 的结果、导的是 B"。
   const inspectSeq = useRef(0);
@@ -177,7 +205,7 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
     if (!inspection) return [];
     const reasons: string[] = [];
     if (inspection.missingColumns.length) {
-      reasons.push(`缺少必填列：${inspection.missingColumns.join('、')}`);
+      reasons.push(`模板中缺少这些列：${inspection.missingColumns.join('、')}（必填列缺失会导致逐行校验失败）`);
     }
     const unsupported = inspection.columns
       .filter((column) => !column.supported)
@@ -203,7 +231,8 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
         ? Boolean(inspection) && blocking.length === 0
         : inspection != null && (inspection.errorCount === 0 || skipErrorRows) && inspection.importableCount > 0;
 
-  const footer = outcome ? (
+  const busy = submitting || manualBusy;
+  const footer = manual ? null : outcome ? (
     <Button type="primary" onClick={onClose}>关闭</Button>
   ) : (
     <>
@@ -226,13 +255,22 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
     <Modal
       title="导入数据"
       open
-      onCancel={() => { if (!submitting) onClose(); }}
-      mask={{ closable: !submitting }}
-      keyboard={!submitting}
+      onCancel={() => { if (!busy) onClose(); }}
+      mask={{ closable: !busy }}
+      keyboard={!busy}
       width={880}
       footer={footer}
     >
-      {outcome ? (
+      {manual ? (
+        <ManualImportStep
+          formOptions={formOptions}
+          defaultFormId={formId}
+          onBack={() => setManual(false)}
+          onClose={onClose}
+          onImported={onImported}
+          onBusyChange={setManualBusy}
+        />
+      ) : outcome ? (
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           <Alert type={outcome.failureCount > 0 ? 'warning' : 'success'} showIcon
             title={outcome.failureCount > 0 ? '导入完成，有部分行失败' : '导入完成'}
@@ -252,7 +290,7 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
             </>
           )}
           {outcome.failuresTruncated && (
-            <Typography.Text type="warning">仅显示前 200 条失败记录，完整明细请下载 CSV。</Typography.Text>
+            <Typography.Text type="warning">仅显示前 200 条错误记录；修正后重新预检即可看到后续问题。</Typography.Text>
           )}
           <Button icon={<DownloadOutlined />} disabled={outcome.failures.length === 0}
             onClick={() => downloadImportFailures(outcome.failures, `导入失败明细-${outcome.batchId}.csv`)}>
@@ -265,6 +303,23 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
 
           {step === 0 && (
             <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              <Typography.Text strong>选择导入方式</Typography.Text>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                <MethodCard
+                  icon={<FormOutlined />}
+                  title="在线填写一条"
+                  description="不用准备文件，直接在页面里填一条"
+                  selected={false}
+                  onClick={() => setManual(true)}
+                />
+                <MethodCard
+                  icon={<FileExcelOutlined />}
+                  title="上传 Excel（可批量）"
+                  description="先下载模板，可一次导入多行"
+                  selected
+                  onClick={() => setManual(false)}
+                />
+              </div>
               <Typography.Text type="secondary">
                 先选表单，再下载该表单的导入模板；模板带字段列与填写说明，请勿改动表头。
               </Typography.Text>

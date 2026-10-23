@@ -70,8 +70,11 @@ const ERROR_TEXT: Record<string, string> = {
 
 export const errorCode = (error: any): string | undefined => error?.response?.data?.code;
 
+/** 业务码 → 人话。在线填写要区分「映射文案」和「后端原文」，所以把表本身也暴露出去。 */
+export const codeMessage = (code?: string): string | undefined => ERROR_TEXT[code ?? ''];
+
 export const errorText = (error: any, fallback: string): string =>
-  ERROR_TEXT[errorCode(error) ?? ''] ?? error?.message ?? fallback;
+  codeMessage(errorCode(error)) ?? error?.message ?? fallback;
 
 /** IMPORT_SHEET_REQUIRED 时预检没有结果，但错误体可能带 sheets，用它把下拉补出来。 */
 export function sheetsFromError(error: any): string[] {
