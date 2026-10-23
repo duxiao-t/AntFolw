@@ -6,6 +6,7 @@ import { collectVisibleValues, firstVisibleValidationError } from '../../../regi
 import type { SchemaNode } from '../../../registry/types';
 import { codeMessage, errorCode, type ImportOutcome, type RowIssue } from './importContract';
 import { IssueTable, Stat } from './ImportPanels';
+import { useCompanyAttribution } from './useCompanyAttribution';
 
 type FormOption = { value: number; label: string };
 
@@ -98,6 +99,9 @@ export default function ManualImportStep({
   const [screen, setScreen] = useState<1 | 2 | 3>(1);
   const [formId, setFormId] = useState<number | undefined>(defaultFormId);
   const [importKey, setImportKey] = useState('');
+  // 无部门的全局管理员必须显式选公司；有部门的账号由服务端推导，这里不打扰。
+  const { needsCompany, companies, loadFailed: companiesFailed } = useCompanyAttribution();
+  const [companyId, setCompanyId] = useState<number | null>(null);
   const [definition, setDefinition] = useState<Definition>();
   const [schema, setSchema] = useState<SchemaNode[]>([]);
   const [data, setData] = useState<Record<string, unknown>>({});
@@ -140,6 +144,7 @@ export default function ManualImportStep({
       formId,
       data: collectVisibleValues(schema, data),
     };
+    if (companyId != null) body.companyId = companyId;
     const key = importKey.trim();
     if (key) body.importKey = key;
 
@@ -273,6 +278,25 @@ export default function ManualImportStep({
           onChange={(value: number) => setFormId(value)}
           options={formOptions}
         />
+        {needsCompany ? (
+          <div style={{ maxWidth: 360 }}>
+            <div style={{ marginBottom: 6 }}>归属公司（必选）</div>
+            <Select
+              aria-label="归属公司"
+              showSearch
+              optionFilterProp="label"
+              placeholder={companiesFailed ? '公司列表加载失败' : '选择归属公司'}
+              status={companiesFailed ? 'error' : undefined}
+              style={{ width: 320 }}
+              value={companyId}
+              onChange={(value: number) => setCompanyId(value)}
+              options={(companies ?? []).map((c) => ({ value: c.id, label: c.name }))}
+            />
+            <Typography.Text type="secondary">
+              当前账号没有部门，无法自动推断归属，需要手动选一个。
+            </Typography.Text>
+          </div>
+        ) : null}
         <div style={{ maxWidth: 360 }}>
           <div style={{ marginBottom: 6 }}>外部单号（可选）</div>
           <Input

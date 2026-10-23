@@ -11,6 +11,7 @@ import {
 import { downloadImportFailures } from './importFailures';
 import { IssueTable, Stat } from './ImportPanels';
 import ManualImportStep from './ManualImportStep';
+import { useCompanyAttribution } from './useCompanyAttribution';
 
 const DROP: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '28px 16px',
@@ -64,6 +65,9 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
   const [inspection, setInspection] = useState<ImportInspection>();
   const [inspecting, setInspecting] = useState(false);
   const [skipErrorRows, setSkipErrorRows] = useState(false);
+  // 无部门的全局管理员必须显式选公司，否则后端以 BAD_COMPANY 拒绝（导入/发起同一套规则）。
+  const { needsCompany, companies, loadFailed: companiesFailed } = useCompanyAttribution();
+  const [companyId, setCompanyId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<ImportOutcome>();
   // 在线填写是独立分支：自带屏幕与底部操作条，父级只负责「提交中不许关」。
@@ -108,6 +112,7 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
       data.append('formId', String(formId));
       data.append('file', target);
       if (sheetName) data.append('sheetName', sheetName);
+      if (companyId != null) data.append('companyId', String(companyId));
       const result = await request<ImportInspection>('/api/forms/data/import/inspect', {
         method: 'POST',
         data,
@@ -186,6 +191,7 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
       data.append('file', file);
       if (sheet) data.append('sheetName', sheet);
       data.append('skipErrorRows', skipErrorRows ? 'true' : 'false');
+      if (companyId != null) data.append('companyId', String(companyId));
       const result = await request<ImportOutcome>('/api/forms/data/import', {
         method: 'POST',
         data,
@@ -326,6 +332,13 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
               <Space wrap>
                 <Select aria-label="表单" showSearch optionFilterProp="label" placeholder="选择表单"
                   style={{ width: 320 }} value={formId} onChange={changeForm} options={formOptions} />
+                {needsCompany ? (
+                  <Select aria-label="归属公司" showSearch optionFilterProp="label"
+                    placeholder={companiesFailed ? '公司列表加载失败' : '选择归属公司（必选）'}
+                    status={companiesFailed ? 'error' : undefined}
+                    style={{ width: 240 }} value={companyId} onChange={setCompanyId}
+                    options={(companies ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+                ) : null}
                 <Button icon={<DownloadOutlined />} loading={templateBusy} disabled={!formId}
                   onClick={() => void downloadTemplate()}>
                   下载导入模板

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,8 +6,16 @@ import type { ImportInspection, ImportOutcome } from './importContract';
 import { failuresToCsv } from './importFailures';
 import ImportWizardModal from './ImportWizardModal';
 
-const { request } = vi.hoisted(() => ({ request: vi.fn() }));
-vi.mock('@umijs/max', () => ({ request }));
+const { request, model } = vi.hoisted(() => ({
+  request: vi.fn(),
+  // 默认模拟"有部门"的普通账号（不需要选公司）；
+  // 测公司选择分支时在用例里把 model.departmentId 设为 null。
+  model: { departmentId: 1 as number | null },
+}));
+vi.mock('@umijs/max', () => ({
+  request,
+  useModel: () => ({ initialState: { currentUser: { departmentId: model.departmentId } } }),
+}));
 
 function inspection(overrides: Partial<ImportInspection> = {}): ImportInspection {
   return {
@@ -38,10 +47,14 @@ function deferred<T>() {
 }
 
 function renderModal() {
+  // useCompanyAttribution 走 react-query（取公司列表），必须提供 client。
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <App>
-      <ImportWizardModal defaultFormId={5} onClose={() => {}} />
-    </App>,
+    <QueryClientProvider client={client}>
+      <App>
+        <ImportWizardModal defaultFormId={5} onClose={() => {}} />
+      </App>
+    </QueryClientProvider>,
   );
 }
 
