@@ -1,4 +1,4 @@
-import { ExportOutlined } from '@ant-design/icons';
+import { ExportOutlined, ImportOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
 import { Link, request, useLocation, useModel } from '@umijs/max';
@@ -6,6 +6,7 @@ import { Button, Drawer, Typography } from 'antd';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { CAPABILITY, hasCapability } from '../../../authz';
 import ExportModal, { type ExportDefaults } from './ExportModal';
+import ImportWizardModal from './ImportWizardModal';
 import { fieldColumns, type FormDataFieldValue } from './fieldValues';
 
 type FormDataRecord = {
@@ -41,11 +42,13 @@ export default function AdminFormDataPage() {
   // 台账的字段列由本页数据推导——这个接口不回 schema，取不到字段清单与类型。
   const [fields, setFields] = useState<Array<{ id: string; label: string }>>([]);
   const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   // 导出弹窗默认沿用表格当前的筛选；表格的搜索状态由 ProTable 自己拿着，这里只在请求时留一份。
   const lastQuery = useRef<ExportDefaults>({});
   const { initialState } = useModel('@@initialState');
   const currentUser = initialState?.currentUser as any;
   const canExport = hasCapability(currentUser, CAPABILITY.formDataExport);
+  const canImport = hasCapability(currentUser, CAPABILITY.formDataImport);
   const searchParams = new URLSearchParams(location.search);
   const initialFormDefId = searchParams.get('formDefId') ?? undefined;
 
@@ -163,12 +166,26 @@ export default function AdminFormDataPage() {
         scroll={{ x: 'max-content' }}
         onRow={(record) => ({ onClick: () => setCurrent(record), style: { cursor: 'pointer' } })}
         request={loadRecords}
-        toolBarRender={() => (canExport ? [
-          <Button key="export" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
-            导出
-          </Button>,
-        ] : [])}
+        toolBarRender={() => [
+          ...(canImport ? [
+            <Button key="import" icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+              导入数据
+            </Button>,
+          ] : []),
+          ...(canExport ? [
+            <Button key="export" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
+              导出
+            </Button>,
+          ] : []),
+        ]}
       />
+      {importOpen && (
+        <ImportWizardModal
+          defaultFormId={lastQuery.current.formDefId}
+          onClose={() => setImportOpen(false)}
+          onImported={() => void actionRef.current?.reload()}
+        />
+      )}
       {exportOpen && (
         <ExportModal defaults={lastQuery.current} onClose={() => setExportOpen(false)} />
       )}
