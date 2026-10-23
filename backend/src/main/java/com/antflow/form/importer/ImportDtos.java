@@ -48,6 +48,15 @@ public final class ImportDtos {
         List<Map<String, Object>> previews, List<String> warnings) { }
 
     /**
+     * 在线填表提交一条：{@code data} 里是**已经结构化的原值**（与 {@code t_form_data.data} 同形），
+     * 前端用现有 {@code FormRenderer} 采集即可，不需要任何"反解析"。
+     *
+     * @param importKey 可选外部单号：命中已有记录 → 422 IMPORT_DUPLICATE（与文件导入同一语义）
+     */
+    public record ManualImportRequest(long formId, Long companyId, String importKey,
+                                      Map<String, Object> data) { }
+
+    /**
      * 导入结果。
      *
      * @param atomic 是否原子模式（true 表示"要么全成功、要么 0 行落库"）

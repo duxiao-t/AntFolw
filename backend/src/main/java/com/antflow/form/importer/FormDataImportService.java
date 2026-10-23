@@ -66,7 +66,8 @@ public class FormDataImportService {
                           AuthorizationService authorizationService) {
         this(new FormImportParser(formDefinitionService, codec,
                 new FormImportTemplateReader(formDefinitionService, json),
-                new FormImportKeyLookup(jdbc), json, companyAttribution),
+                new FormImportKeyLookup(jdbc), json, companyAttribution,
+                new FormImportDetailSheets(codec, json)),
             new FormDataImportWriter(jdbc, transactionTemplate, businessNumbers, json),
             authorizationService);
     }

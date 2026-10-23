@@ -266,6 +266,61 @@ class FormDataImportIntegrationTest {
             .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
     }
 
+    // ---------------------------------------------------------------- 明细 sheet
+
+    /**
+     * 核心断言：同一份结构化数据，用明细表填 与 用 JSON 填，落库的 {@code data} **逐字节一致**。
+     *
+     * <p>为什么必须真库逐字比：两条路径各自"看起来对"很容易，但只要键名、数字类型（2 与 "2"）、
+     * 空图片数组任何一处不同，下游展示与统计就会分叉。jsonb 会重排键序，所以比的是规范化后的文本。
+     */
+    @Test
+    void detailSheetsProduceExactlyTheSameStoredJsonAsTheJsonSyntax() throws Exception {
+        String token = UUID.randomUUID().toString().replace("-", "");
+        long structuredFormId = jdbc.queryForObject("""
+            INSERT INTO t_form_definition(code, name, version, schema, status)
+            VALUES (?, '明细表导入测试', 1, ?::jsonb, 'PUBLISHED') RETURNING id
+            """, Long.class, "detail-" + token, STRUCTURED_SCHEMA);
+
+        byte[] base = templates.render(structuredFormId);
+        byte[] bytes;
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(base));
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet data = workbook.getSheet(FormImportTemplateService.SHEET_DATA);
+            // 第 3 行：老写法（JSON 单元格）；第 4 行：新写法（明细表，主表该列留空）。
+            writeRow(data, 2, new String[] {"A-JSON", "点检", "[{\"id\":\"item-1\",\"status\":\"pass\"}]",
+                "[{\"c1\":\"合同\",\"c2\":\"2\"}]", "{\"cells\":{\"r1\":{\"c1\":\"3\"}}}"});
+            writeRow(data, 3, new String[] {"B-DETAIL", "点检", "", "", ""});
+            writeRow(workbook.getSheet("检查项"), 2,
+                new String[] {"4", "检查项1", "通过", ""});
+            writeRow(workbook.getSheet("明细"), 2, new String[] {"4", "合同", "2"});
+            writeRow(workbook.getSheet("检查矩阵"), 2, new String[] {"4", "第一行", "3", ""});
+            workbook.write(out);
+            bytes = out.toByteArray();
+        }
+
+        ImportDtos.ImportOutcome outcome = importService.importData(structuredFormId,
+            new MockMultipartFile("file", "detail.xlsx", XLSX, bytes), null, false, null);
+        assertThat(outcome.successCount()).isEqualTo(2);
+
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+            SELECT data::text AS data FROM t_form_data
+            WHERE form_def_id = ? ORDER BY import_key
+            """, structuredFormId);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(1).get("data"))
+            .as("明细表与 JSON 写法必须落出完全一致的存储值")
+            .isEqualTo(rows.get(0).get("data"));
+    }
+
+    private static void writeRow(Sheet sheet, int rowIndex, String[] values) {
+        Row row = sheet.getRow(rowIndex);
+        if (row == null) row = sheet.createRow(rowIndex);
+        for (int column = 0; column < values.length; column++) {
+            row.createCell(column).setCellValue(values[column]);
+        }
+    }
+
     // ---------------------------------------------------------------- 夹具
 
     private long countRows() {
@@ -298,6 +353,23 @@ class FormDataImportIntegrationTest {
           {"id":"kind","type":"select","label":"类型","props":{"options":[
             {"label":"差旅","value":"travel"},{"label":"办公","value":"office"}]}},
           {"id":"owner","type":"user_picker","label":"负责人"}
+        ]
+        """;
+
+    /** 三种结构化字段各一张明细表：用来对账"两种写法落库是否一致"。 */
+    private static final String STRUCTURED_SCHEMA = """
+        [
+          {"id":"subject","type":"text","label":"事由"},
+          {"id":"chk","type":"checklist","label":"检查项","props":{
+            "items":[{"id":"item-1","label":"检查项1"}],
+            "results":[{"id":"pass","label":"通过"},{"id":"fail","label":"不通过"}]}},
+          {"id":"lines","type":"table_list","label":"明细","children":[
+            {"id":"c1","type":"text","label":"名称"},
+            {"id":"c2","type":"number","label":"数量"}]},
+          {"id":"grid","type":"matrix_fill","label":"检查矩阵","props":{
+            "cellType":"number","precision":2,"maxRows":10,"maxColumns":10,
+            "rows":[{"id":"r1","label":"第一行"}],
+            "columns":[{"id":"c1","label":"上午"},{"id":"c2","label":"下午"}]}}
         ]
         """;
 }

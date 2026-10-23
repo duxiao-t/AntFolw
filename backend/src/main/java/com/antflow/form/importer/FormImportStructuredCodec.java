@@ -42,7 +42,9 @@ public class FormImportStructuredCodec {
         JsonNode array = requireJson(label, text, true);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (JsonNode item : array) {
-            if (!item.isObject()) throw FormImportSupport.invalid(label, "明细表的每一项都必须是 JSON 对象");
+            if (!item.isObject()) {
+                throw FormImportSupport.invalid(label, "每一行都要写成 { ... }，现在有一行不是");
+            }
             Map<String, Object> row = new LinkedHashMap<>();
             field.path("children").forEach(child ->
                 decodeChild(child, item, row, prefetch, decoder));
@@ -96,9 +98,13 @@ public class FormImportStructuredCodec {
         JsonNode array = requireJson(label, text, true);
         List<Map<String, Object>> entries = new ArrayList<>();
         for (JsonNode item : array) {
-            if (!item.isObject()) throw FormImportSupport.invalid(label, "检查项的每一项都必须是 JSON 对象");
+            if (!item.isObject()) {
+                throw FormImportSupport.invalid(label, "每个检查项都要写成 { ... }，现在有一个不是");
+            }
             String id = item.path("id").asText(item.path("itemId").asText(""));
-            if (id.isBlank()) throw FormImportSupport.invalid(label, "检查项缺少 id");
+            if (id.isBlank()) {
+                throw FormImportSupport.invalid(label, "缺少检查项编号（id），请按模板「填写说明」填写");
+            }
             String status = item.path("status").asText(item.path("result").asText(""));
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("id", id);
@@ -124,7 +130,9 @@ public class FormImportStructuredCodec {
         for (JsonNode result : results) {
             if (result.path("label").asText("").equals(value)) return result.path("id").asText(value);
         }
-        throw FormImportSupport.invalid(label, "检查项结果「" + value + "」不在配置里");
+        // 面向用户：告诉他"能填什么"，而不是"你填的不在配置里"。
+        throw FormImportSupport.invalid(label, "「结果」只能填 "
+            + FormImportSupport.labels(results) + "（现在填的是「" + value + "」）");
     }
 
     Map<String, Object> matrix(JsonNode field, String label, String text) {
@@ -167,9 +175,16 @@ public class FormImportStructuredCodec {
 
     private JsonNode requireJson(String label, String text, boolean array) {
         JsonNode node = FormImportSupport.readJson(json, text);
-        if (node == null || node.isNull()) throw FormImportSupport.invalid(label, "不是合法的 JSON");
-        if (array && !node.isArray()) throw FormImportSupport.invalid(label, "必须是 JSON 数组");
-        if (!array && !node.isObject()) throw FormImportSupport.invalid(label, "必须是 JSON 对象");
+        if (node == null || node.isNull()) {
+            throw FormImportSupport.invalid(label,
+                "内容不完整（不是合法的 JSON）：请检查中括号、引号是否成对");
+        }
+        if (array && !node.isArray()) {
+            throw FormImportSupport.invalid(label, "需要写成 [ ... ] 这样的列表格式");
+        }
+        if (!array && !node.isObject()) {
+            throw FormImportSupport.invalid(label, "必须是 JSON 对象：{ ... }");
+        }
         return node;
     }
 }

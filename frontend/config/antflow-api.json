@@ -1693,6 +1693,28 @@
         },
         "type" : "object"
       },
+      "ManualImportRequest" : {
+        "properties" : {
+          "companyId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "data" : {
+            "additionalProperties" : {
+              "type" : "object"
+            },
+            "type" : "object"
+          },
+          "formId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "importKey" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "MediaRequest" : {
         "properties" : {
           "mediaType" : {
@@ -5947,6 +5969,36 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ImportInspection"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-import-controller"
+        ]
+      }
+    },
+    "/api/forms/data/import/manual" : {
+      "post" : {
+        "operationId" : "manual",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ManualImportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ImportOutcome"
                 }
               }
             },

@@ -75,6 +75,20 @@ final class FormImportSupport {
         return new BizException("IMPORT_VALUE_INVALID", "「" + label + "」" + message);
     }
 
+    /** 配置里的候选名称，用于"只能填 A、B"这类可执行提示；超过 8 项只列前几个。 */
+    static String labels(JsonNode items) {
+        List<String> labels = new ArrayList<>();
+        if (items != null && items.isArray()) {
+            for (JsonNode item : items) {
+                String label = item.path("label").asText("");
+                if (!label.isBlank()) labels.add(label);
+            }
+        }
+        if (labels.isEmpty()) return "配置里的选项";
+        String joined = String.join("、", labels.size() > 8 ? labels.subList(0, 8) : labels);
+        return joined + (labels.size() > 8 ? " 等" : "");
+    }
+
     static BizException unsupported(String label, String message) {
         return new BizException("IMPORT_FIELD_UNSUPPORTED", "「" + label + "」" + message);
     }

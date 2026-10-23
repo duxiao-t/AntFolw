@@ -39,7 +39,8 @@ public class FormImportScalarCodec {
         try {
             return new java.math.BigDecimal(value);
         } catch (NumberFormatException error) {
-            throw FormImportSupport.invalid(label, "不是合法数字：" + text);
+            throw FormImportSupport.invalid(label,
+                "不是合法数字「" + text + "」：只填数字，不要带千分位、单位或文字");
         }
     }
 
@@ -55,7 +56,8 @@ public class FormImportScalarCodec {
                 // 换下一种：模板里写的是通用格式，历史台账常混着 2024/1/5、20240105。
             }
         }
-        throw FormImportSupport.invalid(label, "不是合法日期（支持 yyyy-MM-dd、yyyy/M/d、yyyyMMdd）：" + text);
+        throw FormImportSupport.invalid(label,
+            "不是合法日期「" + text + "」：请写成 yyyy-MM-dd（如 2024-01-31）");
     }
 
     String parseTime(String label, String text, JsonNode field) {
@@ -72,7 +74,8 @@ public class FormImportScalarCodec {
                 // 同上。
             }
         }
-        throw FormImportSupport.invalid(label, "不是合法时间（支持 HH:mm、HH:mm:ss）：" + text);
+        throw FormImportSupport.invalid(label,
+            "不是合法时间「" + text + "」：请写成 HH:mm 或 HH:mm:ss（如 09:30）");
     }
 
     List<String> dateRange(String label, String text, JsonNode field) {

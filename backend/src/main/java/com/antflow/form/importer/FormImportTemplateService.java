@@ -83,7 +83,7 @@ public class FormImportTemplateService {
                     + com.antflow.form.options.OptionTableImporter.MAX_COLUMNS
                     + " 列，无法通过 Excel 导入");
         }
-        return writer.render(form, columns);
+        return writer.render(form, schema, columns);
     }
 
     /** schema 的稳定摘要：模板与库里的定义必须一致，避免"旧模板往新表单里灌列"。 */

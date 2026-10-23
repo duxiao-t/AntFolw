@@ -13,8 +13,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -37,6 +39,7 @@ public class FormDataImportController {
         MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     private final FormDataImportService importService;
+    private final FormDataManualImport manualImport;
     private final FormImportTemplateService templateService;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
@@ -97,5 +100,40 @@ public class FormDataImportController {
                 "totalRows", outcome.totalRows(), "successCount", outcome.successCount(),
                 "failureCount", outcome.failureCount(), "skippedCount", outcome.skippedCount()));
         return outcome;
+    }
+
+    /**
+     * 在线填表提交一条（向导里的"补录一条"）。
+     *
+     * <p>{@code data} 是**已结构化的原值**（前端表单渲染器的采集结果），不需要任何反解析；
+     * 校验、业务单号生成与落库与文件导入完全同一套。
+     */
+    @PostMapping(path = "/api/forms/data/import/manual", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DATA_IMPORT + "')")
+    public ImportOutcome manual(@RequestBody ImportDtos.ManualImportRequest request) {
+        authorizationService.requirePermission(PermissionCodes.FORM_DATA_IMPORT);
+        ImportOutcome outcome = manualImport.importOne(request);
+        auditService.success("form.data.import.manual", "FORM_DEFINITION", request.formId(),
+            AuditService.RiskLevel.HIGH,
+            Map.of("changedFields", java.util.List.of("t_form_data")),
+            Map.of("batchId", outcome.batchId(), "successCount", outcome.successCount(),
+                "importKey", request.importKey() == null ? "" : request.importKey()));
+        return outcome;
+    }
+
+    /**
+     * 单条校验失败：业务码与文件导入一致，额外带 {@code failures}（字段级定位）。
+     *
+     * <p>刻意写在**本控制器**而不是全局 advice：文件导入是"一笔批量"，消息里已经有行号；
+     * 单条提交没有行号可兜底，前端需要 {@code fieldId} 才能定位输入框。
+     */
+    @ExceptionHandler(FormDataManualImport.ManualImportFailure.class)
+    public ResponseEntity<Map<String, Object>> handleManualFailure(
+        FormDataManualImport.ManualImportFailure error) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("code", error.getCode());
+        body.put("message", error.getMessage());
+        body.put("failures", error.failureMaps());
+        return ResponseEntity.unprocessableEntity().body(body);
     }
 }

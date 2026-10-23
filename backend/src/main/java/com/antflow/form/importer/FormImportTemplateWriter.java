@@ -3,13 +3,16 @@ package com.antflow.form.importer;
 import com.antflow.engine.BizException;
 import com.antflow.form.FormDefinition;
 import com.antflow.form.importer.FormImportColumnCollector.Column;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DataValidation;
@@ -55,24 +58,37 @@ public class FormImportTemplateWriter {
     public static final String KEY_COLUMN_LABEL = "业务单号";
 
     private final ObjectMapper json;
+    private final FormImportDetailSheetWriter detailWriter;
 
-    public FormImportTemplateWriter(ObjectMapper json) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public FormImportTemplateWriter(ObjectMapper json, FormImportDetailSheetWriter detailWriter) {
         this.json = json;
+        this.detailWriter = detailWriter;
+    }
+
+    /** 测试/兼容构造器：明细渲染器无状态，直接 new 一份即可。 */
+    FormImportTemplateWriter(ObjectMapper json) {
+        this(json, new FormImportDetailSheetWriter());
     }
 
     /** 生成模板字节。调用方负责鉴权、审计与列数上限（本类只做渲染）。 */
-    byte[] render(FormDefinition form, List<Column> columns) {
+    byte[] render(FormDefinition form, JsonNode schema, List<Column> columns) {
+        // 明细 sheet 的清单与命名要**一次算完**：重名去重是全局的，逐字段算会撞名。
+        List<FormImportDetailSpec.Spec> details = FormImportDetailSpec.build(schema);
+        Map<String, String> detailSheets = new LinkedHashMap<>();
+        details.forEach(spec -> detailSheets.put(spec.fieldId(), spec.sheetName()));
         SXSSFWorkbook workbook = new SXSSFWorkbook(200);
         workbook.setCompressTempFiles(true);
         try {
             CellStyle header = headerStyle(workbook);
             CellStyle fieldIdStyle = fieldIdStyle(workbook);
             SXSSFSheet data = workbook.createSheet(SHEET_DATA);
-            writeHeader(data, columns, header, fieldIdStyle);
+            writeHeader(data, columns, header, fieldIdStyle, detailSheets);
+            detailWriter.write(workbook, details, header, fieldIdStyle);
             SXSSFSheet dict = workbook.createSheet(SHEET_DICT);
             writeDictionary(dict, columns);
-            writeMetaSheet(workbook, form, columns);
-            writeHelpSheet(workbook, columns, header);
+            writeMetaSheet(workbook, form, columns, details);
+            writeHelpSheet(workbook, columns, header, detailSheets);
             addValidations(data, columns);
             // 隐藏辅助表：用户不该编辑它们，否则改一个字段 id 就能让导入把值写进别的字段。
             workbook.setSheetVisibility(workbook.getSheetIndex(SHEET_META), SheetVisibility.HIDDEN);
@@ -104,7 +120,7 @@ public class FormImportTemplateWriter {
     }
 
     private void writeHeader(SXSSFSheet sheet, List<Column> columns, CellStyle header,
-                             CellStyle fieldIdStyle) {
+                             CellStyle fieldIdStyle, Map<String, String> detailSheets) {
         Row labels = sheet.createRow(0);
         Row ids = sheet.createRow(1);
         writeCell(labels, 0, KEY_COLUMN_LABEL, header);
@@ -112,15 +128,29 @@ public class FormImportTemplateWriter {
         for (int index = 0; index < columns.size(); index++) {
             Column column = columns.get(index);
             int cell = index + 1;
-            writeCell(labels, cell, column.label(), header);
+            String text = headerText(column, detailSheets);
+            writeCell(labels, cell, text, header);
             writeCell(ids, cell, column.fieldId(), fieldIdStyle);
             // 表头两行之后才是数据；宽度按标签长度估，中文按 2 个字符算。
-            sheet.setColumnWidth(cell, Math.min(40, Math.max(12, displayWidth(column.label()) + 4)) * 256);
+            sheet.setColumnWidth(cell, Math.min(40, Math.max(12, displayWidth(text) + 4)) * 256);
         }
         sheet.setColumnWidth(0, 22 * 256);
         // 第二行是给程序看的字段 id，藏起来但仍可编辑（取消隐藏时能看到）。
         ids.setZeroHeight(true);
         sheet.createFreezePane(0, 2);
+    }
+
+    /**
+     * 结构化字段在主表只留一个"指针列"：标出数据在哪个明细表，值本身不在这里填。
+     * 第 2 行的 fieldId 保持不变——老模板仍然能导，新旧格式也能在同一份文件里混着填。
+     */
+    private static String headerText(Column column, Map<String, String> detailSheets) {
+        String sheet = detailSheets.get(column.fieldId());
+        if (sheet == null) return column.label();
+        String suffix = "（见「" + sheet + "」表）";
+        // 解析器对表头有 100 字符上限：截的是字段名，不是后缀，否则用户看不到该去哪填。
+        int keep = Math.min(column.label().length(), Math.max(0, 100 - suffix.length()));
+        return column.label().substring(0, keep) + suffix;
     }
 
     private static int displayWidth(String value) {
@@ -177,7 +207,8 @@ public class FormImportTemplateWriter {
         return org.apache.poi.ss.util.CellReference.convertNumToColString(index);
     }
 
-    private void writeMetaSheet(SXSSFWorkbook workbook, FormDefinition form, List<Column> columns) {
+    private void writeMetaSheet(SXSSFWorkbook workbook, FormDefinition form, List<Column> columns,
+                                List<FormImportDetailSpec.Spec> details) {
         SXSSFSheet meta = workbook.createSheet(SHEET_META);
         ObjectNode root = json.createObjectNode();
         root.put("templateVersion", TEMPLATE_VERSION);
@@ -193,6 +224,15 @@ public class FormImportTemplateWriter {
             item.put("order", column.order());
             item.put("required", column.required());
         }
+        // 明细表清单是"可选扩展"：老模板没有这个数组 → 导入端只走 JSON/文本路径。
+        // 刻意**不升 templateVersion**：升了会让已经下载的老模板全部失效，而结构本身是向后兼容的。
+        var detailArray = root.putArray("detailSheets");
+        for (FormImportDetailSpec.Spec spec : details) {
+            ObjectNode item = detailArray.addObject();
+            item.put("sheet", spec.sheetName());
+            item.put("fieldId", spec.fieldId());
+            item.put("kind", spec.kind());
+        }
         try {
             meta.createRow(0).createCell(0).setCellValue(json.writeValueAsString(root));
         } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
@@ -200,7 +240,8 @@ public class FormImportTemplateWriter {
         }
     }
 
-    private void writeHelpSheet(SXSSFWorkbook workbook, List<Column> columns, CellStyle header) {
+    private void writeHelpSheet(SXSSFWorkbook workbook, List<Column> columns, CellStyle header,
+                                Map<String, String> detailSheets) {
         SXSSFSheet help = workbook.createSheet(SHEET_HELP);
         Row head = help.createRow(0);
         String[] titles = {"字段名", "类型", "是否必填", "填写方式"};
@@ -217,7 +258,7 @@ public class FormImportTemplateWriter {
             writeCell(row, 0, column.label(), null);
             writeCell(row, 1, typeLabel(column.type()), null);
             writeCell(row, 2, column.required() ? "是" : "否", null);
-            writeCell(row, 3, howToFill(column), null);
+            writeCell(row, 3, howToFill(column, detailSheets.get(column.fieldId())), null);
         }
     }
 
@@ -257,7 +298,12 @@ public class FormImportTemplateWriter {
         };
     }
 
-    private static String howToFill(Column column) {
+    /** @param detailSheet 该字段的明细 sheet 名；为 null 表示仍然在本表这一列里填 */
+    private static String howToFill(Column column, String detailSheet) {
+        if (detailSheet != null) {
+            return "在「" + detailSheet + "」表里逐行填写：一行一条，「行号」填本表这条记录的行号"
+                + "（从 3 开始）；留空表示与上一行相同";
+        }
         String type = column.type();
         return switch (type) {
             case "text", "search", "scan_code" -> "直接输入文本，不要带公式";
@@ -274,10 +320,9 @@ public class FormImportTemplateWriter {
             case "user_picker" -> "填工号或姓名；多个用「、」分隔；重名时必须写工号或 id:123";
             case "dept_picker" -> "填部门名称或全路径（总部/研发部）；多个用「、」分隔";
             case "location" -> "纬度,经度，如 30.12,120.65";
-            case "table_list" -> "JSON 数组，每个元素是一行："
-                + "[{\"子字段id\":\"值\"}]（字段 id 见模板第二行）";
-            case "checklist" -> "JSON 数组：[{\"id\":\"检查项id\",\"status\":\"结果id\",\"description\":\"说明\"}]";
-            case "matrix_fill" -> "JSON 对象：{\"cells\":{\"行id\":{\"列id\":\"值\"}}}";
+            case "table_list" -> "在明细表里逐行填写（一行一条明细）";
+            case "checklist" -> "在明细表里逐行填写（一行一个检查项）";
+            case "matrix_fill" -> "在明细表里逐行填写（一行一个矩阵行）";
             default -> "";
         };
     }

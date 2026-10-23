@@ -58,16 +58,19 @@ public class FormImportParser {
     private final FormImportKeyLookup keyLookup;
     private final ObjectMapper json;
     private final CompanyAttribution companyAttribution;
+    private final FormImportDetailSheets detailSheets;
 
     public FormImportParser(FormDefinitionService formDefinitionService, FormImportValueCodec codec,
                             FormImportTemplateReader templates, FormImportKeyLookup keyLookup,
-                            ObjectMapper json, CompanyAttribution companyAttribution) {
+                            ObjectMapper json, CompanyAttribution companyAttribution,
+                            FormImportDetailSheets detailSheets) {
         this.formDefinitionService = formDefinitionService;
         this.codec = codec;
         this.templates = templates;
         this.keyLookup = keyLookup;
         this.json = json;
         this.companyAttribution = companyAttribution;
+        this.detailSheets = detailSheets;
     }
 
     Plan parse(long formId, MultipartFile file, String sheetName, Long explicitCompanyId,
@@ -110,7 +113,13 @@ public class FormImportParser {
 
         List<String> warnings = new ArrayList<>();
         Long companyId = resolveCompany(explicitCompanyId, lenientCompany, warnings);
-        FormImportValueCodec.Prefetch prefetch = codec.prefetch(schema, rawRows);
+        // 明细表按「行号」关联到上面这些真实行；行号非法会当场抛出（不是"尽力而为"地跳过）。
+        FormImportDetailSheets.Parsed details = detailSheets.parse(schema, template.meta(), bytes,
+            new LinkedHashSet<>(sourceRows));
+        warnings.addAll(details.warnings());
+        List<Map<String, String>> prefetchRows = new ArrayList<>(rawRows);
+        prefetchRows.addAll(details.prefetchRows());
+        FormImportValueCodec.Prefetch prefetch = codec.prefetch(schema, prefetchRows);
         Set<String> fileKeys = keyLookup.importKeys(rawRows);
         Set<String> existingKeys = keyLookup.existingImportKeys(form.getId(), companyId, fileKeys);
         Set<String> existingBusinessNos = keyLookup.existingBusinessNos(fileKeys);
@@ -125,7 +134,8 @@ public class FormImportParser {
             Map<String, String> raw = rawRows.get(index);
             int sourceRow = sourceRows.get(index);
             List<RowIssue> issues = new ArrayList<>();
-            Map<String, Object> values = decodeRow(schema, columns, raw, sourceRow, prefetch, issues);
+            Map<String, Object> values = decodeRow(columns, raw, sourceRow, prefetch,
+                details, warnings, issues);
 
             boolean skipped = false;
             String importKey = null;
@@ -181,22 +191,34 @@ public class FormImportParser {
             issues.size() > MAX_ISSUES, previews, companyId);
     }
 
-    private Map<String, Object> decodeRow(JsonNode schema, List<Column> columns,
+    /** 一行 → 存储值。**主表单元格有值就用它，否则才看明细表**：老模板里的 JSON 不能被新格式改味，
+     *  明细只是兜底；两者都有值时丢弃明细并 warning，避免"改了明细表却没生效"的困惑。 */
+    private Map<String, Object> decodeRow(List<Column> columns,
                                           Map<String, String> raw, int sourceRow,
                                           FormImportValueCodec.Prefetch prefetch,
-                                          List<RowIssue> issues) {
+                                          FormImportDetailSheets.Parsed details,
+                                          List<String> warnings, List<RowIssue> issues) {
         Map<String, Object> values = new LinkedHashMap<>();
         for (Column column : columns) {
             if (FormImportTemplateService.KEY_COLUMN_ID.equals(column.fieldId())) continue;
             String text = raw.get(column.fieldId());
-            if (text == null || text.isBlank()) continue;
+            boolean blank = text == null || text.isBlank();
             if (!column.supported()) {
+                if (blank) continue;
                 issues.add(issue(sourceRow, column.fieldId(), column.label(), "IMPORT_FIELD_UNSUPPORTED",
                     "字段「" + column.label() + "」不支持通过 Excel 导入"));
                 continue;
             }
+            boolean fromDetail = blank && details.has(column.fieldId(), sourceRow);
+            if (!blank && details.has(column.fieldId(), sourceRow)) {
+                warnings.add("第 " + sourceRow + " 行「" + column.label() + "」已按单元格内容读取，"
+                    + "明细表「" + details.sheet(column.fieldId()) + "」里的对应内容被忽略");
+            }
+            if (blank && !fromDetail) continue;
             try {
-                Object value = codec.decode(column.node(), text, prefetch);
+                Object value = fromDetail
+                    ? details.decode(column.fieldId(), sourceRow, prefetch)
+                    : codec.decode(column.node(), text, prefetch);
                 if (value != null) values.put(column.fieldId(), value);
             } catch (BizException error) {
                 issues.add(issue(sourceRow, column.fieldId(), column.label(), error.getCode(),
@@ -246,9 +268,16 @@ public class FormImportParser {
                 && !FormImportTemplateService.isMedia(type);
             String label = index < labels.size() && !labels.get(index).isBlank()
                 ? labels.get(index) : node.path("label").asText(fieldId);
-            columns.add(new Column(node, fieldId, label, type, index, required(node), supported));
+            // 结构化字段的表头是「字段名（见「xx」表）」：报错时用户认得的是字段名，不是这个指针。
+            columns.add(new Column(node, fieldId, stripDetailSuffix(label), type, index,
+                required(node), supported));
         }
         return columns;
+    }
+
+    private static String stripDetailSuffix(String label) {
+        int marker = label.indexOf("（见「");
+        return marker > 0 ? label.substring(0, marker) : label;
     }
 
     private List<String> missingColumns(JsonNode schema, List<Column> columns) {

@@ -56,7 +56,8 @@ public class FormImportOptionCodec {
         }
         List<Option> hits = options.stream().filter(option -> option.label().equals(token)).toList();
         if (hits.isEmpty()) {
-            throw FormImportSupport.invalid(label, "选项「" + token + "」不存在");
+            throw FormImportSupport.invalid(label, "选项「" + token + "」不存在：只能填 "
+                + String.join("、", options.stream().map(Option::label).distinct().limit(8).toList()));
         }
         Set<String> distinct = new LinkedHashSet<>();
         hits.forEach(option -> distinct.add(String.valueOf(option.value())));
