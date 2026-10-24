@@ -220,6 +220,73 @@
           "textJson": ["b", "a"]
         }
       }
+    },
+    {
+      "id": "checklist-maps-item-and-result-labels-for-bi",
+      "intent": "Java summarises status counts while the BI ledger replaces checklist item ids and result ids with labels from the row's own form version, preserving per-item metadata.",
+      "schema": [
+        {
+          "id": "steps",
+          "type": "checklist",
+          "label": "工序名",
+          "props": {
+            "items": [
+              {
+                "id": "item-1",
+                "label": "工序 1"
+              },
+              {
+                "id": "item-2",
+                "label": "工序 2"
+              }
+            ],
+            "results": [
+              {
+                "id": "pass",
+                "label": "1"
+              },
+              {
+                "id": "fail",
+                "label": "0"
+              }
+            ]
+          }
+        }
+      ],
+      "data": {
+        "steps": [
+          {
+            "id": "item-1",
+            "status": "pass",
+            "images": []
+          },
+          {
+            "id": "item-2",
+            "status": "fail",
+            "description": "尺寸超差"
+          }
+        ]
+      },
+      "fieldId": "steps",
+      "expect": {
+        "java": "1 1 · 0 1",
+        "sql": {
+          "row": true,
+          "label": null,
+          "textJson": [
+            {
+              "id": "工序 1",
+              "status": "1",
+              "images": []
+            },
+            {
+              "id": "工序 2",
+              "status": "0",
+              "description": "尺寸超差"
+            }
+          ]
+        }
+      }
     }
   ]
 }

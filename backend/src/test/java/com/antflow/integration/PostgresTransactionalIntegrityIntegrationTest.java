@@ -1729,7 +1729,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 String fieldId = testCase.path("fieldId").asText();
                 JsonNode expect = testCase.path("expect").path("sql");
                 List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT value_label, value_text FROM " + schema
+                    "SELECT value_label, value_text, value_json::text AS value_json FROM " + schema
                         + ".v_form_ledger WHERE data_id = ? AND field_id = ?", dataId, fieldId);
 
                 assertThat(rows).as("台账行数不符：%s", id)
@@ -1741,9 +1741,14 @@ class PostgresTransactionalIntegrityIntegrationTest {
                     .isEqualTo(fixtureText(expect.path("label")));
                 if (expect.has("textJson")) {
                     Object rawText = row.get("value_text");
+                    Object rawJson = row.get("value_json");
                     assertThat(rawText).as("value_text 应是 JSON 数组文本：%s", id).isNotNull();
+                    assertThat(rawJson).as("value_json 应是 JSON：%s", id).isNotNull();
                     assertThat(mapper.readTree(String.valueOf(rawText)))
                         .as("value_text 按 JSON 解析后不符：%s", id)
+                        .isEqualTo(expect.get("textJson"));
+                    assertThat(mapper.readTree(String.valueOf(rawJson)))
+                        .as("value_json 与 textJson 不符：%s", id)
                         .isEqualTo(expect.get("textJson"));
                 } else {
                     assertThat(row.get("value_text")).as("value_text 不符：%s", id)
@@ -1758,6 +1763,103 @@ class PostgresTransactionalIntegrityIntegrationTest {
     /** fixture 里 `null` 与"键不存在"都表示期望 SQL NULL。 */
     private static String fixtureText(JsonNode node) {
         return node.isTextual() ? node.asText() : null;
+    }
+
+    @Test
+    void checklistLedgerMapsItemAndResultLabelsFromTheRowsOwnVersion() throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        String schema = "ledger_checklist_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(dataSource).defaultSchema(schema).schemas(schema)
+                .locations("classpath:db/migration").load().migrate();
+
+            String version1 = """
+                [{"id":"steps","type":"checklist","label":"工序名","props":{
+                  "items":[{"id":"item-1","label":"刻字"},{"id":"item-2","label":"纠偏"}],
+                  "results":[{"id":"pass","label":"1"},{"id":"fail","label":"0"}]}}]
+                """;
+            String version2 = """
+                [{"id":"steps","type":"checklist","label":"工序名","props":{
+                  "items":[{"id":"item-1","label":"刻字-新版"},{"id":"item-2","label":"纠偏-新版"}],
+                  "results":[{"id":"pass","label":"通过"},{"id":"fail","label":"不通过"}]}}]
+                """;
+            long formId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_definition(code, name, schema, settings, status) "
+                + "VALUES ('checklist_items', 'Checklist items', ?::jsonb, '{}'::jsonb, "
+                + "'PUBLISHED') RETURNING id", Long.class, version2);
+            jdbcTemplate.update("INSERT INTO " + schema
+                + ".t_form_definition_version(form_definition_id, version_no, schema, checksum) "
+                + "VALUES (?, 1, ?::jsonb, 'v1'), (?, 2, ?::jsonb, 'v2')",
+                formId, version1, formId, version2);
+            long dataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, ?::jsonb, 'SUBMITTED') RETURNING id", Long.class, formId, """
+                {"steps":[
+                  {"id":"item-1","status":"pass","images":[],"description":"外观正常"},
+                  {"id":"item-2","status":"fail","images":[{"name":"a.png","url":"/f/a"}],
+                   "remark":"尺寸超差"}
+                ]}
+                """);
+            long latestDataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 2, ?::jsonb, 'SUBMITTED') RETURNING id", Long.class, formId, """
+                {"steps":[{"id":"item-1","status":"pass","images":[]}]}
+                """);
+            long fallbackDataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, ?::jsonb, 'SUBMITTED') RETURNING id", Long.class, formId, """
+                {"steps":[
+                  {"id":"missing","status":"unknown","custom":"keep"},
+                  "raw"
+                ]}
+                """);
+            long emptyDataId = jdbcTemplate.queryForObject("INSERT INTO " + schema
+                + ".t_form_data(form_def_id, form_def_version, data, status) "
+                + "VALUES (?, 1, '{\"steps\":[]}'::jsonb, 'SUBMITTED') RETURNING id",
+                Long.class, formId);
+
+            Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT value_label, value_json::text AS value_json, value_text FROM " + schema
+                    + ".v_form_ledger WHERE data_id = ? AND field_id = 'steps'", dataId);
+            JsonNode valueJson = mapper.readTree(String.valueOf(row.get("value_json")));
+            assertThat(mapper.readTree(String.valueOf(row.get("value_text")))).isEqualTo(valueJson);
+            assertThat(row.get("value_label")).isNull();
+            assertThat(valueJson).isEqualTo(mapper.readTree("""
+                [
+                  {"id":"刻字","status":"1","images":[],"description":"外观正常"},
+                  {"id":"纠偏","status":"0","images":[{"name":"a.png","url":"/f/a"}],
+                   "remark":"尺寸超差"}
+                ]
+                """));
+
+            Map<String, Object> latest = jdbcTemplate.queryForMap(
+                "SELECT value_json::text AS value_json FROM " + schema
+                    + ".v_form_ledger WHERE data_id = ? AND field_id = 'steps'", latestDataId);
+            assertThat(mapper.readTree(String.valueOf(latest.get("value_json"))))
+                .isEqualTo(mapper.readTree("""
+                    [{"id":"刻字-新版","status":"通过","images":[]}]
+                    """));
+
+            Map<String, Object> fallback = jdbcTemplate.queryForMap(
+                "SELECT value_json::text AS value_json FROM " + schema
+                    + ".v_form_ledger WHERE data_id = ? AND field_id = 'steps'", fallbackDataId);
+            assertThat(mapper.readTree(String.valueOf(fallback.get("value_json"))))
+                .isEqualTo(mapper.readTree("""
+                    [{"id":"missing","status":"unknown","custom":"keep"},"raw"]
+                    """));
+
+            Map<String, Object> empty = jdbcTemplate.queryForMap(
+                "SELECT value_json::text AS value_json, value_text FROM " + schema
+                    + ".v_form_ledger WHERE data_id = ? AND field_id = 'steps'", emptyDataId);
+            assertThat(mapper.readTree(String.valueOf(empty.get("value_json"))))
+                .isEqualTo(mapper.createArrayNode());
+            assertThat(empty.get("value_text")).isEqualTo("[]");
+
+            assertThat(jdbcTemplate.queryForObject("SELECT to_regclass(?)", String.class,
+                schema + ".v_form_ledger_checklist")).isNull();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
     }
 
     @Test
