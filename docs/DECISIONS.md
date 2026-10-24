@@ -848,3 +848,24 @@ SELECT d.company_id, count(*) FROM t_process_instance pi
 - **决策：** 不改历史文件、不执行 `flyway repair`。部署分支保留已执行的 V53–V56、V57–V58、V59，并把 master 迁移按原内容前滚改号：
   V53→V60、V54→V61、V55→V62、V56→V63、V59→V64、V60→V65、V61→V66、V62→V67。
 - **影响：** 现有库只新增执行 V64–V67；全新库按 V53–V67 完整执行；后续迁移从 V68 开始。已执行的 V53–V63 内容与校验和不得再改。
+
+## D-20261023-lan-readbi-post-process-ledger
+
+- **状态：** accepted（本部署的运维配置）
+- **背景：** 局域网 BI 使用 `readbi` 直连数据库，只需要「柔性线后工序流转卡」这一张表单的台账。
+- **决策：** Compose 将 PostgreSQL 映射到宿主机 5432，本机用 `POSTGRES_BIND_ADDRESS=10.0.0.250` 只绑定局域网地址；通用台账改名为 `v_form_ledger_all`，`v_form_ledger` 收窄为按表单 code 过滤的视图，并只把后者授给 `readbi`。该视图脚本不进入 Flyway，因为表单 code 是部署数据，不能固化进产品迁移。
+- **影响：** `readbi` 仍按 `v_form_ledger` 查询，但只能看到该表单；看不到 `v_form_ledger_all`。表单 code 变化、通用视图列变化或后续迁移重建 `v_form_ledger` 后需重跑 `infra/sql/readbi-post-process-ledger.sql`。
+
+## D-20261024-checklist-ledger-labels-inline
+
+- **状态：** accepted（本批实施）
+- **背景：** `v_form_ledger.value_json` 保留的 checklist 数组只有内部 `item-*` id 和 `pass`/`fail`，BI 无法直接知道工序名；单独的明细视图又改变了台账的行粒度。
+- **决策：** V70 在 `v_form_ledger` 内就地替换 checklist 元素的 `id` 和 `status`，按该行自己的表单版本解析 `props.items` 与 `props.results`；图片、说明、备注和其他键保持不变。`value_text` 是转换后 JSON 的文本，非 checklist 字段和行为粒度不变。V69 的 `v_form_ledger_checklist` 随 V70 删除，readbi 脚本只保留单表单台账包装。
+- **影响：** 标签随数据自己的历史版本解析；当前「柔性线后工序流转卡」输出工序中文名和 schema 配置的 `1/0`，不是硬编码。未命中的 item/result、非对象元素和空标签回退原值，空数组保持 `[]`。原始内部 id/status 仍可从基表和版本历史追溯，但不再出现在台账 JSON 中。
+
+## D-20261024-workflow-visibility-skips-data-permission-parse
+
+- **状态：** accepted（本批实施）
+- **背景：** `DataPermissionInterceptor` 会对每条查询做 JSqlParser 解析；`ProcessInstanceMapper` 的列表、计数和工作台统计 SQL 已内联可见性条件，而 `DataPermissionRules` 没有 `t_process_instance` 规则，解析不会注入任何条件，复杂 SQL 反而可能触发默认 8 秒解析超时。
+- **决策：** 这些 `ProcessInstanceMapper` 自有查询显式 `@InterceptorIgnore(dataPermission = "true")`，保留原 SQL、授权语义和分页行为；不提高全局解析超时。`MapperSqlParseGuardTest` 锁定该豁免。
+- **影响：** 查询不再等待无效解析，消除 CPU 抖动下的 500；若未来为 `t_process_instance` 增加数据权限规则，必须先移除豁免并同步调整守卫测试，否则新规则不会生效。
