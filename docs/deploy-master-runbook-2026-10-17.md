@@ -123,7 +123,7 @@ bash deploy.sh --all           # 首次 / 改了 .env.docker.local / 需要恢�
 
 | 报错 | 排查思路 |
 | --- | --- |
-| 端口占用：`bind: address already in use` / `port is already allocated` | `netstat -ano \| findstr :7070`（Windows）或 `ss -lntp`（Linux）定位进程；`docker compose ps` 看是否已有旧栈占 7070/7072/7073。本项目 postgres 不映射宿主端口，不会与宿主 5432 冲突 |
+| 端口占用：`bind: address already in use` / `port is already allocated` | `netstat -ano \| findstr :7070`（Windows）或 `ss -lntp`（Linux）定位进程；`docker compose ps` 看是否已有旧栈占 7070/7072/7073/5432。当前 Compose 将 postgres 映射到宿主 5432，需先确认该端口未被其他 PostgreSQL 占用 |
 | 环境变量未配置：`required variable POSTGRES_PASSWORD is missing a value: set POSTGRES_PASSWORD` | 根目录缺 `.env.docker.local` 或未加 `--env-file`。按 §4 补齐；改过该文件后用 `--all` 重建，避免复用旧镜像 |
 | 依赖缺失：`Node.js 22 or newer is required` / `mvn: command not found` / `Unable to find a javac compiler` | 按 §2 装 JDK 17 + Maven 3.9 + Node 22；Windows 上注意 `npm --prefix` 是在仓库根执行 |
 | 镜像拉取失败：`failed to resolve source metadata … dial tcp: i/o timeout` | 出网/镜像源问题。先单独 `docker pull` 各基础镜像定位是哪一层；配置 registry mirror 或代理后重试；后端镜像内还会 apt 装 ffmpeg，需能访问 Debian 源 |

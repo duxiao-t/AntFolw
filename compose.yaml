@@ -10,6 +10,9 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # 局域网 BI 直连入口；应用容器仍走 compose 内部网络 postgres:5432。
+    ports:
+      - "${POSTGRES_BIND_ADDRESS:-0.0.0.0}:5432:5432"
     environment:
       POSTGRES_DB: antflow
       POSTGRES_USER: antflow
