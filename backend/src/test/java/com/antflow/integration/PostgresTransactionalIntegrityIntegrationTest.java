@@ -3905,6 +3905,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {
             WecomService wecomTarget = AopTestUtils.getTargetObject(wecomService);
+            Object directorySync = ReflectionTestUtils.getField(wecomTarget, "directorySync");
             List<User> users = userService.listAuthorizedPage(
                 null, departmentId, false, 1, 20, null).getRecords();
             assertThat(users).extracting(User::getId).containsExactly(leaderId, memberId);
@@ -3916,7 +3917,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThat(jdbcTemplate.queryForObject("""
                 SELECT login_enabled_override FROM t_wecom_user_mapping WHERE user_id = ?
                 """, Boolean.class, leaderId)).isTrue();
-            ReflectionTestUtils.invokeMethod(wecomTarget, "applyLoginStatus",
+            ReflectionTestUtils.invokeMethod(directorySync, "applyLoginStatus",
                 companyId, List.of(leaderId));
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT status FROM t_user WHERE id = ?", String.class, leaderId))
@@ -3943,7 +3944,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 VALUES (?, ?, ?, ?, 'test', now() + interval '1 hour')
                 """, hardDisabledSessionId, leaderId, UUID.randomUUID().toString(),
                 UUID.randomUUID().toString());
-            ReflectionTestUtils.invokeMethod(wecomTarget, "applyLoginStatus",
+            ReflectionTestUtils.invokeMethod(directorySync, "applyLoginStatus",
                 companyId, List.of(leaderId));
             assertThat(jdbcTemplate.queryForMap("""
                 SELECT user_row.status, session.revoked_at IS NOT NULL AS revoked

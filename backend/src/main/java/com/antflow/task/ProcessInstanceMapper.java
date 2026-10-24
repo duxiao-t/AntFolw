@@ -80,6 +80,7 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
           COUNT(*) FILTER (WHERE pi.finished_at >= #{dayStart} AND pi.finished_at < #{dayEnd})
             AS finished_today
         """ + INSTANCE_FROM + " WHERE " + FULL_VISIBLE + " GROUP BY pi.status")
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     List<Map<String, Object>> selectWorkplaceStatusCounts(@Param("userId") long userId,
         @Param("admin") boolean admin, @Param("canReadTasks") boolean canReadTasks,
         @Param("canReadInstances") boolean canReadInstances,
@@ -149,6 +150,7 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         LIMIT #{limit} OFFSET #{offset}
         </script>
         """)
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     List<ProcessInstance> selectInstancePage(@Param("userId") long userId,
         @Param("admin") boolean admin, @Param("canReadTasks") boolean canReadTasks,
         @Param("canReadInstances") boolean canReadInstances, @Param("scope") String scope,
@@ -163,6 +165,7 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         """ + INSTANCE_PAGE_FROM + INSTANCE_PAGE_WHERE + """
         </script>
         """)
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(dataPermission = "true")
     long countInstancePage(@Param("userId") long userId,
         @Param("admin") boolean admin, @Param("canReadTasks") boolean canReadTasks,
         @Param("canReadInstances") boolean canReadInstances, @Param("scope") String scope,

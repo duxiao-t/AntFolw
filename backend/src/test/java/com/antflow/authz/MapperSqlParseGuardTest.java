@@ -84,6 +84,23 @@ class MapperSqlParseGuardTest {
             "com.antflow.form.runtime.FormDataMapper.selectById")).isNotNull();
     }
 
+    /** t_process_instance 可见性已在 SQL 内联；新增数据权限规则前必须移除下列豁免。 */
+    @Test
+    void processInstanceMapperQueriesSkipUnusedDataPermissionParsing() {
+        assertThat(DataPermissionRules.RULES)
+            .extracting(DataPermissionRules.Rule::table)
+            .doesNotContain("t_process_instance");
+        for (Method method : com.antflow.task.ProcessInstanceMapper.class.getDeclaredMethods()) {
+            if (method.getAnnotation(Select.class) == null) continue;
+            InterceptorIgnore ignore = method.getAnnotation(InterceptorIgnore.class);
+            assertThat(ignore)
+                .as("ProcessInstanceMapper#%s must skip the data permission parser",
+                    method.getName())
+                .isNotNull();
+            assertThat(ignore.dataPermission()).isEqualTo("true");
+        }
+    }
+
     /**
      * 拦截器会重新序列化它解析过的 SQL；PostgreSQL 的 `FOR UPDATE`/CTE/RETURNING 组合在
      * JSqlParser 往返后可能变成非法语句（`WITH ... FOR UPDATE SKIP LOCKED ORDER BY` 就是实例）。
