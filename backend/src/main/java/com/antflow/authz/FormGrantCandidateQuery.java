@@ -5,7 +5,6 @@ import static com.antflow.authz.FormGrantSupport.nullableLong;
 import static com.antflow.authz.FormGrantSupport.placeholders;
 
 import com.antflow.authz.FormGrantService.FormGrantCandidates;
-import com.antflow.authz.FormGrantService.GrantCompany;
 import com.antflow.authz.FormGrantService.GrantDepartment;
 import com.antflow.authz.FormGrantService.GrantRole;
 import com.antflow.authz.FormGrantService.GrantUser;
@@ -57,10 +56,7 @@ class FormGrantCandidateQuery {
             SELECT id, code, name FROM t_role WHERE enabled = true ORDER BY builtin DESC, id
             """, (rs, row) -> new GrantRole(rs.getLong("id"), rs.getString("code"),
                 rs.getString("name"))) : List.of();
-        List<GrantCompany> companies = snapshot.admin() ? jdbcTemplate.query(
-            "SELECT id, name FROM t_company ORDER BY id",
-            (rs, row) -> new GrantCompany(rs.getLong("id"), rs.getString("name"))) : List.of();
-        return new FormGrantCandidates(roles, grantDepartments(snapshot), companies);
+        return new FormGrantCandidates(roles, grantDepartments(snapshot));
     }
 
     GrantUserPage userCandidates(Long formId, int page, int size, String keyword,
@@ -89,16 +85,6 @@ class FormGrantCandidateQuery {
         return new GrantUserPage(items, total == null ? 0 : total, normalizedPage, normalizedSize);
     }
 
-    /** 公司授权只对全局管理员开放，且公司必须存在；管理员校验本身留在门面（错误码不同）。 */
-    void validateCompanies(Set<Long> companyIds) {
-        for (Long companyId : companyIds) {
-            Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_company WHERE id = ?", Long.class, companyId);
-            if (count == null || count == 0) {
-                throw new BizException("COMPANY_NOT_FOUND", "grant company not found");
-            }
-        }
-    }
 
     void validateSubjects(Set<Long> userIds, Set<Long> roleIds,
                           Set<Long> departmentIds) {

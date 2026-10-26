@@ -1090,12 +1090,6 @@
       },
       "FormGrantCandidates" : {
         "properties" : {
-          "companies" : {
-            "items" : {
-              "$ref" : "#/components/schemas/GrantCompany"
-            },
-            "type" : "array"
-          },
           "departments" : {
             "items" : {
               "$ref" : "#/components/schemas/GrantDepartment"
@@ -1113,19 +1107,6 @@
       },
       "FormGrantDto" : {
         "properties" : {
-          "companies" : {
-            "items" : {
-              "$ref" : "#/components/schemas/GrantCompany"
-            },
-            "type" : "array"
-          },
-          "companyIds" : {
-            "items" : {
-              "format" : "int64",
-              "type" : "integer"
-            },
-            "type" : "array"
-          },
           "departmentIds" : {
             "items" : {
               "format" : "int64",
@@ -1174,14 +1155,6 @@
       },
       "FormGrantWriteRequest" : {
         "properties" : {
-          "companyIds" : {
-            "items" : {
-              "format" : "int64",
-              "type" : "integer"
-            },
-            "type" : "array",
-            "uniqueItems" : true
-          },
           "departmentIds" : {
             "items" : {
               "format" : "int64",
@@ -1324,18 +1297,6 @@
           "withdrawn" : {
             "format" : "int64",
             "type" : "integer"
-          }
-        },
-        "type" : "object"
-      },
-      "GrantCompany" : {
-        "properties" : {
-          "id" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "name" : {
-            "type" : "string"
           }
         },
         "type" : "object"

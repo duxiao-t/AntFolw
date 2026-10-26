@@ -4,7 +4,6 @@ import static com.antflow.authz.FormGrantSupport.grantUser;
 import static com.antflow.authz.FormGrantSupport.nullableLong;
 
 import com.antflow.authz.FormGrantService.FormGrantDto;
-import com.antflow.authz.FormGrantService.GrantCompany;
 import com.antflow.authz.FormGrantService.GrantDepartment;
 import com.antflow.authz.FormGrantService.GrantRole;
 import com.antflow.authz.FormGrantService.GrantUser;
@@ -55,8 +54,7 @@ class FormGrantStore {
                 WHERE form_def_id = ? AND subject_type = 'DEPARTMENT' ORDER BY subject_id
                 """, Long.class, formId);
         return new FormGrantDto(version, userIds, roleIds, departmentIds,
-            selectedUsers(formId), selectedRoles(formId), selectedDepartments(formId),
-            companyIds(formId), selectedCompanies(formId));
+            selectedUsers(formId), selectedRoles(formId), selectedDepartments(formId));
     }
 
     int version(long formId) {
@@ -93,18 +91,7 @@ class FormGrantStore {
             formId);
     }
 
-    void deleteCompanySubjects(long formId) {
-        jdbcTemplate.update("""
-            DELETE FROM t_form_resource_grant WHERE form_def_id = ? AND subject_type = 'COMPANY'
-            """, formId);
-    }
 
-    void insertCompany(long formId, long companyId, long actorId) {
-        jdbcTemplate.update("""
-            INSERT INTO t_form_resource_grant(form_def_id, subject_type, subject_id, granted_by)
-            VALUES (?, 'COMPANY', ?, ?)
-            """, formId, companyId, actorId);
-    }
 
     void insertUser(long formId, long userId, long actorId) {
         jdbcTemplate.update("""
@@ -169,18 +156,5 @@ class FormGrantStore {
                 nullableLong(rs, "parent_id"), rs.getString("name")), formId);
     }
 
-    List<Long> companyIds(long formId) {
-        return jdbcTemplate.queryForList("""
-            SELECT subject_id FROM t_form_resource_grant
-            WHERE form_def_id = ? AND subject_type = 'COMPANY' ORDER BY subject_id
-            """, Long.class, formId);
-    }
 
-    List<GrantCompany> selectedCompanies(long formId) {
-        return jdbcTemplate.query("""
-            SELECT company.id, company.name FROM t_company company
-            JOIN t_form_resource_grant g ON g.subject_id = company.id
-            WHERE g.form_def_id = ? AND g.subject_type = 'COMPANY' ORDER BY company.id
-            """, (rs, row) -> new GrantCompany(rs.getLong("id"), rs.getString("name")), formId);
-    }
 }

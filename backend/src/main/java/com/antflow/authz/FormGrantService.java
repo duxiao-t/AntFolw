@@ -95,13 +95,6 @@ public class FormGrantService {
         }
         candidates.validateSubjects(request.userIds(), request.roleIds(), request.departmentIds());
         boolean admin = authorizationService.isAdmin();
-        if (request.companyIds() != null) {
-            if (!admin) {
-                throw new AuthorizationFailureException("MISSING_PERMISSION",
-                    "only global administrators can change company grants");
-            }
-            candidates.validateCompanies(request.companyIds());
-        }
         store.lockFormAuthorization(formId);
         authorizationService.requireFormMaintenance(formId,
             PermissionCodes.FORM_AUTHORIZATION_MANAGE);
@@ -112,10 +105,6 @@ public class FormGrantService {
         }
         store.deleteSubjects(formId, admin);
         Long actorId = PrincipalHolder.current().orElseThrow().userId();
-        if (request.companyIds() != null) {
-            store.deleteCompanySubjects(formId);
-            request.companyIds().forEach(companyId -> store.insertCompany(formId, companyId, actorId));
-        }
         request.userIds().forEach(userId -> store.insertUser(formId, userId, actorId));
         if (admin) {
             request.roleIds().forEach(roleId -> store.insertRole(formId, roleId, actorId));
@@ -125,18 +114,16 @@ public class FormGrantService {
             : store.roleSubjectIds(formId);
         auditService.success("form.authorization.update", "FORM", formId,
             AuditService.RiskLevel.HIGH,
-            java.util.Map.of("changedFields", request.companyIds() == null
-                ? List.of("userIds", "roleIds", "departmentIds")
-                : List.of("userIds", "roleIds", "departmentIds", "companyIds")),
+            java.util.Map.of("changedFields",
+                List.of("userIds", "roleIds", "departmentIds")),
             java.util.Map.of("userCount", request.userIds().size(),
                 "roleCount", effectiveRoleIds.size(),
-                "departmentCount", request.departmentIds().size(),
-                "companyCount", store.companyIds(formId).size()));
+                "departmentCount", request.departmentIds().size()));
         return new FormGrantDto(request.version() + 1,
             request.userIds().stream().sorted().toList(),
             effectiveRoleIds, request.departmentIds().stream().sorted().toList(),
-            store.selectedUsers(formId), store.selectedRoles(formId), store.selectedDepartments(formId),
-            store.companyIds(formId), store.selectedCompanies(formId));
+            store.selectedUsers(formId), store.selectedRoles(formId),
+            store.selectedDepartments(formId));
     }
 
     @Transactional
@@ -194,30 +181,21 @@ public class FormGrantService {
     public record FormGrantDto(int version, List<Long> userIds, List<Long> roleIds,
                                List<Long> departmentIds, List<GrantUser> users,
                                List<GrantRole> roles,
-                               List<GrantDepartment> departments,
-                               List<Long> companyIds, List<GrantCompany> companies) { }
+                               List<GrantDepartment> departments) { }
     public record FormGrantCandidates(List<GrantRole> roles,
-                                      List<GrantDepartment> departments,
-                                      List<GrantCompany> companies) { }
-    public record GrantCompany(long id, String name) { }
+                                      List<GrantDepartment> departments) { }
     public record GrantUser(long id, String username, String displayName, String employeeNo,
                             Long departmentId, String departmentName) { }
     public record GrantRole(long id, String code, String name) { }
     public record GrantDepartment(long id, Long parentId, String name) { }
     public record GrantUserPage(List<GrantUser> items, long total, int page, int size) { }
     public record FormGrantWriteRequest(Integer version, Set<Long> userIds,
-                                        Set<Long> roleIds, Set<Long> departmentIds,
-                                        Set<Long> companyIds) {
-        public FormGrantWriteRequest(Integer version, Set<Long> userIds,
-                                     Set<Long> roleIds, Set<Long> departmentIds) {
-            this(version, userIds, roleIds, departmentIds, null);
-        }
+                                        Set<Long> roleIds, Set<Long> departmentIds) {
         public FormGrantWriteRequest {
             userIds = userIds == null ? Set.of() : new LinkedHashSet<>(userIds);
             roleIds = roleIds == null ? Set.of() : new LinkedHashSet<>(roleIds);
             departmentIds = departmentIds == null
                 ? Set.of() : new LinkedHashSet<>(departmentIds);
-            companyIds = companyIds == null ? null : new LinkedHashSet<>(companyIds);
         }
     }
     public record FormMaintainerDto(int version, List<Long> userIds, List<GrantUser> users) { }

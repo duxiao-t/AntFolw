@@ -1,7 +1,6 @@
 package com.antflow.authz;
 
 import com.antflow.authz.FormGrantService.GrantDepartment;
-import com.antflow.authz.FormGrantService.GrantCompany;
 import com.antflow.authz.FormGrantService.GrantRole;
 import com.antflow.authz.FormGrantService.GrantUser;
 import java.sql.ResultSet;
