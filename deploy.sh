@@ -9,6 +9,12 @@ HEALTH_URL=${ANTFLOW_HEALTH_URL:-http://127.0.0.1:7070/actuator/health}
 # 注意这是**软**超时：每轮巡检本身要花几秒（compose ps + docker inspect），
 # 实际等待 ≈ 设定值 + 一轮（实测一轮约 1~10s）。别把它当硬上界写进文档。
 HEALTH_TIMEOUT_SECONDS=${ANTFLOW_HEALTH_TIMEOUT_SECONDS:-300}
+# `compose up` 的硬超时。**必须有**：本机实测过引擎"假活"——容器能创建、但 start 永久卡住，
+# 此时 compose up 会无限等待（不报错、不退出），部署脚本跟着挂死，而旧容器已经被删掉了
+# （compose recreate 是先删后建），整栈就静默下线了。
+COMPOSE_UP_TIMEOUT_SECONDS=${ANTFLOW_COMPOSE_UP_TIMEOUT_SECONDS:-900}
+# 探活用的镜像：必须是**本地已有**的，断网时不能指望 pull。
+PROBE_IMAGE=${ANTFLOW_PROBE_IMAGE:-nginx:1.28-alpine}
 
 # 部署前记录的服务镜像（服务名 → 镜像 ID / 镜像名），健康检查失败或 up 失败时用来回滚。
 # 镜像名也要记：容器若在 up 阶段被删/创建失败，回滚时就没地方读这个名字了（见 rollback_services）。
@@ -17,6 +23,48 @@ declare -A PREV_REF=()
 
 compose() {
   docker compose --env-file "$ENV_FILE" "$@"
+}
+
+# 带硬超时的 compose 调用。超时返回 124（GNU timeout 的约定），
+# 让调用方能用 `||` 走回滚分支，而不是永久阻塞。
+compose_to() {
+  local secs=$1
+  shift
+  timeout --foreground "$secs" docker compose --env-file "$ENV_FILE" "$@"
+}
+
+# 部署前的引擎可用性预检。
+#
+# 为什么需要它：本机反复遇到 Docker 引擎"假活"——`docker ps`/`exec` 都正常，
+# 但**新容器的 start 会永久卡住**。此时 `compose up` 既不报错也不推进，
+# 表现就是"部署没反应"，最后容器停在 Created、站点 502。
+# 用一次性容器把 create→start 走一遍，几秒内就能判定，给出可执行的处置建议。
+#
+# 返回 0 表示引擎能正常创建并启动容器；非 0 表示不建议继续部署。
+preflight_engine() {
+  local probe="antflow-preflight-$$" rc=0
+  docker rm -f "$probe" >/dev/null 2>&1 || true
+  if ! timeout 60 docker create --name "$probe" "$PROBE_IMAGE" true >/dev/null 2>&1; then
+    echo "[预检] 失败：无法创建容器。引擎没起来，或本机缺少镜像 $PROBE_IMAGE。" >&2
+    return 1
+  fi
+  timeout 30 docker start "$probe" >/dev/null 2>&1 || rc=$?
+  docker rm -f "$probe" >/dev/null 2>&1 || true
+  if (( rc == 124 )); then
+    cat >&2 <<'EOF'
+[预检] 失败：容器能创建，但 start 超过 30 秒没有返回 —— 引擎处于"假活"状态。
+       继续部署的话，compose up 会卡在启动容器，旧容器已被删掉，整栈会静默下线。
+       处置：docker desktop restart（等 status 变为 running 后重跑本脚本）。
+       已实测：重启引擎即可恢复，与镜像、compose 配置无关。
+EOF
+    return 1
+  fi
+  if (( rc != 0 )); then
+    echo "[预检] 失败：探测容器启动异常（退出码 $rc）。建议 docker desktop restart 后重试。" >&2
+    return 1
+  fi
+  echo "[预检] 引擎正常：容器可创建、可启动"
+  return 0
 }
 
 reset_plan() {
@@ -142,7 +190,8 @@ rollback_services() {
     echo "  - $svc：$image_ref 已指回上一版镜像" >&2
   done
   (( restored )) || return 1
-  compose up -d --force-recreate --no-build "$@" >&2
+  # 回滚本身也要有上界：引擎假死时 recreate 会卡在这里，把"挂死"从一个阶段挪到另一个阶段。
+  compose_to "$COMPOSE_UP_TIMEOUT_SECONDS" up -d --force-recreate --no-build "$@" >&2
 }
 
 # 备份目录的就绪检查（每次部署都做）。
@@ -235,6 +284,10 @@ main() {
   git pull --ff-only
   current=$(git rev-parse HEAD)
 
+  # 先确认引擎能正常起容器，再花几分钟构建：引擎假死时构建出来的东西也用不上，
+  # 更糟的是会让人以为"部署正在跑"，直到很久之后才发现根本没动。
+  preflight_engine || return 1
+
   reset_plan
   if [[ -z "$previous" ]] || ! git cat-file -e "$previous^{commit}" 2>/dev/null || ! git merge-base --is-ancestor "$previous" "$current"; then
     enable_all
@@ -303,12 +356,19 @@ main() {
   # up 本身也必须纳入判定：compose recreate 是"先删旧容器再建新的"，一旦创建失败
   # （坏镜像、坏配置、设备映射等），set -e 会让脚本直接退出，而旧容器已经没了 → 整栈下线。
   # 演练（_rollback-drill/drill3）实测过这条路径。
-  if ! compose up -d --build "${services[@]}" \
+  if ! compose_to "$COMPOSE_UP_TIMEOUT_SECONDS" up -d --build "${services[@]}" \
       || ! wait_healthy "${deploy_services[@]}" \
       || ! curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-connrefused \
            "$HEALTH_URL"; then
     echo '健康检查未通过，开始回滚到上一版镜像…' >&2
     compose logs --tail 50 "${deploy_services[@]}" >&2 || true
+    # 回滚同样要 recreate + start，引擎假死时它一样会挂住。先探一次：
+    # 引擎不可用就直说"先重启引擎"，别让人再等一轮注定失败的长时间等待。
+    if ! preflight_engine; then
+      echo '引擎当前不可用，跳过自动回滚。' >&2
+      echo '旧镜像仍在本机：执行 docker desktop restart，等引擎恢复后重跑本脚本即可。' >&2
+      return 1
+    fi
     if rollback_services "${deploy_services[@]}" && wait_healthy "${deploy_services[@]}"; then
       echo '已回滚到上一版镜像（revision 未更新，修复后可重跑）' >&2
     else
