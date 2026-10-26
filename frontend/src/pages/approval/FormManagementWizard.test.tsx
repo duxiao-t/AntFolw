@@ -95,9 +95,11 @@ describe('FormManagementWizard permission settings', () => {
       if (url === '/api/forms/10/grants/candidates') return { roles: [], departments: [] };
       if (url === '/api/forms/10/grants') {
         if (options?.method === 'PUT') permissionVersion += 1;
+        // 必须带公司：公司是使用门槛，只有主体授权没有公司的配置会被前端拦下（单独有拦禁用例）。
         return {
         version: permissionVersion,
-        userIds: [3], roleIds: [], departmentIds: [], users: [], roles: [], departments: [],
+        userIds: [3], roleIds: [], departmentIds: [], companyIds: [1],
+        users: [], roles: [], departments: [], companies: [{ id: 1, name: '甲公司' }],
         };
       }
       if (url === '/api/forms/10/maintainers') {
@@ -119,7 +121,7 @@ describe('FormManagementWizard permission settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '保存使用范围' }));
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/10/grants', {
-      method: 'PUT', data: { userIds: [3], roleIds: [], departmentIds: [], companyIds: [], version: 7 },
+      method: 'PUT', data: { userIds: [3], roleIds: [], departmentIds: [], companyIds: [1], version: 7 },
     }));
     await waitFor(() => expect(permissionVersion).toBe(8));
 
@@ -128,6 +130,41 @@ describe('FormManagementWizard permission settings', () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/forms/10/maintainers', {
       method: 'PUT', data: { userIds: [5, 6], version: 8 },
     }));
+  });
+
+  it('只选了人员/角色/部门却没选公司时，拦下保存并说明原因', async () => {
+    const definition = {
+      id: 10, code: 'leave', name: '请假申请', version: 1, status: 'PUBLISHED',
+      schema: [{ id: 'a', type: 'text', label: 'A' }], settings: {},
+    };
+    request.mockImplementation(async (url: string) => {
+      if (url === '/api/forms/definitions/10') return definition;
+      if (url === '/api/forms/10/grants/candidates') return { roles: [], departments: [] };
+      if (url === '/api/forms/10/grants') {
+        return {
+          version: 7, userIds: [3], roleIds: [], departmentIds: [], companyIds: [],
+          users: [], roles: [], departments: [], companies: [],
+        };
+      }
+      if (url === '/api/forms/10/maintainers') return { version: 7, userIds: [5], users: [] };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })}>
+        <FormManagementWizard />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByLabelText('选择可使用表单的人员')).toHaveValue('3'));
+    // request 的调用记录在用例之间是累积的，只看本次点击之后新增的调用。
+    const before = request.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存使用范围' }));
+    });
+    // 保存被拦在本地：不应该发出授权 PUT，否则会出现"保存成功但谁也用不了"。
+    const after = request.mock.calls.slice(before);
+    expect(after.some((call) => call[1]?.method === 'PUT')).toBe(false);
   });
 
   it('后台重新拉取使用范围时，不会把没保存的改动冲掉', async () => {

@@ -1,4 +1,4 @@
-import { Button, Form, Select, Switch, TreeSelect } from 'antd';
+import { Alert, Button, Form, Select, Switch, TreeSelect } from 'antd';
 import FormGrantUserPicker from './FormGrantUserPicker';
 import { useWizardStyles } from './wizardStyles';
 import { grantDepartmentTree } from './wizardValidation';
@@ -70,6 +70,20 @@ export function FormUsageScopeSection({ formId, isAdmin, permissions }: SectionP
           <span className={styles.sectionDescription}>先限定允许使用的公司，再按人员、角色或部门授权。公司未获准时不能使用；不授予模板维护或业务数据查看权限。</span>
         </div>
       </div>
+      {/*
+        公司是「门槛」而不是可选项：没有公司授权行时，后端的 hasFormGrant 里那个
+        EXISTS(company_grant) 永远不成立，于是人员/角色/部门授权全部静默失效、只有全局管理员能用。
+        这里必须显式提示，否则用户会以为"保存成功=已生效"。
+      */}
+      {isAdmin && (formGrant?.companyIds?.length ?? 0) === 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          title="未授予任何公司：除全局管理员外，其他人都无法使用这张表单"
+          description="人员、角色、部门授权都以「已授权公司」为前提。请先在下方选择公司，再选择角色或部门。"
+        />
+      ) : null}
       {isAdmin ? (
         <Form.Item label="允许使用的公司" name="companyIds">
           <Select mode="multiple" allowClear placeholder="未选择公司时，仅全局管理员可使用"

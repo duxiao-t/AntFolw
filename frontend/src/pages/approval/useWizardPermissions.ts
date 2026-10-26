@@ -183,6 +183,24 @@ export function useWizardPermissions({
           ? [...new Set([...roleIds, allCompanyRoleId])]
           : roleIds.filter((roleId: number) => roleId !== allCompanyRoleId);
       }
+      // 公司是门槛：没有公司授权行时，后端 hasFormGrant 里的 EXISTS(company_grant) 永远不成立，
+      // 人员/角色/部门授权会静默失效（只有全局管理员能用）。这里提前拦下并说清原因，
+      // 否则用户看到"保存成功"却怎么都看不到表单。
+      //
+      // 只拦管理员：公司选择框只对管理员渲染、companyIds 也只在 isAdmin 时才提交，
+      // 非管理员在这张表单上没有补救手段。对他们抛错会把人堵死（连"移除离职人员"这类
+      // 正常操作都做不了），所以保持原先的放行；历史遗留数据由 V71 回填兜底。
+      if (isAdmin) {
+        const effectiveUserIds = Array.isArray(values.userIds) ? values.userIds : formGrant.userIds;
+        const effectiveDepartmentIds = Array.isArray(values.departmentIds)
+          ? values.departmentIds : formGrant.departmentIds;
+        const effectiveCompanyIds = values.companyIds ?? formGrant.companyIds ?? [];
+        const hasSubjects = effectiveUserIds.length > 0 || roleIds.length > 0
+          || effectiveDepartmentIds.length > 0;
+        if (hasSubjects && effectiveCompanyIds.length === 0) {
+          throw new Error('请先选择「允许使用的公司」：未授权公司时，所选人员/角色/部门不会生效，除全局管理员外无人能使用该表单');
+        }
+      }
       return request<FormGrant>(`/api/forms/${formId}/grants`, {
         method: 'PUT',
         data: {
