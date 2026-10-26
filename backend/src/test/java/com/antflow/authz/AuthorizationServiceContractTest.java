@@ -126,7 +126,7 @@ class AuthorizationServiceContractTest {
         UUID sessionId = UUID.randomUUID();
         var principal = new PrincipalHolder.Principal(7L, "u", "U", Set.of(), Set.of(), 1L, 10L,
             sessionId);
-        var scope = new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(), 1L);
+        var scope = new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of());
         var filter = Optional.of(scope);
 
         when(snapshots.snapshot(7L)).thenReturn(snapshot);

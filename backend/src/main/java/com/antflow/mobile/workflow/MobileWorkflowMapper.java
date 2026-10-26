@@ -12,10 +12,24 @@ import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface MobileWorkflowMapper {
-    String NOTIFICATION_SNAPSHOT = "(" + com.antflow.authz.CompanySnapshotSql.ADMIN + " OR " + """
+    /**
+     * 持有 admin 角色的用户。这段以前放在 CompanySnapshotSql 里，但它与公司无关，
+     * 单公司改造后随公司快照一起消失会有语义损失（通知/抄送要靠它放宽可见性），故内联保留。
+     */
+    String ADMIN = """
+        EXISTS (SELECT 1 FROM t_user_role admin_user_role
+          JOIN t_role admin_role ON admin_role.id = admin_user_role.role_id
+          WHERE admin_user_role.user_id = #{userId}
+            AND admin_role.code = 'admin' AND admin_role.enabled = true)
+        """;
+
+    /**
+     * 通知可见性：管理员看全部；普通用户只看"确实指向一条存在的实例"的通知。
+     * 以前还要求实例带公司归属快照，单公司下该门槛恒真，已移除。
+     */
+    String NOTIFICATION_SNAPSHOT = "(" + ADMIN + " OR " + """
         EXISTS (SELECT 1 FROM t_process_instance pi
-          WHERE pi.id = NULLIF(payload->>'instanceId', '')::bigint AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE + "))";
+          WHERE pi.id = NULLIF(payload->>'instanceId', '')::bigint))""";
 
     @Select("SELECT COUNT(*) FROM t_user_notification WHERE user_id = #{userId}"
         + " AND read_at IS NULL AND " + NOTIFICATION_SNAPSHOT)
@@ -49,10 +63,10 @@ public interface MobileWorkflowMapper {
         """)
     int markNotificationRead(@Param("id") long id, @Param("userId") long userId);
 
+    /** 抄送可见性：抄送记录指向的实例必须存在（单公司下不再叠加归属快照门槛）。 */
     String CC_SNAPSHOT = """
         EXISTS (SELECT 1 FROM t_process_instance pi
-          WHERE pi.id = t_cc_record.proc_inst_id AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + ")";
+          WHERE pi.id = t_cc_record.proc_inst_id)""";
 
     @Select("SELECT COUNT(*) FROM t_cc_record WHERE recipient_id = #{userId}"
         + " AND read_at IS NULL AND " + CC_SNAPSHOT)
@@ -98,8 +112,6 @@ public interface MobileWorkflowMapper {
         LEFT JOIN t_user applicant ON applicant.id = pi.started_by
         LEFT JOIN t_department dept ON dept.id = applicant.dept_id
         WHERE t.assignee_id = #{userId}
-          AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
         <choose>
           <when test="view == 'done'">
             AND (t.status IN ('APPROVED', 'REJECTED', 'RESUBMITTED')
@@ -147,8 +159,6 @@ public interface MobileWorkflowMapper {
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
-          AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
           AND pi.current_node_id IS DISTINCT FROM '__rework__'
         <if test="status != null and status != ''">
           AND pi.status = #{status}
@@ -186,8 +196,6 @@ public interface MobileWorkflowMapper {
           JOIN t_form_data data ON data.id = pi.form_data_id
           JOIN t_form_definition form ON form.id = data.form_def_id
           WHERE pi.started_by = #{userId}
-            AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
             AND pi.current_node_id IS DISTINCT FROM '__rework__'
           UNION ALL
           SELECT 'DIRECT' AS kind,
@@ -202,8 +210,6 @@ public interface MobileWorkflowMapper {
           FROM t_form_data data
           JOIN t_form_definition form ON form.id = data.form_def_id
           WHERE data.created_by = #{userId}
-            AND
-        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
             AND data.status = 'SUBMITTED'
             AND NOT EXISTS (
               SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = data.id
@@ -243,8 +249,6 @@ public interface MobileWorkflowMapper {
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE data.id = #{dataId}
           AND data.created_by = #{userId}
-          AND
-        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
           AND data.status = 'SUBMITTED'
           AND NOT EXISTS (
             SELECT 1 FROM t_process_instance pi WHERE pi.form_data_id = data.id
@@ -402,8 +406,6 @@ public interface MobileWorkflowMapper {
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
-          AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
         ORDER BY pi.started_at DESC, pi.id DESC
         LIMIT #{limit}
         """)

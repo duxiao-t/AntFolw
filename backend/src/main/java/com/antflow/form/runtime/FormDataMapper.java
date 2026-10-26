@@ -32,8 +32,6 @@ public interface FormDataMapper extends BaseMapper<FormData> {
         <script>
         SELECT data.* FROM t_form_data data
         WHERE created_by = #{userId}
-          AND
-        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
         <if test="formDefId != null"> AND form_def_id = #{formDefId} </if>
         ORDER BY created_at DESC, id DESC
         LIMIT #{limit} OFFSET #{offset}
@@ -50,8 +48,6 @@ public interface FormDataMapper extends BaseMapper<FormData> {
         <script>
         SELECT COUNT(*) FROM t_form_data data
         WHERE created_by = #{userId}
-          AND
-        """ + com.antflow.authz.CompanySnapshotSql.DATA_FOR_USER + """
         <if test="formDefId != null"> AND form_def_id = #{formDefId} </if>
         </script>
         """)

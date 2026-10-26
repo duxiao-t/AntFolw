@@ -21,9 +21,10 @@ import org.springframework.stereotype.Component;
  *       审批人靠这条路径看待办；改成"再按数据范围裁一刀"，审批人会立刻看不到自己的单子
  *       （{@code AuthorizationServiceTest} 的红线用例就钉这个）。</li>
  *   <li>发起人看自己的实例 → 全量；参与者/抄送人 → 摘要。顺序不能调换，SUMMARY 分支必须最后。</li>
- *   <li>{@code companyId == null || companyInferred} → 直接 {@code NONE}（fail-closed）。
- *       归属推断出来的实例宁可看不见，也不能按"猜的公司"放行。</li>
  * </ol>
+ *
+ * <p>单公司模式下不再有"公司归属未知则不可见"这一层：公司不是隔离维度，
+ * 可见性只由身份（发起人/被指派人/参与者）与数据范围（本人/本部门/全部）决定。
  */
 @Component
 public class InstanceAccessGuard {
@@ -64,17 +65,14 @@ public class InstanceAccessGuard {
         if (snapshot.admin()) {
             return InstanceVisibility.FULL;
         }
-        if (resource.companyId() == null || resource.companyInferred()) {
-            return InstanceVisibility.NONE;
-        }
         if (Objects.equals(resource.startedBy(), userId)) return InstanceVisibility.FULL;
         if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_TASK_READ)
             && isReadableTaskAssignee(instanceId, userId)) {
             return InstanceVisibility.FULL;
         }
         if (snapshot.permissions().contains(PermissionCodes.WORKFLOW_INSTANCE_READ)
-            && dataScopes.inCompanyDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
-                resource.startedBy(), resource.startedDepartmentId(), resource.companyId())) {
+            && dataScopes.inDataScope(snapshot, PermissionCodes.WORKFLOW_INSTANCE_READ,
+                resource.startedBy(), resource.startedDepartmentId())) {
             return InstanceVisibility.FULL;
         }
         return isParticipant(instanceId, userId)
@@ -109,8 +107,8 @@ public class InstanceAccessGuard {
         }
         capabilities.requirePermission(permission);
         AuthzSnapshot snapshot = snapshots.snapshot(principal.userId());
-        if (!dataScopes.inCompanyDataScope(snapshot, permission, resource.startedBy(),
-                resource.startedDepartmentId(), resource.companyId())) {
+        if (!dataScopes.inDataScope(snapshot, permission, resource.startedBy(),
+                resource.startedDepartmentId())) {
             throw new AccessDeniedException("instance is outside your management scope");
         }
     }
@@ -131,19 +129,17 @@ public class InstanceAccessGuard {
         if (snapshot.admin()) {
             return true;
         }
-        if (resource.companyId() == null || resource.companyInferred()) return false;
         if (Objects.equals(resource.createdBy(), userId)) return true;
         return snapshot.permissions().contains(PermissionCodes.FORM_DATA_READ)
-            && dataScopes.inCompanyDataScope(snapshot, PermissionCodes.FORM_DATA_READ,
-                resource.createdBy(), resource.startedDepartmentId(), resource.companyId());
+            && dataScopes.inDataScope(snapshot, PermissionCodes.FORM_DATA_READ,
+                resource.createdBy(), resource.startedDepartmentId());
     }
 
-    /** Assigned actions retain their existing actor checks, but cannot operate on uncertain attribution. */
+    /** Assigned actions retain their existing actor checks; attribution is no longer a gate. */
     public void requireConfirmedInstance(long instanceId) {
         if (PrincipalHolder.current().isEmpty()) return; // Explicit internal worker context.
         InstanceAccess access = instanceAccess(instanceId);
-        if (access == null || (!capabilities.isAdmin()
-            && (access.companyId() == null || access.companyInferred()))) {
+        if (access == null) {
             throw new HiddenResourceException("instance not found");
         }
     }
@@ -160,7 +156,6 @@ public class InstanceAccessGuard {
         FormDataAccess resource = formDataAccess(formDataId);
         if (resource == null) return false;
         if (snapshots.snapshot(userId).admin()) return true;
-        if (resource.companyId() == null || resource.companyInferred()) return false;
         return true;
     }
 
@@ -201,18 +196,17 @@ public class InstanceAccessGuard {
 
     InstanceAccess instanceAccess(long instanceId) {
         return jdbcTemplate.query("""
-            SELECT pi.started_by, pi.started_dept_id, pi.company_id, pi.company_inferred
+            SELECT pi.started_by, pi.started_dept_id
             FROM t_process_instance pi
             WHERE pi.id = ?
             """, rs -> rs.next() ? new InstanceAccess(
                 nullableLong(rs, "started_by"),
-                nullableLong(rs, "started_dept_id"),
-                nullableLong(rs, "company_id"), rs.getBoolean("company_inferred")) : null, instanceId);
+                nullableLong(rs, "started_dept_id")) : null, instanceId);
     }
 
     private FormDataAccess formDataAccess(long formDataId) {
         return jdbcTemplate.query("""
-            SELECT data.created_by, data.company_id, data.company_inferred, pi.started_dept_id,
+            SELECT data.created_by, pi.started_dept_id,
                    submitter.dept_id AS submitter_dept_id
             FROM t_form_data data
             LEFT JOIN t_process_instance pi ON pi.form_data_id = data.id
@@ -224,8 +218,7 @@ public class InstanceAccessGuard {
                 nullableLong(rs, "created_by"),
                 nullableLong(rs, "started_dept_id") != null
                     ? nullableLong(rs, "started_dept_id")
-                    : nullableLong(rs, "submitter_dept_id"),
-                nullableLong(rs, "company_id"), rs.getBoolean("company_inferred")) : null, formDataId);
+                    : nullableLong(rs, "submitter_dept_id")) : null, formDataId);
     }
 
     private static Long nullableLong(java.sql.ResultSet resultSet, String column)
@@ -236,8 +229,6 @@ public class InstanceAccessGuard {
 
     // InstanceAccess / instanceAccess 与 isParticipant / isReadableTaskAssignee 包内可见：
     // 红线回归测试（AuthorizationServiceTest）直接构造与打桩这几个点，验证"被指派人可见性"。
-    record InstanceAccess(Long startedBy, Long startedDepartmentId, Long companyId,
-                          boolean companyInferred) { }
-    private record FormDataAccess(Long createdBy, Long startedDepartmentId, Long companyId,
-                                  boolean companyInferred) { }
+    record InstanceAccess(Long startedBy, Long startedDepartmentId) { }
+    private record FormDataAccess(Long createdBy, Long startedDepartmentId) { }
 }

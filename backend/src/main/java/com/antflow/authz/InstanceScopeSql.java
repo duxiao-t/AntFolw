@@ -35,12 +35,11 @@ public final class InstanceScopeSql {
             return new Scope("1 = 1", List.of());
         }
         AuthorizationService.DataScopeFilter scope = current.get();
-        if (scope.companyId() == null) return new Scope("1 = 0", List.of());
-        String company = alias + ".company_id = ? AND " + alias + ".company_inferred = false";
-        if (scope.unrestricted()) return new Scope("(" + company + ")", List.of(scope.companyId()));
+        // 单公司模式下可见性只剩"本人 / 本部门 / 全部"三个维度，
+        // 不再有"同公司"这一层，也就不再要求实例带公司归属快照。
+        if (scope.unrestricted()) return new Scope("1 = 1", List.of());
         List<String> parts = new ArrayList<>();
         List<Object> args = new ArrayList<>();
-        args.add(scope.companyId());
         if (scope.selfAllowed()) {
             parts.add(alias + ".started_by = ?");
             args.add(scope.userId());
@@ -53,8 +52,7 @@ public final class InstanceScopeSql {
         if (parts.isEmpty()) {
             return new Scope("1 = 0", List.of());
         }
-        return new Scope("(" + company + " AND (" + String.join(" OR ", parts) + "))",
-            List.copyOf(args));
+        return new Scope("(" + String.join(" OR ", parts) + ")", List.copyOf(args));
     }
 
     /** 给"SQL 末尾还有 LIMIT ?"的查询拼参数：范围参数在前，limit 在最后。 */

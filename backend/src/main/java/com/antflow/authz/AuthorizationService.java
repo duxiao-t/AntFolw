@@ -61,7 +61,7 @@ public class AuthorizationService {
         this.snapshots = new AuthzSnapshotStore(jdbcTemplate);
         this.capabilities = new CapabilityResolver(snapshots);
         this.dataScopes = new DataScopeResolver(jdbcTemplate, snapshots, capabilities);
-        this.forms = new FormAccessGuard(jdbcTemplate, snapshots, capabilities, dataScopes);
+        this.forms = new FormAccessGuard(jdbcTemplate, snapshots, capabilities);
         this.instances = new InstanceAccessGuard(jdbcTemplate, snapshots, capabilities, dataScopes);
     }
 
@@ -136,8 +136,12 @@ public class AuthorizationService {
         return dataScopes.currentDataScope(permissionCode);
     }
 
+    /**
+     * 数据范围的判定结果。单公司模式下不再有 companyId：
+     * 可见性只由"本人 / 本部门 / 全部"三个维度决定，公司不再是隔离维度。
+     */
     public record DataScopeFilter(boolean admin, boolean unrestricted, boolean selfAllowed,
-                                  long userId, Set<Long> departmentIds, Long companyId) {
+                                  long userId, Set<Long> departmentIds) {
     }
 
     public boolean inCurrentDataScope(String permission, Long ownerId, Long departmentId) {

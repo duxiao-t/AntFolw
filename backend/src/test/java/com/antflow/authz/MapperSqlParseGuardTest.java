@@ -49,7 +49,7 @@ class MapperSqlParseGuardTest {
     @Test
     void generatedPermissionFragmentsAreParseable() {
         var scope = new AuthorizationService.DataScopeFilter(
-            false, false, true, 42L, java.util.Set.of(3L, 5L), 1L);
+            false, false, true, 42L, java.util.Set.of(3L, 5L));
         List.of(DataPermissionRules.FORM_DATA, DataPermissionRules.FORM_DEFINITION).forEach(rule ->
             assertThatCode(() -> CCJSqlParserUtil.parseCondExpression(
                 DataPermissionPolicyHandler.buildSegment(
@@ -59,7 +59,7 @@ class MapperSqlParseGuardTest {
     }
 
     @Test
-    void newBusinessReadsMustDeclareSnapshotFilteringOrAnAuthorizedInternalPath() {
+    void newBusinessReadsMustDeclareAnOwnerBoundaryOrAnAuthorizedInternalPath() {
         java.util.Set<String> authorizedDetails = java.util.Set.of(
             "selectInstanceDetail", "selectTaskDetail", "selectApprovalTasks",
             "selectFileLinks", "selectFilesByFormDataId");
@@ -71,7 +71,9 @@ class MapperSqlParseGuardTest {
                 if (statement == null) continue;
                 String sql = String.join(" ", statement.value());
                 if (!sql.contains("t_form_data") && !sql.contains("t_process_instance")) continue;
-                boolean filtered = sql.contains("company_inferred")
+                // 单公司改造后公司不再是业务边界：新增读必须绑定当前用户（#{userId}），
+                // 或显式登记为内部/已授权路径，避免"整表读"被悄悄加进来。
+                boolean filtered = sql.contains("#{userId}")
                     || method.isAnnotationPresent(InterceptorIgnore.class)
                     || authorizedDetails.contains(method.getName());
                 assertThat(filtered).as("%s#%s requires an explicit business boundary",

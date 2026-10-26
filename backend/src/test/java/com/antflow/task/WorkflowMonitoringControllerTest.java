@@ -49,7 +49,7 @@ class WorkflowMonitoringControllerTest {
     void everyQueryIsScopedToTheCallersOwnOrDepartmentInstances() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, true, 7L, Set.of(10L, 11L), 1L)));
+                false, false, true, 7L, Set.of(10L, 11L))));
 
         controller().overview(50);
 
@@ -61,7 +61,7 @@ class WorkflowMonitoringControllerTest {
     void aScopeWithNeitherSelfNorDepartmentsBecomesAFalsePredicate() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, false, 7L, Set.of(), 1L)));
+                false, false, false, 7L, Set.of())));
 
         controller().overview(50);
 
@@ -74,7 +74,7 @@ class WorkflowMonitoringControllerTest {
     void adminAndAllScopeAreNotFiltered() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                true, true, false, 7L, Set.of(), 1L)));
+                true, true, false, 7L, Set.of())));
 
         controller().overview(50);
 
@@ -82,22 +82,12 @@ class WorkflowMonitoringControllerTest {
             assertThat(sql).contains("1 = 1").doesNotContain("1 = 0"));
     }
 
-    @Test
-    void nonAdminAllScopeIsRestrictedToConfirmedCompanySnapshots() {
-        when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
-            .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, true, false, 7L, Set.of(), 2L)));
-        controller().overview(50);
-        assertThat(issuedSql()).allSatisfy(sql -> assertThat(sql)
-            .contains("instance.company_id = ?", "instance.company_inferred = false")
-            .doesNotContain("1 = 1"));
-    }
 
     @Test
     void outboxIsJoinedToInstancesAndOtherAggregateTypesAreExcluded() {
         when(authorization.currentDataScope(PermissionCodes.WORKFLOW_MONITOR_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, true, 7L, Set.of(), 1L)));
+                false, false, true, 7L, Set.of())));
 
         controller().overview(50);
 

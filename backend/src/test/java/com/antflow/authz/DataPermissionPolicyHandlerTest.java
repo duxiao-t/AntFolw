@@ -56,7 +56,7 @@ class DataPermissionPolicyHandlerTest {
     void administratorInjectsNothing() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                true, true, false, 7L, Set.of(), 1L)));
+                true, true, false, 7L, Set.of())));
 
         assertThat(handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)).isNull();
     }
@@ -65,24 +65,24 @@ class DataPermissionPolicyHandlerTest {
     void nonAdminAllScopeDoesNotDependOnFormUsageGrant() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, true, false, 7L, Set.of(), 1L)));
+                false, true, false, 7L, Set.of())));
 
         String segment = handler.getSqlSegment(FORM_DATA_TABLE, null, FORM_DATA_STATEMENT)
             .toString();
 
-        assertThat(segment).contains("t_form_data.company_id = 1", "company_inferred = false")
-            .doesNotContain("t_form_resource_grant");
+        // 单公司：段里不再出现公司条件（unrestricted 时该规则不产生任何 WHERE 片段）
+        assertThat(segment).doesNotContain("company_id", "company_inferred");
     }
 
     @Test
     void missingCapabilityFailsClosed() {
         when(authorizationService.currentDataScope(PermissionCodes.FORM_DATA_READ))
             .thenReturn(Optional.of(new AuthorizationService.DataScopeFilter(
-                false, false, false, 7L, Set.of(), 1L)));
+                false, false, false, 7L, Set.of())));
 
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(), 1L));
+            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of()));
 
         assertThat(segment).contains("1 = 0");
     }
@@ -91,7 +91,7 @@ class DataPermissionPolicyHandlerTest {
     void selfScopeUsesOwnerColumnWithoutFormUsageGrant() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(), 1L));
+            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of()));
 
         assertThat(segment).contains("t_form_data.created_by = 7");
         assertThat(segment).doesNotContain("t_form_resource_grant");
@@ -105,7 +105,7 @@ class DataPermissionPolicyHandlerTest {
         aliased.setAlias(new net.sf.jsqlparser.expression.Alias("fd"));
         String segment = DataPermissionPolicyHandler.buildSegment(aliased,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(3L, 5L), 1L));
+            new AuthorizationService.DataScopeFilter(false, false, false, 7L, Set.of(3L, 5L)));
 
         assertThat(segment).contains("scope_pi.form_data_id = fd.id");
         assertThat(segment).contains("scope_pi.started_dept_id IN (3,5)");
@@ -117,7 +117,7 @@ class DataPermissionPolicyHandlerTest {
     void selfAndDepartmentScopesAreUnioned() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(3L), 1L));
+            new AuthorizationService.DataScopeFilter(false, false, true, 7L, Set.of(3L)));
 
         assertThat(segment).contains(" OR ");
         assertThat(segment).contains("t_form_data.created_by = 7");
@@ -128,7 +128,7 @@ class DataPermissionPolicyHandlerTest {
     void formDefinitionListRequiresMaintainerAndIgnoresDepartmentScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DEFINITION_TABLE,
             DataPermissionRules.FORM_DEFINITION,
-            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L), 1L));
+            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
 
         assertThat(segment).contains("t_form_maintainer");
         assertThat(segment).contains("maintainer.user_id = 5");
@@ -141,11 +141,11 @@ class DataPermissionPolicyHandlerTest {
     void formDataListRequiresOnlyCapabilityScope() {
         String segment = DataPermissionPolicyHandler.buildSegment(FORM_DATA_TABLE,
             DataPermissionRules.FORM_DATA,
-            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L), 1L));
+            new AuthorizationService.DataScopeFilter(false, false, false, 5L, Set.of(5L)));
 
-        assertThat(segment).contains("EXISTS (SELECT 1 FROM t_process_instance",
-            "t_form_data.company_id = 1", "company_inferred = false");
-        assertThat(segment).doesNotContain("t_form_resource_grant");
+        // 单公司：只剩部门维度，不再叠公司条件
+        assertThat(segment).contains("started_dept_id IN (5)")
+            .doesNotContain("company_id", "company_inferred", "t_form_resource_grant");
     }
 
     /**

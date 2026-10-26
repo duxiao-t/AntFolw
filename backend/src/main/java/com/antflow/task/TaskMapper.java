@@ -18,8 +18,7 @@ public interface TaskMapper extends BaseMapper<TaskEntity> {
         SELECT * FROM t_task
         WHERE assignee_id = #{userId}
           AND EXISTS (SELECT 1 FROM t_process_instance pi
-            WHERE pi.id = t_task.proc_inst_id AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
+            WHERE pi.id = t_task.proc_inst_id
           )
         <choose>
           <when test="view == 'done'">
@@ -47,8 +46,7 @@ public interface TaskMapper extends BaseMapper<TaskEntity> {
         SELECT COUNT(*) FROM t_task
         WHERE assignee_id = #{userId}
           AND EXISTS (SELECT 1 FROM t_process_instance pi
-            WHERE pi.id = t_task.proc_inst_id AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + """
+            WHERE pi.id = t_task.proc_inst_id
           )
         <choose>
           <when test="view == 'done'">
@@ -71,7 +69,7 @@ public interface TaskMapper extends BaseMapper<TaskEntity> {
         SELECT COUNT(*) FROM t_task
         WHERE assignee_id = #{userId} AND (status = 'PENDING' OR (status = 'CC' AND read_at IS NULL))
           AND EXISTS (SELECT 1 FROM t_process_instance pi
-            WHERE pi.id = t_task.proc_inst_id AND
-        """ + com.antflow.authz.CompanySnapshotSql.INSTANCE_FOR_USER + ")")
+            WHERE pi.id = t_task.proc_inst_id)
+        """)
     long countPendingInbox(@Param("userId") long userId);
 }

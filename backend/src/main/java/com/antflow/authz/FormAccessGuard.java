@@ -46,39 +46,36 @@ public class FormAccessGuard {
     private final JdbcTemplate jdbcTemplate;
     private final AuthzSnapshotStore snapshots;
     private final CapabilityResolver capabilities;
-    private final DataScopeResolver dataScopes;
 
     FormAccessGuard(JdbcTemplate jdbcTemplate, AuthzSnapshotStore snapshots,
-                    CapabilityResolver capabilities, DataScopeResolver dataScopes) {
+                    CapabilityResolver capabilities) {
         this.jdbcTemplate = jdbcTemplate;
         this.snapshots = snapshots;
         this.capabilities = capabilities;
-        this.dataScopes = dataScopes;
     }
 
+    /**
+     * 单公司模式下的表单使用授权：只要有一条命中本人的授权行即可。
+     *
+     * <p>以前还要叠加"同一家公司也有授权"这一层（company_grant EXISTS），
+     * 公司不再是隔离维度后这层恒真，已移除。
+     */
     public boolean hasFormGrant(long formId, long userId) {
-        AuthzSnapshot snapshot = snapshots.snapshot(userId);
-        if (snapshot.admin()) {
-            return true;
-        }
-        return hasFormGrant(formId, userId, dataScopes.companyOf(snapshot));
-    }
-
-    /** companyId must come from the authenticated department or an owned draft snapshot. */
-    public boolean hasFormGrant(long formId, long userId, Long companyId) {
         if (snapshots.snapshot(userId).admin()) return true;
-        if (companyId == null) return false;
         Long count = jdbcTemplate.queryForObject("""
             SELECT COUNT(*) FROM t_form_resource_grant grant_row
             WHERE grant_row.form_def_id = ? AND
             """ + FORM_SUBJECT_MATCH + """
-             AND EXISTS (
-                 SELECT 1 FROM t_form_resource_grant company_grant
-                 WHERE company_grant.form_def_id = grant_row.form_def_id
-                   AND company_grant.subject_type = 'COMPANY'
-                   AND company_grant.subject_id = ?)
-            """, Long.class, formId, userId, userId, userId, companyId);
+            """, Long.class, formId, userId, userId, userId);
         return count != null && count > 0;
+    }
+
+    /**
+     * @deprecated 单公司模式：公司参数不再参与判定，请改用 {@link #hasFormGrant(long, long)}。
+     */
+    @Deprecated
+    public boolean hasFormGrant(long formId, long userId, Long ignoredCompanyId) {
+        return hasFormGrant(formId, userId);
     }
 
     /**
@@ -90,18 +87,10 @@ public class FormAccessGuard {
         if (snapshot.admin()) {
             return Optional.empty();
         }
-        Long companyId = dataScopes.companyOf(snapshot);
-        if (companyId == null) return Optional.of(Set.of());
         return Optional.of(new java.util.HashSet<>(jdbcTemplate.queryForList("""
             SELECT DISTINCT grant_row.form_def_id FROM t_form_resource_grant grant_row
             WHERE
-            """ + FORM_SUBJECT_MATCH + """
-             AND EXISTS (
-                 SELECT 1 FROM t_form_resource_grant company_grant
-                 WHERE company_grant.form_def_id = grant_row.form_def_id
-                   AND company_grant.subject_type = 'COMPANY'
-                   AND company_grant.subject_id = ?)
-            """, Long.class, userId, userId, userId, companyId)));
+            """ + FORM_SUBJECT_MATCH, Long.class, userId, userId, userId)));
     }
 
     /** Batch draft authorization uses each stored company, rather than today's department. */
@@ -134,13 +123,12 @@ public class FormAccessGuard {
         }
     }
 
-    public void requireFormUse(long formId, Long companyId) {
-        PrincipalHolder.Principal principal = capabilities.principal();
-        if (principal.isAdmin()) return;
-        capabilities.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
-        if (!hasFormGrant(formId, principal.userId(), companyId)) {
-            throw new HiddenResourceException("form not found");
-        }
+    /**
+     * @deprecated 单公司模式：公司参数不再参与判定，请改用 {@link #requireFormUse(long)}。
+     */
+    @Deprecated
+    public void requireFormUse(long formId, Long ignoredCompanyId) {
+        requireFormUse(formId);
     }
 
     public boolean canUseForm(long formId, long userId) {

@@ -247,7 +247,7 @@ class AuthorizationServiceTest {
         var guard = Mockito.spy(new InstanceAccessGuard(jdbcTemplate, store, capabilities,
             new DataScopeResolver(jdbcTemplate, store, capabilities)));
         Mockito.doReturn(assignee).when(store).snapshot(8L);
-        Mockito.doReturn(new InstanceAccessGuard.InstanceAccess(99L, 42L, 2L, false))
+        Mockito.doReturn(new InstanceAccessGuard.InstanceAccess(99L, 42L))
             .when(guard).instanceAccess(501L);
         Mockito.doReturn(true).when(guard).isReadableTaskAssignee(501L, 8L);
 
@@ -337,8 +337,7 @@ class AuthorizationServiceTest {
     private FormAccessGuard formGuard() {
         AuthzSnapshotStore store = new AuthzSnapshotStore(jdbcTemplate);
         CapabilityResolver capabilities = new CapabilityResolver(store);
-        return new FormAccessGuard(jdbcTemplate, store, capabilities,
-            new DataScopeResolver(jdbcTemplate, store, capabilities));
+        return new FormAccessGuard(jdbcTemplate, store, capabilities);
     }
 
     private static AuthorizationService.AuthzSnapshot snapshot(

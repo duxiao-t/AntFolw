@@ -57,14 +57,14 @@ public class DataScopeResolver {
         AuthzSnapshot snapshot = capabilities.currentSnapshot();
         if (snapshot.admin()) {
             return Optional.of(new DataScopeFilter(true, true, false,
-                snapshot.userId(), Set.of(), null));
+                snapshot.userId(), Set.of()));
         }
         List<RoleGrant> grants = snapshot.permissionRoles().getOrDefault(permissionCode, List.of());
         boolean all = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.ALL);
         boolean self = grants.stream().anyMatch(grant -> grant.dataScope() == DataScope.SELF);
         Set<Long> departments = all ? Set.of() : manageableDepartments(snapshot, permissionCode);
         return Optional.of(new DataScopeFilter(false, all, self,
-            snapshot.userId(), departments, companyOf(snapshot)));
+            snapshot.userId(), departments));
     }
 
     public boolean inCurrentDataScope(String permission, Long ownerId, Long departmentId) {
@@ -172,11 +172,6 @@ public class DataScopeResolver {
                 case SELF -> { }
             }
         }
-        if (!result.isEmpty()) {
-            Long companyId = companyOf(snapshot);
-            result.retainAll(companyId == null ? Set.of() : jdbcTemplate.queryForList(
-                "SELECT id FROM t_department WHERE company_id = ?", Long.class, companyId));
-        }
         return result;
     }
 
@@ -204,32 +199,6 @@ public class DataScopeResolver {
             WHERE child.id = ? AND parent.id = ?
             """, Boolean.class, candidateId, ancestorId);
         return Boolean.TRUE.equals(result);
-    }
-
-    /**
-     * 主体所在部门对应的公司。表单授权（t_form_resource_grant）与实例可见性都要按公司隔离，
-     * 而公司不在快照里（部门会被改组），所以每次从 t_department 现取。
-     */
-    Long companyOf(AuthzSnapshot snapshot) {
-        if (snapshot.departmentId() == null) return null;
-        return jdbcTemplate.query("SELECT company_id FROM t_department WHERE id = ?",
-            rs -> rs.next() ? nullableLong(rs, "company_id") : null, snapshot.departmentId());
-    }
-
-    /**
-     * 跨公司不可见：资源公司与主体公司不一致时直接判否（不是"退回按部门判"）。
-     * 这里的 {@code companyId != null &&} 是 fail-closed 的起点——归属未知的实例一律不可见。
-     */
-    boolean inCompanyDataScope(AuthzSnapshot snapshot, String permission,
-                               Long ownerId, Long departmentId, Long companyId) {
-        return companyId != null && companyId.equals(companyOf(snapshot))
-            && inDataScope(snapshot, permission, ownerId, departmentId);
-    }
-
-    private static Long nullableLong(java.sql.ResultSet resultSet, String column)
-            throws java.sql.SQLException {
-        long value = resultSet.getLong(column);
-        return resultSet.wasNull() ? null : value;
     }
 
     private static void addIfPresent(Set<Long> target, Long value) {
