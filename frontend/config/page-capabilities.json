@@ -1,6 +1,6 @@
 {
   "workplace": [],
-  "org.contacts": ["org:company:read", "org:department:read", "org:user:read"],
+  "org.contacts": ["org:department:read", "org:user:read"],
   "approval.forms": ["form:definition:read"],
   "approval.records": ["workflow:instance:read"],
   "approval.monitor": ["workflow:monitor:read"],

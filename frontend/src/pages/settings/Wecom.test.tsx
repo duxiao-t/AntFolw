@@ -12,7 +12,6 @@ vi.mock('@ant-design/pro-components', () => ({
 }));
 
 const settings = {
-  companyId: 1,
   corpId: 'ww-corp',
   secretConfigured: true,
   scheduleEnabled: false,
@@ -38,7 +37,6 @@ describe('WecomPage', () => {
   it('restores saved configuration without exposing the secret and shows partial results', async () => {
     const latestJob = {
       id: 9,
-      companyId: 1,
       status: 'PARTIAL',
       phase: 'COMPLETED',
       percent: 100,
@@ -80,7 +78,6 @@ describe('WecomPage', () => {
       if (url === '/api/integrations/wecom/settings') return Promise.resolve(settings);
       if (url === '/api/integrations/wecom/sync-jobs') return Promise.resolve({
         id: 10,
-        companyId: 1,
         status: 'PENDING',
         phase: 'CONNECTING',
         percent: 0,
@@ -108,7 +105,6 @@ describe('WecomPage', () => {
       expect.objectContaining({
         method: 'PUT',
         data: expect.objectContaining({
-          companyId: 1,
           corpId: 'ww-updated',
           scheduleEnabled: false,
           scheduleTime: '03:00:00',
@@ -120,7 +116,7 @@ describe('WecomPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /开始同步/ }));
     await waitFor(() => expect(requestMock).toHaveBeenCalledWith(
       '/api/integrations/wecom/sync-jobs',
-      { method: 'POST', data: { companyId: 1, mode: 'INCREMENTAL' } },
+      { method: 'POST', data: { mode: 'INCREMENTAL' } },
     ));
   });
 

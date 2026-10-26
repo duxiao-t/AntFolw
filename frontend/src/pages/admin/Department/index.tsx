@@ -5,10 +5,6 @@ import { Button, message } from 'antd';
 
 export default function DepartmentPage() {
   const qc = useQueryClient();
-  const cos = useQuery({
-    queryKey: ['companies'],
-    queryFn: () => request<any[]>('/api/companies').then((r: any) => r ?? []),
-  });
   const tree = useQuery({
     queryKey: ['departments-tree'],
     queryFn: () => request<any[]>('/api/departments').then((r: any) => r ?? []),

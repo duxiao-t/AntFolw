@@ -79,7 +79,7 @@ export function FormUsageScopeSection({ formId, isAdmin, permissions }: SectionP
           <div className={styles.settingControl}>
             <span>{!allCompanyRoleId ? '不可用' : allCompany ? '已启用' : '未启用'}</span>
             <Form.Item name="allCompany" valuePropName="checked" noStyle>
-              <Switch aria-label="已授权公司内全部员工" disabled={!allCompanyRoleId} />
+              <Switch aria-label="全部员工" disabled={!allCompanyRoleId} />
             </Form.Item>
           </div>
         </div>

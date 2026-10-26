@@ -7,7 +7,7 @@ import { DeptPickerField } from './DeptPickerField';
 const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
 vi.mock('@umijs/max', () => ({ request: requestMock, useModel: () => ({}) }));
 
-it('uses the runtime picker with the configured company and root department', async () => {
+it('uses the runtime picker with the configured root department', async () => {
   requestMock.mockResolvedValue([
     { id: 21, companyId: 2, parentId: null, name: '其他根' },
     { id: 22, companyId: 2, parentId: null, name: '配置根' },
@@ -23,7 +23,7 @@ it('uses the runtime picker with the configured company and root department', as
       }} onChange={onChange} />
     </QueryClientProvider>
   </ConfigProvider>);
-  await waitFor(() => expect(requestMock).toHaveBeenCalledWith('/api/pickers/departments', { params: { companyId: 2 } }));
+  await waitFor(() => expect(requestMock).toHaveBeenCalledWith('/api/pickers/departments'));
   fireEvent.mouseDown(screen.getByRole('combobox'));
   fireEvent.click(await screen.findByText('根下部门'));
   expect(screen.queryByText('其他根')).not.toBeInTheDocument();
