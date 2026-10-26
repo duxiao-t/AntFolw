@@ -129,9 +129,11 @@ export default function CorrectionModal({ formDataId, onClose, onSaved }: Props)
       onSaved();
       onClose();
     } catch (error: any) {
-      const status = error?.response?.status;
+      // 业务异常在本项目统一返回 422（GlobalExceptionHandler 的约定），所以这里按
+      // **错误码**判断而不是 HTTP 状态：拿状态码判 409 永远不成立，会走成通用错误提示。
+      const code = error?.response?.data?.code;
       const text = error?.response?.data?.message ?? '修正失败';
-      if (status === 409) {
+      if (code === 'CORRECTION_CONFLICT') {
         // 并发冲突：别人先改了，必须重新打开拿新的基准，不能盲目重试
         message.error(`${text}（请关闭窗口重新打开后再改）`);
       } else {

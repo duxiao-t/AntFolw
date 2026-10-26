@@ -197,8 +197,10 @@ public class FormDataCorrectionService {
         FormDataCorrectionRepository.InstanceRow instance = repository.latestInstance(formDataId);
         rejectRunning(instance);
         Map<String, Object> merged = readMap(pending.proposedData());
+        // 复核意见走 request.note()，不能沿用"修正原因"那一栏——
+        // 复核路径的 reasonText 参数本来就是空的，之前传 null 导致复核意见静默丢失。
         Applied applied = apply(row, instance, pending.proposedData(), merged,
-            principal.userId(), null, null, false, correctionId, principal);
+            principal.userId(), null, request.note(), false, correctionId, principal);
         return new CorrectionDtos.CorrectionResult(applied.correctionId(), STATUS_APPLIED,
             applied.revisionId());
     }

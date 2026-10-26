@@ -182,10 +182,12 @@ public class FormDataCorrectionRepository {
 
     /** 最后一位审批人：修正通知要同时告知提交人与他。 */
     public Long lastApprover(long instanceId) {
+        // 按 approved_at 排序（t_task 没有 completed_at，这里是实测修正过的坑：
+        // 列名写错时编译不会报错，只有真跑一次才暴露）。
         List<Long> ids = jdbc.queryForList("""
             SELECT COALESCE(approved_by, assignee_id) FROM t_task
             WHERE proc_inst_id = ? AND approved_by IS NOT NULL
-            ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 1
+            ORDER BY COALESCE(approved_at, created_at) DESC, id DESC LIMIT 1
             """, Long.class, instanceId);
         return ids.isEmpty() ? null : ids.get(0);
     }
