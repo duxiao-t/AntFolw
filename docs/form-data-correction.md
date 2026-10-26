@@ -290,7 +290,7 @@ COMMIT;
 
 | 检查项 | 期望 | 不满足时 |
 | --- | --- | --- |
-| `(form_def_id, form_def_version)` 在 `t_form_definition_version` 有行 | **33/33** | 列出明细，人工补版本行（V31 已按 `t_form_data` 补过一轮，理论上应全部命中） |
+| `(form_def_id, form_def_version)` 在 `t_form_definition_version` 有行 | **全部非草稿单据命中（附录 B2，实测 0 缺失）** | 列出明细，人工补版本行（V31 已按 `t_form_data` 补过一轮，理论上应全部命中） |
 | `legacy_approximate = true` 的占比 | 记录数量 | 前端必须显示"近似版本"提示 |
 | `current_revision_id` 为空的行 | 记录数量（F4 的导入行） | 修正路径必须容忍 `baseRevisionId = null`（已设计） |
 | 修订指向的 version 与 `(form_def_id, form_def_version)` 是否一致 | **无分歧** | 有分歧即触发 4.3.3 ③ 的 fail-closed，需人工判定 |
@@ -862,10 +862,13 @@ WHERE d.status <> 'DRAFT' AND d.form_def_version < f.version
 GROUP BY d.form_def_id, f.name, d.form_def_version, f.version
 ORDER BY drifted_rows DESC;
 
--- B2 硬门槛：漂移单据里，版本行是否都存在（期望 33/33 命中；缺一不可上线）
+-- B2 硬门槛：版本行是否都存在（期望 0 行；缺一不可上线）。
+-- 复核时把范围从"漂移单据"放宽到了全部非草稿单据：代价相同（一条 SQL），
+-- 却能去掉"只有漂移单据才会缺版本行"这个隐含假设——当前版本的单据同样
+-- 依赖这行存在才能解析 schema。实测当前库为 0 行。
 SELECT d.id, d.form_def_id, d.form_def_version
-FROM t_form_data d JOIN t_form_definition f ON f.id = d.form_def_id
-WHERE d.status <> 'DRAFT' AND d.form_def_version < f.version
+FROM t_form_data d
+WHERE d.status <> 'DRAFT'
   AND NOT EXISTS (
     SELECT 1 FROM t_form_definition_version v
     WHERE v.form_definition_id = d.form_def_id AND v.version_no = d.form_def_version);
