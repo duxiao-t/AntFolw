@@ -15,7 +15,7 @@
 | 谁能改 | 全局管理员（全部、含归属未确认）；表单维护者（`t_form_maintainer` **且** 持有能力，限**本公司**、归属已确认的数据） |
 | 允许的单据状态 | 实例 `APPROVED / REJECTED / WITHDRAWN`，或无实例的 `SUBMITTED`；**`RUNNING` 一律拒绝**，`DRAFT` 不走此接口 |
 | 不可改的东西 | `business_no / created_by / created_at / form_def_id / form_def_version / status / company_id / company_inferred`（结构性列，白名单之外） |
-| schema 漂移 | 修正**永远在单据自己的 `form_def_version` 上做**，校验用该版本的 schema；**不用** `t_form_definition.schema`（最新版） |
+| schema 漂移（已定结论，非"视情况"） | **禁止跨版本修正**：只在单据提交时的版本上改，`form_def_version` **不变**，schema 用 `revision.form_definition_version_id`（回落 `(form_def_id, form_def_version)`），**永不**用 `t_form_definition.schema`。存量实测 **33/324（10%，11 个表单）** 落后版本，属第一批用户就会撞上的主路径，详见 §4.3 |
 | 实例影响 | 只改 `current_form_revision_id` + `version`（乐观锁）；**status / 节点 / 审批意见 / 抄送全部不动** |
 | 并发 | `baseRevisionId` + `WHERE current_revision_id IS NOT DISTINCT FROM ?` 双保险 → `409 CORRECTION_CONFLICT` |
 | 下游 | 报表/BI 视图读**实时主表**，天然一致；外部抽取靠新增的 `corrections?sinceId=` 增量接口补拉 |
@@ -23,9 +23,9 @@
 
 ---
 
-## 1. 代码现状核实（决定方案的三条事实）
+## 1. 代码现状核实（决定方案的事实）
 
-团队给的事实我全部采信，另外补三条**会直接改变设计**的发现，都有代码位置：
+团队给的事实我全部采信；下面是**会直接改变设计**的发现，都定位到代码或实测数据。
 
 | # | 发现 | 位置 | 为什么重要 |
 | --- | --- | --- | --- |
@@ -35,6 +35,10 @@
 | F4 | `FormDataImportWriter` **只写 `t_form_data`，不产生修订** | `form/importer/FormDataImportWriter:97` | 存量里存在大量 `current_revision_id IS NULL` 的行 → 修正必须容忍 `baseRevisionId == null` |
 | F5 | 业务单号可由**表单字段拼出**（`FIELD` 部件） | `BusinessNumberService:43` | "被单号规则引用的字段"必须进**黑名单**：改了它，单号与内容就自相矛盾，而单号不能变 |
 | F6 | 条件分支引用字段的形状是 `props.groups[].conditions[].field` | `ConditionEvaluator:14-24` | 可以**静态抽取**出"参与流程走向判定"的字段集合 → 黑名单可实现 |
+| **F7** | **版本漂移是普遍现状**：已提交单据（`status <> 'DRAFT'`）共 324 张，其中 **33 张（11 个表单，约 10%）** 的 `t_form_data.form_def_version` **落后于** `t_form_definition.version` | 主理人本机库实测 | 这条把"漂移"从理论风险变成**第一批用户就会命中的主路径**。因此"旧 schema 下如何修正"必须有**唯一结论**，不能留选项（见 §4.3） |
+| **F8** | 已有按修订取 schema / 取值的原语：`revisionSchema(revisionId)`（join `form_definition_version`）、`revisionData(revisionId)` | `DefinitionVersionRepository:177/182` | 修正编辑页的 schema 有**现成且已被实例详情使用**的取法，不必新写；且能与实例详情**同源**（这是 §4.3 里"单一取值口径"的基础） |
+| **F9** | `t_form_maintainer` 是 `(form_def_id, user_id)` 复合主键 + `granted_by` + `created_at`，已对 **44 个表单**配置维护者；`hasFormMaintainer` 在此之上还校验 `form.deleted = 0` 与 `user.status = 'ACTIVE'` | `FormAccessGuard:153-168` | 判定确实就是一条 `EXISTS`，但**必须复用 `hasFormMaintainer`**，不要另写裸 `EXISTS`：裸写会漏掉"账号停用仍可修正"这条漏洞 |
+| **F10** | 孤儿对象清扫只按 `t_mobile_file` 行是否存在来判定（`selectAllStorageKeys`），**与 `t_form_data_file` 解绑无关**；`t_mobile_file` 行从不物理删除 | `MobileFileOrphanSweeper:45`、`MobileFileMapper:113` | 修正时"解绑附件"不会让历史修订里的附件失效——这是 §4.2 里敢用"替换当前集合"的**前提证据** |
 
 ---
 
@@ -110,7 +114,7 @@
 | 层 | 落点 | 判定 |
 | --- | --- | --- |
 | ① 端点能力 | `@PreAuthorize("@authz.console('form:data:correct')")` + `authorizationService.requirePermission(...)`（两处都写，与 `FormDataController` 现有风格一致） | 有没有"修正"这个动作的授权 |
-| ② 资源授权 | `FormAccessGuard.requireFormCorrection(formDefId)`：`admin → 放行`；否则 `requirePermission(correct)` **且** `hasFormMaintainer(formDefId, userId)` | 是不是**这张表单**的维护者（`t_form_maintainer` 成员关系 + 原子能力双满足，形状照抄 `requireFormMaintenance`） |
+| ② 资源授权 | `FormAccessGuard.requireFormCorrection(formDefId)`：`admin → 放行`；否则 `requirePermission(correct)` **且** `hasFormMaintainer(formDefId, userId)` | 是不是**这张表单**的维护者（`t_form_maintainer` 成员关系 + 原子能力双满足，形状照抄 `requireFormMaintenance`）。<br>**必须复用 `hasFormMaintainer`、不要另写裸 `EXISTS(SELECT 1 FROM t_form_maintainer …)`**：后者看着等价，但漏掉了 `form.deleted = 0` 与 `user.status = 'ACTIVE'` 两个校验（F9），会让**被停用的维护者账号继续能改已删除表单的数据**——这是 44 个表单、多人维护的实际配置下真会发生的事 |
 | ③ 数据范围 | `InstanceAccessGuard.canCorrectFormData(formDataId)`（新增）：`admin → true`；否则要求 `company_id` 非空 **且** `company_inferred = false` **且** `company_id = 本人公司`；**刻意不叠加** `form:data:read` 的 scope | 这条**单据**能不能动 |
 
 **为什么第 ③ 层不叠加 `form:data:read` 的 scope（这是本次最关键的一次判断）**：
@@ -125,7 +129,7 @@
 | 表单范围 | 任意表单 | 仅 `t_form_maintainer` 覆盖的表单 |
 | 数据范围 | 全部（**含**归属未确认 / 跨公司） | 本公司内、**归属已确认**（`company_id` 非空且 `company_inferred=false`）的数据 |
 | 允许的实例状态 | APPROVED / REJECTED / WITHDRAWN / 无实例 | 同（`RUNNING` 都禁止） |
-| 换版修正（按最新 schema 重填） | 阶段二开放 | **不开放** |
+| 换版修正（按最新 schema 重填） | **禁止**（修正永不改 `form_def_version`，见 §4.3） | **禁止** |
 | 一键回滚 | 可（任意历史修订） | 可（本公司内、且仅回滚"由本表单修正产生"的修订） |
 | 结构性列（单号/归属/提交人/版本） | 禁止 | 禁止 |
 | 归属未确认的数据 | 可修（但**不会**顺手把归属"确认"掉） | 不可修 → 提示"请联系管理员确认归属" |
@@ -180,9 +184,12 @@ SELECT id, status, version, current_form_revision_id
 -- 3) 并发基准比对（客户端带 baseRevisionId，null 表示"没有修订"）
 --    不一致 → 409 CORRECTION_CONFLICT（有人先改过：NODE_EDIT / RESUBMIT / 另一次修正）
 
--- 4) 字段策略 + 校验：schema = t_form_definition_version(form_def_id, form_def_version)
---    allowed = CorrectionFieldPolicy(...);  请求字段 ⊆ allowed
---    formDefinitionService.validateSubmission(schema_of_that_version, merged, changedFieldIds)
+-- 4) schema 取值（唯一口径，见 §4.3.3）：
+--    有 current_revision_id → revisionSchema(current_revision_id)
+--    无（导入行）           → t_form_definition_version(form_def_id, form_def_version).schema
+--    两者都有且版本不同 → 409 CORRECTION_SCHEMA_CONFLICT（fail-closed）
+--    字段策略 + 校验：allowed = CorrectionFieldPolicy(...);  请求字段 ⊆ allowed
+--    formDefinitionService.validateSubmission(schema_of_record, merged, changedFieldIds)
 --    附件字段按 modes = {changed: EDITABLE, 其余: READONLY} 交给 mediaValidator
 
 -- 5) 附件先落主表集合（F2：修订快照从这里复制）
@@ -222,32 +229,71 @@ COMMIT;
 
 | 表 | 角色 | 修正时 |
 | --- | --- | --- |
-| `t_form_data_file` | **当前**附件集合（受理、导出、详情展示都以它为主） | 用既有 `MobileFileLinkService.reconcileEditable` **增量替换**：只动被允许的字段，其它字段的附件原样保留 |
+| `t_form_data_file` | **当前**附件集合（受理、导出、详情展示都以它为主） | 用既有 `MobileFileLinkService.reconcileEditable` **按字段替换**：只动"被允许且请求里提交了"的字段，其它字段的附件**原样保留** |
 | `t_form_data_revision_file` | 每个修订的附件**快照**（不可变） | **不手写**，由 `syncRevisionFiles` 从当前集合复制（F2）。修正后自动得到新快照 |
 
-- 附件字段的值同时存在于 `data`（字段值里是 file 引用数组）与 `t_form_data_file`（关系表）——**两处必须同时改**，由 `reconcileEditable` + `merged data` 一次事务内保证。
-- 删除的附件只是**解绑关系**，`t_mobile_file` 行与对象存储里的文件不动（审计与追溯需要）。
+**明确结论：采用"替换当前集合 → 再快照"，不做"附件版本链"**。理由与代价：
+
+| 备选 | 机制 | 结论 |
+| --- | --- | --- |
+| **A 替换当前集合 + 快照（采纳）** | `reconcileEditable` 改 `t_form_data_file` → `createRevision` 自动快照 | 与提交/重提（`reconcile`）**同一套语义**，读侧（详情/导出/移动端附件投影）零改动；历史版本靠 `revision_file` 已经可回溯 |
+| B 附件版本链（另建 `t_form_attachment_version`） | 每次修正追加附件版本，读侧要选"当前是第几版" | 与 `revision_file` 形成双轨，所有读附件的地方都要加"选哪一版"的判断；收益仅为"能直接看某次附件差异"，而这个能力 `revision_file` 已经给了。**排除** |
+| C 禁止修正附件（只允许改文本） | 附件字段进黑名单 | 直接砍掉一类核心场景（"附件传错"是用户点名的三种错之一）。**排除** |
+
+配套的三条硬规则：
+
+- 附件字段的值同时存在于 `data`（字段值是 file 引用数组）与 `t_form_data_file`（关系表）——**两处必须同时改**，由 `reconcileEditable` + `merged data` 在同事务内保证；只改一处的后果是"界面有、导出没有"或反之。
+- **只解绑关系，不做 `t_mobile_file` 软删**。依据 F10：孤儿清扫器只按 `t_mobile_file` **行是否存在**判定（`MobileFileOrphanSweeper:45` → `MobileFileMapper:113`），而 `t_mobile_file` 行从不物理删除，所以解绑后对象仍在、历史修订的快照仍能打开。反之，若顺手把 `t_mobile_file` 标成 `deleted_at`，历史修订里的附件会在详情投影里消失（`FormDataFileMapper:42` 筛 `deleted_at IS NULL`）——**这是本设计里最容易写错的一行代码**。
 - 审计里附件只记 `fileId` 增删，**不记 URL、不记内容**（审计表长期保留且可导出，`fileId` 已经足够定位）。
 
-### 4.3 `form_def_version` 漂移（最容易出事的地方）
+### 4.3 旧 schema 下如何安全修正（**明确结论：禁止跨版本，原地修正**）
 
-先把事实钉住：
-- `t_form_data.form_def_version` = 这张单据**填报时**的表单版本，是个快照，**修正不改变它**。
-- `t_form_definition_version(form_def_id, version_no)` 是**不可变**的历史 schema（V31 建立；`legacy_approximate = true` 的行表示"旧 schema 未知，用当时最新 schema 近似"）。
+#### 4.3.1 先把事实钉住
+
+- `t_form_data.form_def_version` = 这张单据**填报时**的表单版本（快照），**修正不改变它**。
+- `t_form_definition_version(form_def_id, version_no)` 是**不可变**历史 schema（V31 建立；`legacy_approximate = true` 表示"旧 schema 未知，用迁移当时的最新 schema 近似"）。
 - `createRevision` 用 `formVersionId(formDefId, formDefVersion)` 定位版本行 → 修正产出的修订**自动钉在旧版本上**（F1）。
+- 漂移是**常态而非边角**：324 张已提交单据里 33 张（11 个表单，≈10%）落后于当前表单版本（F7）。所以下面不是"要不要处理异常"，而是"主路径怎么走"。
 
-设计规则：
+#### 4.3.2 三个候选，一个结论
 
-| 场景 | 处理 |
-| --- | --- |
-| 单据版本 < 表单最新版（常态） | **在旧版本上修正**。校验/渲染都用 `t_form_definition_version(form_def_id, form_def_version).schema`。**禁止**用 `t_form_definition.schema`（最新） |
-| 新版本**删除**了某字段 | 旧 schema 里仍有该字段 → 允许看、允许改（它属于这张单据的事实）。不做"顺手清理孤儿字段" |
-| 新版本**新增**了必填字段 | **不强制补填**。校验集合 = 被修改的字段（`validateSubmission(schema, merged, changedFieldIds)` 的既有语义），不是全量必填校验。否则老单据永远修不了 |
-| 版本行缺失（`VERSION_NOT_FOUND`） | 返回 `409 CORRECTION_SCHEMA_UNAVAILABLE`，并提示"该单据的版本快照缺失，需管理员走按最新版本重填" → **阶段二**能力，MVP 只报错不动手 |
-| `legacy_approximate = true` | 允许修正，但 `correction-form` 响应带 `schemaApproximate: true`，前端提示"该单据的原始表单版本为近似还原，字段可能与当时略有差异" |
-| 字段 id 在新旧版本间复用但类型变了 | 因为只在旧版本上操作，类型永远取旧版本定义 → 不会出现"按新类型校验旧值"的错乱 |
+| 备选 | 机制 | 优点 | 缺点 | 结论 |
+| --- | --- | --- | --- | --- |
+| **X1 只在提交版本上原地修正，`form_def_version` 不变（成本最低的正确解）** | 渲染/校验/新修订全用**单据自己的版本 schema** | 与 `createRevision` 的原生行为一致（F1）；与实例详情同源（F3/F8）；不会因为新版必填挡住老单；改动面最小 | 老单据上的字段如果在新版被删，用户"改不了新版里的新字段"——但那张单据本来就没有那些字段 | **✅ 采纳** |
+| X2 修正时把 `form_def_version` 升到最新，并做字段兼容性校验/映射 | 升版 + 数据迁移 + 全量必填校验 | 顺手把老单"洗"成新版 | ① 语义混了：这是"重新填报"，不是"改个错字"；② 新版必填会挡住 10% 存量单（F7），修正功能上线即不可用；③ 一旦升版，此后所有按 `form_def_version` 做的历史解释都失去依据；④ 字段映射要人工确认，MVP 做不完 | **❌ 禁止**（如需，另立独立动作，见 4.3.4） |
+| X3 禁止修正落后版本的单据（只允许"版本=最新"的单据修正） | 版本不等直接拒绝 | 实现最简单 | 直接把 10% 单据排除在外，而这 10% 恰恰是"最老、最可能填错、最需要改"的那批 | **❌ 排除** |
 
-> **一条硬不变量**：修正的**渲染 schema** 与**校验 schema** 必须是同一份文本（同一条 SQL 取值口径）。历史上"台账用 A 版本渲染、提交用 B 版本校验"已经害过一次（`FormDataMapper.selectSchemas` 的注释就是在说这件事），这里必须显式引用同一处取值。
+> **一句话结论：永远在这张单据提交时的版本上修正，`form_def_version` 一个字节都不改。**
+
+#### 4.3.3 落地规则（每一条都能写成断言）
+
+| 场景 | 处理 | 断言/错误码 |
+| --- | --- | --- |
+| 单据版本 < 表单最新版（**常态，10%**） | 在单据自己的版本上修正；`correction-form` 额外返回 `formDefVersion`、`latestVersion`、`versionDrifted: true`，前端显示"这张单据按 v3 表单填报（当前表单已到 v5），修正只影响本单据" | 响应字段，不报错 |
+| **schema 取值口径（唯一）** | ① 有 `current_revision_id` → 用 `revision.form_definition_version_id`（即 `revisionSchema(revisionId)`，F8），与实例详情完全同源；② 无修订（导入行，F4）→ 回落 `(form_def_id, form_def_version)`；③ **两处都存在且指向不同版本 → 立即失败**，不做"选一个" | ③ 抛 `409 CORRECTION_SCHEMA_CONFLICT`（fail-closed）。这种分歧只可能来自数据损坏，猜哪个都会错 |
+| 新版本**删除**了字段 | 旧 schema 里仍在 → 允许看、允许改；**不**顺手清理孤儿字段（数据是事实，清理是另一件事） | 无 |
+| 新版本**新增**了必填字段 | **不强制补填**。校验集合 = 本次被修改的字段（`validateSubmission(schema, merged, changedFieldIds)` 的既有语义），不是全量必填校验 | 否则老单据永远修不了 |
+| 版本行缺失（`VERSION_NOT_FOUND`） | 拒绝修正，`409 CORRECTION_SCHEMA_UNAVAILABLE`，提示"该单据的表单版本快照缺失，请联系管理员" | MVP **只报错、不做自动修复** |
+| `legacy_approximate = true` | 允许修正；响应带 `schemaApproximate: true` + 前端醒目提示"该单据的原始表单版本为近似还原，字段可能与当时略有差异" | 响应字段 |
+| 字段 id 在新旧版间复用但**类型变了** | 永远取旧版本的字段定义 → 不会"按新类型校验旧值" | 无 |
+| 下拉/外链选项 | 选项解析走 `OptionSchemaResolver`（按 `current_form_revision_id` 的版本取选项源，F3 同源），所以修正弹窗里的候选是"当时的选项"，不会出现"旧值不在新选项里" | 无 |
+| 单据版本**高于**表单当前版本（脏数据/回滚发布） | 按同样的口径用单据自己的版本；只记日志 + 审计 metadata 标 `versionAheadOfCurrent: true`，不阻断 | 无 |
+
+#### 4.3.4 明确**不做**的两件事（避免后人"顺手加"）
+
+1. **不在修正接口里改 `form_def_version`**，也不接受 `targetVersion` 参数。若业务确实要把老单据迁到新版：那是**另一个动作**（建议 `form:data:migrate_version`，管理员 + 单独审计 + 逐字段人工确认映射 + 迁移后重算校验），排期在阶段二，**不得夹带进修正**。
+2. **不做"用最新 schema 试探性渲染"**。任何"先按新 schema 打开看看能不能存回去"的做法都会踩 §13.2 的坑 4（必填挡住 / 字段错位丢值）。
+
+#### 4.3.5 上线前的存量体检（T01 的验收项，只读 SQL）
+
+这 33 张单据必须在功能上线**前**逐条确认"版本行存在且 schema 可解析"，否则用户点开修正弹窗就报错。体检 SQL 见 §附录 B；判定标准：
+
+| 检查项 | 期望 | 不满足时 |
+| --- | --- | --- |
+| `(form_def_id, form_def_version)` 在 `t_form_definition_version` 有行 | **33/33** | 列出明细，人工补版本行（V31 已按 `t_form_data` 补过一轮，理论上应全部命中） |
+| `legacy_approximate = true` 的占比 | 记录数量 | 前端必须显示"近似版本"提示 |
+| `current_revision_id` 为空的行 | 记录数量（F4 的导入行） | 修正路径必须容忍 `baseRevisionId = null`（已设计） |
+| 修订指向的 version 与 `(form_def_id, form_def_version)` 是否一致 | **无分歧** | 有分歧即触发 4.3.3 ③ 的 fail-closed，需人工判定 |
 
 ---
 
@@ -367,12 +413,14 @@ GET /api/forms/data/corrections?sinceId=<lastSeen>&limit=500
 {
   "dataId": 1024,
   "formDefId": 44,
-  "formDefVersion": 3,               // 单据自己的版本，不是最新
-  "schemaApproximate": false,
+  "formDefVersion": 3,               // 单据自己的版本（schema 来源，不是最新）
+  "latestVersion": 5,                // 表单当前版本，仅供提示
+  "versionDrifted": true,            // = formDefVersion < latestVersion（存量里约 10%）
+  "schemaApproximate": false,        // 该版本行的 legacy_approximate
   "baseRevisionId": 8812,            // null = 该单据还没有修订（导入行）
   "instanceId": 9931,                // null = 无流程单据
   "instanceStatus": "APPROVED",      // null = 无实例
-  "data": { "f_amount": 5000, "f_remark": "……" },
+  "data": { "f_amount": 5000, "f_remark": "……" },   // 含旧版本独有的字段，原样回传
   "attachments": [{ "fileId": "…", "fieldId": "f_invoice", "sortOrder": 0 }],
   "allowedFields": ["f_amount", "f_remark", "f_invoice"],
   "blockedFields": [
@@ -414,6 +462,7 @@ GET /api/forms/data/corrections?sinceId=<lastSeen>&limit=500
 | `CORRECTION_INSTANCE_RUNNING` | 409 | 实例仍在审批中 | "审批中的单据不能这样修正：请用审批节点的字段权限，或先撤回" |
 | `CORRECTION_STATUS_NOT_ALLOWED` | 400 | `DRAFT`，或实例状态不在允许集合 | "草稿请直接修改；此状态不支持修正" |
 | `CORRECTION_SCHEMA_UNAVAILABLE` | 409 | 该 `(form_def_id, form_def_version)` 版本行缺失 | "该单据的表单版本快照缺失，请联系管理员" |
+| `CORRECTION_SCHEMA_CONFLICT` | 409 | 修订指向的版本与 `(form_def_id, form_def_version)` **不一致**（数据损坏，见 §4.3.3 ③） | "该单据的版本信息不一致，已阻止修正，请联系管理员" |
 | `CORRECTION_FIELD_FORBIDDEN` | 400 | 请求字段不在 `allowedFields`（含黑名单） | 指名到字段："字段「所属部门」不允许事后修正：它决定审批走向" |
 | `CORRECTION_FIELD_UNKNOWN` | 400 | 字段 id 不在该单据版本的 schema 里 | "字段不存在于这张单据的表单版本" |
 | `CORRECTION_REASON_REQUIRED` | 400 | 缺 `reasonCode` / `OTHER` 缺说明 / 缺 `confirm` | "请填写修正原因并确认" |
@@ -500,6 +549,12 @@ classDiagram
         -businessNoFields(String settingsJson) Set~String~
     }
 
+    class CorrectionSchemaResolver {
+        +resolve(long dataId, long revisionId, long formDefId, int formDefVersion) VersionedSchema
+        -byRevision(long revisionId) VersionedSchema
+        -byFormVersion(long formDefId, int versionNo) VersionedSchema
+    }
+
     class DefinitionVersionRepository {
         +createRevision(FormData data, String status, String reason, long actorId) long
         +formVersionId(long formDefId, int versionNo) long
@@ -559,7 +614,9 @@ classDiagram
     FormDataCorrectionController --> FormDataCorrectionService
     FormDataCorrectionService --> FormDataCorrectionRepository
     FormDataCorrectionService --> CorrectionFieldPolicy
+    FormDataCorrectionService --> CorrectionSchemaResolver
     FormDataCorrectionService --> DefinitionVersionRepository
+    CorrectionSchemaResolver ..> DefinitionVersionRepository : "revisionSchema / byFormVersion"
     FormDataCorrectionService --> MobileFileLinkService
     FormDataCorrectionService --> MediaSubmissionValidator
     FormDataCorrectionService --> AuditService
@@ -581,6 +638,7 @@ sequenceDiagram
     participant FG as FormAccessGuard
     participant IG as InstanceAccessGuard
     participant P as CorrectionFieldPolicy
+    participant SR as CorrectionSchemaResolver
     participant R as CorrectionRepository
     participant FL as MobileFileLinkService
     participant V as DefinitionVersionRepository
@@ -591,10 +649,16 @@ sequenceDiagram
     C->>S: correctionForm(id)
     S->>FG: requireFormCorrection(formDefId)
     S->>IG: requireCorrectableFormData(id)
-    S->>R: lockFormData / instanceOf / schemaOfOwnVersion
+    S->>R: lockFormData / instanceOf
+    S->>SR: resolve(dataId, currentRevisionId, formDefId, formDefVersion)
+    SR->>V: revisionSchema(revisionId) 或 (form_def_id, form_def_version)
+    alt 两处版本不一致
+        SR-->>S: 409 CORRECTION_SCHEMA_CONFLICT
+    end
+    SR-->>S: schema（单据自己的版本）
     S->>P: allowed(schema, data, process, settings)
     P-->>S: allowedFields / blockedFields
-    S-->>Admin: {schema(自己的版本), data, attachments, allowedFields, baseRevisionId}
+    S-->>Admin: {schema(自己的版本), versionDrifted, data, attachments, allowedFields, baseRevisionId}
 
     Admin->>C: POST /{id}/corrections {baseRevisionId, reasonCode, data, attachments, confirm}
     C->>S: correct(id, req, actorId)
@@ -608,6 +672,7 @@ sequenceDiagram
     alt instance.status = RUNNING
         S-->>C: 409 CORRECTION_INSTANCE_RUNNING
     end
+    S->>SR: resolve(...)  [与 GET 同一口径，同一实现]
     S->>P: allowed(...)  [字段必须 ⊆ allowed]
     S->>S: validateSubmission(schema_of_own_version, merged, changedFieldIds)
     S->>FL: reconcileEditable(formDataId, attachments, actorId, modes)
@@ -645,7 +710,10 @@ sequenceDiagram
 | `backend/src/main/java/com/antflow/form/correction/FormDataCorrectionRepository.java` | 新表读写 + 行锁 + 实例指针 CAS + 增量查询 |
 | `backend/src/main/java/com/antflow/form/correction/CorrectionFieldPolicy.java` | 白名单/黑名单计算（静态抽取条件字段、单号字段） |
 | `backend/src/main/java/com/antflow/form/correction/CorrectionDtos.java` | 请求/响应 record（含错误码常量） |
-| `backend/src/test/java/com/antflow/form/correction/…` | 单测（策略）+ 集成测试（并发/附件/schema 漂移/权限矩阵） |
+| `backend/src/main/java/com/antflow/form/correction/CorrectionSchemaResolver.java` | **schema 单一取值口径**（`revisionSchema` 优先 → 回落 `(form_def_id, form_def_version)` → 分歧 fail-closed）。单独成类：它是 §4.3 全部规则的唯一实现点，与实例详情同源 |
+| `backend/src/test/java/com/antflow/form/correction/…` | 单测（策略/口径）+ 集成测试（并发/附件/schema 漂移/权限矩阵） |
+
+> 存量体检 SQL（附录 B）**不落成仓库脚本**：它是一次性验收动作，放进文档即可；仓库里再堆一个只跑一次的脚本，半年后没人知道它是否已执行过。
 
 ### 11.2 后端（修改）
 
@@ -690,15 +758,16 @@ graph LR
 
 | ID | 任务 | 主要文件 | 依赖 | 优先级 |
 | --- | --- | --- | --- | --- |
-| **T01** | 平台底座：V72 迁移 + 能力码登记 + `RevisionReasons` 收口 + 契约快照重建 | `V72__form_data_correction.sql`、`PermissionCodes`、`PermissionCatalog`、`RevisionReasons`、`frontend/config/antflow-api.json` | — | P0 |
-| **T02** | 可修正判定：`requireFormCorrection` / `canCorrectFormData` / `CorrectionFieldPolicy`（条件字段、单号字段、结构性列）+ 权限矩阵与策略单测 | `FormAccessGuard`、`InstanceAccessGuard`、`AuthorizationService`、`CorrectionFieldPolicy` | T01 | P0 |
-| **T03** | 修正写路径：controller + service + repository，事务写序、`baseRevisionId` CAS、实例乐观锁、附件 reconcile、`ADMIN_CORRECTION` 修订、审计 | `FormDataCorrectionController/Service/Repository`、`CorrectionDtos`、集成测试 | T02 | P0 |
-| **T04** | 读路径与回滚：`correction-form` 视图（含 allowedFields/blockedFields）、修正历史、一键回滚、`corrections?sinceId=` 增量 | 上述 + `CorrectionHistory` 相关 DTO/查询 | T03 | P1 |
-| **T05** | 前端：台账详情"修正数据"入口 + 修正弹窗（diff/原因/二次确认）+ 409 引导 + 契约类型 + 前端测试 | `CorrectionModal.tsx`、`useCorrection.ts`、`index.tsx`、`authz.ts`、`shared/api.generated.d.ts` | T03（接口签名冻结后即可开工，与 T04 并行） | P0 |
+| **T01** | 平台底座：V72 迁移 + 能力码登记 + `RevisionReasons` 收口 + **存量版本体检（§4.3.5，33 张单据逐条核对）** + 契约快照重建 | `V72__form_data_correction.sql`、`PermissionCodes`、`PermissionCatalog`、`RevisionReasons`、`frontend/config/antflow-api.json` | — | P0 |
+| **T02** | 可修正判定：`requireFormCorrection` / `canCorrectFormData` / `CorrectionFieldPolicy`（条件字段、单号字段、结构性列）+ **schema 单一取值口径与分歧 fail-closed** + 权限矩阵/策略单测 | `FormAccessGuard`、`InstanceAccessGuard`、`AuthorizationService`、`CorrectionFieldPolicy` | T01 | P0 |
+| **T03** | 修正写路径：controller + service + repository，事务写序、`baseRevisionId` CAS、实例乐观锁、附件按字段 reconcile、`ADMIN_CORRECTION` 修订、审计 | `FormDataCorrectionController/Service/Repository`、`CorrectionDtos`、集成测试 | T02 | P0 |
+| **T04** | 读路径与回滚：`correction-form` 视图（含 allowedFields/blockedFields/versionDrifted）、修正历史、一键回滚、`corrections?sinceId=` 增量 | 上述 + `CorrectionHistory` 相关 DTO/查询 | T03 | P1 |
+| **T05** | 前端：台账详情"修正数据"入口 + 修正弹窗（旧版本 schema 渲染 / diff / 原因 / 二次确认 / "版本已升级"提示）+ 409 引导 + 契约类型 + 前端测试 | `CorrectionModal.tsx`、`useCorrection.ts`、`index.tsx`、`authz.ts`、`shared/api.generated.d.ts` | T03（接口签名冻结后即可开工，与 T04 并行） | P0 |
 
 **MVP（可上线的最小范围）** = T01 + T02 + T03 + T05 的"入口 + 弹窗 + 保存路径"，其中：
-- 必须包含：能力码、三层鉴权、字段白名单、单据自己版本的 schema 校验、附件 reconcile、实例指针同步、审计、409 并发语义。
-- 可以推迟：T04 的修正历史 UI、一键回滚、下游增量接口、按最新版本重填（阶段二）、双人复核、提交人通知。
+- 必须包含：能力码、三层鉴权、字段白名单、**单据自己版本的 schema 渲染与校验（含 10% 漂移单据）**、附件按字段 reconcile、实例指针同步、审计、409 并发语义、存量体检结果。
+- 可以推迟：T04 的修正历史 UI、一键回滚、下游增量接口、双人复核、提交人通知。
+- **明确不在任何阶段做**：在修正里改 `form_def_version`（见 §4.3.4）。
 
 ---
 
@@ -713,24 +782,28 @@ graph LR
 | I3 | `business_no / created_by / created_at / form_def_id / form_def_version / status / company_id / company_inferred` 修正不可变 | 请求 DTO 里根本没有这些字段 + 服务端白名单断言；测试逐列比对修正前后 |
 | I4 | 实例的 `status / current_node_id / finished_at / 审批任务 / 意见 / 抄送` 修正不可变，只允许 `current_form_revision_id`、`version` 变 | 集成测试比对 `t_task`、`t_cc_record` 行数与内容 |
 | I5 | `RUNNING` 实例一律拒绝修正 | 状态判定 + 用例 |
-| I6 | 渲染 schema 与校验 schema 是**同一份**（单据自己的 `form_def_version`） | 两者走同一条 SQL（单测断言调用的是同一个取值方法） |
+| I6 | **schema 单一取值口径**：渲染与校验用同一份版本 schema（优先 `revisionSchema(current_revision_id)`，回落 `(form_def_id, form_def_version)`），两者分歧时 **fail-closed** | 同一个取值方法 + 单测断言（含"分歧必抛 `CORRECTION_SCHEMA_CONFLICT`"用例） |
 | I7 | 归属未确认（`company_id IS NULL` 或 `company_inferred`）→ 仅管理员；修正不改归属标记 | `canCorrectFormData` 单测 + R1/R2 断言 |
 | I8 | 审计 append-only | 不改 `t_audit_event` 与保护函数；只 `INSERT` |
 | I9 | 修正请求字段 ⊆ `allowedFields`（服务端算） | 白名单校验在 service，不依赖前端 |
 | I10 | 台账/导出/BI 视图继续读主表；**若将来引入物化视图，修正必须触发刷新** | 文档约束 + 视图定义注释 |
+| I11 | `form_def_version` **永不**被修正改变；修正不接受 `targetVersion` 类参数 | DTO 无此字段 + 集测逐列比对（同 I3） |
+| I12 | 附件修正 = **按字段替换当前集合**；只删 `t_form_data_file` 关系行，**绝不**软删 `t_mobile_file`（否则历史修订的附件在详情里消失，F10） | 集测断言 `t_mobile_file` 行数与 `deleted_at` 不变 + 历史修订附件仍可列出 |
 
-### 13.2 最容易踩的 8 个坑
+### 13.2 最容易踩的 10 个坑
 
 | # | 坑 | 后果 | 防法 |
 | --- | --- | --- | --- |
 | 1 | **只追加修订、不改主表** | 台账/导出/实例详情（读主表）看不到修正，选项/附件校验（读修订）却跟着变 → "同一单据两个值" | I2 + 集测比对两处内容 |
 | 2 | **先 `createRevision` 再 reconcile 附件** | 修订快照复制到旧附件（F2），历史版本永远错，且无法自愈 | 写序固定；集测断言修订快照 = 当前集合 |
 | 3 | **忘了同步 `t_process_instance.current_form_revision_id`** | 详情按旧修订取 schema、按新主表取值（F3），字段错位；附件校验口径也不一致 | 写序第 8 步；集测断言指针已更新 |
-| 4 | **用 `t_form_definition.schema`（最新）渲染或校验** | 老单据被新版的必填/类型挡住，或字段 id 错位导致丢值 | I6；代码里显式只从 `t_form_definition_version` 取 |
+| 4 | **用 `t_form_definition.schema`（最新）渲染或校验** | **10% 的存量单据（33 张 / 11 个表单）当场命中**：新版必填挡住修正，或字段 id 错位导致丢值 | I6 + §4.3.3 的单一取值口径；集测里必须有一条"落后 2 个版本的单据能正常修正"的用例 |
 | 5 | **并发：只靠 `MAX(revision_no)+1` 的行锁** | 行锁只保证修订号不撞，**不保证**"基于最新内容合并"；两人各改一半会互相覆盖 | `baseRevisionId` CAS + `WHERE current_revision_id IS NOT DISTINCT FROM ?` 双保险 |
 | 6 | **让"公司归属"跟着字段走**（给修正开个 `companyId` 参数，或修改后重算归属） | 单据从某些人的台账里凭空消失/出现，且无历史可解释 | R1/R2；参数白名单；归属变更走独立受控动作 |
 | 7 | **修正"参与流程分支判定"的字段** | 历史审批的"为什么走这条分支"解释不通，审计上说不清责任 | 黑名单（`props.groups[].conditions[].field`）+ 抽取失败 fail-closed |
 | 8 | **修正"参与单号生成"的字段** | 单号与内容自相矛盾，而单号有唯一索引不能改 | 黑名单（`settings.businessNumber.parts[].fieldId`）+ UI 明示原因 |
+| 9 | **给修正加"顺手升级到最新表单版本"** | 语义从"改错字"变成"重新填报"；新版必填挡住 10% 存量单；历史解释失去依据 | §4.3.4 明确禁止；`form_def_version` 进 I3/I11 不可变清单 |
+| 10 | **修正时把被替换的附件 `t_mobile_file` 软删** | 历史修订的快照仍指向该 file，但详情投影筛 `deleted_at IS NULL` → 历史附件"看得见 id、点不开" | I12；只删关系行 |
 
 ### 13.3 已知的不完美（接受并记录）
 
@@ -750,9 +823,11 @@ graph LR
 | Q1 | 修正后是否要**通知**提交人与最后审批人？渠道（站内/企业微信）与文案？ | 建议要（否则单据悄悄变了）；MVP 可先只写审计，通知放 T04 | 影响 T04 范围 |
 | Q2 | 财务类表单是否需要**双人复核**（方案 B 的轻量版）？ | 做成表单级开关 `settings.correction.requiresReview`，默认关 | 影响 T03 的接口（可能要加 `review` 步骤） |
 | Q3 | 同一个人维护**多个公司**的同一表单时，跨公司修正是否需要额外确认？ | 现阶段 `t_form_maintainer` 不区分公司，只有 `canCorrectFormData` 的公司边界约束；建议暂按"一次只能改一条、逐条确认"处理 | 影响 §3.3 |
-| Q4 | 是否允许"按最新版本重填"（`form_def_version` 升级）？ | 建议阶段二，且只给管理员；MVP 只报 `CORRECTION_SCHEMA_UNAVAILABLE` | 影响 T04 |
 | Q5 | 移动端是否需要修正入口？ | 建议不做（管理员在桌面操作） | 影响前端范围 |
 | Q6 | 台账列表是否需要"已修正"徽标？ | 需要（`EXISTS` 子查询派生），但排在 T04 | 影响列表查询与 UI |
+| Q7 | 阶段二是否要做**独立的**"老单据升版"动作（`form:data:migrate_version`）？ | 可以立项，但必须是独立端点/独立审计/逐字段人工确认，**不得并入修正**（§4.3.4 已定） | 影响未来排期，不影响本次 |
+
+> **已决策、不再作为待确认项**：Q4「是否允许在修正时按最新版本重填」→ **不允许**（§4.3.2 X2 已排除）。这条写在这里，是为了防止"待确认"表被当成"还可以改"。
 
 ---
 
@@ -772,3 +847,45 @@ graph LR
 | 下游（报表/BI/台账）一致性 | §8 |
 | `business_no` 不因修正改变 | §3.4 黑名单 + §8 + §13.1 I3 |
 | 字段级三态已有先例（`formPerms`） | §3.4 白名单与之对齐；`fieldModes` 复用同一模式 |
+| 修正要在**提交时的 schema** 下做（实测 10% 漂移） | §4.3（X1 唯一结论）+ §1 F7/F8 + §13.1 I6/I11 |
+
+---
+
+## 附录 B：存量体检 SQL（只读，T01 验收用）
+
+```sql
+-- B1 漂移全貌：落后版本的单据（实测 324 中 33 张 / 11 个表单）
+SELECT d.form_def_id, f.name, d.form_def_version, f.version AS current_version,
+       count(*) AS drifted_rows
+FROM t_form_data d JOIN t_form_definition f ON f.id = d.form_def_id
+WHERE d.status <> 'DRAFT' AND d.form_def_version < f.version
+GROUP BY d.form_def_id, f.name, d.form_def_version, f.version
+ORDER BY drifted_rows DESC;
+
+-- B2 硬门槛：漂移单据里，版本行是否都存在（期望 33/33 命中；缺一不可上线）
+SELECT d.id, d.form_def_id, d.form_def_version
+FROM t_form_data d JOIN t_form_definition f ON f.id = d.form_def_id
+WHERE d.status <> 'DRAFT' AND d.form_def_version < f.version
+  AND NOT EXISTS (
+    SELECT 1 FROM t_form_definition_version v
+    WHERE v.form_definition_id = d.form_def_id AND v.version_no = d.form_def_version);
+
+-- B3 近似版本：这类单据的 schema 不可全信，UI 必须提示
+SELECT d.id, d.form_def_id, d.form_def_version
+FROM t_form_data d
+JOIN t_form_definition_version v
+  ON v.form_definition_id = d.form_def_id AND v.version_no = d.form_def_version
+WHERE v.legacy_approximate = true AND d.status <> 'DRAFT';
+
+-- B4 无修订的存量行（导入产生，F4）：修正必须容忍 baseRevisionId = null
+SELECT count(*) FROM t_form_data WHERE current_revision_id IS NULL AND status <> 'DRAFT';
+
+-- B5 口径分歧（期望 0 行）：修订版本 ≠ 单据版本 → 触发 CORRECTION_SCHEMA_CONFLICT
+SELECT d.id, d.form_def_version, v.version_no AS revision_version
+FROM t_form_data d
+JOIN t_form_data_revision r ON r.id = d.current_revision_id
+JOIN t_form_definition_version v ON v.id = r.form_definition_version_id
+WHERE v.version_no <> d.form_def_version;
+```
+
+上线判定：**B2 必须为空、B5 必须为空**；B3 / B4 的结果作为前端提示与用例覆盖的输入（不是阻断项）。
