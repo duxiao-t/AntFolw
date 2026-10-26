@@ -18,7 +18,6 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
 
     String FULL_VISIBLE = """
         (#{admin} OR (
-          pi.company_id IS NOT NULL AND pi.company_inferred = false AND (
           pi.started_by = #{userId}
           OR (#{canReadTasks} AND (
             EXISTS (
@@ -34,12 +33,6 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
             )
           ))
           OR (#{canReadInstances}
-            AND EXISTS (
-              SELECT 1 FROM t_user company_viewer
-              JOIN t_department company_department ON company_department.id = company_viewer.dept_id
-              WHERE company_viewer.id = #{userId}
-                AND company_department.company_id = pi.company_id
-            )
             AND EXISTS (
               SELECT 1 FROM t_user_role user_role
               JOIN t_role role ON role.id = user_role.role_id AND role.enabled = true
@@ -68,7 +61,7 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
                       AND scope_department.department_id = pi.started_dept_id
                   )))
             ))
-        )))
+        ))
         """;
 
     @Select("SELECT * FROM t_process_instance WHERE id = #{id} FOR UPDATE")

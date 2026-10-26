@@ -46,8 +46,7 @@ public class MobileWorkflowController {
     public Long createDraft(@RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
         return auditService.execute(
-            () -> draftService.create(request.formCode(), request.data(), request.companyId(),
-                principal.userId()),
+            () -> draftService.create(request.formCode(), request.data(), principal.userId()),
             id -> auditService.success("form.draft.create", "FORM_DRAFT", id,
                 AuditService.RiskLevel.NORMAL,
                 Map.of("changedFields", dataFields(request.data())),
@@ -60,8 +59,7 @@ public class MobileWorkflowController {
                                       @RequestBody MobileDraftRequest request) {
         PrincipalHolder.Principal principal = principal();
         return auditService.execute(() -> draftService.get(
-                draftService.update(id, request.data(), request.companyId(),
-                    principal.userId()).getId(),
+                draftService.update(id, request.data(), principal.userId()).getId(),
                 principal.userId()),
             updated -> auditService.success("form.draft.update", "FORM_DRAFT", id,
                 AuditService.RiskLevel.NORMAL,
@@ -141,14 +139,11 @@ public class MobileWorkflowController {
         mediaValidator.preloadMediaDurations(request.data());
         return formDataService.submit(request.formCode(),
             request.status(), request.data(), userId,
-            request.files() == null ? List.of() : request.files(), request.draftId(),
-            request.companyId());
+            request.files() == null ? List.of() : request.files(), request.draftId());
     }
 
     public record DirectSubmitRequest(String formCode, String status, Object data,
-                                      List<MobileFileRef> files, Long draftId,
-                                      // P4a：同上，带 draftId 时不读，归属取草稿快照。
-                                      Long companyId) { }
+                                      List<MobileFileRef> files, Long draftId) { }
 
     @GetMapping("/instances")
     @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_READ + "')")

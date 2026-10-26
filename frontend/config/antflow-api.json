@@ -887,10 +887,6 @@
       },
       "DirectSubmitRequest" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "data" : {
             "type" : "object"
           },
@@ -985,13 +981,6 @@
         "properties" : {
           "businessNo" : {
             "type" : "string"
-          },
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "companyInferred" : {
-            "type" : "boolean"
           },
           "corrected" : {
             "type" : "boolean"
@@ -2040,10 +2029,6 @@
       },
       "MobileDraftRequest" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "data" : {
             "$ref" : "#/components/schemas/JsonNode"
           },
@@ -3260,13 +3245,6 @@
           "businessNo" : {
             "type" : "string"
           },
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "companyInferred" : {
-            "type" : "boolean"
-          },
           "currentFormRevisionId" : {
             "format" : "int64",
             "type" : "integer"
@@ -4094,10 +4072,6 @@
       },
       "StartCmd" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "data" : {
             "type" : "object"
           },
@@ -4134,10 +4108,6 @@
       },
       "StartMobileInstanceRequest" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "data" : {
             "$ref" : "#/components/schemas/JsonNode"
           },

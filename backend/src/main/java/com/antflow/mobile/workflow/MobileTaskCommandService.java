@@ -92,7 +92,7 @@ final class MobileTaskCommandService {
         Map<String, List<Long>> selfSelected = request.selfSelected() == null
             ? Map.of() : request.selfSelected();
         Map<String, Object> result = engine.start(
-            new StartCmd(request.formCode(), data, selfSelected, null), userId);
+            new StartCmd(request.formCode(), data, selfSelected), userId);
         Long formDataId = asLong(result.get("formDataId"));
         Long instanceId = asLong(result.get("instanceId"));
         String businessNo = Objects.toString(result.get("businessNo"), null);

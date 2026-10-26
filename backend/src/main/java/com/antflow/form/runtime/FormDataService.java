@@ -67,12 +67,6 @@ public class FormDataService {
     @Transactional
     public SubmitResult submit(String formCode, String status, Object data, Long userId,
                        List<MobileFileRef> files, Long draftId) {
-        return submit(formCode, status, data, userId, files, draftId, null);
-    }
-
-    @Transactional
-    public SubmitResult submit(String formCode, String status, Object data, Long userId,
-                       List<MobileFileRef> files, Long draftId, Long explicitCompanyId) {
         FormDefinition fd = formDefinitionService.getByCode(formCode);
         if (fd == null || !"PUBLISHED".equals(fd.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + formCode);
@@ -96,7 +90,6 @@ public class FormDataService {
                 "该表单已启用审批流程，请从发起入口提交");
         }
         // 单公司：不再解析公司归属，提交只校验表单使用授权。
-        // explicitCompanyId 参数暂留（外部契约未变），已不参与任何判定。
         authorizationService.requireFormUse(fd.getId());
         formDefinitionService.validateSubmission(fd.getSchema(), data);
         Object storedData = "DRAFT".equals(normalizedStatus)
@@ -112,7 +105,6 @@ public class FormDataService {
         fd2.setData(writeJson(storedData));
         fd2.setStatus(normalizedStatus);
         fd2.setCreatedBy(userId);
-        fd2.setCompanyInferred(false);
         mapper.insert(fd2);
         if ("SUBMITTED".equals(normalizedStatus)) mediaValidator.validate(fd2.getId());
         fileLinkService.append(fd2.getId(), files, userId);

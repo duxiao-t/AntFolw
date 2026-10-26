@@ -69,7 +69,7 @@ class MobileDraftServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(form("leave", "PUBLISHED"));
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
 
-        Long id = service.create("leave", data, null, 7L);
+        Long id = service.create("leave", data, 7L);
 
         assertThat(id).isEqualTo(100L);
         ArgumentCaptor<FormData> captor = ArgumentCaptor.forClass(FormData.class);
@@ -90,7 +90,7 @@ class MobileDraftServiceTest {
             .when(authorizationService).requireFormUse(10L);
 
         assertThatThrownBy(() -> service.create("leave",
-            objectMapper.createObjectNode(), null, 7L))
+            objectMapper.createObjectNode(), 7L))
             .isInstanceOf(HiddenResourceException.class);
         Mockito.verify(formDataMapper, Mockito.never()).insert(Mockito.any(FormData.class));
     }
@@ -101,7 +101,7 @@ class MobileDraftServiceTest {
         Mockito.when(formDefinitionService.getById(10L)).thenReturn(form("leave", "PUBLISHED"));
         JsonNode data = objectMapper.createObjectNode().put("days", 5);
 
-        FormData updated = service.update(101L, data, null, 7L);
+        FormData updated = service.update(101L, data, 7L);
 
         assertThat(updated.getId()).isEqualTo(101L);
         assertThat(objectMapper.readTree(updated.getData()).path("days").asInt()).isEqualTo(5);
@@ -113,7 +113,7 @@ class MobileDraftServiceTest {
     void updateRejectsSecondUser() {
         Mockito.when(formDataMapper.selectRuntimeById(101L)).thenReturn(draft(101L, 7L, "DRAFT"));
 
-        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), null, 8L))
+        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), 8L))
             .isInstanceOf(AccessDeniedException.class);
     }
 
@@ -123,7 +123,7 @@ class MobileDraftServiceTest {
         Mockito.when(formDefinitionService.mapByIds(Mockito.anyCollection()))
             .thenReturn(Map.of(10L, form("leave", "DEPRECATED")));
 
-        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), null, 7L))
+        assertThatThrownBy(() -> service.update(101L, objectMapper.createObjectNode(), 7L))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("Form not published");
 
@@ -214,7 +214,6 @@ class MobileDraftServiceTest {
         draft.setData("{\"days\":1}");
         draft.setStatus(status);
         draft.setCreatedBy(createdBy);
-        draft.setCompanyId(TEST_COMPANY_ID);
         return draft;
     }
 }

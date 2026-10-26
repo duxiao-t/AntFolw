@@ -343,12 +343,12 @@ class ApiContractSnapshotTest {
         assertThat(schemas.path("SaveBody").path("properties").has("schema"))
             .as("保存体 SaveBody.schema").isTrue();
 
-        // P4a：新增的两列必须出现在对应 DTO 上，否则前端拿不到归属字段。
+        // 单公司改造后，归属字段已从 DTO 上移除：这里反向断言，避免它被悄悄加回来。
         assertThat(schemas.path("FormData").path("properties").has("companyId"))
-            .as("FormData.companyId").isTrue();
+            .as("FormData 不该再暴露 companyId").isFalse();
         assertThat(schemas.path("FormData").path("properties").has("companyInferred"))
-            .as("FormData.companyInferred").isTrue();
+            .as("FormData 不该再暴露 companyInferred").isFalse();
         assertThat(schemas.path("ProcessInstance").path("properties").has("companyId"))
-            .as("ProcessInstance.companyId").isTrue();
+            .as("ProcessInstance 不该再暴露 companyId").isFalse();
     }
 }

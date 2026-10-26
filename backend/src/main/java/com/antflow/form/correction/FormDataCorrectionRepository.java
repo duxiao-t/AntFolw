@@ -25,8 +25,7 @@ public class FormDataCorrectionRepository {
 
     /** 锁行读取：后续所有判断都以这一行为准，不从请求里信任任何值。 */
     public record DataRow(long id, long formDefId, int formDefVersion, String data, String status,
-                          String businessNo, Long currentRevisionId, Long companyId,
-                          boolean companyInferred, Long createdBy) {
+                          String businessNo, Long currentRevisionId, Long createdBy) {
     }
 
     public record InstanceRow(long id, String status, int version, Long currentFormRevisionId,
@@ -49,12 +48,11 @@ public class FormDataCorrectionRepository {
     private DataRow queryData(long formDataId, boolean forUpdate) {
         return jdbc.query("""
             SELECT id, form_def_id, form_def_version, data::text, status, business_no,
-                   current_revision_id, company_id, COALESCE(company_inferred, false), created_by
+                   current_revision_id, created_by
             FROM t_form_data WHERE id = ?""" + (forUpdate ? " FOR UPDATE" : ""), rs -> rs.next()
                 ? new DataRow(rs.getLong(1), rs.getLong(2), rs.getInt(3), rs.getString(4),
-                    rs.getString(5), rs.getString(6),
-                    (Long) rs.getObject(7), (Long) rs.getObject(8), rs.getBoolean(9),
-                    (Long) rs.getObject(10))
+                    rs.getString(5), rs.getString(6), (Long) rs.getObject(7),
+                    (Long) rs.getObject(8))
                 : null, formDataId);
     }
 

@@ -327,7 +327,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             assertThatThrownBy(() -> formDataService.submit(code, "SUBMITTED",
                 Map.of("clip", List.of(Map.of("id", file.toString(), "durationSeconds", 1))),
                 owner, List.of(new com.antflow.attachment.MobileFileRef(file, "clip", 0)),
-                draft, null)).isInstanceOfSatisfying(BizException.class,
+                draft)).isInstanceOfSatisfying(BizException.class,
                     error -> assertThat(error.getCode()).isEqualTo("FORM_DATA_INVALID"));
             assertThat(jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM t_form_data WHERE form_def_id = ?", Long.class, form))
@@ -515,7 +515,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             PrincipalHolder.set(new PrincipalHolder.Principal(starter, "admin", List.of("admin")));
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(
-                new StartCmd(code, Map.of(), Map.of(), anyCompanyId()), starter);
+                new StartCmd(code, Map.of(), Map.of()), starter);
             final long instanceId = ((Number) started.get("instanceId")).longValue();
             createdInstance = instanceId;
             long dataId = jdbcTemplate.queryForObject(
@@ -1855,7 +1855,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(
-                new StartCmd(code, Map.of("subject", "versioned"), Map.of(), anyCompanyId()),
+                new StartCmd(code, Map.of("subject", "versioned"), Map.of()),
                 adminId);
             long instanceId = ((Number) started.get("instanceId")).longValue();
             long firstTaskId = ((List<?>) started.get("firstTaskIds")).stream()
@@ -1911,7 +1911,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> started = processEngine.start(new StartCmd(code,
-                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of(), anyCompanyId()), adminId);
+                Map.of("subject", "第一行\n路径 C:\\temp"), Map.of()), adminId);
 
             assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM t_form_definition_version
@@ -1952,10 +1952,10 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             String first = String.valueOf(processEngine.start(
-                new StartCmd(code, Map.of("subject", "first"), Map.of(), anyCompanyId()), adminId)
+                new StartCmd(code, Map.of("subject", "first"), Map.of()), adminId)
                 .get("businessNo"));
             String second = String.valueOf(processEngine.start(
-                new StartCmd(code, Map.of("subject", "second"), Map.of(), anyCompanyId()), adminId)
+                new StartCmd(code, Map.of("subject", "second"), Map.of()), adminId)
                 .get("businessNo"));
 
             assertThat(first).matches("ITNUM-[0-9]{8}-0001");
@@ -2471,7 +2471,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             assertThatThrownBy(() -> processEngine.start(
-                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of(), anyCompanyId()),
+                new StartCmd(code, Map.of("subject", "no implicit admin"), Map.of()),
                 adminId))
                 .isInstanceOfSatisfying(BizException.class,
                     error -> assertThat(error.getCode()).isEqualTo("FALLBACK_UNAVAILABLE"));
@@ -4632,7 +4632,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         try {
             publishService.publish(formId, processId);
             Map<String, Object> result = processEngine.start(
-                new StartCmd(code, Map.of("subject", "v2"), Map.of(), anyCompanyId()), starterId);
+                new StartCmd(code, Map.of("subject", "v2"), Map.of()), starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());
         } finally {
@@ -4658,7 +4658,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 WHERE process_definition_id = ?
                 """, compatibleLegacyFlow, compatibleLegacyFlow, processId);
             Map<String, Object> result = processEngine.start(
-                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of(), anyCompanyId()),
+                new StartCmd(code, Map.of("subject", "legacy-v2"), Map.of()),
                 starterId);
             return new StartedV2(((Number) result.get("instanceId")).longValue(),
                 ((Number) result.get("formDataId")).longValue());

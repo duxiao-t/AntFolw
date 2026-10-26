@@ -95,7 +95,7 @@ public class FormDataController {
             body.data(),
             p.userId(),
             body.files() == null ? List.of() : body.files(),
-            body.draftId(), body.companyId());
+            body.draftId());
     }
 
     @GetMapping

@@ -149,7 +149,7 @@ public class FormDataCorrectionService {
             long correctionId = repository.insertCorrection(formDataId, STATUS_PENDING, null,
                 row.currentRevisionId(), instance == null ? null : instance.id(), actorId,
                 reasonCode, request.reasonText(), changesJson(row.data(), merged),
-                mergedJson, attachmentsTouched, row.companyId(),
+                mergedJson, attachmentsTouched, null,
                 instance == null ? null : instance.status(), null);
             audit.successAs(principal, "FORM_DATA_CORRECTION_SUBMIT", "FORM_DATA", formDataId,
                 AuditService.RiskLevel.CRITICAL, readMap(changesJson(row.data(), merged)),
@@ -255,7 +255,7 @@ public class FormDataCorrectionService {
             correctionId = repository.insertCorrection(row.id(), STATUS_APPLIED, revisionId,
                 row.currentRevisionId(), instance == null ? null : instance.id(), actorId,
                 normalizeReason(reasonCode), reasonText, fieldChanges, null, attachmentsTouched,
-                row.companyId(), instance == null ? null : instance.status(), null);
+                null, instance == null ? null : instance.status(), null);
         } else {
             // 复核路径：复用那条 PENDING 记录，回填修订指针，不新增一行
             if (repository.markApplied(pendingCorrectionId, revisionId, actorId, reasonText) == 0) {

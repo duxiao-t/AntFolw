@@ -38,7 +38,7 @@ public class MobileDraftService {
     private ProcessDefinitionService processDefinitionService;
 
     @Transactional(rollbackFor = Exception.class)
-    public Long create(String formCode, JsonNode data, Long explicitCompanyId, long userId) {
+    public Long create(String formCode, JsonNode data, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
         // 单公司：草稿不再记录公司归属
         authorizationService.requireFormUse(formDefinition.getId());
@@ -54,7 +54,7 @@ public class MobileDraftService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public FormData update(long draftId, JsonNode data, Long explicitCompanyId, long userId) {
+    public FormData update(long draftId, JsonNode data, long userId) {
         FormData draft = requireOwnedDraft(draftId, userId);
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
         authorizationService.requireFormUse(formDefinition.getId());

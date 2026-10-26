@@ -18,12 +18,6 @@ public class FormData {
     private String data;        // JSONB
     private String status;      // DRAFT or SUBMITTED
     private Long createdBy;
-    /**
-     * P4a 归属快照（同 {@code t_process_instance}）。**无流程提交与草稿没有实例可继承**，
-     * 所以这两条路径必须自己写这一列。可空 + {@link #companyInferred} 的三档含义见 V54 迁移注释。
-     */
-    private Long companyId;
-    private Boolean companyInferred;
     /** 提交人姓名（display_name 为空时回落登录账号，口径同 ProcessInstanceMapper 的 COALESCE）。 */
     @TableField(exist = false) private String createdByName;
     @TableField(exist = false) private String createdByEmployeeNo;

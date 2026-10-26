@@ -139,7 +139,7 @@ class MobileWorkflowServiceTest {
 
         MobileStartResult result = service.start(new StartMobileInstanceRequest("leave", data,
             Map.of("a1", List.of(8L)), 101L,
-            List.of(new MobileFileRef(fileId, "attachment", 0)), null), 7L);
+            List.of(new MobileFileRef(fileId, "attachment", 0))), 7L);
 
         assertThat(result.instanceId()).isEqualTo(501L);
         assertThat(result.formDataId()).isEqualTo(301L);
@@ -166,7 +166,7 @@ class MobileWorkflowServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
 
         assertThatThrownBy(() -> service.start(new StartMobileInstanceRequest("leave", data,
-            Map.of(), 101L, List.of(), null), 7L))
+            Map.of(), 101L, List.of()), 7L))
             .isInstanceOf(BizException.class)
             .satisfies(exception -> assertThat(((BizException) exception).getCode()).isEqualTo("DRAFT_VERSION_MISMATCH"))
             .hasMessageContaining("表单已改版");
@@ -181,7 +181,7 @@ class MobileWorkflowServiceTest {
             .requireFormUse(10L);
 
         assertThatThrownBy(() -> service.start(
-            new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of(), null), 7L))
+            new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of()), 7L))
             .isInstanceOf(HiddenResourceException.class);
         Mockito.verify(engine, Mockito.never()).start(Mockito.any(StartCmd.class),
             Mockito.anyLong());

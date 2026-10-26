@@ -161,8 +161,7 @@ class OperationAuditControllerTest {
             Mockito.mock(FormDefinitionService.class),
             Mockito.mock(com.antflow.form.runtime.FormDataMapper.class),
             Mockito.mock(com.antflow.attachment.MediaSubmissionValidator.class));
-        StartCmd command = new StartCmd("leave", Map.of("salary", "private-value"), Map.of(),
-            1L);
+        StartCmd command = new StartCmd("leave", Map.of("salary", "private-value"), Map.of());
         when(engine.start(command, 7L)).thenReturn(Map.of(
             "instanceId", 61L, "businessNo", "PRIVATE-BUSINESS-NO"));
 
