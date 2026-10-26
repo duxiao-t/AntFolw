@@ -2,9 +2,10 @@ import { ExportOutlined, ImportOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
 import { Link, request, useLocation, useModel } from '@umijs/max';
-import { Button, Drawer, Typography } from 'antd';
+import { Button, Drawer, Space, Tag, Typography } from 'antd';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { CAPABILITY, hasCapability } from '../../../authz';
+import CorrectionModal from './CorrectionModal';
 import ExportModal, { type ExportDefaults } from './ExportModal';
 import ImportWizardModal from './ImportWizardModal';
 import { fieldColumns, type FormDataFieldValue } from './fieldValues';
@@ -23,6 +24,8 @@ type FormDataRecord = {
   createdByDeptName?: string;
   fieldValues?: FormDataFieldValue[];
   createdAt?: string;
+  /** 是否被事后修正过（后端按当前页批量派生，不是表上的列）。 */
+  corrected?: boolean;
 };
 
 type PageResult<T> = {
@@ -43,12 +46,16 @@ export default function AdminFormDataPage() {
   const [fields, setFields] = useState<Array<{ id: string; label: string }>>([]);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  // 正在修正的那条单据；非空即打开修正弹窗
+  const [correcting, setCorrecting] = useState<FormDataRecord | null>(null);
   // 导出弹窗默认沿用表格当前的筛选；表格的搜索状态由 ProTable 自己拿着，这里只在请求时留一份。
   const lastQuery = useRef<ExportDefaults>({});
   const { initialState } = useModel('@@initialState');
   const currentUser = initialState?.currentUser as any;
   const canExport = hasCapability(currentUser, CAPABILITY.formDataExport);
   const canImport = hasCapability(currentUser, CAPABILITY.formDataImport);
+  // 只是"显示按钮"的依据；能不能真的改这张单由后端按维护者身份与公司归属再判一次。
+  const canCorrect = hasCapability(currentUser, CAPABILITY.formDataCorrect);
   const searchParams = new URLSearchParams(location.search);
   const initialFormDefId = searchParams.get('formDefId') ?? undefined;
 
@@ -99,7 +106,17 @@ export default function AdminFormDataPage() {
         title: '状态',
         dataIndex: 'status',
         valueEnum: statusValueEnum,
-        width: 100,
+        width: 150,
+        // 「已修正」是派生标记（台账里有已生效的修正），不改 status 本身：
+        // 单据仍然是"已提交"，只是内容被纠正过，两者语义不能混。
+        render: (_, record) => (
+          <Space size={4}>
+            <Tag color={record.status === 'DRAFT' ? 'default' : 'blue'}>
+              {record.status === 'DRAFT' ? '草稿' : '已提交'}
+            </Tag>
+            {record.corrected ? <Tag color="orange">已修正</Tag> : null}
+          </Space>
+        ),
       },
     ];
     const fieldCols: ProColumns<FormDataRecord>[] = fields.map((field) => ({
@@ -195,6 +212,11 @@ export default function AdminFormDataPage() {
         onClose={() => setCurrent(null)}
         width={640}
       >
+        {canCorrect && current ? (
+          <Space style={{ marginBottom: 12 }}>
+            <Button onClick={() => setCorrecting(current)}>修正数据</Button>
+          </Space>
+        ) : null}
         <dl style={{ margin: 0 }}>
           {(current?.fieldValues ?? []).map((field) => (
             <div
@@ -213,6 +235,13 @@ export default function AdminFormDataPage() {
           ))}
         </dl>
       </Drawer>
+      {correcting && (
+        <CorrectionModal
+          formDataId={correcting.id}
+          onClose={() => setCorrecting(null)}
+          onSaved={() => void actionRef.current?.reload()}
+        />
+      )}
     </PageContainer>
   );
 }

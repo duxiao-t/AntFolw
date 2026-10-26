@@ -8,6 +8,7 @@ export const CAPABILITY = {
   formDataRead: 'form:data:read',
   formDataExport: 'form:data:export',
   formDataImport: 'form:data:import',
+  formDataCorrect: 'form:data:correct',
   workflowInstanceRead: 'workflow:instance:read',
   workflowInstanceOverride: 'workflow:instance:override',
   workflowInstanceWithdraw: 'workflow:instance:withdraw',
