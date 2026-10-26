@@ -212,10 +212,6 @@ class UserAccountService {
         if (body.containsKey("managerId") || body.containsKey("deptId")) {
             guards.lockReportingRelations(originalDepartmentId, user.getDeptId());
             guards.validateManager(userId, user.getManagerId(), user.getDeptId());
-            if (body.containsKey("deptId")) {
-                guards.validateCompanyTransfer(userId, originalDepartmentId, user.getDeptId());
-                guards.validateDirectReportsCompany(userId, user.getDeptId());
-            }
         }
         userMapper.updateById(user);
         // UpdateWrapper 显式置 NULL：MyBatis-Plus 的 updateById 默认忽略 null 字段，

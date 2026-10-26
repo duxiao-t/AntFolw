@@ -165,13 +165,10 @@ class UserQueryService {
         if (department == null) {
             throw new BizException("DEPARTMENT_NOT_FOUND", "所属部门不存在");
         }
-        List<Long> departmentIds = departmentMapper.selectList(new QueryWrapper<Department>()
-            .eq("company_id", department.getCompanyId())).stream()
-            .map(Department::getId)
-            .toList();
+        // 单公司：候选人不再按公司圈定，但仍要求其归属某个部门（无部门无法参与汇报关系）
         QueryWrapper<User> query = new QueryWrapper<User>()
             .eq("status", "ACTIVE")
-            .in("dept_id", departmentIds)
+            .isNotNull("dept_id")
             .orderByAsc("display_name")
             .orderByAsc("id")
             .last("LIMIT 100");

@@ -253,20 +253,6 @@ class AssigneeResolverTest {
             .hasMessageContaining("循环");
     }
 
-    @Test void resolve_directManager_rejectsManagerFromAnotherCompany() {
-        User starter = user(42L, "ACTIVE", 10L);
-        starter.setManagerId(99L);
-        Mockito.when(userMapper.selectById(42L)).thenReturn(starter);
-        Mockito.when(userMapper.selectById(99L)).thenReturn(user(99L, "ACTIVE", 20L));
-        Mockito.when(deptMapper.selectById(10L)).thenReturn(companyDept(10L, 7L));
-        Mockito.when(deptMapper.selectById(20L)).thenReturn(companyDept(20L, 8L));
-
-        var spec = new AssigneeSpec("DIRECT_MANAGER", List.of(), 1, 42L, List.of());
-
-        assertThatThrownBy(() -> resolver().resolve("n1", spec))
-            .isInstanceOf(NoAssigneeFoundException.class)
-            .hasMessageContaining("不属于同一公司");
-    }
 
     // ---------- Sprint 3 LEADER_TOP ----------
     @Test void resolve_leaderTop_level3_walksAllAncestors() {

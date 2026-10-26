@@ -124,43 +124,7 @@ class UserServiceTest {
         verify(userMapper, never()).updateById(any(User.class));
     }
 
-    @Test
-    void updateRejectsManagerFromAnotherCompany() {
-        UserMapper userMapper = Mockito.mock(UserMapper.class);
-        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
-        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
-            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
-            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class));
-        when(userMapper.selectById(1L)).thenReturn(user(1L, 10L, null, "ACTIVE"));
-        when(userMapper.selectById(2L)).thenReturn(user(2L, 20L, null, "ACTIVE"));
-        when(departmentMapper.selectById(10L)).thenReturn(department(10L, 7L));
-        when(departmentMapper.selectById(20L)).thenReturn(department(20L, 8L));
 
-        BizException error = assertThrows(BizException.class,
-            () -> service.update(1L, Map.of("managerId", 2L)));
-
-        assertEquals("MANAGER_COMPANY_MISMATCH", error.getCode());
-    }
-
-    @Test
-    void departmentMoveRejectsLeavingDirectReportsInAnotherCompany() {
-        UserMapper userMapper = Mockito.mock(UserMapper.class);
-        DepartmentMapper departmentMapper = Mockito.mock(DepartmentMapper.class);
-        UserService service = newService(userMapper, Mockito.mock(UserRoleMapper.class),
-            Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class), departmentMapper,
-            Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class));
-        User manager = user(1L, 10L, null, "ACTIVE");
-        User report = user(2L, 10L, 1L, "ACTIVE");
-        when(userMapper.selectById(1L)).thenReturn(manager);
-        when(userMapper.selectList(any())).thenReturn(List.of(report));
-        when(departmentMapper.selectById(10L)).thenReturn(department(10L, 7L));
-        when(departmentMapper.selectById(20L)).thenReturn(department(20L, 8L));
-
-        BizException error = assertThrows(BizException.class,
-            () -> service.update(1L, Map.of("deptId", 20L)));
-
-        assertEquals("REPORTING_COMPANY_MISMATCH", error.getCode());
-    }
 
     @Test
     void createRejectsDuplicateUsernameBeforeInsert() {

@@ -5533,17 +5533,6 @@
     "/api/departments" : {
       "get" : {
         "operationId" : "tree",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : true,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
         "responses" : {
           "200" : {
             "content" : {

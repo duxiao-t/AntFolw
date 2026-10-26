@@ -68,9 +68,9 @@ class UserGuards {
             }
             Department currentDepartment = current.getDeptId() == null
                 ? null : departmentMapper.selectById(current.getDeptId());
-            if (department == null || currentDepartment == null
-                || !Objects.equals(department.getCompanyId(), currentDepartment.getCompanyId())) {
-                throw new BizException("MANAGER_COMPANY_MISMATCH", "直属上级必须与成员属于同一公司");
+            // 单公司：不再要求"同一公司"，但仍要求直属上级归属某个部门。
+            if (currentDepartment == null) {
+                throw new BizException("MANAGER_DEPARTMENT_MISSING", "直属上级必须归属某个部门");
             }
             current = current.getManagerId() == null
                 ? null : userMapper.selectById(current.getManagerId());
@@ -83,35 +83,18 @@ class UserGuards {
      * <p>**必须用 xact 锁**（提交/回滚自动释放）：改成 session 锁后，连接池复用会让锁跨请求残留。
      * 常量前缀 {@code 0x414E5446}（"ANTF"）是为了和别的模块抢同一把锁时错开命名空间。
      */
+    /**
+     * 汇报关系变更的串行化锁。
+     *
+     * <p>以前按公司分别加锁（同一公司内的汇报关系可能成环，需要串行）。单公司后只剩一个域，
+     * 用固定 key 一把锁即可，不必再按部门反查公司。
+     */
     void lockReportingRelations(Long... departmentIds) {
-        Set<Long> companyIds = new java.util.TreeSet<>();
-        for (Long departmentId : departmentIds) {
-            if (departmentId == null) continue;
-            Department department = departmentMapper.selectById(departmentId);
-            if (department != null) companyIds.add(department.getCompanyId());
-        }
-        for (Long companyId : companyIds) {
-            jdbcTemplate.query("SELECT pg_advisory_xact_lock(?)",
-                statement -> statement.setLong(1, 0x414E544600000000L ^ companyId),
-                (org.springframework.jdbc.core.ResultSetExtractor<Void>) resultSet -> null);
-        }
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(?)",
+            statement -> statement.setLong(1, 0x414E544600000000L),
+            (org.springframework.jdbc.core.ResultSetExtractor<Void>) resultSet -> null);
     }
 
-    void validateDirectReportsCompany(Long userId, Long departmentId) {
-        List<User> directReports = userMapper.selectList(
-            new QueryWrapper<User>().eq("manager_id", userId));
-        if (directReports.isEmpty()) return;
-        Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);
-        for (User report : directReports) {
-            Department reportDepartment = report.getDeptId() == null
-                ? null : departmentMapper.selectById(report.getDeptId());
-            if (department == null || reportDepartment == null
-                || !Objects.equals(department.getCompanyId(), reportDepartment.getCompanyId())) {
-                throw new BizException("REPORTING_COMPANY_MISMATCH",
-                    "该成员仍是其他公司成员的直属上级，请先调整汇报关系");
-            }
-        }
-    }
 
     String normalizeEmployeeNo(String employeeNo, Long excludedUserId) {
         return formalNumberService.employeeNo(employeeNo, excludedUserId);
@@ -132,25 +115,4 @@ class UserGuards {
         }
     }
 
-    void validateCompanyTransfer(Long userId, Long originalDepartmentId, Long targetDepartmentId) {
-        Department original = originalDepartmentId == null ? null : departmentMapper.selectById(originalDepartmentId);
-        Department target = targetDepartmentId == null ? null : departmentMapper.selectById(targetDepartmentId);
-        if (original != null && target != null
-            && Objects.equals(original.getCompanyId(), target.getCompanyId())) return;
-        if (Boolean.TRUE.equals(jdbcTemplate.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM t_wecom_user_mapping WHERE user_id = ?)", Boolean.class, userId))) {
-            throw new BizException("WECOM_COMPANY_TRANSFER_FORBIDDEN", "企微同步成员的跨公司归属请在企业微信维护");
-        }
-        if (target != null && Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
-            SELECT EXISTS (
-                SELECT 1 FROM t_department department
-                WHERE department.company_id <> ?
-                  AND (department.leader_id = ? OR EXISTS (
-                      SELECT 1 FROM t_department_leader leader
-                      WHERE leader.department_id = department.id AND leader.user_id = ?))
-            )
-            """, Boolean.class, target.getCompanyId(), userId, userId))) {
-            throw new BizException("LEADER_COMPANY_MISMATCH", "该成员仍是其他公司的部门负责人，请先调整负责人");
-        }
-    }
 }

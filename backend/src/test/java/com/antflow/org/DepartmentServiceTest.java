@@ -14,29 +14,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DepartmentServiceTest {
-    @Test
-    void crossCompanyParentAndRootSortAreRejectedBeforeWriting() {
-        DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
-        DepartmentService service = service(mapper, Mockito.mock(DepartmentLeaderMapper.class));
-        Department first = dept(2L, null, "d_2", "甲公司");
-        Department other = dept(3L, null, "d_3", "乙公司");
-        other.setCompanyId(2L);
-        when(mapper.selectById(2L)).thenReturn(first);
-        when(mapper.selectById(3L)).thenReturn(other);
-
-        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
-            assertThrows(BizException.class, () -> service.move(2L, 3L)).getCode());
-        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
-            assertThrows(BizException.class, () -> service.movePosition(2L, 3L, "AFTER")).getCode());
-        Department child = dept(null, 3L, null, "新部门");
-        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
-            assertThrows(BizException.class, () -> service.create(child)).getCode());
-        Mockito.verify(mapper, Mockito.never()).insert(any(Department.class));
-        Mockito.verify(mapper, Mockito.never()).updateById(any(Department.class));
-    }
 
     @Test
-    void moveRejectsSelfAndMixedCompanySubtree() {
+    void moveRejectsMovingIntoOwnSubtree() {
         DepartmentMapper mapper = Mockito.mock(DepartmentMapper.class);
         DepartmentService service = service(mapper, Mockito.mock(DepartmentLeaderMapper.class));
         Department root = dept(2L, null, "d_2", "甲公司");
@@ -45,9 +25,8 @@ class DepartmentServiceTest {
         when(mapper.selectById(2L)).thenReturn(root);
         when(mapper.subtree("d_2")).thenReturn(List.of(child));
 
+        // 单公司后不再有"跨公司移动"这条拒绝理由，只保留自移动校验
         assertEquals("BAD_MOVE", assertThrows(BizException.class, () -> service.move(2L, 2L)).getCode());
-        assertEquals("DEPARTMENT_COMPANY_MISMATCH",
-            assertThrows(BizException.class, () -> service.move(2L, null)).getCode());
         Mockito.verify(mapper, Mockito.never()).updateById(any(Department.class));
     }
 
@@ -211,7 +190,7 @@ class DepartmentServiceTest {
             user.setDeptId(4L);
             return user;
         });
-        return new DepartmentService(mapper, leaders, companies, users);
+        return new DepartmentService(mapper, leaders, users);
     }
 
     private static Department dept(Long id, Long parentId, String path, String name) {

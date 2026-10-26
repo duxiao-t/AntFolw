@@ -55,10 +55,10 @@ public class DirectManagerStrategy implements AssigneeStrategy {
             }
             Department managerDepartment = current.getDeptId() == null
                 ? null : departmentMapper.selectById(current.getDeptId());
-            if (managerDepartment == null || !Objects.equals(starterDepartment.getCompanyId(),
-                managerDepartment.getCompanyId())) {
+            // 单公司：只要求上级归属部门，不再要求与制单人同公司
+            if (managerDepartment == null) {
                 throw new NoAssigneeFoundException(nodeId,
-                    "制单人的第 " + currentLevel + " 级直属上级不属于同一公司");
+                    "制单人的第 " + currentLevel + " 级直属上级未归属任何部门");
             }
         }
         return List.of(current.getId());

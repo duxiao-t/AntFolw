@@ -14,7 +14,6 @@ import java.util.*;
 public class DepartmentService {
     private final DepartmentMapper mapper;
     private final DepartmentLeaderMapper leaderMapper;
-    private final CompanyMapper companyMapper;
     private final UserMapper userMapper;
     private static final String DIRECTION_UP = "UP";
     private static final String DIRECTION_DOWN = "DOWN";
@@ -23,9 +22,6 @@ public class DepartmentService {
 
     @Transactional(rollbackFor = Exception.class)
     public Department create(Department d) {
-        if (d.getCompanyId() == null || companyMapper.selectById(d.getCompanyId()) == null) {
-            throw new BizException("COMPANY_REQUIRED", "请选择有效公司");
-        }
         Long parentId = d.getParentId();
         Department parent = null;
         if (parentId != null) {
@@ -33,11 +29,10 @@ public class DepartmentService {
             if (parent == null) {
                 throw new BizException("NOT_FOUND", "父部门不存在");
             }
-            requireSameCompany(d, parent);
         }
         d.setId(null);
         d.setPath("pending");
-        d.setSortOrder(nextSortOrder(d.getCompanyId(), parentId));
+        d.setSortOrder(nextSortOrder(parentId));
         mapper.insert(d);
         d.setPath(buildPath(parent, d.getId()));
         mapper.updateById(d);
@@ -67,9 +62,7 @@ public class DepartmentService {
             throw new BizException("BAD_MOVE", "不能移动到自己或自己的子部门下");
         }
         List<Department> descendants = mapper.subtree(d.getPath());
-        for (Department child : descendants) requireSameCompany(d, child);
         if (Objects.equals(d.getParentId(), newParentId)) {
-            if (newParentId != null) requireSameCompany(d, mapper.selectById(newParentId));
             return d;
         }
         // 防止把自己移到自己后代下
@@ -79,7 +72,6 @@ public class DepartmentService {
             if (newParent == null) {
                 throw new BizException("NOT_FOUND", "目标父部门不存在");
             }
-            requireSameCompany(d, newParent);
             if (newParent.getPath().startsWith(oldPath + ".")) {
                 throw new BizException("BAD_MOVE", "不能移动到自己的子部门下");
             }
@@ -89,7 +81,7 @@ public class DepartmentService {
             d.setPath(buildPath(null, d.getId()));
             d.setParentId(null);
         }
-        d.setSortOrder(nextSortOrder(d.getCompanyId(), newParentId));
+        d.setSortOrder(nextSortOrder(newParentId));
         mapper.updateById(d);
         // 递归更新所有子孙的 path
         for (Department child : descendants) {
@@ -109,7 +101,7 @@ public class DepartmentService {
         if (d == null) {
             throw new BizException("NOT_FOUND", "部门不存在");
         }
-        List<Department> siblings = siblingsOf(d.getCompanyId(), d.getParentId());
+        List<Department> siblings = siblingsOf(d.getParentId());
         int index = -1;
         for (int i = 0; i < siblings.size(); i += 1) {
             if (Objects.equals(siblings.get(i).getId(), id)) {
@@ -147,7 +139,6 @@ public class DepartmentService {
         if (d == null || target == null) {
             throw new BizException("NOT_FOUND", "部门不存在");
         }
-        requireSameCompany(d, target);
         if (Objects.equals(id, targetId)) {
             return withLeaderIds(d);
         }
@@ -155,7 +146,7 @@ public class DepartmentService {
             throw new BizException("BAD_SORT_TARGET", "只能在同级部门内排序");
         }
 
-        List<Department> siblings = new ArrayList<>(siblingsOf(d.getCompanyId(), d.getParentId()));
+        List<Department> siblings = new ArrayList<>(siblingsOf(d.getParentId()));
         siblings.removeIf(item -> Objects.equals(item.getId(), id));
         int targetIndex = -1;
         for (int i = 0; i < siblings.size(); i += 1) {
@@ -213,7 +204,6 @@ public class DepartmentService {
             path.add(current);
             Long parentId = current.getParentId();
             Department parent = parentId == null ? null : mapper.selectById(parentId);
-            if (parent != null) requireSameCompany(current, parent);
             current = parent;
         }
         Collections.reverse(path);
@@ -221,10 +211,10 @@ public class DepartmentService {
         return path;
     }
 
-    /** 公司下的完整部门树 */
-    public List<Department> tree(long companyId) {
+    /** 完整部门树（单公司：不再按公司过滤）。 */
+    public List<Department> tree() {
         List<Department> roots = mapper.selectList(new QueryWrapper<Department>()
-            .eq("company_id", companyId).isNull("parent_id")
+            .isNull("parent_id")
             .orderByAsc("sort_order").orderByAsc("id"));
         if (roots.isEmpty()) {
             return List.of();
@@ -248,8 +238,9 @@ public class DepartmentService {
             User user = userMapper.selectById(userId);
             Department userDepartment = user == null || user.getDeptId() == null
                 ? null : mapper.selectById(user.getDeptId());
-            if (userDepartment == null || !Objects.equals(d.getCompanyId(), userDepartment.getCompanyId())) {
-                throw new BizException("LEADER_COMPANY_MISMATCH", "负责人必须属于同一公司");
+            // 单公司：负责人只需归属某个部门，不再校验公司一致
+            if (userDepartment == null) {
+                throw new BizException("LEADER_DEPARTMENT_MISSING", "负责人必须归属某个部门");
             }
         }
         leaderMapper.delete(new QueryWrapper<DepartmentLeader>().eq("department_id", departmentId));
@@ -284,8 +275,8 @@ public class DepartmentService {
             .toList();
     }
 
-    private Integer nextSortOrder(Long companyId, Long parentId) {
-        List<Department> siblings = siblingsOf(companyId, parentId);
+    private Integer nextSortOrder(Long parentId) {
+        List<Department> siblings = siblingsOf(parentId);
         return siblings.stream()
             .map(Department::getSortOrder)
             .filter(Objects::nonNull)
@@ -293,9 +284,9 @@ public class DepartmentService {
             .orElse(0) + 1;
     }
 
-    private List<Department> siblingsOf(Long companyId, Long parentId) {
+    /** 同层兄弟节点（单公司：不再按公司过滤）。 */
+    private List<Department> siblingsOf(Long parentId) {
         QueryWrapper<Department> query = new QueryWrapper<Department>()
-            .eq("company_id", companyId)
             .orderByAsc("sort_order").orderByAsc("id");
         if (parentId == null) {
             query.isNull("parent_id");
@@ -308,16 +299,11 @@ public class DepartmentService {
     private List<Department> flattenBySortOrder(Department root) {
         List<Department> result = new ArrayList<>();
         result.add(root);
-        List<Department> children = siblingsOf(root.getCompanyId(), root.getId());
+        List<Department> children = siblingsOf(root.getId());
         for (Department child : children) {
             result.addAll(flattenBySortOrder(child));
         }
         return result;
     }
 
-    private void requireSameCompany(Department source, Department target) {
-        if (target == null || !Objects.equals(source.getCompanyId(), target.getCompanyId())) {
-            throw new BizException("DEPARTMENT_COMPANY_MISMATCH", "部门父子关系、移动和排序必须在同一公司内");
-        }
-    }
 }

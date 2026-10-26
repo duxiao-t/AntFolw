@@ -23,13 +23,12 @@ public class DepartmentController {
     private final AuditService auditService;
     private final OrgCompanyAccess companyAccess;
 
-    /** 公司下完整部门树（含 ltree 子树递归） */
+    /** 完整部门树（含 ltree 子树递归）。单公司：不再接收公司参数。 */
     @GetMapping
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_READ + "')")
-    public List<Department> tree(@RequestParam Long companyId) {
+    public List<Department> tree() {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_READ);
-        companyAccess.requireCompany(companyId);
-        List<Department> all = service.tree(companyId);
+        List<Department> all = service.tree();
         Set<Long> departmentRead = authorizationService.visibleDepartments(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_READ);
         Set<Long> userRead = authorizationService.hasPermission(
@@ -56,7 +55,6 @@ public class DepartmentController {
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department create(@RequestBody Department d) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
-        companyAccess.requireCompany(d.getCompanyId());
         if (d.getParentId() == null) {
             authorizationService.requireAllDataScope(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
         } else {
@@ -66,7 +64,7 @@ public class DepartmentController {
         return auditService.execute(() -> service.create(d),
             created -> auditService.success("org.department.create", "DEPARTMENT",
                 created.getId(), AuditService.RiskLevel.HIGH,
-                Map.of("changedFields", List.of("companyId", "parentId", "name", "leaderIds")),
+                Map.of("changedFields", List.of("parentId", "name", "leaderIds")),
                 Map.of("leaderCount", created.getLeaderIds().size())));
     }
 
