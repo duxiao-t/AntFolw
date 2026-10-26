@@ -58,24 +58,23 @@ public class WecomAppController {
 
     @GetMapping("/api/integrations/wecom/message-status")
     @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
-    public WecomAppService.DeliveryStatus messageStatus(@RequestParam long companyId) {
-        return service.deliveryStatus(companyId);
+    public WecomAppService.DeliveryStatus messageStatus() {
+        return service.deliveryStatus();
     }
 
     @PostMapping("/api/integrations/wecom/test-message")
     @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
-    public ResponseEntity<Void> testMessage(@RequestBody CompanyRequest request) {
-        service.sendTestMessage(request.companyId());
+    public ResponseEntity<Void> testMessage() {
+        service.sendTestMessage();
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/api/integrations/wecom/retry-messages")
     @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
-    public ResponseEntity<Void> retryMessages(@RequestBody CompanyRequest request) {
-        service.retryDead(request.companyId());
+    public ResponseEntity<Void> retryMessages() {
+        service.retryDead();
         return ResponseEntity.noContent().build();
     }
 
     public record MediaRequest(String serverId, String mediaType) { }
-    public record CompanyRequest(long companyId) { }
 }

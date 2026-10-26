@@ -114,19 +114,21 @@ class WecomJobStore {
             """, message, errorJson(errors), jobId, token) == 1;
     }
 
-    JobDto latestJob(long companyId) {
+    /** 最近一次同步任务（单公司：不再按公司过滤）。 */
+    JobDto latestJob() {
         return jdbc.query("""
-            SELECT * FROM t_wecom_sync_job WHERE company_id = ?
+            SELECT * FROM t_wecom_sync_job
             ORDER BY created_at DESC, id DESC LIMIT 1
-            """, rs -> rs.next() ? mapJob(rs) : null, companyId);
+            """, rs -> rs.next() ? mapJob(rs) : null);
     }
 
-    JobDto activeJob(long companyId) {
+    /** 正在进行的同步任务（单公司：全局最多一个）。 */
+    JobDto activeJob() {
         JobDto result = jdbc.query("""
             SELECT * FROM t_wecom_sync_job
-            WHERE company_id = ? AND status IN ('PENDING', 'RUNNING')
+            WHERE status IN ('PENDING', 'RUNNING')
             ORDER BY created_at DESC, id DESC LIMIT 1
-            """, rs -> rs.next() ? mapJob(rs) : null, companyId);
+            """, rs -> rs.next() ? mapJob(rs) : null);
         if (result == null) throw new BizException("WECOM_JOB_CONFLICT", "同步任务状态已变化，请重试");
         return result;
     }
@@ -147,7 +149,7 @@ class WecomJobStore {
         } catch (SQLException ignored) {
             // Older database rows without the column default to FULL.
         }
-        return new JobDto(rs.getLong("id"), rs.getLong("company_id"), rs.getString("status"),
+        return new JobDto(rs.getLong("id"), rs.getString("status"),
             rs.getString("phase"), rs.getInt("percent"), rs.getInt("total_users"),
             rs.getInt("processed_users"), rs.getInt("created_users"),
             rs.getInt("updated_users"), rs.getInt("failed_users"), rs.getString("message"),
@@ -175,7 +177,7 @@ class WecomJobStore {
             JobDto result = job(jobId, false);
             audit.successAs(actor, "integration.wecom.sync.finish", "WECOM_SYNC_JOB", jobId,
                 AuditService.RiskLevel.HIGH, Map.of("status", result.status()),
-                Map.of("companyId", result.companyId(), "totalUsers", result.totalUsers(),
+                Map.of("totalUsers", result.totalUsers(),
                     "createdUsers", result.createdUsers(), "updatedUsers", result.updatedUsers(),
                     "failedUsers", result.failedUsers()));
         } catch (RuntimeException ignored) {

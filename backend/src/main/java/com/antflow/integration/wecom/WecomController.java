@@ -27,8 +27,8 @@ public class WecomController {
 
     @GetMapping("/settings")
     @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
-    public WecomService.SettingsDto settings(@RequestParam long companyId) {
-        return service.settings(companyId);
+    public WecomService.SettingsDto settings() {
+        return service.settings();
     }
 
     @PutMapping("/settings")
@@ -38,9 +38,9 @@ public class WecomController {
             && request.oauthEnabled() == null && request.jsSdkEnabled() == null
             && request.messageEnabled() == null && request.scheduleEnabled() == null
             && request.scheduleTime() == null && request.scheduleMode() == null) {
-            return service.saveSettings(request.companyId(), request.corpId(), request.secret());
+            return service.saveSettings(request.corpId(), request.secret());
         }
-        return service.saveSettings(request.companyId(), request.corpId(), request.secret(),
+        return service.saveSettings(request.corpId(), request.secret(),
             request.agentId(), request.agentSecret(), request.oauthEnabled(),
             request.jsSdkEnabled(), request.messageEnabled(), request.scheduleEnabled(),
             request.scheduleTime(), request.scheduleMode());
@@ -49,7 +49,7 @@ public class WecomController {
     @PostMapping("/sync-jobs")
     @PreAuthorize("@authz.console('" + PermissionCodes.INTEGRATION_WECOM_MANAGE + "')")
     public WecomService.JobDto start(@Valid @RequestBody StartJobRequest request) {
-        return service.start(request.companyId(), request.mode());
+        return service.start(request.mode());
     }
 
     @GetMapping("/sync-jobs/{id}")
@@ -58,8 +58,7 @@ public class WecomController {
         return service.job(id);
     }
 
-    public record SaveSettingsRequest(@NotNull Long companyId,
-                                      @NotBlank @Size(max = 128) String corpId,
+    public record SaveSettingsRequest(@NotBlank @Size(max = 128) String corpId,
                                       @Size(max = 512) String secret,
                                       Integer agentId,
                                       @Size(max = 512) String agentSecret,
@@ -72,5 +71,5 @@ public class WecomController {
                                       String scheduleTime,
                                       @Pattern(regexp = "INCREMENTAL|FULL", message = "自动同步模式无效")
                                       String scheduleMode) { }
-    public record StartJobRequest(@NotNull Long companyId, String mode) { }
+    public record StartJobRequest(String mode) { }
 }

@@ -95,7 +95,7 @@ class WecomAppMessageDispatcher implements NotificationListener {
 
     void deliver(Delivery delivery) {
         try {
-            Recipient recipient = recipient(delivery.recipientId(), null);
+            Recipient recipient = recipient(delivery.recipientId());
             if (recipient == null) throw new BizException("WECOM_DELIVERY_UNAVAILABLE", "企业微信应用消息未启用或成员未映射");
             String url = authProperties.publicBaseUri().resolve(deepLink(delivery)).toString();
             client.sendTextCard(tokens.session(recipient.config()), recipient.config().agentId(),
@@ -137,18 +137,22 @@ class WecomAppMessageDispatcher implements NotificationListener {
         return "/mobile/processes/" + delivery.instanceId();
     }
 
-    Recipient recipient(long userId, Long companyId) {
+    /**
+     * 取收件人与其要用的应用配置。
+     *
+     * <p>单公司后不再按公司匹配配置：系统里只有一份配置，直接取它（ORDER BY company_id 只是为了确定取哪一行）。
+     * {@code config.company_id} 仍然要选出来——它是密文的 AAD 上下文（见 {@code WecomSecretCipher}）。
+     */
+    Recipient recipient(long userId) {
         return jdbc.query("""
             SELECT mapping.wecom_user_id, config.company_id, config.corp_id, config.agent_id,
                    config.agent_secret_encrypted, config.oauth_enabled, config.js_sdk_enabled,
                    config.message_enabled
             FROM t_wecom_user_mapping mapping
-            JOIN t_wecom_config config ON config.company_id = mapping.company_id
+            CROSS JOIN (SELECT * FROM t_wecom_config ORDER BY company_id LIMIT 1) config
             WHERE mapping.user_id = ? AND config.message_enabled
-              AND (?::bigint IS NULL OR config.company_id = ?)
-            ORDER BY config.company_id LIMIT 1
             """, rs -> rs.next() ? new Recipient(rs.getString(1), WecomAppConfigStore.appConfig(rs)) : null,
-            userId, companyId, companyId);
+            userId);
     }
 
     private static String title(String type) {

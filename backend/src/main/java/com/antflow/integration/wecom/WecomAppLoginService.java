@@ -72,13 +72,13 @@ class WecomAppLoginService {
             """, rs -> rs.next() ? new Flow(rs.getLong(1), rs.getString(2)) : null,
             AuthSessionService.hash(state));
         if (flow == null) throw new BadCredentialsException("WeCom state is invalid or expired");
-        WecomAppConfig config = configs.requireConfig(flow.companyId(), "oauth_enabled");
+        WecomAppConfig config = configs.requireConfig("oauth_enabled");
         String wecomUserId = client.oauthUserId(tokens.session(config), code);
         Long userId = jdbc.query("""
             SELECT mapping.user_id FROM t_wecom_user_mapping mapping
             JOIN t_user user_row ON user_row.id = mapping.user_id AND user_row.status = 'ACTIVE'
-            WHERE mapping.company_id = ? AND mapping.wecom_user_id = ?
-            """, rs -> rs.next() ? rs.getLong(1) : null, config.companyId(), wecomUserId);
+            WHERE mapping.wecom_user_id = ?
+            """, rs -> rs.next() ? rs.getLong(1) : null, wecomUserId);
         if (userId == null) {
             throw new BizException("WECOM_ACCOUNT_UNAVAILABLE", "企业微信成员尚未同步或本地账号已停用");
         }

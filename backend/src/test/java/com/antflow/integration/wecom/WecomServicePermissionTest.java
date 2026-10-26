@@ -37,10 +37,9 @@ class WecomServicePermissionTest {
             new WecomConfigService(mock(JdbcTemplate.class), mock(WecomSecretCipher.class),
                 // 权限校验已随配置读写搬到 WecomConfigService，必须传同一个 mock 才能观测到拒绝。
                 authorization, mock(AuditService.class),
-                mock(WecomJobStore.class), mock(WecomAccessGuard.class)),
+                mock(WecomJobStore.class)),
             new WecomJobStore(mock(JdbcTemplate.class), mock(TransactionTemplate.class),
-                mock(WecomSyncLease.class), mock(AuditService.class), new ObjectMapper()),
-            new WecomAccessGuard(mock(JdbcTemplate.class)));
+                mock(WecomSyncLease.class), mock(AuditService.class), new ObjectMapper()));
     }
 
     @Test
@@ -48,7 +47,7 @@ class WecomServicePermissionTest {
         doThrow(new AccessDeniedException("denied")).when(authorization)
             .requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
 
-        assertThatThrownBy(() -> service.settings(1)).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> service.settings()).isInstanceOf(AccessDeniedException.class);
         verify(authorization).requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
     }
 
@@ -57,7 +56,7 @@ class WecomServicePermissionTest {
         doThrow(new AccessDeniedException("user scope")).when(authorization)
             .requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
 
-        assertThatThrownBy(() -> service.start(1, "FULL")).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> service.start("FULL")).isInstanceOf(AccessDeniedException.class);
         verify(authorization).requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_MANAGE);
         verify(authorization).requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
     }

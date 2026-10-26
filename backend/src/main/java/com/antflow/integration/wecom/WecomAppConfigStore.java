@@ -26,10 +26,10 @@ class WecomAppConfigStore {
         return config;
     }
 
-    WecomAppConfig requireConfig(long companyId, String enabledColumn) {
+    WecomAppConfig requireConfig(String enabledColumn) {
         WecomAppConfig config = jdbc.query("SELECT company_id, corp_id, agent_id, agent_secret_encrypted, "
-            + "oauth_enabled, js_sdk_enabled, message_enabled FROM t_wecom_config WHERE company_id = ? AND "
-            + enabledColumn, rs -> rs.next() ? appConfig(rs) : null, companyId);
+            + "oauth_enabled, js_sdk_enabled, message_enabled FROM t_wecom_config WHERE "
+            + enabledColumn, rs -> rs.next() ? appConfig(rs) : null);
         if (config == null) throw new BizException("WECOM_APP_DISABLED", "企业微信应用能力尚未启用");
         return config;
     }

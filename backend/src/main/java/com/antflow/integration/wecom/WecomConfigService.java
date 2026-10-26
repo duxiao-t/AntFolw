@@ -43,14 +43,12 @@ class WecomConfigService {
     private final AuthorizationService authorization;
     private final AuditService audit;
     private final WecomJobStore jobStore;
-    private final WecomAccessGuard accessGuard;
 
-    public SettingsDto settings(long companyId) {
+    public SettingsDto settings() {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
-        accessGuard.requireCompanyAccess(companyId);
-        Config config = config(companyId);
-        return new SettingsDto(companyId, config == null ? "" : config.corpId(),
-            config != null && !config.encryptedSecret().isBlank(), jobStore.latestJob(companyId),
+        Config config = config();
+        return new SettingsDto(config == null ? "" : config.corpId(),
+            config != null && !config.encryptedSecret().isBlank(), jobStore.latestJob(),
             config == null ? null : config.agentId(),
             config != null && config.encryptedAgentSecret() != null,
             config != null && config.oauthEnabled(), config != null && config.jsSdkEnabled(),
@@ -61,44 +59,43 @@ class WecomConfigService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public SettingsDto saveSettings(long companyId, String corpId, String secret) {
-        Config current = config(companyId);
-        return saveSettings(companyId, corpId, secret,
+    public SettingsDto saveSettings(String corpId, String secret) {
+        Config current = config();
+        return saveSettings(corpId, secret,
             current == null ? null : current.agentId(), null,
             current != null && current.oauthEnabled(), current != null && current.jsSdkEnabled(),
             current != null && current.messageEnabled(), null, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
+    public SettingsDto saveSettings(String corpId, String secret, Integer agentId,
                                     String agentSecret, boolean oauthEnabled,
                                     boolean jsSdkEnabled, boolean messageEnabled) {
-        return saveSettings(companyId, corpId, secret, agentId, agentSecret, oauthEnabled,
+        return saveSettings(corpId, secret, agentId, agentSecret, oauthEnabled,
             jsSdkEnabled, messageEnabled, null, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
+    public SettingsDto saveSettings(String corpId, String secret, Integer agentId,
                                     String agentSecret, Boolean oauthEnabled,
                                     Boolean jsSdkEnabled, Boolean messageEnabled,
                                     Boolean scheduleEnabled, String scheduleTime,
                                     String scheduleMode) {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
-        accessGuard.requireCompanyAccess(companyId);
         String normalizedCorpId = corpId == null ? "" : corpId.trim();
         if (normalizedCorpId.isBlank() || normalizedCorpId.length() > 128) {
             throw new BizException("WECOM_CORP_ID_REQUIRED", "请输入有效的 CorpID");
         }
-        Config current = config(companyId);
+        Config current = config();
         String encrypted = secret == null || secret.isBlank()
             ? current == null ? null : current.encryptedSecret()
-            : cipher.encrypt(secret.trim(), companyId);
+            : cipher.encrypt(secret.trim(), companyIdFor(current));
         if (encrypted == null) {
             throw new BizException("WECOM_SECRET_REQUIRED", "首次配置时请输入通讯录同步 Secret");
         }
         String encryptedAgentSecret = agentSecret == null || agentSecret.isBlank()
             ? current == null ? null : current.encryptedAgentSecret()
-            : cipher.encrypt(agentSecret.trim(), "wecom-agent:" + companyId);
+            : cipher.encrypt(agentSecret.trim(), "wecom-agent:" + companyIdFor(current));
         Integer savedAgentId = agentId == null && current != null ? current.agentId() : agentId;
         boolean savedOauthEnabled = oauthEnabled == null
             ? current != null && current.oauthEnabled() : oauthEnabled;
@@ -109,14 +106,6 @@ class WecomConfigService {
         boolean appEnabled = savedOauthEnabled || savedJsSdkEnabled || savedMessageEnabled;
         if (appEnabled && (savedAgentId == null || savedAgentId <= 0 || encryptedAgentSecret == null)) {
             throw new BizException("WECOM_APP_REQUIRED", "启用免登、JS-SDK 或应用消息前请配置 AgentId 和应用 Secret");
-        }
-        if (savedOauthEnabled) {
-            Integer otherOauth = jdbc.queryForObject("""
-                SELECT count(*) FROM t_wecom_config WHERE oauth_enabled AND company_id <> ?
-                """, Integer.class, companyId);
-            if (otherOauth != null && otherOauth > 0) {
-                throw new BizException("WECOM_OAUTH_CONFLICT", "当前只允许启用一个企业微信 Corp 免登入口");
-            }
         }
         boolean savedScheduleEnabled = scheduleEnabled == null
             ? current != null && current.scheduleEnabled() : scheduleEnabled;
@@ -145,28 +134,45 @@ class WecomConfigService {
                 schedule_mode = EXCLUDED.schedule_mode,
                 updated_by = EXCLUDED.updated_by,
                 updated_at = now()
-            """, companyId, normalizedCorpId, encrypted, savedAgentId, encryptedAgentSecret,
+            """, companyIdFor(current), normalizedCorpId, encrypted, savedAgentId, encryptedAgentSecret,
             savedOauthEnabled, savedJsSdkEnabled, savedMessageEnabled, savedScheduleEnabled,
             savedScheduleTime, savedScheduleMode, actorId, actorId);
-        audit.success("integration.wecom.settings.update", "COMPANY", companyId,
+        audit.success("integration.wecom.settings.update", "WECOM_CONFIG", companyIdFor(current),
             AuditService.RiskLevel.HIGH,
             Map.of("changedFields", List.of("corpId", "secretConfigured", "scheduleEnabled",
                 "scheduleTime", "scheduleMode")), Map.of());
-        return new SettingsDto(companyId, normalizedCorpId, true, jobStore.latestJob(companyId), savedAgentId,
+        return new SettingsDto(normalizedCorpId, true, jobStore.latestJob(), savedAgentId,
             encryptedAgentSecret != null, savedOauthEnabled, savedJsSdkEnabled, savedMessageEnabled,
             savedScheduleEnabled, formatScheduleTime(savedScheduleTime), savedScheduleMode);
     }
 
-    Config config(long companyId) {
+    Config config() {
         return jdbc.query("""
-            SELECT corp_id, secret_encrypted, agent_id, agent_secret_encrypted,
+            SELECT company_id, corp_id, secret_encrypted, agent_id, agent_secret_encrypted,
                    oauth_enabled, js_sdk_enabled, message_enabled,
                    schedule_enabled, schedule_time, schedule_mode
-            FROM t_wecom_config WHERE company_id = ?
-            """, rs -> rs.next() ? new Config(rs.getString(1), rs.getString(2),
-                (Integer) rs.getObject(3), rs.getString(4), rs.getBoolean(5),
-                rs.getBoolean(6), rs.getBoolean(7), rs.getBoolean(8),
-                rs.getObject(9, LocalTime.class), rs.getString(10)) : null, companyId);
+            FROM t_wecom_config ORDER BY company_id LIMIT 1
+            """, rs -> rs.next() ? new Config(rs.getLong(1), rs.getString(2), rs.getString(3),
+                (Integer) rs.getObject(4), rs.getString(5), rs.getBoolean(6),
+                rs.getBoolean(7), rs.getBoolean(8), rs.getBoolean(9),
+                rs.getObject(10, LocalTime.class), rs.getString(11)) : null);
+    }
+
+    /**
+     * 配置行的 company_id。
+     *
+     * <p>t_wecom_config 没有独立主键，company_id 就是主键；它同时是密文的 AAD 上下文。
+     * 所以这里保留这个取值，但**只用于行标识与解密**，不再参与任何分区或权限判断。
+     * 首次保存（还没有行）时取库里唯一那家公司。
+     */
+    private long companyIdFor(Config current) {
+        if (current != null) return current.companyId();
+        Long only = jdbc.query("SELECT id FROM t_company WHERE deleted = 0 ORDER BY created_at, id LIMIT 1",
+            rs -> rs.next() ? rs.getLong(1) : null);
+        if (only == null) {
+            throw new BizException("COMPANY_NOT_FOUND", "系统内没有可用公司，无法保存企业微信配置");
+        }
+        return only;
     }
 
     static LocalTime parseScheduleTime(String value) {
@@ -188,7 +194,9 @@ class WecomConfigService {
     }
 
     /** 连接配置的读取结果。包内可见：{@code WecomService.run()} 需要一个具名类型来持有它。 */
-    record Config(String corpId, String encryptedSecret, Integer agentId,
+    /** 配置行。{@code companyId} 是 t_wecom_config 的主键（该表没有独立 id），
+     *  同时充当密文的 AAD 上下文——保留它不是为了分区，而是为了能解开既有密文。 */
+    record Config(long companyId, String corpId, String encryptedSecret, Integer agentId,
                           String encryptedAgentSecret, boolean oauthEnabled,
                           boolean jsSdkEnabled, boolean messageEnabled,
                           boolean scheduleEnabled, LocalTime scheduleTime,

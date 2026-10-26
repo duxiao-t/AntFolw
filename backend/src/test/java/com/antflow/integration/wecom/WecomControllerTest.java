@@ -26,10 +26,10 @@ class WecomControllerTest {
 
     @Test
     void settingsNeverExposeSecret() throws Exception {
-        when(service.settings(1)).thenReturn(new WecomService.SettingsDto(
-            1, "ww-corp", true, job()));
+        when(service.settings()).thenReturn(new WecomService.SettingsDto(
+            "ww-corp", true, job()));
 
-        mvc.perform(get("/api/integrations/wecom/settings").param("companyId", "1"))
+        mvc.perform(get("/api/integrations/wecom/settings"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.corpId").value("ww-corp"))
             .andExpect(jsonPath("$.secretConfigured").value(true))
@@ -42,16 +42,16 @@ class WecomControllerTest {
 
     @Test
     void blankSecretIsAcceptedForPreservingExistingValue() throws Exception {
-        when(service.saveSettings(1, "ww-corp", "")).thenReturn(
-            new WecomService.SettingsDto(1, "ww-corp", true, null));
+        when(service.saveSettings("ww-corp", "")).thenReturn(
+            new WecomService.SettingsDto("ww-corp", true, null));
 
         mvc.perform(put("/api/integrations/wecom/settings")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"companyId\":1,\"corpId\":\"ww-corp\",\"secret\":\"\"}"))
+                .content("{\"corpId\":\"ww-corp\",\"secret\":\"\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.secret").doesNotExist());
 
-        verify(service).saveSettings(1, "ww-corp", "");
+        verify(service).saveSettings("ww-corp", "");
     }
 
     @Test
@@ -59,25 +59,25 @@ class WecomControllerTest {
         mvc.perform(put("/api/integrations/wecom/settings")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                    {"companyId":1,"corpId":"ww-corp","scheduleEnabled":true,
+                    {"corpId":"ww-corp","scheduleEnabled":true,
                      "scheduleTime":"04:30:00","scheduleMode":"FULL"}
                     """))
             .andExpect(status().isOk());
 
-        verify(service).saveSettings(1, "ww-corp", null, null, null,
+        verify(service).saveSettings("ww-corp", null, null, null,
             null, null, null, true, "04:30:00", "FULL");
 
         mvc.perform(put("/api/integrations/wecom/settings")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                    {"companyId":1,"corpId":"ww-corp","scheduleEnabled":true,
+                    {"corpId":"ww-corp","scheduleEnabled":true,
                      "scheduleTime":"4:30","scheduleMode":"WEEKLY"}
                     """))
             .andExpect(status().isBadRequest());
     }
 
     private static WecomService.JobDto job() {
-        return new WecomService.JobDto(9, 1, "SUCCESS", "COMPLETED", 100,
+        return new WecomService.JobDto(9, "SUCCESS", "COMPLETED", 100,
             2, 2, 1, 1, 0, "完成", List.of(), null, null);
     }
 }

@@ -513,15 +513,6 @@
         },
         "type" : "object"
       },
-      "CompanyRequest" : {
-        "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          }
-        },
-        "type" : "object"
-      },
       "CorrectionFormView" : {
         "properties" : {
           "allowedFields" : {
@@ -1621,10 +1612,6 @@
       },
       "JobDto" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "createdUsers" : {
             "format" : "int32",
             "type" : "integer"
@@ -3734,10 +3721,6 @@
             "minLength" : 0,
             "type" : "string"
           },
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "corpId" : {
             "maxLength" : 128,
             "minLength" : 0,
@@ -3770,7 +3753,6 @@
           }
         },
         "required" : [
-          "companyId",
           "corpId"
         ],
         "type" : "object"
@@ -3862,10 +3844,6 @@
           },
           "agentSecretConfigured" : {
             "type" : "boolean"
-          },
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
           },
           "corpId" : {
             "type" : "string"
@@ -4054,17 +4032,10 @@
       },
       "StartJobRequest" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "mode" : {
             "type" : "string"
           }
         },
-        "required" : [
-          "companyId"
-        ],
         "type" : "object"
       },
       "StartMobileInstanceRequest" : {
@@ -7100,17 +7071,6 @@
     "/api/integrations/wecom/message-status" : {
       "get" : {
         "operationId" : "messageStatus",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : true,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -7131,16 +7091,6 @@
     "/api/integrations/wecom/retry-messages" : {
       "post" : {
         "operationId" : "retryMessages",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/CompanyRequest"
-              }
-            }
-          },
-          "required" : true
-        },
         "responses" : {
           "200" : {
             "description" : "OK"
@@ -7154,17 +7104,6 @@
     "/api/integrations/wecom/settings" : {
       "get" : {
         "operationId" : "settings_2",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : true,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -7274,16 +7213,6 @@
     "/api/integrations/wecom/test-message" : {
       "post" : {
         "operationId" : "testMessage",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/CompanyRequest"
-              }
-            }
-          },
-          "required" : true
-        },
         "responses" : {
           "200" : {
             "description" : "OK"

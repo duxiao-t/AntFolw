@@ -73,7 +73,6 @@ public class WecomService {
     /** 同步任务持久化：创建、进度、收尾、查询。 */
     private final WecomJobStore jobStore;
     /** 公司存在性与归属校验，三个协作者共用。 */
-    private final WecomAccessGuard accessGuard;
 
     public WecomService(JdbcTemplate jdbc, WecomSecretCipher cipher, WecomClient client,
                         AuthorizationService authorization, AuditService audit,
@@ -85,8 +84,7 @@ public class WecomService {
                         WecomDirectorySync directorySync,
                         WecomDepartmentSync departmentSync,
                         WecomConfigService configService,
-                        WecomJobStore jobStore,
-                        WecomAccessGuard accessGuard) {
+                        WecomJobStore jobStore) {
         this.jdbc = jdbc;
         this.cipher = cipher;
         this.client = client;
@@ -101,52 +99,52 @@ public class WecomService {
         this.departmentSync = departmentSync;
         this.configService = configService;
         this.jobStore = jobStore;
-        this.accessGuard = accessGuard;
     }
 
-    public SettingsDto settings(long companyId) {
-        return configService.settings(companyId);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public SettingsDto saveSettings(long companyId, String corpId, String secret) {
-        return configService.saveSettings(companyId, corpId, secret);
+    public SettingsDto settings() {
+        return configService.settings();
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
+    public SettingsDto saveSettings(String corpId, String secret) {
+        return configService.saveSettings(corpId, secret);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SettingsDto saveSettings(String corpId, String secret, Integer agentId,
                                     String agentSecret, boolean oauthEnabled,
                                     boolean jsSdkEnabled, boolean messageEnabled) {
-        return configService.saveSettings(companyId, corpId, secret, agentId, agentSecret,
+        return configService.saveSettings(corpId, secret, agentId, agentSecret,
             oauthEnabled, jsSdkEnabled, messageEnabled);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public SettingsDto saveSettings(long companyId, String corpId, String secret, Integer agentId,
+    public SettingsDto saveSettings(String corpId, String secret, Integer agentId,
                                     String agentSecret, Boolean oauthEnabled,
                                     Boolean jsSdkEnabled, Boolean messageEnabled,
                                     Boolean scheduleEnabled, String scheduleTime,
                                     String scheduleMode) {
-        return configService.saveSettings(companyId, corpId, secret, agentId, agentSecret,
+        return configService.saveSettings(corpId, secret, agentId, agentSecret,
             oauthEnabled, jsSdkEnabled, messageEnabled, scheduleEnabled, scheduleTime, scheduleMode);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public JobDto start(long companyId, String syncMode) {
+    public JobDto start(String syncMode) {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         authorization.requireAllDataScope(PermissionCodes.ORG_DEPARTMENT_MANAGE);
         authorization.requireAllDataScope(PermissionCodes.ORG_USER_MANAGE);
-        accessGuard.requireCompanyAccess(companyId);
-        if (configService.config(companyId) == null) {
+        // 单公司：只有一份配置，取它的 company_id 作为同步任务行的键。
+        WecomConfigService.Config config = configService.config();
+        if (config == null) {
             throw new BizException("WECOM_NOT_CONFIGURED", "请先保存企业微信连接配置");
         }
         String mode = "FULL".equalsIgnoreCase(syncMode) ? "FULL" : "INCREMENTAL";
         PrincipalHolder.Principal actor = PrincipalHolder.current().orElseThrow();
-        Long id = jobStore.create(companyId, mode, actor.userId());
-        if (id == null) return jobStore.activeJob(companyId);
+        Long id = jobStore.create(config.companyId(), mode, actor.userId());
+        if (id == null) return jobStore.activeJob();
 
         audit.success("integration.wecom.sync.start", "WECOM_SYNC_JOB", id,
-            AuditService.RiskLevel.HIGH, Map.of(), Map.of("companyId", companyId));
+            AuditService.RiskLevel.HIGH, Map.of(), Map.of());
         long jobId = id;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -159,9 +157,7 @@ public class WecomService {
 
     public JobDto job(long id) {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
-        JobDto result = jobStore.job(id, true);
-        accessGuard.requireCompanyAccess(result.companyId());
-        return result;
+        return jobStore.job(id, true);
     }
 
     @Scheduled(fixedDelayString = "${antflow.wecom.schedule-poll-interval-ms:60000}",
@@ -255,16 +251,19 @@ public class WecomService {
         boolean terminal = false;
         try {
             JobDto initial = jobStore.job(jobId, false);
-            Config config = configService.config(initial.companyId());
+            Config config = configService.config();
             if (config == null) throw new WecomClient.WecomApiException("企业微信配置不存在");
+            // 单公司：映射表的 company_id 只是行键（该表没有独立主键），
+            // 统一取配置行的值，不再按公司分区。
+            long companyId = config.companyId();
             boolean full = "FULL".equals(initial.syncMode());
             jobStore.stage(jobId, "CONNECTING", 5, "正在连接企业微信");
             WecomClient.Session session = client.connect(config.corpId(),
-                cipher.decrypt(config.encryptedSecret(), initial.companyId()));
+                cipher.decrypt(config.encryptedSecret(), companyId));
 
             jobStore.stage(jobId, "DEPARTMENTS", 12, "正在同步部门树");
             List<WecomDepartment> departments = WecomMappingRules.orderDepartments(client.departments(session));
-            Map<Long, Long> departmentMappings = departmentSync.syncDepartments(initial.companyId(), departments);
+            Map<Long, Long> departmentMappings = departmentSync.syncDepartments(companyId, departments);
             jobStore.stage(jobId, "DEPARTMENTS", 25, "部门同步完成");
 
             jobStore.stage(jobId, "FETCHING_USERS", 30, "正在获取成员列表");
@@ -277,7 +276,7 @@ public class WecomService {
             });
 
             List<String> errors = new CopyOnWriteArrayList<>();
-            SyncContext context = directorySync.loadContext(initial.companyId(), externalUsers, full);
+            SyncContext context = directorySync.loadContext(companyId, externalUsers, full);
             List<WecomUser> pending = List.copyOf(context.pending);
             int created = 0;
             int updated = 0;
@@ -289,7 +288,7 @@ public class WecomService {
                     SyncContext batchContext = context;
                     int[] counts = transactions.execute(status -> {
                         lease.require();
-                        return directorySync.syncUsers(initial.companyId(), batch, departmentMappings, batchContext);
+                        return directorySync.syncUsers(companyId, batch, departmentMappings, batchContext);
                     });
                     created += counts[0];
                     updated += counts[1];
@@ -297,13 +296,13 @@ public class WecomService {
                     if (exception instanceof LeaseLostException) throw exception;
                     log.warn("WeCom member batch write failed: job={}, batch={}", jobId,
                         offset / USER_BATCH_SIZE + 1, exception);
-                    SyncContext retryContext = directorySync.loadContext(initial.companyId(), externalUsers, full);
+                    SyncContext retryContext = directorySync.loadContext(companyId, externalUsers, full);
                     for (WecomUser user : batch) {
                         try {
                             SyncContext memberContext = retryContext;
                             int[] counts = transactions.execute(status -> {
                                 lease.require();
-                                return directorySync.syncUsers(initial.companyId(), List.of(user),
+                                return directorySync.syncUsers(companyId, List.of(user),
                                     departmentMappings, memberContext);
                             });
                             created += counts[0];
@@ -314,7 +313,7 @@ public class WecomService {
                             log.warn("WeCom member write failed: job={}, member={}", jobId,
                                 WecomMappingRules.mask(user.userId()), memberException);
                             WecomSyncErrors.addError(errors, WecomSyncErrors.memberError(user, memberException));
-                            retryContext = directorySync.loadContext(initial.companyId(), externalUsers, full);
+                            retryContext = directorySync.loadContext(companyId, externalUsers, full);
                         }
                     }
                     context = retryContext;
@@ -328,15 +327,15 @@ public class WecomService {
 
             jobStore.stage(jobId, "RELATIONS", 88, "正在同步部门负责人和直属上级");
             // 部门负责人同步与直属上级同步都改为"返回问题列表"，错误上限与截断仍由本类统一执行。
-            for (String problem : departmentSync.syncDepartmentLeaders(initial.companyId(), departments)) {
+            for (String problem : departmentSync.syncDepartmentLeaders(companyId, departments)) {
                 WecomSyncErrors.addError(errors, problem);
             }
             // 直属上级同步已搬到 WecomManagerSync；它只返回"发生了什么"，错误上限由本类统一执行。
-            for (String problem : managerSync.sync(initial.companyId(), session, externalUsers,
+            for (String problem : managerSync.sync(companyId, session, externalUsers,
                 context.mappedIds, context.byId.values())) {
                 WecomSyncErrors.addError(errors, problem);
             }
-            int disabled = directorySync.deactivateMissing(initial.companyId(), externalUsers);
+            int disabled = directorySync.deactivateMissing(companyId, externalUsers);
             String summary = "通讯录同步完成"
                 + (disabled > 0 ? "，已停用 " + disabled + " 名成员" : "");
             boolean clean = failed == 0 && errors.isEmpty();
@@ -355,26 +354,26 @@ public class WecomService {
 
 
 
-    public record SettingsDto(long companyId, String corpId, boolean secretConfigured,
+    public record SettingsDto(String corpId, boolean secretConfigured,
                               JobDto latestJob, Integer agentId, boolean agentSecretConfigured,
                               boolean oauthEnabled, boolean jsSdkEnabled,
                               boolean messageEnabled, boolean scheduleEnabled,
                               String scheduleTime, String scheduleMode) {
-        public SettingsDto(long companyId, String corpId, boolean secretConfigured, JobDto latestJob) {
-            this(companyId, corpId, secretConfigured, latestJob, null, false, false, false, false,
+        public SettingsDto(String corpId, boolean secretConfigured, JobDto latestJob) {
+            this(corpId, secretConfigured, latestJob, null, false, false, false, false,
                 false, "03:00:00", "INCREMENTAL");
         }
     }
-    public record JobDto(long id, long companyId, String status, String phase, int percent,
+    public record JobDto(long id, String status, String phase, int percent,
                          int totalUsers, int processedUsers, int createdUsers, int updatedUsers,
                          int failedUsers, String message, List<String> errorSummary,
                          OffsetDateTime startedAt, OffsetDateTime finishedAt,
                          String syncMode) {
-        public JobDto(long id, long companyId, String status, String phase, int percent,
+        public JobDto(long id, String status, String phase, int percent,
                       int totalUsers, int processedUsers, int createdUsers, int updatedUsers,
                       int failedUsers, String message, List<String> errorSummary,
                       OffsetDateTime startedAt, OffsetDateTime finishedAt) {
-            this(id, companyId, status, phase, percent, totalUsers, processedUsers, createdUsers,
+            this(id, status, phase, percent, totalUsers, processedUsers, createdUsers,
                 updatedUsers, failedUsers, message, errorSummary, startedAt, finishedAt,
                 "FULL");
         }

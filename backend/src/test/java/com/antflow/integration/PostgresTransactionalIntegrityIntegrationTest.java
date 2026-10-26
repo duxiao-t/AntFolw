@@ -2819,13 +2819,13 @@ class PostgresTransactionalIntegrityIntegrationTest {
             long adminId = userId("admin");
             PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
             try {
-                WecomService.SettingsDto saved = wecomService.saveSettings(companyId,
+                WecomService.SettingsDto saved = wecomService.saveSettings(
                     "ww-schedule-test", "", null, null, false, false, false,
                     true, "03:00:00", "FULL");
                 assertThat(saved.scheduleEnabled()).isTrue();
                 assertThat(saved.scheduleTime()).isEqualTo("03:00:00");
                 assertThat(saved.scheduleMode()).isEqualTo("FULL");
-                assertThat(wecomService.settings(companyId)).isEqualTo(saved);
+                assertThat(wecomService.settings()).isEqualTo(saved);
             } finally {
                 PrincipalHolder.clear();
             }

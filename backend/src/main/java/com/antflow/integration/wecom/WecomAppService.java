@@ -106,17 +106,17 @@ public class WecomAppService {
         return files.upload(new ByteArrayMultipartFile(media.fileName(), media.contentType(), media.content()), owner);
     }
 
-    public void sendTestMessage(long companyId) {
+    public void sendTestMessage() {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         long userId = authorization.currentUserId();
-        WecomAppMessageDispatcher.Recipient recipient = dispatcher.recipient(userId, companyId);
+        WecomAppMessageDispatcher.Recipient recipient = dispatcher.recipient(userId);
         if (recipient == null) throw new BizException("WECOM_USER_NOT_MAPPED", "当前管理员尚未同步到该企业微信通讯录");
         client.sendTextCard(tokens.session(recipient.config()), recipient.config().agentId(), recipient.wecomUserId(),
             "AntFlow 企业微信连接测试", "应用消息发送成功，审批通知将通过此入口送达。",
             authProperties.publicBaseUri().resolve("/mobile/").toString());
     }
 
-    public DeliveryStatus deliveryStatus(long companyId) {
+    public DeliveryStatus deliveryStatus() {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         return jdbc.query("""
             SELECT count(*) FILTER (WHERE delivery.status IN ('PENDING', 'RUNNING')),
@@ -124,20 +124,19 @@ public class WecomAppService {
                    min(delivery.created_at) FILTER (WHERE delivery.status IN ('PENDING', 'RUNNING'))
             FROM t_wecom_message_delivery delivery
             JOIN t_wecom_user_mapping mapping ON mapping.user_id = delivery.recipient_id
-            WHERE mapping.company_id = ?
             """, rs -> rs.next() ? new DeliveryStatus(rs.getLong(1), rs.getLong(2),
-                rs.getObject(3, OffsetDateTime.class)) : new DeliveryStatus(0, 0, null), companyId);
+                rs.getObject(3, OffsetDateTime.class)) : new DeliveryStatus(0, 0, null));
     }
 
-    public void retryDead(long companyId) {
+    public void retryDead() {
         authorization.requirePermission(PermissionCodes.INTEGRATION_WECOM_MANAGE);
         jdbc.update("""
             UPDATE t_wecom_message_delivery delivery SET status = 'PENDING', attempts = 0,
                 next_attempt_at = now(), last_error = NULL
             FROM t_wecom_user_mapping mapping
-            WHERE mapping.user_id = delivery.recipient_id AND mapping.company_id = ?
+            WHERE mapping.user_id = delivery.recipient_id
               AND delivery.status = 'DEAD'
-            """, companyId);
+            """);
     }
 
     /**
