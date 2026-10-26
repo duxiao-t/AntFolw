@@ -9,8 +9,7 @@ import { normalizeGender } from './Contacts.utils';
  * 成员编辑弹窗 + 重置密码弹窗。两者的状态必须同一个宿主：编辑弹窗里点"重置密码"
  * 要先把编辑框关掉再把同一个成员交给密码框，分两个 hook 就得在页面壳里做接力。
  */
-export function useContactsMemberDialogs({ companyId, selDeptId, canAdmin, refreshMembers }: {
-  companyId: number;
+export function useContactsMemberDialogs({ selDeptId, canAdmin, refreshMembers }: {
   selDeptId: number | null;
   canAdmin: boolean;
   refreshMembers: () => Promise<void>;
@@ -23,15 +22,14 @@ export function useContactsMemberDialogs({ companyId, selDeptId, canAdmin, refre
   const [managerKeyword, setManagerKeyword] = useState('');
   const [passwordTarget, setPasswordTarget] = useState<MemberItem | null>(null);
 
-  const memberCompanyId = Form.useWatch('companyId', { form: memberForm, preserve: true }) ?? companyId;
   const managerDepartmentId = Form.useWatch('deptId', { form: memberForm, preserve: true });
   const memberDepartments = useQuery<Dept[]>({
-    queryKey: ['depts', memberCompanyId],
-    queryFn: () => request('/api/departments', { params: { companyId: memberCompanyId } }),
+    queryKey: ['depts'],
+    queryFn: () => request('/api/departments'),
     enabled: memberOpen,
   });
   const { data: managerCandidates = [], isFetching: managerCandidatesLoading } = useQuery<ManagerCandidate[]>({
-    queryKey: ['manager-candidates', memberCompanyId, managerDepartmentId, memberEdit?.id, managerKeyword],
+    queryKey: ['manager-candidates', managerDepartmentId, memberEdit?.id, managerKeyword],
     queryFn: () => request('/api/users/manager-candidates', { params: {
       deptId: managerDepartmentId,
       excludeUserId: memberEdit?.id,
@@ -73,21 +71,21 @@ export function useContactsMemberDialogs({ companyId, selDeptId, canAdmin, refre
     setMemberEdit(null);
     setManagerKeyword('');
     memberForm.resetFields();
-    memberForm.setFieldsValue({ companyId, deptId: selDeptId });
+    memberForm.setFieldsValue({ deptId: selDeptId });
     setMemberOpen(true);
   };
   const openEdit = (member: MemberItem) => {
     setMemberEdit(member);
     setManagerKeyword('');
     setMemberOpen(true);
-    memberForm.setFieldsValue({ ...member, companyId, gender: normalizeGender(member.gender) });
+    memberForm.setFieldsValue({ ...member, gender: normalizeGender(member.gender) });
   };
   const closeMember = () => { setMemberOpen(false); setMemberEdit(null); memberForm.resetFields(); };
 
   const handleMemberOk = async () => {
     try {
       const v = await memberForm.validateFields();
-      const { confirmPassword: _confirmPassword, companyId: _companyId, ...payload } = v;
+      const { confirmPassword: _confirmPassword, ...payload } = v;
       payload.managerId = payload.managerId ?? null;
       if (memberEdit) await memberUpdate.mutateAsync({ id: memberEdit.id, ...payload });
       else await memberCreate.mutateAsync(payload);
@@ -135,13 +133,11 @@ export function useContactsMemberDialogs({ companyId, selDeptId, canAdmin, refre
       id: department.id, pId: department.parentId ?? 0, value: department.id, title: department.name,
       selectable: !department.contextOnly && !!department.canManageUsers,
     })),
-    canChangeCompany: canAdmin && !!memberEdit && !memberEdit.wecomMapped,
     saving: memberCreate.isPending || memberUpdate.isPending,
     openAdd,
     openEdit,
     closeMember,
     handleMemberOk,
-    resetDepartmentOnCompanyChange: () => { memberForm.setFieldValue('deptId', undefined); setManagerKeyword(''); },
     // 密码
     passwordForm,
     passwordTarget,

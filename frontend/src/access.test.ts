@@ -48,7 +48,7 @@ describe('access', () => {
 
     const full = access({
       currentUser: currentUser(['user'], [
-        CONSOLE_ENTRY, 'org:company:read', 'org:department:read', 'org:user:read',
+        CONSOLE_ENTRY, 'org:department:read', 'org:user:read',
       ]),
     });
     expect(full[accessKey('org.contacts')]).toBe(true);
@@ -69,7 +69,7 @@ describe('access', () => {
 
   it('gates 企业微信 on the integration capability instead of company info', () => {
     const withoutIntegration = access({
-      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:company:read']),
+      currentUser: currentUser(['user'], [CONSOLE_ENTRY, 'org:department:read']),
     });
     expect(withoutIntegration[accessKey('settings.wecom')]).toBe(false);
 

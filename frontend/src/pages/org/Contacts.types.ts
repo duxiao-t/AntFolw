@@ -6,7 +6,6 @@
  */
 export interface Dept {
   id: number;
-  companyId: number;
   parentId: number | null;
   path: string;
   name: string;
@@ -51,7 +50,3 @@ export interface ManagerCandidate {
   deptId: number;
 }
 
-export interface CompanyOption {
-  value: number;
-  label: string;
-}

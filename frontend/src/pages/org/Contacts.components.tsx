@@ -338,9 +338,6 @@ export function MemberFormModal({
   managerOptions,
   managerLoading,
   onManagerSearch,
-  companies,
-  canChangeCompany,
-  onCompanyChange,
   departments,
   departmentsLoading,
 }: {
@@ -355,9 +352,6 @@ export function MemberFormModal({
   managerOptions: Array<{ value: number; label: string }>;
   managerLoading?: boolean;
   onManagerSearch: (keyword: string) => void;
-  companies: Array<{ value: number; label: string }>;
-  canChangeCompany: boolean;
-  onCompanyChange: () => void;
   departments: Array<{ id: number; pId: number; value: number; title: string; selectable: boolean }>;
   departmentsLoading?: boolean;
 }) {
@@ -374,10 +368,6 @@ export function MemberFormModal({
       <Form className="ct-member-form" form={form} layout="vertical" preserve={false}
         initialValues={editing ? { ...editing, gender: normalizeGender(editing.gender) } : undefined}>
         <div className="ct-member-form__grid">
-          <Form.Item label="所属公司" name="companyId" rules={[{ required: true }]}
-            extra={editing?.wecomMapped ? '企微成员的跨公司归属请在企业微信维护；部门调整可能被同步覆盖' : undefined}>
-            <Select options={companies} disabled={!canChangeCompany} onChange={onCompanyChange} />
-          </Form.Item>
           <Form.Item label="所属部门" name="deptId" rules={[{ required: true, message: '请选择所属部门' }]}>
             <TreeSelect treeData={departments} treeDataSimpleMode loading={departmentsLoading}
               showSearch={{ treeNodeFilterProp: 'title' }} placeholder="请选择所属部门" />

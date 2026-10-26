@@ -3,7 +3,7 @@ import { request } from '@umijs/max';
 import { App, Form } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
-import type { Company, FormValues, Settings } from './wecomModel';
+import type { FormValues, Settings } from './wecomModel';
 
 /**
  * 公司 + 企业微信设置 + 凭证表单 + 保存。
@@ -13,25 +13,11 @@ export function useWecomSettings() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<FormValues>();
-  const [companyId, setCompanyId] = useState<number>();
   const [dirty, setDirty] = useState(false);
 
-  const companiesQuery = useQuery({
-    queryKey: ['companies'],
-    queryFn: () => request<Company[]>('/api/companies'),
-  });
-  const companies = (companiesQuery.data ?? []) as Company[];
-
-  useEffect(() => {
-    if (companyId === undefined && companies.length) setCompanyId(companies[0].id);
-  }, [companies, companyId]);
-
   const settingsQuery = useQuery({
-    queryKey: ['wecom-settings', companyId],
-    queryFn: () => request<Settings>('/api/integrations/wecom/settings', {
-      params: { companyId },
-    }),
-    enabled: companyId !== undefined,
+    queryKey: ['wecom-settings'],
+    queryFn: () => request<Settings>('/api/integrations/wecom/settings'),
   });
   const settings = settingsQuery.data;
 
@@ -57,7 +43,6 @@ export function useWecomSettings() {
     mutationFn: (values: FormValues) => request<Settings>('/api/integrations/wecom/settings', {
       method: 'PUT',
       data: {
-        companyId,
         corpId: values.corpId.trim(),
         ...(values.secret?.trim() ? { secret: values.secret.trim() } : {}),
         agentId: values.agentId,
@@ -72,7 +57,7 @@ export function useWecomSettings() {
     }),
     onSuccess: (saved) => {
       // 直接写入缓存而不是失效重取：回填 effect 会把用户刚填的其他字段重置成服务端值。
-      queryClient.setQueryData(['wecom-settings', companyId], saved);
+      queryClient.setQueryData(['wecom-settings'], saved);
       form.setFieldValue('secret', undefined);
       form.setFieldValue('agentSecret', undefined);
       setDirty(false);
@@ -80,18 +65,8 @@ export function useWecomSettings() {
     },
   });
 
-  const selectCompany = (value: number) => {
-    setCompanyId(value);
-    setDirty(false);
-    form.resetFields();
-  };
-
   return {
     form,
-    companies,
-    companiesLoading: companiesQuery.isLoading,
-    companyId,
-    selectCompany,
     settings,
     settingsLoading: settingsQuery.isLoading,
     dirty,

@@ -22,8 +22,6 @@ export type FormGrant = {
   userIds: number[];
   roleIds: number[];
   departmentIds: number[];
-  companyIds: number[];
-  companies: { id: number; name: string }[];
   users: GrantUser[];
   roles: { id: number; code: string; name: string }[];
   departments: GrantDepartment[];

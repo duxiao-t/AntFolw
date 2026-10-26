@@ -17,7 +17,6 @@ import {
  * 与本域之外的唯一交汇点是"当前选中部门"与关键词——两者由页面壳持有，这里只读。
  */
 export function useContactsMembers({
-  companyId,
   selDeptId,
   search,
   memberPage,
@@ -25,7 +24,6 @@ export function useContactsMembers({
   breadcrumb,
   onBusyChange,
 }: {
-  companyId: number;
   selDeptId: number | null;
   search: string;
   memberPage: number;
@@ -40,9 +38,9 @@ export function useContactsMembers({
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const { data: memberResult } = useQuery<UserPage>({
-    queryKey: ['users-page', companyId, selDeptId, memberPage],
+    queryKey: ['users-page', selDeptId, memberPage],
     queryFn: () => request('/api/users/page', { params: {
-      companyId, page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
+      page: memberPage, size: PAGE_SIZE, deptId: selDeptId, includeDescendants: true,
     } }),
     enabled: !!selDeptId,
   });
@@ -52,9 +50,9 @@ export function useContactsMembers({
   const [searchPage, setSearchPage] = useState(1);
   useEffect(() => setSearchPage(1), [trimmedSearch]);
   const { data: searchResult, isFetching: searchLoading } = useQuery<UserPage>({
-    queryKey: ['users-search', companyId, trimmedSearch, searchPage],
+    queryKey: ['users-search', trimmedSearch, searchPage],
     queryFn: () => request('/api/users/page', { params: {
-      companyId, page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
+      page: searchPage, size: PAGE_SIZE, keyword: trimmedSearch,
     } }),
     enabled: !!trimmedSearch,
   });
@@ -113,7 +111,7 @@ export function useContactsMembers({
     if (!selDeptId) { msg.warning('请先选择部门'); return; }
     try {
       const blob = await request('/api/users/export', {
-        params: { companyId, deptId: selDeptId, includeDescendants: true, format: 'csv' },
+        params: { deptId: selDeptId, includeDescendants: true, format: 'csv' },
         responseType: 'blob',
         skipErrorHandler: true,
       });

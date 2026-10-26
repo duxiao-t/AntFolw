@@ -73,36 +73,10 @@ export default function Fill() {
     [],
   );
   const [pendingSubmissionData, setPendingSubmissionData] = useState<Record<string, any>>({});
-  const [companyId, setCompanyId] = useState<number | null>(null);
-
-  // P4a：归属在创建时快照。有部门的账号由服务端按身份推导，这里不打扰他；
-  // **没有部门的全局管理员**（如种子 admin）必须显式选一个公司，否则服务端会拒绝创建。
-  const currentUser = useModel('@@initialState')?.initialState?.currentUser as
-    | { departmentId?: unknown }
-    | undefined;
-  const departmentId = Number(currentUser?.departmentId);
-  const needsCompany =
-    currentUser != null && !(Number.isInteger(departmentId) && departmentId > 0);
-
   const { data: fd, isFetching } = useQuery<any>({
     queryKey: ['mobile-form', code],
     queryFn: () => request(`/api/mobile/forms/${encodeURIComponent(code)}`),
   });
-  const { data: companies, isError: companiesFailed } = useQuery<any[]>({
-    queryKey: ['companies'],
-    queryFn: () => request('/api/companies').then((r: any) => r ?? []),
-    enabled: needsCompany,
-    retry: 0,
-  });
-  const companyBlocked = () => {
-    if (!needsCompany || companyId != null) return false;
-    message.error(
-      companiesFailed
-        ? '无法加载公司列表，暂时不能提交，请稍后重试'
-        : '请先选择本次提交归属的公司',
-    );
-    return true;
-  };
   const fieldModes = useMemo<Record<string, FieldMode>>(
     () =>
       Object.fromEntries(
@@ -138,7 +112,6 @@ export default function Fill() {
           data: payload.data,
           selfSelected: payload.selfSelected,
           draftId: null,
-          companyId,
           files: collectFileRefs(payload.data),
         },
       }),
@@ -158,7 +131,6 @@ export default function Fill() {
           formCode: code,
           status: 'SUBMITTED',
           data,
-          companyId,
           files: collectFileRefs(data),
         },
       }),
@@ -180,7 +152,6 @@ export default function Fill() {
       return;
     }
     const submissionData = collectVisibleValues(schema, val);
-    if (companyBlocked()) return;
     const workflowEnabled = !!parseJsonValue<Record<string, any>>(
       fd?.settings,
       {},
@@ -214,35 +185,10 @@ export default function Fill() {
         value={val}
         onChange={setVal}
       />
-      {needsCompany ? (
-        <div style={{ marginTop: 16 }}>
-          <Typography.Text type="secondary">
-            当前账号没有部门，请选择本次提交归属的公司：
-          </Typography.Text>
-          <Select
-            style={{ display: 'block', marginTop: 8, maxWidth: 320 }}
-            placeholder={companiesFailed ? '公司列表加载失败' : '请选择公司'}
-            value={companyId ?? undefined}
-            disabled={companiesFailed}
-            loading={!companiesFailed && companies == null}
-            onChange={(value: number) => setCompanyId(value ?? null)}
-            options={(companies ?? []).map((company: any) => ({
-              label: company.name,
-              value: company.id,
-            }))}
-          />
-          {companiesFailed ? (
-            <Typography.Text type="danger">
-              无法加载公司列表，暂时不能提交，请稍后重试。
-            </Typography.Text>
-          ) : null}
-        </div>
-      ) : null}
       <Button
         type="primary"
         style={{ marginTop: 16 }}
         onClick={handleSubmit}
-        disabled={needsCompany && companyId == null}
         loading={startInstance.isPending || submitFormData.isPending}
       >
         {parseJsonValue<Record<string, any>>(fd.settings, {}).workflowEnabled

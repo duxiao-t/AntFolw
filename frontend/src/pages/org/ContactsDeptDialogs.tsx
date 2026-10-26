@@ -8,7 +8,6 @@ import type { Dept } from './Contacts.types';
  * 新建与改名复用的是同一份字段定义，拆开反而要在两个文件之间对齐字段名。
  */
 export function ContactsDeptDialogs({
-  companyLabel,
   departments,
   form,
   addOpen,
@@ -28,7 +27,6 @@ export function ContactsDeptDialogs({
   onLeaderOk,
   onLeaderCancel,
 }: {
-  companyLabel?: string;
   departments: Dept[];
   form: FormInstance;
   addOpen: boolean;
@@ -60,7 +58,6 @@ export function ContactsDeptDialogs({
         destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item label="所属公司"><Input value={companyLabel} disabled /></Form.Item>
           <Form.Item label="部门名称" name="name" rules={[{ required: true, message: '请输入' }]}>
             <Input autoFocus />
           </Form.Item>
@@ -85,7 +82,6 @@ export function ContactsDeptDialogs({
       >
         <Form form={form} layout="vertical" preserve={false}
           initialValues={{ name: editName }}>
-          <Form.Item label="所属公司"><Input value={companyLabel} disabled /></Form.Item>
           <Form.Item label="部门名称" name="name" rules={[{ required: true }]}>
             <Input autoFocus />
           </Form.Item>

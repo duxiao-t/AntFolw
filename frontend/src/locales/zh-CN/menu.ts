@@ -31,7 +31,6 @@ export default {
 
   // 系统设置
   'menu.settings': '系统设置',
-  'menu.settings.company': '企业基础信息',
   'menu.settings.s3': 'S3 存储',
   'menu.settings.wecom': '企业微信',
   'menu.settings.identityProviders': '身份提供方',

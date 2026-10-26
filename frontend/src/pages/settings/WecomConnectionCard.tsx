@@ -18,36 +18,28 @@ import {
   Typography,
 } from 'antd';
 import type { FormInstance } from 'antd';
-import type { Company, FormValues, Settings } from './wecomModel';
+import type { FormValues, Settings } from './wecomModel';
 import { WECOM_GREEN } from './wecomModel';
 import { useWecomStyles } from './wecomStyles';
 
 type Props = {
   form: FormInstance<FormValues>;
-  companies: Company[];
-  companiesLoading: boolean;
-  companyId?: number;
   settings?: Settings;
   /** 卡片骨架屏：公司列表或设置任一在加载。 */
   loading: boolean;
   dirty: boolean;
   saving: boolean;
   onDirty: () => void;
-  onSelectCompany: (value: number) => void;
   onSave: (values: FormValues) => void;
 };
 
 export function WecomConnectionCard({
   form,
-  companies,
-  companiesLoading,
-  companyId,
   settings,
   loading,
   dirty,
   saving,
   onDirty,
-  onSelectCompany,
   onSave,
 }: Props) {
   const { styles } = useWecomStyles();
@@ -75,19 +67,6 @@ export function WecomConnectionCard({
         onValuesChange={() => onDirty()}
         onFinish={(values) => onSave(values)}
       >
-        <Form.Item label="公司" required>
-          <Select
-            aria-label="公司"
-            value={companyId}
-            loading={companiesLoading}
-            options={companies.map((company) => ({
-              value: company.id,
-              label: company.name,
-            }))}
-            placeholder="请选择公司"
-            onChange={onSelectCompany}
-          />
-        </Form.Item>
         <Form.Item
           name="corpId"
           label="企业 ID（CorpID）"
@@ -163,7 +142,6 @@ export function WecomConnectionCard({
           <Button
             type="primary"
             htmlType="submit"
-            disabled={companyId === undefined}
             loading={saving}
           >
             保存连接配置

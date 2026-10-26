@@ -10,7 +10,6 @@
   "security.user-permissions": ["security:user_role:read"],
   "security.audit-log": ["audit:event:read"],
   "security.menu": ["security:menu:manage"],
-  "settings.company": ["org:company:read"],
   "settings.s3": ["integration:storage:manage"],
   "settings.wecom": ["integration:wecom:manage"],
   "settings.identity-providers": ["integration:identity_provider:manage"],

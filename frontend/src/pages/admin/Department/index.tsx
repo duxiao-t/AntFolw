@@ -11,7 +11,7 @@ export default function DepartmentPage() {
   });
   const tree = useQuery({
     queryKey: ['departments-tree'],
-    queryFn: () => request<any[]>('/api/departments', { params: { companyId: 1 } }).then((r: any) => r ?? []),
+    queryFn: () => request<any[]>('/api/departments').then((r: any) => r ?? []),
   });
   const create = useMutation({
     mutationFn: (body: any) => request('/api/departments', { method: 'POST', data: body }),
@@ -38,8 +38,6 @@ export default function DepartmentPage() {
             return true;
           }}
         >
-          <ProFormSelect name="companyId" label="公司" required
-            options={(cos.data ?? []).map((c: any) => ({ value: c.id, label: c.name }))} />
           <ProFormSelect name="parentId" label="父部门（顶层时不选）"
             options={(tree.data ?? []).map((d: any) => ({ value: d.id, label: d.name }))} />
           <ProFormText name="name" label="部门名" rules={[{ required: true }]} />

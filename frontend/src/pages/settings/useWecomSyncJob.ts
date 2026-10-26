@@ -5,13 +5,13 @@ import { useState } from 'react';
 import { active, syncPollInterval } from './wecomModel';
 import type { Settings, SyncJob, SyncMode } from './wecomModel';
 
-type Params = { companyId?: number; settings?: Settings };
+type Params = { settings?: Settings };
 
 /**
  * 当前同步任务：查询（含轮询）、启动写操作、手工同步模式。
- * `startedJobId` 必须与 `companyId` 同步重置，所以页面在切公司时调用 `resetStartedJob`。
+ * `startedJobId` 记录本次会话刚发起的任务；手工同步时可以重置它。
  */
-export function useWecomSyncJob({ companyId, settings }: Params) {
+export function useWecomSyncJob({ settings }: Params) {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [startedJobId, setStartedJobId] = useState<number>();
@@ -30,7 +30,7 @@ export function useWecomSyncJob({ companyId, settings }: Params) {
   const startMutation = useMutation<SyncJob, Error, SyncMode>({
     mutationFn: (mode: SyncMode) => request<SyncJob>('/api/integrations/wecom/sync-jobs', {
       method: 'POST',
-      data: { companyId, mode },
+      data: { mode },
     }),
     onSuccess: (started) => {
       setStartedJobId(started.id);

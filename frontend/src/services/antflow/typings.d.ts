@@ -253,17 +253,6 @@ declare namespace AntFlowAPI {
     id: number;
   };
 
-  type Company = {
-    createdAt?: string;
-    deleted?: number;
-    id?: number;
-    name?: string;
-  };
-
-  type CompanyRequest = {
-    companyId?: number;
-  };
-
   type contentParams = {
     id: string;
   };
@@ -327,10 +316,6 @@ declare namespace AntFlowAPI {
     databaseOnly?: boolean;
   };
 
-  type CreateCompanyRequest = {
-    name?: string;
-  };
-
   type CreateRequest = {
     agentId?: number;
     endsAt?: string;
@@ -387,10 +372,6 @@ declare namespace AntFlowAPI {
     id: number;
   };
 
-  type delete8Params = {
-    id: number;
-  };
-
   type deleteByFormParams = {
     formDefId: number;
   };
@@ -413,7 +394,6 @@ declare namespace AntFlowAPI {
     canManageDepartment?: boolean;
     canManageUsers?: boolean;
     canReadMembers?: boolean;
-    companyId?: number;
     contextOnly?: boolean;
     createdAt?: string;
     id?: number;
@@ -436,10 +416,6 @@ declare namespace AntFlowAPI {
 
   type departments1Params = {
     keyword?: string;
-  };
-
-  type departmentsParams = {
-    companyId?: number;
   };
 
   type DeptRow = {
@@ -481,7 +457,6 @@ declare namespace AntFlowAPI {
   };
 
   type DirectSubmitRequest = {
-    companyId?: number;
     data?: Record<string, any>;
     draftId?: number;
     files?: MobileFileRef[];
@@ -611,8 +586,6 @@ declare namespace AntFlowAPI {
 
   type FormData = {
     businessNo?: string;
-    companyId?: number;
-    companyInferred?: boolean;
     corrected?: boolean;
     createdAt?: string;
     createdBy?: number;
@@ -655,14 +628,11 @@ declare namespace AntFlowAPI {
   };
 
   type FormGrantCandidates = {
-    companies?: GrantCompany[];
     departments?: GrantDepartment[];
     roles?: GrantRole[];
   };
 
   type FormGrantDto = {
-    companies?: GrantCompany[];
-    companyIds?: number[];
     departmentIds?: number[];
     departments?: GrantDepartment[];
     roleIds?: number[];
@@ -673,7 +643,6 @@ declare namespace AntFlowAPI {
   };
 
   type FormGrantWriteRequest = {
-    companyIds?: number[];
     departmentIds?: number[];
     roleIds?: number[];
     userIds?: number[];
@@ -739,11 +708,6 @@ declare namespace AntFlowAPI {
 
   type getParams = {
     id: number;
-  };
-
-  type GrantCompany = {
-    id?: number;
-    name?: string;
   };
 
   type GrantDepartment = {
@@ -893,7 +857,6 @@ declare namespace AntFlowAPI {
   };
 
   type JobDto = {
-    companyId?: number;
     createdUsers?: number;
     errorSummary?: string[];
     failedUsers?: number;
@@ -1030,10 +993,6 @@ declare namespace AntFlowAPI {
     visible?: boolean;
   };
 
-  type messageStatusParams = {
-    companyId: number;
-  };
-
   type metadataParams = {
     id: string;
   };
@@ -1071,8 +1030,6 @@ declare namespace AntFlowAPI {
   };
 
   type MobileDraftDto = {
-    companyId?: number;
-    companyInferred?: boolean;
     createdAt?: string;
     data?: JsonNode;
     formCode?: string;
@@ -1086,7 +1043,6 @@ declare namespace AntFlowAPI {
   };
 
   type MobileDraftRequest = {
-    companyId?: number;
     data?: JsonNode;
     formCode?: string;
   };
@@ -1308,10 +1264,6 @@ declare namespace AntFlowAPI {
     unreadOnly?: boolean;
   };
 
-  type oneParams = {
-    id: number;
-  };
-
   type OptionPage = {
     items?: OptionValue[];
     level?: number;
@@ -1514,7 +1466,6 @@ declare namespace AntFlowAPI {
   };
 
   type PickerDepartment = {
-    companyId?: number;
     id?: number;
     name?: string;
     parentId?: number;
@@ -1550,8 +1501,6 @@ declare namespace AntFlowAPI {
     applicantEmployeeNo?: string;
     applicantName?: string;
     businessNo?: string;
-    companyId?: number;
-    companyInferred?: boolean;
     currentFormRevisionId?: number;
     currentNodeId?: string;
     currentNodeInstanceId?: number;
@@ -1831,7 +1780,6 @@ declare namespace AntFlowAPI {
   type SaveSettingsRequest = {
     agentId?: number;
     agentSecret?: string;
-    companyId: number;
     corpId: string;
     jsSdkEnabled?: boolean;
     messageEnabled?: boolean;
@@ -1883,14 +1831,9 @@ declare namespace AntFlowAPI {
     version?: number;
   };
 
-  type settings2Params = {
-    companyId: number;
-  };
-
   type SettingsDto = {
     agentId?: number;
     agentSecretConfigured?: boolean;
-    companyId?: number;
     corpId?: string;
     jsSdkEnabled?: boolean;
     latestJob?: JobDto;
@@ -1945,19 +1888,16 @@ declare namespace AntFlowAPI {
   };
 
   type StartCmd = {
-    companyId?: number;
     data?: Record<string, any>;
     formCode?: string;
     selfSelected?: Record<string, any>;
   };
 
   type StartJobRequest = {
-    companyId: number;
     mode?: string;
   };
 
   type StartMobileInstanceRequest = {
-    companyId?: number;
     data?: JsonNode;
     draftId?: number;
     files?: MobileFileRef[];
@@ -2085,10 +2025,6 @@ declare namespace AntFlowAPI {
     id: number;
   };
 
-  type treeParams = {
-    companyId: number;
-  };
-
   type unbindParams = {
     providerId: number;
     bindingId: number;
@@ -2113,14 +2049,6 @@ declare namespace AntFlowAPI {
 
   type update4Params = {
     id: number;
-  };
-
-  type update5Params = {
-    id: number;
-  };
-
-  type UpdateCompanyRequest = {
-    name?: string;
   };
 
   type updateDraftParams = {

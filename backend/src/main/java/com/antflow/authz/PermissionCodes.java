@@ -13,7 +13,6 @@ public final class PermissionCodes {
     public static final String CONSOLE_ACCESS = "console:entry:access";
 
     // 组织与人员
-    public static final String ORG_COMPANY_READ = "org:company:read";
     public static final String ORG_DEPARTMENT_READ = "org:department:read";
     public static final String ORG_DEPARTMENT_MANAGE = "org:department:manage";
     public static final String ORG_USER_READ = "org:user:read";
@@ -82,7 +81,6 @@ public final class PermissionCodes {
     public static final String SECURITY_MENU_MANAGE = "security:menu:manage";
 
     // 系统设置
-    public static final String SYSTEM_COMPANY_MANAGE = "system:company:manage";
     public static final String SYSTEM_BACKUP_MANAGE = "system:backup:manage";
 
     // 文件

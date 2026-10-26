@@ -22,8 +22,7 @@ export interface DeptNodeActions {
  * 写操作与弹窗必须在同一个 hook：建部门、改名、设负责人都落到 `PUT/POST /api/departments`，
  * 失效链（`['depts']`、`['dept-path']`）只写一份，拆开就会出现"一处刷新、另一处忘刷"。
  */
-export function useContactsDepartments({ companyId, selDeptId, onSelectDept, onLeaderSaved }: {
-  companyId: number;
+export function useContactsDepartments({ selDeptId, onSelectDept, onLeaderSaved }: {
   selDeptId: number | null;
   onSelectDept: (deptId: number | null) => void;
   /** 设置负责人后成员表的"负责人"标记要重算，原来顺手把成员页打回第 1 页。 */
@@ -41,14 +40,13 @@ export function useContactsDepartments({ companyId, selDeptId, onSelectDept, onL
   const [leaderDeptId, setLeaderDeptId] = useState<number | null>(null);
 
   const { data: deptList = [], isError: departmentsError, refetch: refetchDepartments } = useQuery<Dept[]>({
-    queryKey: ['depts', companyId],
-    queryFn: () => request(`/api/departments?companyId=${companyId}`),
-    enabled: !!companyId,
+    queryKey: ['depts'],
+    queryFn: () => request('/api/departments'),
   });
 
   const { data: leaderResult } = useQuery<UserPage>({
-    queryKey: ['leader-users', companyId],
-    queryFn: () => request('/api/users/page', { params: { companyId, page: 1, size: 100 } }),
+    queryKey: ['leader-users'],
+    queryFn: () => request('/api/users/page', { params: { page: 1, size: 100 } }),
     enabled: leaderOpen,
   });
 
@@ -185,7 +183,7 @@ export function useContactsDepartments({ companyId, selDeptId, onSelectDept, onL
   const handleDeptAdd = async () => {
     try {
       const v = await deptForm.validateFields();
-      await deptCreate.mutateAsync({ name: v.name, companyId, parentId: v.parentId ?? deptAddParentId ?? null });
+      await deptCreate.mutateAsync({ name: v.name, parentId: v.parentId ?? deptAddParentId ?? null });
       setDeptAddOpen(false); setDeptAddParentId(null); deptForm.resetFields();
     } catch (error: any) {
       if (error?.errorFields) return;

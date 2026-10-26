@@ -14,11 +14,11 @@ const readCodes = (key: string) =>
 describe('page registry', () => {
   it('gates 通讯录 on all three read capabilities', () => {
     expect(readCodes('org.contacts')).toEqual([
-      'org:company:read', 'org:department:read', 'org:user:read',
+      'org:department:read', 'org:user:read',
     ]);
     const page = PAGES.find((item) => item.key === 'org.contacts');
     if (!page) throw new Error('org.contacts page is missing');
-    expect(pageAllowed(page, ['user'], ['org:company:read', 'org:user:read'])).toBe(false);
+    expect(pageAllowed(page, ['user'], ['org:department:read', 'org:user:read'])).toBe(false);
     expect(pageAllowed(page, ['user'], [CONSOLE_ENTRY, ...readCodes('org.contacts')])).toBe(true);
   });
 

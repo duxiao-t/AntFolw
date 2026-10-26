@@ -35,7 +35,6 @@ public final class PermissionCatalog {
     private static final List<Entry> ENTRIES = List.of(
         entry(PermissionCodes.CONSOLE_ACCESS, "进入管理端", Risk.HIGH),
 
-        entry(PermissionCodes.ORG_COMPANY_READ, "查看企业信息", Risk.NORMAL),
         entry(PermissionCodes.ORG_DEPARTMENT_READ, "查看部门", Risk.NORMAL,
             DataScope.DEPARTMENT_AND_DESCENDANTS),
         entry(PermissionCodes.ORG_DEPARTMENT_MANAGE, "管理部门", Risk.HIGH,
@@ -102,7 +101,6 @@ public final class PermissionCatalog {
         entry(PermissionCodes.SECURITY_EFFECTIVE_READ, "预览有效权限", Risk.NORMAL),
         entry(PermissionCodes.SECURITY_MENU_MANAGE, "管理导航菜单", Risk.HIGH),
 
-        entry(PermissionCodes.SYSTEM_COMPANY_MANAGE, "管理企业信息", Risk.HIGH),
         entry(PermissionCodes.SYSTEM_BACKUP_MANAGE, "管理系统备份", Risk.CRITICAL, true),
 
         entry(PermissionCodes.FILE_ATTACHMENT_READ, "读取附件", Risk.NORMAL),

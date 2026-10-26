@@ -1,11 +1,9 @@
 import type { Dayjs } from 'dayjs';
 
 export type SyncMode = 'FULL' | 'INCREMENTAL';
-export type Company = { id: number; name: string };
 export type SyncStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
 export type SyncJob = {
   id: number;
-  companyId: number;
   status: SyncStatus;
   phase: string;
   percent: number;

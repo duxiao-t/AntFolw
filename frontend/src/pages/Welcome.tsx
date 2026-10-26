@@ -73,7 +73,7 @@ const statusMeta: Record<string, { label: string; color: string; icon: ReactNode
 };
 
 // 卡片可见性必须与路由门禁用同一套判定（registry.pageAllowed）：早先这里只查单个能力点，
-// 而 org.contacts 需要 org:company:read + org:department:read + org:user:read 三个，
+// 而 org.contacts 需要 org:department:read + org:user:read 两个，
 // 只拿到 org:user:read 的人会看到「组织架构」卡片，点进去却是 403。
 const managementLinks = [
   { pageKey: 'approval.forms', label: '表单管理', detail: '维护表单与流程配置', icon: <FileTextOutlined /> },

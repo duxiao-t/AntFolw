@@ -16,10 +16,6 @@ export default function WecomPage() {
   const { styles } = useWecomStyles();
   const {
     form,
-    companies,
-    companiesLoading,
-    companyId,
-    selectCompany,
     settings,
     settingsLoading,
     dirty,
@@ -27,17 +23,10 @@ export default function WecomPage() {
     saveMutation,
   } = useWecomSettings();
   const { job, syncMode, setSyncMode, startMutation, resetStartedJob } = useWecomSyncJob({
-    companyId,
     settings,
   });
 
   const canStart = !!settings?.secretConfigured && !dirty && !active(job);
-
-  // 切公司必须同步清掉任务 id：放到 effect 里会先带着旧 id 渲染一帧并发一次陈旧请求。
-  const handleSelectCompany = (value: number) => {
-    resetStartedJob();
-    selectCompany(value);
-  };
 
   return (
     <PageContainer
@@ -48,15 +37,11 @@ export default function WecomPage() {
         <Col xs={24} xl={10}>
           <WecomConnectionCard
             form={form}
-            companies={companies}
-            companiesLoading={companiesLoading}
-            companyId={companyId}
             settings={settings}
-            loading={companiesLoading || settingsLoading}
+            loading={settingsLoading}
             dirty={dirty}
             saving={saveMutation.isPending}
             onDirty={markDirty}
-            onSelectCompany={handleSelectCompany}
             onSave={(values) => saveMutation.mutate(values)}
           />
         </Col>
@@ -73,7 +58,7 @@ export default function WecomPage() {
         </Col>
       </Row>
       <WecomAccessCard />
-      <WecomReadinessCard companyId={companyId} settings={settings} />
+      <WecomReadinessCard settings={settings} />
     </PageContainer>
   );
 }

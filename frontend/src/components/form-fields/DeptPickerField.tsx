@@ -15,7 +15,6 @@ export const DeptPickerField: FieldType = {
   defaultProps: {
     required: false,
     multiple: false,
-    companyId: 1,
     selectableParent: true,
     leafOnly: false,
   },
@@ -75,10 +74,9 @@ export const DeptPickerField: FieldType = {
     );
   },
   Component: ({ node, mode, value, onChange }) => {
-    const [companyId] = useState<number>(node.props?.companyId ?? 1);
     const { data, isFetching } = useQuery({
-      queryKey: ['picker-departments', companyId],
-      queryFn: () => request<AntFlowAPI.PickerDepartment[]>('/api/pickers/departments', { params: { companyId } }),
+      queryKey: ['picker-departments'],
+      queryFn: () => request<AntFlowAPI.PickerDepartment[]>('/api/pickers/departments'),
     });
 
     const shouldDisable = (children: any[]) =>

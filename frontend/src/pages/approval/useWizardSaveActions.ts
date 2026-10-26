@@ -86,7 +86,6 @@ export function useWizardSaveActions({
               userIds,
               roleIds,
               departmentIds,
-              ...(isAdmin ? { companyIds: values.companyIds ?? latestGrant.companyIds ?? [] } : {}),
               version: latestGrant.version,
             },
           },

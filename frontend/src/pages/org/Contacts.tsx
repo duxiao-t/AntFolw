@@ -1,85 +1,53 @@
 import { PageContainer } from '@ant-design/pro-components';
-import { request, useAccess } from '@umijs/max';
-import { useQuery, useIsMutating } from '@tanstack/react-query';
-import { Button, Select } from 'antd';
+import { useAccess } from '@umijs/max';
+import { useIsMutating } from '@tanstack/react-query';
+import { Button } from 'antd';
 import { useState } from 'react';
 import './Contacts.less';
 import { MemberFormModal, MemberSearchResults, MembersSection } from './Contacts.components';
 import { ContactsDeptDialogs } from './ContactsDeptDialogs';
 import { ContactsDeptPanel } from './ContactsDeptPanel';
 import { ContactsPasswordDialog } from './ContactsPasswordDialog';
-import type { CompanyOption } from './Contacts.types';
 import { contactsPaneMode } from './Contacts.utils';
 import { useContactsDepartments } from './useContactsDepartments';
 import { useContactsMemberDialogs } from './useContactsMemberDialogs';
 import { useContactsMembers } from './useContactsMembers';
 
 export default function ContactsPage() {
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number>();
-  const [busy, setBusy] = useState(false);
-  const mutations = useIsMutating();
-  const companies = useQuery({
-    queryKey: ['companies'],
-    queryFn: () => request<AntFlowAPI.Company[]>('/api/companies'),
-  });
-  const options = (companies.data ?? []).flatMap((company) => company.id == null ? []
-    : [{ value: company.id, label: company.name ?? `公司 ${company.id}` }]);
-  const companyId = options.some((option) => option.value === selectedCompanyId)
-    ? selectedCompanyId : options.length === 1 ? options[0].value : undefined;
   return (
     <PageContainer breadcrumbRender={false}>
-      <Select
-        aria-label="通讯录公司"
-        placeholder="请选择公司"
-        value={companyId}
-        options={options}
-        loading={companies.isFetching}
-        disabled={busy || mutations > 0}
-        onChange={setSelectedCompanyId}
-        style={{ width: 280, marginBottom: 12 }}
-      />
-      {companies.isError && <Button onClick={() => companies.refetch()}>公司加载失败，点击重试</Button>}
-      {companyId == null ? (
-        <div className="ct-empty">{options.length ? '请先选择公司' : '暂无可访问的公司'}</div>
-      ) : (
-        <CompanyContacts key={companyId} companyId={companyId} companies={options} onBusyChange={setBusy} />
-      )}
+      <ContactsWorkbench />
     </PageContainer>
   );
 }
 
 /**
- * 单个公司的通讯录工作台：这里只放**跨域**的三条状态（选中部门、关键词、成员页码），
- * 部门域与成员域各自在自己的 hook 里，视图只做装配。
+ * 通讯录工作台（单公司，不再按公司分区）：只放**跨域**的三条状态
+ * （选中部门、关键词、成员页码），部门域与成员域各自在自己的 hook 里，视图只做装配。
  */
-function CompanyContacts({ companyId, companies, onBusyChange }: {
-  companyId: number;
-  companies: CompanyOption[];
-  onBusyChange: (busy: boolean) => void;
-}) {
+function ContactsWorkbench() {
   const access = useAccess();
+  const [busy, setBusy] = useState(false);
+  const [mutations] = [useIsMutating()];
   const canAdmin = !!access.canAdmin;
   const [selDeptId, setSelDeptId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [memberPage, setMemberPage] = useState(1);
 
   const dept = useContactsDepartments({
-    companyId,
     selDeptId,
     onSelectDept: setSelDeptId,
     onLeaderSaved: () => setMemberPage(1),
   });
   const members = useContactsMembers({
-    companyId,
     selDeptId,
     search,
     memberPage,
     setMemberPage,
     breadcrumb: dept.breadcrumb,
-    onBusyChange,
+    onBusyChange: setBusy,
   });
   const dialogs = useContactsMemberDialogs({
-    companyId,
     selDeptId,
     canAdmin,
     refreshMembers: members.refreshMembers,
@@ -153,7 +121,6 @@ function CompanyContacts({ companyId, companies, onBusyChange }: {
       </div>
 
       <ContactsDeptDialogs
-        companyLabel={companies.find((company) => company.value === companyId)?.label}
         departments={dept.deptList}
         form={dept.deptForm}
         addOpen={dept.deptAddOpen}
@@ -184,9 +151,6 @@ function CompanyContacts({ companyId, companies, onBusyChange }: {
         managerOptions={dialogs.managerOptions}
         managerLoading={dialogs.managerCandidatesLoading}
         onManagerSearch={dialogs.setManagerKeyword}
-        companies={companies}
-        canChangeCompany={dialogs.canChangeCompany}
-        onCompanyChange={dialogs.resetDepartmentOnCompanyChange}
         departments={dialogs.memberDepartmentsReady}
         departmentsLoading={dialogs.memberDepartments.isFetching}
         canResetPassword={canAdmin}

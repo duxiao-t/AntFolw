@@ -11,7 +11,7 @@ export async function list6(options?: { [key: string]: any }) {
 }
 
 /** 此处后端没有提供注释 POST /api/approval-delegations */
-export async function create7(
+export async function create6(
   body: AntFlowAPI.CreateRequest,
   options?: { [key: string]: any }
 ) {

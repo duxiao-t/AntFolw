@@ -11,49 +11,28 @@ export async function accessInfo(options?: { [key: string]: any }) {
 }
 
 /** 此处后端没有提供注释 GET /api/integrations/wecom/message-status */
-export async function messageStatus(
-  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
-  params: AntFlowAPI.messageStatusParams,
-  options?: { [key: string]: any }
-) {
+export async function messageStatus(options?: { [key: string]: any }) {
   return request<AntFlowAPI.DeliveryStatus>(
     "/api/integrations/wecom/message-status",
     {
       method: "GET",
-      params: {
-        ...params,
-      },
       ...(options || {}),
     }
   );
 }
 
 /** 此处后端没有提供注释 POST /api/integrations/wecom/retry-messages */
-export async function retryMessages(
-  body: AntFlowAPI.CompanyRequest,
-  options?: { [key: string]: any }
-) {
+export async function retryMessages(options?: { [key: string]: any }) {
   return request<any>("/api/integrations/wecom/retry-messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    data: body,
     ...(options || {}),
   });
 }
 
 /** 此处后端没有提供注释 POST /api/integrations/wecom/test-message */
-export async function testMessage(
-  body: AntFlowAPI.CompanyRequest,
-  options?: { [key: string]: any }
-) {
+export async function testMessage(options?: { [key: string]: any }) {
   return request<any>("/api/integrations/wecom/test-message", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    data: body,
     ...(options || {}),
   });
 }

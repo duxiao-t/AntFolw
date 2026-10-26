@@ -6,7 +6,6 @@ import * as accountController from "./accountController";
 import * as approvalDelegationController from "./approvalDelegationController";
 import * as auditController from "./auditController";
 import * as loginController from "./loginController";
-import * as companyController from "./companyController";
 import * as departmentController from "./departmentController";
 import * as formDataController from "./formDataController";
 import * as formDataImportController from "./formDataImportController";
@@ -43,7 +42,6 @@ export default {
   approvalDelegationController,
   auditController,
   loginController,
-  companyController,
   departmentController,
   formDataController,
   formDataImportController,

@@ -4,29 +4,29 @@ import { App, Button, Card, Space, Typography } from 'antd';
 import type { DeliveryStatus, Settings } from './wecomModel';
 import { useWecomStyles } from './wecomStyles';
 
-type Props = { companyId?: number; settings?: Settings };
+type Props = { settings?: Settings };
 
 /** 接入状态卡片：四段链路是纯展示，投递统计与两个消息按钮只在开启应用消息后出现。 */
-export function WecomReadinessCard({ companyId, settings }: Props) {
+export function WecomReadinessCard({ settings }: Props) {
   const { styles } = useWecomStyles();
   const { message } = App.useApp();
 
   const deliveryQuery = useQuery({
-    queryKey: ['wecom-message-status', companyId],
-    queryFn: () => request<DeliveryStatus>('/api/integrations/wecom/message-status', { params: { companyId } }),
-    enabled: companyId !== undefined && settings?.messageEnabled === true,
+    queryKey: ['wecom-message-status'],
+    queryFn: () => request<DeliveryStatus>('/api/integrations/wecom/message-status'),
+    enabled: settings?.messageEnabled === true,
     refetchInterval: 10_000,
   });
 
   const testMessageMutation = useMutation({
     mutationFn: () => request('/api/integrations/wecom/test-message', {
-      method: 'POST', data: { companyId },
+      method: 'POST',
     }),
     onSuccess: () => message.success('测试消息已发送到当前管理员的企业微信'),
   });
   const retryMessagesMutation = useMutation({
     mutationFn: () => request('/api/integrations/wecom/retry-messages', {
-      method: 'POST', data: { companyId },
+      method: 'POST',
     }),
     onSuccess: () => { void deliveryQuery.refetch(); message.success('失败消息已重新进入投递队列'); },
   });
