@@ -3,6 +3,7 @@ package com.antflow.engine;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.RevisionReasons;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskEntity;
@@ -80,8 +81,8 @@ final class ReworkService {
         formDataRow.setStatus("SUBMITTED");
         formDataMapper.updateById(formDataRow);
         if (v2 != null && v2.active(instance)) {
-            long revisionId = v2.createRevision(formDataRow, "SUBMITTED", "RESUBMIT",
-                operatorId);
+            long revisionId = v2.createRevision(formDataRow, "SUBMITTED",
+                RevisionReasons.RESUBMIT, operatorId);
             instance.setCurrentFormRevisionId(revisionId);
             task.setActionFormRevisionId(revisionId);
             taskMapper.updateById(task);

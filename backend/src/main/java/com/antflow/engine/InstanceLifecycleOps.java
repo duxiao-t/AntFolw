@@ -4,6 +4,7 @@ import com.antflow.engine.WorkflowRuntimeV2.StartState;
 import com.antflow.form.runtime.FormData;
 import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.process.ProcessDefinition;
+import com.antflow.process.RevisionReasons;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.TaskEntity;
 import java.util.ArrayList;
@@ -47,7 +48,8 @@ final class InstanceLifecycleOps {
     }
 
     StartState prepareStart(FormData data, ProcessDefinition process, long actorId) {
-        long revisionId = versions.createRevision(data, "SUBMITTED", "INITIAL_SUBMIT", actorId);
+        long revisionId = versions.createRevision(data, "SUBMITTED",
+            RevisionReasons.INITIAL_SUBMIT, actorId);
         long processVersionId = versions.processVersionId(process.getId(), process.getVersion());
         return new StartState(processVersionId, revisionId);
     }

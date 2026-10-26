@@ -542,6 +542,157 @@
         },
         "type" : "object"
       },
+      "CorrectionFormView" : {
+        "properties" : {
+          "allowedFields" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "baseRevisionId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "blockedFields" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "businessNo" : {
+            "type" : "string"
+          },
+          "data" : {
+            "type" : "object"
+          },
+          "formCode" : {
+            "type" : "string"
+          },
+          "formDataId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "formDefId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "formDefVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "formName" : {
+            "type" : "string"
+          },
+          "instanceStatus" : {
+            "type" : "string"
+          },
+          "latestFormVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "reviewRequired" : {
+            "type" : "boolean"
+          },
+          "schema" : {
+            "type" : "string"
+          },
+          "schemaApproximate" : {
+            "type" : "boolean"
+          },
+          "versionDrifted" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "CorrectionRequest" : {
+        "properties" : {
+          "baseRevisionId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fields" : {
+            "additionalProperties" : {
+              "type" : "object"
+            },
+            "type" : "object"
+          },
+          "files" : {
+            "items" : {
+              "$ref" : "#/components/schemas/MobileFileRef"
+            },
+            "type" : "array"
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "reasonText" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CorrectionResult" : {
+        "properties" : {
+          "correctionId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "revisionId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CorrectionView" : {
+        "properties" : {
+          "actorName" : {
+            "type" : "string"
+          },
+          "attachmentsChanged" : {
+            "type" : "boolean"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "fieldChanges" : {
+            "additionalProperties" : {
+              "type" : "object"
+            },
+            "type" : "object"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "reasonText" : {
+            "type" : "string"
+          },
+          "reviewNote" : {
+            "type" : "string"
+          },
+          "reviewedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "reviewerName" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "CreateCompanyRequest" : {
         "properties" : {
           "name" : {
@@ -872,6 +1023,9 @@
             "type" : "integer"
           },
           "companyInferred" : {
+            "type" : "boolean"
+          },
+          "corrected" : {
             "type" : "boolean"
           },
           "createdAt" : {
@@ -3417,6 +3571,17 @@
           "withdrawn" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ReviewRequest" : {
+        "properties" : {
+          "approve" : {
+            "type" : "boolean"
+          },
+          "note" : {
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -6070,6 +6235,170 @@
         },
         "tags" : [
           "form-data-controller"
+        ]
+      }
+    },
+    "/api/forms/data/{id}/correction-form" : {
+      "get" : {
+        "operationId" : "correctionForm",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CorrectionFormView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-correction-controller"
+        ]
+      }
+    },
+    "/api/forms/data/{id}/corrections" : {
+      "get" : {
+        "operationId" : "history_1",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "limit",
+            "required" : false,
+            "schema" : {
+              "default" : 50,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/CorrectionView"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-correction-controller"
+        ]
+      },
+      "post" : {
+        "operationId" : "correct",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CorrectionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CorrectionResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-correction-controller"
+        ]
+      }
+    },
+    "/api/forms/data/{id}/corrections/{correctionId}/review" : {
+      "post" : {
+        "operationId" : "review",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "correctionId",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReviewRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CorrectionResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "form-data-correction-controller"
         ]
       }
     },

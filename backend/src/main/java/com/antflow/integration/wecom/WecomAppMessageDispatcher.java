@@ -161,6 +161,8 @@ class WecomAppMessageDispatcher implements NotificationListener {
             case "TASK_TIMEOUT_REMINDER" -> "审批任务即将超时";
             case "INSTANCE_APPROVED" -> "流程已审批通过";
             case "INSTANCE_REJECTED" -> "流程已被驳回";
+            // 与站内信保持同一口径：修正不改流程状态，但要让当事人知道数据变了
+            case "DATA_CORRECTED" -> "单据数据已被修正";
             default -> "流程状态已更新";
         };
     }

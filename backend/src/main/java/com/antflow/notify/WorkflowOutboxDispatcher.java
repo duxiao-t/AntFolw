@@ -135,6 +135,8 @@ public class WorkflowOutboxDispatcher {
             case "CC_ASSIGNED" -> "您收到本轮抄送汇总";
             case "INSTANCE_APPROVED" -> "流程已审批通过";
             case "INSTANCE_REJECTED" -> "流程已被驳回";
+            // 事后修正：数据被改过要让人知道，否则审批人以为自己审的内容还有效
+            case "DATA_CORRECTED" -> "单据数据已被修正";
             default -> "流程状态已更新";
         };
     }

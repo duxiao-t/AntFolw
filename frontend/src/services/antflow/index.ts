@@ -9,6 +9,8 @@ import * as loginController from "./loginController";
 import * as companyController from "./companyController";
 import * as departmentController from "./departmentController";
 import * as formDataController from "./formDataController";
+import * as formDataImportController from "./formDataImportController";
+import * as formDataCorrectionController from "./formDataCorrectionController";
 import * as formDefinitionController from "./formDefinitionController";
 import * as formGrantController from "./formGrantController";
 import * as optionSourceController from "./optionSourceController";
@@ -44,6 +46,8 @@ export default {
   companyController,
   departmentController,
   formDataController,
+  formDataImportController,
+  formDataCorrectionController,
   formDefinitionController,
   formGrantController,
   optionSourceController,

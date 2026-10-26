@@ -32,6 +32,14 @@ public final class PermissionCodes {
     public static final String FORM_DATA_EXPORT = "form:data:export";
     /** 历史数据补录：直接写 SUBMITTED 台账行，不建流程实例，风险高于普通查看。 */
     public static final String FORM_DATA_IMPORT = "form:data:import";
+    /**
+     * 审批终态之后修正表单数据（不重走审批）。
+     *
+     * <p>风险高于普通读写：它会**改写已生效的业务结论**，所以必须同时满足
+     * "持有本能力"与"是该表单的维护者"（全局管理员除外）。
+     * 修正的字段还受服务端白名单约束，见 CorrectionFieldPolicy。
+     */
+    public static final String FORM_DATA_CORRECT = "form:data:correct";
 
     // 流程定义与运行
     public static final String WORKFLOW_DEFINITION_READ = "workflow:definition:read";

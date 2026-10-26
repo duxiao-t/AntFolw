@@ -11,9 +11,16 @@ export async function list1(options?: { [key: string]: any }) {
 }
 
 /** 此处后端没有提供注释 POST /api/system/backups */
-export async function create1(options?: { [key: string]: any }) {
+export async function create1(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: AntFlowAPI.create1Params,
+  options?: { [key: string]: any }
+) {
   return request<AntFlowAPI.Status>("/api/system/backups", {
     method: "POST",
+    params: {
+      ...params,
+    },
     ...(options || {}),
   });
 }

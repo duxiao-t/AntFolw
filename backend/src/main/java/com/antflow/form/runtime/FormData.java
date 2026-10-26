@@ -28,6 +28,13 @@ public class FormData {
     @TableField(exist = false) private String createdByName;
     @TableField(exist = false) private String createdByEmployeeNo;
     @TableField(exist = false) private String createdByDeptName;
+    /**
+     * 是否被事后修正过（台账列表的「已修正」徽标）。
+     *
+     * <p>刻意不做成表上的冗余列：那会引入"冗余列与修正台账不一致"这个新的不变量。
+     * 这里由列表接口按当前页批量派生（一次 IN 查询），不落库。
+     */
+    @TableField(exist = false) private Boolean corrected;
     @TableField(exist = false) private List<FieldValue> fieldValues = List.of();
     @TableField(fill = FieldFill.INSERT) private java.time.OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE) private java.time.OffsetDateTime updatedAt;

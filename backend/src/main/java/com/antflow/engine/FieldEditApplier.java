@@ -5,6 +5,7 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.RevisionReasons;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.ProcessInstanceMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -102,8 +103,8 @@ final class FieldEditApplier {
                 editable.contains(node.path("id").asText()) ? "EDITABLE" : "READONLY"));
         mediaValidator.validate(formData.getId(), modes);
         if (v2 != null && v2.active(pi)) {
-            long revisionId = v2.createRevision(formData, "SUBMITTED", "NODE_EDIT",
-                operatorId);
+            long revisionId = v2.createRevision(formData, "SUBMITTED",
+                RevisionReasons.NODE_EDIT, operatorId);
             pi.setCurrentFormRevisionId(revisionId);
             processInstanceMapper.updateById(pi);
         }

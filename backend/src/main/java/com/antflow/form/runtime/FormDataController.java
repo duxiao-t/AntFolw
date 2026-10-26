@@ -19,6 +19,8 @@ public class FormDataController {
     private final FormDataService service;
     private final AuthorizationService authorizationService;
     private final com.antflow.audit.AuditService auditService;
+    /** 列表「已修正」徽标需要它批量派生修正状态。 */
+    private final com.antflow.form.correction.FormDataCorrectionService corrections;
 
     /**
      * 把台账导成 Excel（默认）或 CSV。两种格式同一份「列 + 值」模型：列按字段 id、表头取字段标签、
@@ -116,8 +118,23 @@ public class FormDataController {
                                     @RequestParam(required = false) String submitterKeyword) {
         authorizationService.requirePermission(PermissionCodes.FORM_DATA_READ);
         var principal = PrincipalHolder.current().orElseThrow();
-        return service.authorizedPage(page, size, formDefId, status, createdBy, submitterKeyword,
-            principal.userId(), principal.isAdmin());
+        Page<FormData> result = service.authorizedPage(page, size, formDefId, status, createdBy,
+            submitterKeyword, principal.userId(), principal.isAdmin());
+        markCorrected(result);
+        return result;
+    }
+
+    /**
+     * 给当前页打上「已修正」标记。
+     *
+     * <p>按页批量查一次，而不是每行查一次：台账列表一页 20 行，逐行查会把一个列表变成 20 次往返。
+     * 只对已生效（APPLIED）的修正算数——待复核或被驳回的不该显示成"改过了"。
+     */
+    private void markCorrected(Page<FormData> page) {
+        if (page == null || page.getRecords() == null || page.getRecords().isEmpty()) return;
+        var ids = page.getRecords().stream().map(FormData::getId).toList();
+        var corrected = corrections.correctedIds(ids);
+        page.getRecords().forEach(row -> row.setCorrected(corrected.contains(row.getId())));
     }
 
     @GetMapping("/{id}")

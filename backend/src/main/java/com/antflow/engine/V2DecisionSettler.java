@@ -4,6 +4,7 @@ import com.antflow.engine.dto.CompleteCmd;
 import com.antflow.engine.tree.ProcessTreeNav;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
+import com.antflow.process.RevisionReasons;
 import com.antflow.task.ProcessInstance;
 import com.antflow.task.ProcessInstanceMapper;
 import com.antflow.task.TaskEntity;
@@ -150,8 +151,8 @@ final class V2DecisionSettler {
         if (formData == null) throw new BizException("NOT_FOUND", "form data not found");
         formData.setStatus("NEEDS_REVISION");
         formDataMapper.updateById(formData);
-        long revisionId = runtimeV2.get().createRevision(formData, "NEEDS_REVISION", "REJECTED",
-            operatorId);
+        long revisionId = runtimeV2.get().createRevision(formData, "NEEDS_REVISION",
+            RevisionReasons.REJECTED, operatorId);
         instance.setCurrentFormRevisionId(revisionId);
         instance.setCurrentNodeInstanceId(null);
         instance.setCurrentNodeId("__rework__");

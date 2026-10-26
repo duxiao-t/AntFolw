@@ -210,6 +210,28 @@ public class FormAccessGuard {
     }
 
     /**
+     * 修正已提交表单数据的表单级校验：管理员放行，其余必须"持有修正能力 **且** 是维护者"。
+     *
+     * <p>这里**刻意不叠加** {@code form:data:read} 的 SELF 数据范围：数据范围只对读生效，
+     * 而维护者的职责恰恰是替别人收拾数据，叠加 SELF 会让它只能改自己提交的单据，功能等于不可用。
+     * 真正需要限制的是"能碰哪些单据"，由 {@code InstanceAccessGuard.canCorrectFormData}
+     * 按公司归属判定，比一个数据范围下拉更贴合语义。
+     *
+     * <p>未授权时抛 HiddenResourceException（资源不存在）而不是 403，
+     * 与 {@link #requireFormMaintenance} 保持一致：不泄露表单是否存在。
+     */
+    public void requireFormCorrection(long formId) {
+        PrincipalHolder.Principal principal = capabilities.principal();
+        if (principal.isAdmin()) {
+            return;
+        }
+        capabilities.requirePermission(PermissionCodes.FORM_DATA_CORRECT);
+        if (!hasFormMaintainer(formId, principal.userId())) {
+            throw new HiddenResourceException("form not found");
+        }
+    }
+
+    /**
      * 发起/填报入口统一使用：表单必须已发布且当前用户具备表单使用授权。
      * 未授权时返回资源不存在，避免泄露表单是否存在。
      */

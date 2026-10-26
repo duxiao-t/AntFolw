@@ -58,6 +58,10 @@ public final class PermissionCatalog {
         // 不声明数据范围：导入是写操作，范围只对读生效；给个 SELF 会让角色页显示一个
         // 永远不会被读取的"数据范围"下拉。V40 注释已定：新增能力只改这里，由启动同步器入库。
         entry(PermissionCodes.FORM_DATA_IMPORT, "导入表单数据（历史补录）", Risk.HIGH),
+        // 不声明数据范围，理由同导入：修正也是写操作，范围只对读生效。
+        // 实际可见范围由 FormAccessGuard.requireFormCorrection 判定（管理员短路，
+        // 其余必须"持有本能力 + 是该表单的维护者"），比一个数据范围下拉更贴切。
+        entry(PermissionCodes.FORM_DATA_CORRECT, "修正已提交的表单数据", Risk.HIGH),
 
         entry(PermissionCodes.WORKFLOW_DEFINITION_READ, "查看流程配置", Risk.NORMAL),
         entry(PermissionCodes.WORKFLOW_DEFINITION_MANAGE, "设计流程配置", Risk.HIGH),

@@ -241,6 +241,15 @@ export declare namespace AntFlowAPI {
     id: number;
   };
 
+  type ColumnReport = {
+    fieldId?: string;
+    label?: string;
+    order?: number;
+    required?: boolean;
+    supported?: boolean;
+    type?: string;
+  };
+
   type commentPresetsParams = {
     id: number;
   };
@@ -258,6 +267,65 @@ export declare namespace AntFlowAPI {
 
   type contentParams = {
     id: string;
+  };
+
+  type correctionFormParams = {
+    id: number;
+  };
+
+  type CorrectionFormView = {
+    allowedFields?: string[];
+    baseRevisionId?: number;
+    blockedFields?: Record<string, any>;
+    businessNo?: string;
+    data?: Record<string, any>;
+    formCode?: string;
+    formDataId?: number;
+    formDefId?: number;
+    formDefVersion?: number;
+    formName?: string;
+    instanceStatus?: string;
+    latestFormVersion?: number;
+    reviewRequired?: boolean;
+    schema?: string;
+    schemaApproximate?: boolean;
+    versionDrifted?: boolean;
+  };
+
+  type CorrectionRequest = {
+    baseRevisionId?: number;
+    fields?: Record<string, any>;
+    files?: MobileFileRef[];
+    reasonCode?: string;
+    reasonText?: string;
+  };
+
+  type CorrectionResult = {
+    correctionId?: number;
+    revisionId?: number;
+    status?: string;
+  };
+
+  type CorrectionView = {
+    actorName?: string;
+    attachmentsChanged?: boolean;
+    createdAt?: string;
+    fieldChanges?: Record<string, any>;
+    id?: number;
+    reasonCode?: string;
+    reasonText?: string;
+    reviewNote?: string;
+    reviewedAt?: string;
+    reviewerName?: string;
+    status?: string;
+  };
+
+  type correctParams = {
+    id: number;
+  };
+
+  type create1Params = {
+    databaseOnly?: boolean;
   };
 
   type CreateCompanyRequest = {
@@ -546,6 +614,7 @@ export declare namespace AntFlowAPI {
     businessNo?: string;
     companyId?: number;
     companyInferred?: boolean;
+    corrected?: boolean;
     createdAt?: string;
     createdBy?: number;
     createdByDeptName?: string;
@@ -716,8 +785,20 @@ export declare namespace AntFlowAPI {
     version?: number;
   };
 
+  type history1Params = {
+    id: number;
+    limit?: number;
+  };
+
   type historyParams = {
     id: number;
+  };
+
+  type importDataParams = {
+    formId: number;
+    sheetName?: string;
+    skipErrorRows?: boolean;
+    companyId?: number;
   };
 
   type importDraftParams = {
@@ -730,6 +811,40 @@ export declare namespace AntFlowAPI {
   type ImportFailure = {
     message?: string;
     row?: number;
+  };
+
+  type ImportInspection = {
+    columns?: ColumnReport[];
+    errorCount?: number;
+    formCode?: string;
+    formId?: number;
+    formName?: string;
+    formVersion?: number;
+    importableCount?: number;
+    issues?: RowIssue[];
+    issuesTruncated?: boolean;
+    missingColumns?: string[];
+    previews?: Record<string, any>[];
+    rowCount?: number;
+    sheetName?: string;
+    sheets?: string[];
+    skippedCount?: number;
+    templateVersion?: string;
+    warnings?: string[];
+  };
+
+  type ImportOutcome = {
+    atomic?: boolean;
+    batchId?: string;
+    createdIds?: number[];
+    failureCount?: number;
+    failures?: RowIssue[];
+    failuresTruncated?: boolean;
+    formId?: number;
+    skippedCount?: number;
+    successCount?: number;
+    totalRows?: number;
+    warnings?: string[];
   };
 
   type ImportPreview = {
@@ -755,6 +870,11 @@ export declare namespace AntFlowAPI {
     size?: number;
     keyword?: string;
     status?: string;
+  };
+
+  type inspect1Params = {
+    formId: number;
+    sheetName?: string;
   };
 
   type inspectParams = {
@@ -872,6 +992,13 @@ export declare namespace AntFlowAPI {
     deptId: number;
     excludeUserId?: number;
     keyword?: string;
+  };
+
+  type ManualImportRequest = {
+    companyId?: number;
+    data?: Record<string, any>;
+    formId?: number;
+    importKey?: string;
   };
 
   type markReadParams = {
@@ -1583,6 +1710,16 @@ export declare namespace AntFlowAPI {
     id: string;
   };
 
+  type reviewParams = {
+    id: number;
+    correctionId: number;
+  };
+
+  type ReviewRequest = {
+    approve?: boolean;
+    note?: string;
+  };
+
   type revokeSessionParams = {
     id: string;
   };
@@ -1642,6 +1779,14 @@ export declare namespace AntFlowAPI {
     name?: string;
     permissions?: PermissionGrantWriteRequest[];
     version?: number;
+  };
+
+  type RowIssue = {
+    code?: string;
+    fieldId?: string;
+    fieldLabel?: string;
+    message?: string;
+    row?: number;
   };
 
   type rowsParams = {
@@ -1927,6 +2072,10 @@ export declare namespace AntFlowAPI {
     size?: number;
     keyword?: string;
     status?: string;
+  };
+
+  type templateParams = {
+    formId: number;
   };
 
   type terminateParams = {

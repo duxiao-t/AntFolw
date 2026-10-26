@@ -148,6 +148,29 @@ public class InstanceAccessGuard {
         }
     }
 
+    /**
+     * 能否修正这份表单数据的**数据级**校验（表单级校验见
+     * {@code FormAccessGuard.requireFormCorrection}）。
+     *
+     * <p>这里只回答"这份数据能不能碰"，不关心能力点，因为能力与维护者关系在表单级已经判过。
+     * 管理员放行一切；非管理员要求归属已确认——{@code company_id} 为空或属于推断时，
+     * 连"这份数据算哪家公司的"都不确定，允许改写会让它在别人的可见范围里凭空出现或消失。
+     */
+    public boolean canCorrectFormData(long formDataId, long userId) {
+        FormDataAccess resource = formDataAccess(formDataId);
+        if (resource == null) return false;
+        if (snapshots.snapshot(userId).admin()) return true;
+        if (resource.companyId() == null || resource.companyInferred()) return false;
+        return true;
+    }
+
+    public void requireCorrectableFormData(long formDataId) {
+        PrincipalHolder.Principal principal = capabilities.principal();
+        if (!canCorrectFormData(formDataId, principal.userId())) {
+            throw new HiddenResourceException("form data not found");
+        }
+    }
+
     boolean isParticipant(long instanceId, long userId) {
         Long count = jdbcTemplate.queryForObject("""
             SELECT (SELECT COUNT(*) FROM t_task

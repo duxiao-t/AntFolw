@@ -217,6 +217,20 @@ public class AuthorizationService {
     }
 
     /**
+     * 修正已提交表单数据的入口校验（表单级）：管理员放行，
+     * 其余必须持有 {@code form:data:correct} 且是该表单维护者。
+     * 还需配合 {@link #requireCorrectableFormData(long)} 做数据级（公司归属）校验。
+     */
+    public void requireFormCorrection(long formId) {
+        forms.requireFormCorrection(formId);
+    }
+
+    /** 修正的数据级校验：归属未确认的单据仅管理员可碰。 */
+    public void requireCorrectableFormData(long formDataId) {
+        instances.requireCorrectableFormData(formDataId);
+    }
+
+    /**
      * 发起/填报入口统一使用：表单必须已发布且当前用户具备表单使用授权。
      * 未授权时返回资源不存在，避免泄露表单是否存在。
      */
