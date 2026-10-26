@@ -8,7 +8,6 @@ import com.antflow.form.importer.FormImportParser.Plan;
 import com.antflow.form.importer.ImportDtos.ImportInspection;
 import com.antflow.form.importer.ImportDtos.ImportOutcome;
 import com.antflow.form.importer.ImportDtos.RowIssue;
-import com.antflow.org.CompanyAttribution;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -62,11 +61,11 @@ public class FormDataImportService {
      */
     FormDataImportService(FormDefinitionService formDefinitionService, FormImportValueCodec codec,
                           ObjectMapper json, JdbcTemplate jdbc, TransactionTemplate transactionTemplate,
-                          BusinessNumberService businessNumbers, CompanyAttribution companyAttribution,
+                          BusinessNumberService businessNumbers,
                           AuthorizationService authorizationService) {
         this(new FormImportParser(formDefinitionService, codec,
                 new FormImportTemplateReader(formDefinitionService, json),
-                new FormImportKeyLookup(jdbc), json, companyAttribution,
+                new FormImportKeyLookup(jdbc), json,
                 new FormImportDetailSheets(codec, json)),
             new FormDataImportWriter(jdbc, transactionTemplate, businessNumbers, json),
             authorizationService);
@@ -120,7 +119,7 @@ public class FormDataImportService {
         List<RowIssue> insertFailures = new ArrayList<>();
         if (!skipErrorRows) {
             try {
-                writer.insertAtomically(plan.form(), insertable, userId, plan.companyId(), batchId);
+                writer.insertAtomically(plan.form(), insertable, userId, batchId);
             } catch (BizException error) {
                 throw error;
             } catch (RuntimeException error) {
@@ -129,8 +128,7 @@ public class FormDataImportService {
                     "导入失败，未写入任何数据：" + FormDataImportWriter.rootMessage(error));
             }
         } else {
-            insertFailures = writer.insertInBatches(plan.form(), insertable, userId,
-                plan.companyId(), batchId);
+            insertFailures = writer.insertInBatches(plan.form(), insertable, userId, batchId);
         }
 
         List<Long> createdIds = writer.loadCreatedIds(batchId);

@@ -216,17 +216,6 @@ class ProcessEngineTreeTest {
         return all.get(all.size() - 1);
     }
 
-    // ---------- 1. single approval ----------
-    @Test
-    void start_failsClosedWhenTheCallerDidNotResolveACompany() {
-        // P4a：引擎不再自己解析归属（它分不清"用户显式选的"与"从草稿继承的"），
-        // 只保留这最后一道——绝不让一条无归属的记录静默落库。
-        assertThatThrownBy(() ->
-            engine().start(new StartCmd("F1", Map.of("k", "v"), null, null), 7L))
-            .isInstanceOfSatisfying(BizException.class,
-                error -> assertThat(error.getCode()).isEqualTo("BAD_COMPANY"));
-        Mockito.verifyNoInteractions(formDataMapper, processInstanceMapper);
-    }
 
     @Test
     void start_rejectsFormWithoutUsageGrant() {
@@ -238,7 +227,7 @@ class ProcessEngineTreeTest {
         stubFormAndPd("F1", processJson);
         Mockito.doThrow(new HiddenResourceException("form not found"))
             .when(authorizationService)
-            .requireFormUse(1L, TEST_COMPANY_ID);
+            .requireFormUse(1L);
 
         assertThatThrownBy(() ->
             engine().start(new StartCmd("F1", Map.of("k", "v"), null, TEST_COMPANY_ID), 7L))

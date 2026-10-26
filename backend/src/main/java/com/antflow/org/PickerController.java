@@ -52,13 +52,12 @@ public class PickerController {
      */
     @GetMapping("/departments")
     @PreAuthorize("@authz.consoleEntry()")
-    public List<PickerDepartment> departments(@RequestParam(required = false) Long companyId) {
+    public List<PickerDepartment> departments() {
         QueryWrapper<Department> query = new QueryWrapper<Department>()
-            .select("id", "name", "company_id", "parent_id").orderByAsc("sort_order").orderByAsc("id");
-        if (companyId != null) query.eq("company_id", companyId);
+            .select("id", "name", "parent_id").orderByAsc("sort_order").orderByAsc("id");
         return departmentMapper.selectList(query).stream()
             .map(department -> new PickerDepartment(department.getId(), department.getName(),
-                department.getCompanyId(), department.getParentId())).toList();
+                department.getParentId())).toList();
     }
 
     @GetMapping("/roles")
@@ -73,5 +72,5 @@ public class PickerController {
         return service.selectedRoles(ids);
     }
 
-    public record PickerDepartment(Long id, String name, Long companyId, Long parentId) { }
+    public record PickerDepartment(Long id, String name, Long parentId) { }
 }

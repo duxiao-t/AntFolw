@@ -9,7 +9,6 @@ import java.util.List;
 @TableName(value = "t_department", autoResultMap = true)
 public class Department {
     @TableId(type = IdType.AUTO) private Long id;
-    private Long companyId;
     private Long parentId;
     /** `ltree` materialized path; e.g. `acme.root.eng.platform`. */
     private String path;

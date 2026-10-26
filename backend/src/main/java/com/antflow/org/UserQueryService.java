@@ -33,7 +33,7 @@ class UserQueryService {
     private final DepartmentMapper departmentMapper;
     private final JdbcTemplate jdbcTemplate;
     private final AuthorizationService authorizationService;
-    private final OrgCompanyAccess companyAccess;
+    private final OrgAccess orgAccess;
 
     /**
      * 查询条件。**为什么不直接吃 {@code UserService.UserQuery}**：那是个挂在门面上的公开嵌套类型
@@ -47,7 +47,6 @@ class UserQueryService {
     List<User> listAuthorized(Criteria request) {
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_USER_READ);
         QueryWrapper<User> query = new QueryWrapper<>();
-        companyAccess.constrainUsers(query, request.companyId());
         if (request.keyword() != null && !request.keyword().isBlank()) {
             String keyword = request.keyword().trim();
             query.and(wrapper -> {
@@ -95,7 +94,6 @@ class UserQueryService {
         long safePage = Math.max(page, 1);
         long safeSize = Math.min(Math.max(size, 1), 100);
         QueryWrapper<User> query = new QueryWrapper<>();
-        companyAccess.constrainUsers(query, companyId);
         if (keyword != null && !keyword.isBlank()) {
             String normalized = keyword.trim();
             // 关键字也匹配部门名（含下级）：通讯录里搜"研发部"要出人，不能只过滤左树。
@@ -158,7 +156,7 @@ class UserQueryService {
     }
 
     List<User> managerCandidates(Long departmentId, Long excludedUserId, String keyword) {
-        companyAccess.requireDepartment(departmentId);
+        orgAccess.requireDepartment(departmentId);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
         Department department = departmentId == null ? null : departmentMapper.selectById(departmentId);

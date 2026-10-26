@@ -37,7 +37,7 @@ class UserAccountService {
     private final AuthorizationService authorizationService;
     private final AuthSessionService authSessionService;
     private final AuditService auditService;
-    private final OrgCompanyAccess companyAccess;
+    private final OrgAccess orgAccess;
     private final UserRoles roles;
     private final UserGuards guards;
     private final UserStatusService status;
@@ -55,7 +55,7 @@ class UserAccountService {
         guards.validateUsernameAvailable(u.getUsername(), null);
         guards.validateDisplayName(u.getDisplayName());
         guards.validateDepartment(u.getDeptId());
-        companyAccess.requireDepartment(u.getDeptId());
+        orgAccess.requireDepartment(u.getDeptId());
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, u.getDeptId());
         guards.validateManager(null, u.getManagerId(), u.getDeptId());
@@ -117,7 +117,7 @@ class UserAccountService {
         if (u == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
         }
-        companyAccess.requireUserSource(u.getDeptId());
+        orgAccess.requireUserSource(u.getDeptId());
         List<String> currentRoles = roles.rolesOf(userId);
         if (!authorizationService.isAdmin() && currentRoles.contains("admin")) {
             throw new BizException("ADMIN_USER_PROTECTED", "管理员用户只能由管理员操作");
@@ -157,7 +157,7 @@ class UserAccountService {
         if (user == null) {
             throw new BizException("NOT_FOUND", "用户不存在");
         }
-        companyAccess.requireUserSource(user.getDeptId());
+        orgAccess.requireUserSource(user.getDeptId());
         if (body.containsKey("status") && status.hasWecomMapping(userId)) {
             throw new BizException("WECOM_LOGIN_ACCESS_REQUIRED", "企业微信成员请使用登录权限操作");
         }
@@ -187,7 +187,7 @@ class UserAccountService {
             Long departmentId = body.get("deptId") == null
                 ? null : ((Number) body.get("deptId")).longValue();
             guards.validateDepartment(departmentId);
-            companyAccess.requireDepartment(departmentId);
+            orgAccess.requireDepartment(departmentId);
             authorizationService.requireManageableDepartment(
                 com.antflow.authz.PermissionCodes.ORG_USER_MANAGE, departmentId);
             user.setDeptId(departmentId);

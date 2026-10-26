@@ -20,7 +20,6 @@ import com.antflow.form.FormDefinitionServiceFixture;
 import com.antflow.form.importer.FormDataManualImport.ManualImportFailure;
 import com.antflow.form.importer.ImportDtos.ImportOutcome;
 import com.antflow.form.importer.ImportDtos.ManualImportRequest;
-import com.antflow.org.CompanyAttribution;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
@@ -83,16 +82,13 @@ class FormDataImportManualTest {
         BusinessNumberService numbers = mock(BusinessNumberService.class);
         when(numbers.next(any(), any())).thenReturn("NO-1");
 
-        CompanyAttribution attribution = mock(CompanyAttribution.class);
-        when(attribution.resolve(any())).thenReturn(COMPANY_ID);
-
         AuthorizationService authorization = mock(AuthorizationService.class);
         when(authorization.currentUserId()).thenReturn(USER_ID);
 
         keyLookup = new FormImportKeyLookup(jdbc);
         manual = new FormDataManualImport(new FormImportTemplateReader(forms, JSON), forms,
             keyLookup, new FormDataImportWriter(jdbc, transactions, numbers, JSON),
-            attribution, authorization);
+            authorization);
     }
 
     @Test
@@ -109,9 +105,9 @@ class FormDataImportManualTest {
         Object[] row = captor.getValue().get(0);
         assertThat(row[0]).isEqualTo(FORM_ID);
         assertThat(row[3]).as("data 原样落库（不再做任何反解析）").isNotNull();
-        assertThat(row[5]).isEqualTo(COMPANY_ID);
+        // 单公司后不再写 company_id，列顺序整体前移一位。
         // 业务单号两端 trim，避免「EXT-1」与「 EXT-1 」被当成两条。
-        assertThat(row[6]).isEqualTo("EXT-1");
+        assertThat(row[5]).isEqualTo("EXT-1");
 
         JsonNode stored = JSON.readTree((String) row[3]);
         assertThat(stored.path("subject").asText()).isEqualTo("出差");

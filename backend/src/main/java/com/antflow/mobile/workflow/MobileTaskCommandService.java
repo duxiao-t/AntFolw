@@ -10,7 +10,6 @@ import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.MobileDraftDto;
 import com.antflow.form.runtime.MobileDraftService;
 import com.antflow.attachment.MobileFileLinkService;
-import com.antflow.org.CompanyAttribution;
 import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
@@ -60,7 +59,6 @@ final class MobileTaskCommandService {
     private final MobileFileLinkService fileLinkService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
-    private final CompanyAttribution companyAttribution;
     private final MobileAttachmentProjector attachments;
     private final MobileEntityLookups lookups;
     /**
@@ -75,8 +73,7 @@ final class MobileTaskCommandService {
         if (currentForm == null || !PUBLISHED_STATUS.equals(currentForm.getStatus())) {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + request.formCode());
         }
-        // P4a：带草稿时**归属取草稿行的快照**（调岗后重提也不改归属）；新发起才按身份解析。
-        Long companyId;
+        // 单公司：不再解析公司归属，只做草稿与表单的一致性校验。
         if (request.draftId() != null) {
             MobileDraftDto draft = draftService.get(request.draftId(), userId);
             if (!Objects.equals(draft.formCode(), request.formCode())) {
@@ -89,16 +86,13 @@ final class MobileTaskCommandService {
                 throw new BizException("DRAFT_VERSION_MISMATCH",
                     "表单已改版，请基于新版本重新填写");
             }
-            companyId = companyAttribution.forDraft(draft.companyId(), request.companyId());
-        } else {
-            companyId = companyAttribution.resolve(request.companyId());
         }
-        authorizationService.requireFormUse(currentForm.getId(), companyId);
+        authorizationService.requireFormUse(currentForm.getId());
 
         Map<String, List<Long>> selfSelected = request.selfSelected() == null
             ? Map.of() : request.selfSelected();
         Map<String, Object> result = engine.start(
-            new StartCmd(request.formCode(), data, selfSelected, companyId), userId);
+            new StartCmd(request.formCode(), data, selfSelected, null), userId);
         Long formDataId = asLong(result.get("formDataId"));
         Long instanceId = asLong(result.get("instanceId"));
         String businessNo = Objects.toString(result.get("businessNo"), null);

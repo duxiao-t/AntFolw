@@ -7,7 +7,6 @@ import com.antflow.form.FormDefinitionService;
 import com.antflow.form.importer.ImportDtos.ColumnReport;
 import com.antflow.form.importer.ImportDtos.RowIssue;
 import com.antflow.form.options.OptionTableImporter;
-import com.antflow.org.CompanyAttribution;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.security.MessageDigest;
@@ -57,19 +56,16 @@ public class FormImportParser {
     private final FormImportTemplateReader templates;
     private final FormImportKeyLookup keyLookup;
     private final ObjectMapper json;
-    private final CompanyAttribution companyAttribution;
     private final FormImportDetailSheets detailSheets;
 
     public FormImportParser(FormDefinitionService formDefinitionService, FormImportValueCodec codec,
                             FormImportTemplateReader templates, FormImportKeyLookup keyLookup,
-                            ObjectMapper json, CompanyAttribution companyAttribution,
-                            FormImportDetailSheets detailSheets) {
+                            ObjectMapper json, FormImportDetailSheets detailSheets) {
         this.formDefinitionService = formDefinitionService;
         this.codec = codec;
         this.templates = templates;
         this.keyLookup = keyLookup;
         this.json = json;
-        this.companyAttribution = companyAttribution;
         this.detailSheets = detailSheets;
     }
 
@@ -112,7 +108,6 @@ public class FormImportParser {
         }
 
         List<String> warnings = new ArrayList<>();
-        Long companyId = resolveCompany(explicitCompanyId, lenientCompany, warnings);
         // 明细表按「行号」关联到上面这些真实行；行号非法会当场抛出（不是"尽力而为"地跳过）。
         FormImportDetailSheets.Parsed details = detailSheets.parse(schema, template.meta(), bytes,
             new LinkedHashSet<>(sourceRows));
@@ -121,7 +116,7 @@ public class FormImportParser {
         prefetchRows.addAll(details.prefetchRows());
         FormImportValueCodec.Prefetch prefetch = codec.prefetch(schema, prefetchRows);
         Set<String> fileKeys = keyLookup.importKeys(rawRows);
-        Set<String> existingKeys = keyLookup.existingImportKeys(form.getId(), companyId, fileKeys);
+        Set<String> existingKeys = keyLookup.existingImportKeys(form.getId(), fileKeys);
         Set<String> existingBusinessNos = keyLookup.existingBusinessNos(fileKeys);
 
         List<RowPlan> rows = new ArrayList<>(rawRows.size());
@@ -188,7 +183,7 @@ public class FormImportParser {
         return new Plan(form, template.sheets(), sheet, columns, missingColumns, rows, warnings,
             rows.size(), errorCount, skippedCount, rows.size() - errorCount - skippedCount,
             issues.size() > MAX_ISSUES ? issues.subList(0, MAX_ISSUES) : issues,
-            issues.size() > MAX_ISSUES, previews, companyId);
+            issues.size() > MAX_ISSUES, previews);
     }
 
     /** 一行 → 存储值。**主表单元格有值就用它，否则才看明细表**：老模板里的 JSON 不能被新格式改味，
@@ -330,20 +325,6 @@ public class FormImportParser {
         }
     }
 
-    /**
-     * 公司归属：导入的写入路径必须能确定归属（{@code company_id} 是唯一索引的一部分）。
-     * 预检是只读的，允许在"无部门管理员未指定公司"时降级为 null——那只是让重复判断偏保守，
-     * 真正导入时仍由 {@link CompanyAttribution} 严格拦截。
-     */
-    private Long resolveCompany(Long explicitCompanyId, boolean lenient, List<String> warnings) {
-        try {
-            return companyAttribution.resolve(explicitCompanyId);
-        } catch (BizException error) {
-            if (!lenient) throw error;
-            warnings.add("未能确定公司归属（" + error.getMessage() + "），预检的重复判断可能不准确");
-            return null;
-        }
-    }
 
     /** 异常消息里没有 fieldId（校验器只吐 label）：按"消息以哪个 label 开头"反查，取最长匹配。 */
     private static String locateField(String message, List<Column> columns) {
@@ -388,7 +369,7 @@ public class FormImportParser {
                 List<Column> columns, List<String> missingColumns, List<RowPlan> rows,
                 List<String> warnings, int rowCount, int errorCount, int skippedCount,
                 int importableCount, List<RowIssue> issues, boolean issuesTruncated,
-                List<Map<String, Object>> previews, Long companyId) {
+                List<Map<String, Object>> previews) {
 
         List<ColumnReport> columnReports() {
             return columns.stream()

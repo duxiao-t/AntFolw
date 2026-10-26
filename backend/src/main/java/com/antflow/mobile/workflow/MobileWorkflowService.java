@@ -7,7 +7,6 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormDataMapper;
 import com.antflow.form.runtime.MobileDraftService;
-import com.antflow.org.CompanyAttribution;
 import com.antflow.process.DefinitionVersionRepository;
 import com.antflow.process.ProcessDefinitionService;
 import com.antflow.task.ProcessInstanceMapper;
@@ -80,8 +79,7 @@ public class MobileWorkflowService {
                                  ProcessInstanceMapper instanceMapper, TaskMapper taskMapper,
                                  TaskHistoryMapper historyMapper,
                                  MobileFileLinkService fileLinkService, ObjectMapper objectMapper,
-                                 AuthorizationService authorizationService,
-                                 CompanyAttribution companyAttribution) {
+                                 AuthorizationService authorizationService) {
         // 装配顺序 = 依赖顺序：投影底座最先，取数其次，最后是命令/返工/填单。
         MobileProjectionSupport projection = new MobileProjectionSupport(objectMapper);
         MobileAttachmentProjector attachments =
@@ -96,7 +94,7 @@ public class MobileWorkflowService {
             projection, objectMapper);
         this.commands = new MobileTaskCommandService(engine, draftService, workflowMapper,
             formDefinitionService, processDefinitionService, instanceMapper, taskMapper,
-            fileLinkService, objectMapper, authorizationService, companyAttribution, attachments,
+            fileLinkService, objectMapper, authorizationService, attachments,
             lookups, definitionVersionsRef);
         this.reworks = new MobileReworkService(engine, formDefinitionService, formDataMapper,
             instanceMapper, taskMapper, fileLinkService, objectMapper, authorizationService,

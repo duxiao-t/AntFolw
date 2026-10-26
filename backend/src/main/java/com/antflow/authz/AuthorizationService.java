@@ -168,10 +168,6 @@ public class AuthorizationService {
         return forms.hasFormGrant(formId, userId);
     }
 
-    /** companyId must come from the authenticated department or an owned draft snapshot. */
-    public boolean hasFormGrant(long formId, long userId, Long companyId) {
-        return forms.hasFormGrant(formId, userId, companyId);
-    }
 
     /**
      * 该用户有使用授权的表单 id 集合，用于列表类的批量过滤。
@@ -181,19 +177,12 @@ public class AuthorizationService {
         return forms.usableFormIds(userId);
     }
 
-    /** Batch draft authorization uses each stored company, rather than today's department. */
-    public Optional<Map<Long, Set<Long>>> usableFormIdsByCompany(long userId) {
-        return forms.usableFormIdsByCompany(userId);
-    }
 
     /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
     public void requireFormUse(long formId) {
         forms.requireFormUse(formId);
     }
 
-    public void requireFormUse(long formId, Long companyId) {
-        forms.requireFormUse(formId, companyId);
-    }
 
     public boolean canUseForm(long formId, long userId) {
         return forms.canUseForm(formId, userId);

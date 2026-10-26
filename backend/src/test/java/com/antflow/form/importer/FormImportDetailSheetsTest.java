@@ -14,7 +14,6 @@ import com.antflow.form.FormDefinitionService;
 import com.antflow.form.FormDefinitionServiceFixture;
 import com.antflow.form.importer.FormImportValueCodec.DeptRef;
 import com.antflow.form.importer.FormImportValueCodec.UserRef;
-import com.antflow.org.CompanyAttribution;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
@@ -262,10 +261,8 @@ class FormImportDetailSheetsTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         when(jdbc.queryForList(anyString(), any(Class.class), any(Object[].class)))
             .thenReturn(List.of());
-        CompanyAttribution attribution = mock(CompanyAttribution.class);
-        when(attribution.resolve(any())).thenReturn(9L);
         return new FormImportParser(forms, codec, new FormImportTemplateReader(forms, JSON),
-            new FormImportKeyLookup(jdbc), JSON, attribution, detailSheets);
+            new FormImportKeyLookup(jdbc), JSON, detailSheets);
     }
 
     /** 主表一行数据 + 若干明细表（第 3 行起）。 */

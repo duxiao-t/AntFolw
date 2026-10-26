@@ -21,7 +21,6 @@ import com.antflow.form.importer.FormImportValueCodec.DeptRef;
 import com.antflow.form.importer.FormImportValueCodec.UserRef;
 import com.antflow.form.importer.ImportDtos.ImportInspection;
 import com.antflow.form.importer.ImportDtos.ImportOutcome;
-import com.antflow.org.CompanyAttribution;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -62,7 +61,6 @@ class FormDataImportServiceTest {
     private JdbcTemplate jdbc;
     private TransactionTemplate transactions;
     private BusinessNumberService businessNumbers;
-    private CompanyAttribution companyAttribution;
     private AuthorizationService authorization;
     private FormDataImportService service;
     private FormDefinition form;
@@ -99,15 +97,13 @@ class FormDataImportServiceTest {
         businessNumbers = mock(BusinessNumberService.class);
         when(businessNumbers.next(any(), any())).thenReturn("NO-1", "NO-2", "NO-3");
 
-        companyAttribution = mock(CompanyAttribution.class);
-        when(companyAttribution.resolve(any())).thenReturn(COMPANY_ID);
 
         authorization = mock(AuthorizationService.class);
         when(authorization.currentUserId()).thenReturn(USER_ID);
 
         FormImportValueCodec codec = new FormImportValueCodec(JSON, DIRECTORY);
         service = new FormDataImportService(forms, codec, JSON, jdbc, transactions,
-            businessNumbers, companyAttribution, authorization);
+            businessNumbers, authorization);
     }
 
     // ---------------------------------------------------------------- 预检

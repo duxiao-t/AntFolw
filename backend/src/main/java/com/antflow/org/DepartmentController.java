@@ -21,7 +21,7 @@ public class DepartmentController {
     private final DepartmentService service;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
-    private final OrgCompanyAccess companyAccess;
+    private final OrgAccess orgAccess;
 
     /** 完整部门树（含 ltree 子树递归）。单公司：不再接收公司参数。 */
     @GetMapping
@@ -71,7 +71,7 @@ public class DepartmentController {
     @PutMapping("/{id}")
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        companyAccess.requireDepartment(id);
+        orgAccess.requireDepartment(id);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         if (body.containsKey("parentId")) {
@@ -81,7 +81,7 @@ public class DepartmentController {
                 authorizationService.requireAllDataScope(
                     com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE);
             } else {
-                companyAccess.requireDepartment(parentId);
+                orgAccess.requireDepartment(parentId);
                 authorizationService.requireManageableDepartment(
                     com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, parentId);
             }
@@ -97,7 +97,7 @@ public class DepartmentController {
     @PutMapping("/{id}/order")
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department moveOrder(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        companyAccess.requireDepartment(id);
+        orgAccess.requireDepartment(id);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         return auditService.execute(
@@ -110,7 +110,7 @@ public class DepartmentController {
     @PutMapping("/{id}/position")
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public Department movePosition(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        companyAccess.requireDepartment(id);
+        orgAccess.requireDepartment(id);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         Object targetId = body.get("targetId");
@@ -118,7 +118,7 @@ public class DepartmentController {
             throw new BizException("BAD_TARGET", "目标部门不能为空");
         }
         long targetDepartmentId = ((Number) targetId).longValue();
-        companyAccess.requireDepartment(targetDepartmentId);
+        orgAccess.requireDepartment(targetDepartmentId);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, targetDepartmentId);
         return auditService.execute(
@@ -133,7 +133,7 @@ public class DepartmentController {
     @DeleteMapping("/{id}")
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_MANAGE + "')")
     public void delete(@PathVariable Long id) {
-        companyAccess.requireDepartment(id);
+        orgAccess.requireDepartment(id);
         authorizationService.requireManageableDepartment(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_MANAGE, id);
         auditService.execute(() -> service.delete(id),
@@ -145,7 +145,7 @@ public class DepartmentController {
     @GetMapping("/{id}/path")
     @PreAuthorize("@authz.console('" + PermissionCodes.ORG_DEPARTMENT_READ + "')")
     public List<Department> path(@PathVariable Long id) {
-        companyAccess.requireDepartment(id);
+        orgAccess.requireDepartment(id);
         authorizationService.requirePermission(com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_READ);
         if (!authorizationService.visibleDepartments(
             com.antflow.authz.PermissionCodes.ORG_DEPARTMENT_READ).contains(id)) {
@@ -187,10 +187,6 @@ public class DepartmentController {
     private Department updateDepartment(Long id, Map<String, Object> body) {
         Department department = mapper.selectById(id);
         if (department == null) throw new BizException("NOT_FOUND", "部门不存在");
-        if (body.containsKey("companyId") && (body.get("companyId") == null
-            || !department.getCompanyId().equals(((Number) body.get("companyId")).longValue()))) {
-            throw new BizException("DEPARTMENT_COMPANY_IMMUTABLE", "部门所属公司创建后不可修改");
-        }
         if (body.containsKey("parentId")) {
             Long newParentId = body.get("parentId") == null
                 ? null : ((Number) body.get("parentId")).longValue();

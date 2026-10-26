@@ -9,7 +9,6 @@ import com.antflow.form.importer.FormImportParser.RowPlan;
 import com.antflow.form.importer.ImportDtos.ImportOutcome;
 import com.antflow.form.importer.ImportDtos.ManualImportRequest;
 import com.antflow.form.importer.ImportDtos.RowIssue;
-import com.antflow.org.CompanyAttribution;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -48,19 +47,16 @@ public class FormDataManualImport {
     private final FormDefinitionService formDefinitionService;
     private final FormImportKeyLookup keyLookup;
     private final FormDataImportWriter writer;
-    private final CompanyAttribution companyAttribution;
     private final AuthorizationService authorizationService;
 
     public FormDataManualImport(FormImportTemplateReader templates,
                                 FormDefinitionService formDefinitionService,
                                 FormImportKeyLookup keyLookup, FormDataImportWriter writer,
-                                CompanyAttribution companyAttribution,
                                 AuthorizationService authorizationService) {
         this.templates = templates;
         this.formDefinitionService = formDefinitionService;
         this.keyLookup = keyLookup;
         this.writer = writer;
-        this.companyAttribution = companyAttribution;
         this.authorizationService = authorizationService;
     }
 
@@ -72,17 +68,16 @@ public class FormDataManualImport {
         FormDefinition form = templates.requirePublished(request.formId());
         JsonNode schema = templates.readSchema(form);
         Map<String, Object> data = request.data() == null ? Map.of() : request.data();
-        Long companyId = companyAttribution.resolve(request.companyId());
         String importKey = importKey(request.importKey());
         Map<String, Object> values = validate(form, schema, data);
-        ensureNotDuplicate(form, companyId, importKey);
+        ensureNotDuplicate(form, importKey);
 
         long userId = authorizationService.currentUserId();
         String batchId = nextBatchId();
         // 行号固定 1：单条提交没有"Excel 行号"，前端只需要"这一条"的定位。
         RowPlan row = new RowPlan(1, values, importKey, null, List.of(), false);
         try {
-            writer.insertAtomically(form, List.of(row), userId, companyId, batchId);
+            writer.insertAtomically(form, List.of(row), userId, batchId);
         } catch (org.springframework.dao.DuplicateKeyException error) {
             if (importKey == null) throw error;
             // 并发下的兜底：唯一索引拒绝 → 与预检同一个错误语义，不要漏成 500。
@@ -113,10 +108,10 @@ public class FormDataManualImport {
         return values;
     }
 
-    private void ensureNotDuplicate(FormDefinition form, Long companyId, String importKey) {
+    private void ensureNotDuplicate(FormDefinition form, String importKey) {
         if (importKey == null) return;
         Set<String> keys = Set.of(importKey);
-        boolean exists = !keyLookup.existingImportKeys(form.getId(), companyId, keys).isEmpty()
+        boolean exists = !keyLookup.existingImportKeys(form.getId(), keys).isEmpty()
             || !keyLookup.existingBusinessNos(keys).isEmpty();
         if (exists) {
             throw new BizException("IMPORT_DUPLICATE",

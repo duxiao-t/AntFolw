@@ -53,7 +53,6 @@ class AuthorizationServiceContractTest {
         "evict(long)->void",
         "evictAll()->void",
         "hasFormGrant(long,long)->boolean",
-        "hasFormGrant(long,long,java.lang.Long)->boolean",
         "hasFormMaintainer(long,long)->boolean",
         "hasPermission(java.lang.String)->boolean",
         "hasPermission(long,java.lang.String)->boolean",
@@ -78,7 +77,6 @@ class AuthorizationServiceContractTest {
         "requireFormMaintenance(long,java.lang.String)->void",
         "requireFormMaintenanceAny(long,java.lang.String[])->void",
         "requireFormUse(long)->void",
-        "requireFormUse(long,java.lang.Long)->void",
         "requireFormUseByCode(java.lang.String)->void",
         "requireManageInstance(long,java.lang.String)->void",
         "requireManageTask(long,java.lang.String)->void",
@@ -89,8 +87,6 @@ class AuthorizationServiceContractTest {
         "requireReadableTask(long)->void",
         "snapshot(long)->com.antflow.authz.AuthorizationService$AuthzSnapshot",
         "usableFormIds(long)->java.util.Optional<java.util.Set<java.lang.Long>>",
-        "usableFormIdsByCompany(long)->java.util.Optional<java.util.Map<java.lang.Long, "
-            + "java.util.Set<java.lang.Long>>>",
         "visibleDepartments(java.lang.String)->java.util.Set<java.lang.Long>"
     );
 
@@ -173,7 +169,6 @@ class AuthorizationServiceContractTest {
         service.requireAllDataScope(PermissionCodes.FORM_DATA_READ);
         service.visibleDepartments(PermissionCodes.FORM_DATA_READ);
         service.requireFormUse(9L);
-        service.requireFormUse(9L, 2L);
         service.requireFormMaintenance(9L, "form:definition:manage");
         service.requireFormMaintenanceAny(9L, "a", "b");
         service.requireFormUseByCode("leave");
@@ -198,7 +193,6 @@ class AuthorizationServiceContractTest {
         verify(dataScopes).requireAllDataScope(PermissionCodes.FORM_DATA_READ);
         verify(dataScopes).visibleDepartments(PermissionCodes.FORM_DATA_READ);
         verify(forms).requireFormUse(9L);
-        verify(forms).requireFormUse(9L, 2L);
         verify(forms).requireFormMaintenance(9L, "form:definition:manage");
         verify(forms).requireFormMaintenanceAny(9L, "a", "b");
         verify(forms).requireFormUseByCode("leave");

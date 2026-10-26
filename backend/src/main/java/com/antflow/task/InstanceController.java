@@ -10,7 +10,6 @@ import com.antflow.engine.ProcessEngine;
 import com.antflow.engine.dto.StartCmd;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormDataMapper;
-import com.antflow.org.CompanyAttribution;
 import com.antflow.process.DefinitionVersionRepository;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +35,6 @@ public class InstanceController {
     private final AuditService auditService;
     private final FormDefinitionService formDefinitionService;
     private final FormDataMapper formDataMapper;
-    private final CompanyAttribution companyAttribution;
     private final com.antflow.attachment.MediaSubmissionValidator mediaValidator;
     @Autowired(required = false)
     private DefinitionVersionRepository definitionVersions;
@@ -47,13 +45,10 @@ public class InstanceController {
         authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_START);
         authorizationService.requirePermission(PermissionCodes.FORM_RUNTIME_READ);
         var p = PrincipalHolder.current().orElseThrow();
-        // 归属按**身份**解析（请求里的 companyId 只对无部门的全局管理员有意义），引擎只收已解析的值。
-        Long companyId = companyAttribution.resolve(cmd.companyId());
-        StartCmd resolved = new StartCmd(cmd.formCode(), cmd.data(), cmd.selfSelected(),
-            companyId);
+        // 单公司：不再解析公司归属，请求原样透传（引擎也不再读 companyId）。
         // 事务外预热媒体时长：进引擎后 validate 只读已回写的 duration，不再持锁拉流跑 ffprobe（见 A5）。
-        mediaValidator.preloadMediaDurations(resolved.data());
-        return auditService.execute(() -> engine.start(resolved, p.userId()), result ->
+        mediaValidator.preloadMediaDurations(cmd.data());
+        return auditService.execute(() -> engine.start(cmd, p.userId()), result ->
             auditService.success("workflow.instance.start", "PROCESS_INSTANCE",
                 result.get("instanceId"), AuditService.RiskLevel.NORMAL,
                 Map.of("changedFields", List.of("status", "startedBy", "startedAt",

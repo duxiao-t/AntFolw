@@ -75,8 +75,7 @@ class OptionSchemaResolver {
                 if (rs.getLong("created_by") != user) {
                     throw new HiddenResourceException("draft not found");
                 }
-                Long companyId = rs.getObject("company_id", Long.class);
-                authorization.requireFormUse(rs.getLong("form_def_id"), companyId);
+                authorization.requireFormUse(rs.getLong("form_def_id"));
                 return rs.getLong("form_def_id");
             }, request.dataId());
         // 版本口径必须和 instanceId 路径一致：那张表优先用实例的"当前修订版"，

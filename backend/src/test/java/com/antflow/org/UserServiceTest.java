@@ -208,7 +208,7 @@ class UserServiceTest {
         UserService service = new UserService(userMapper, userRoleMapper, roleMapper, encoder,
             Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
             Mockito.mock(JdbcTemplate.class), Mockito.mock(FormalNumberService.class),
-            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgCompanyAccess.class));
+            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgAccess.class));
         User user = new User();
         user.setId(9L);
         when(userMapper.selectById(9L)).thenReturn(user);
@@ -254,7 +254,7 @@ class UserServiceTest {
             Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
             Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
             jdbcTemplate, Mockito.mock(FormalNumberService.class),
-            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgCompanyAccess.class));
+            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgAccess.class));
         User user = user(9L, 10L, null, "ACTIVE");
         when(userMapper.selectById(9L)).thenReturn(user);
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
@@ -278,7 +278,7 @@ class UserServiceTest {
             Mockito.mock(RoleMapper.class), Mockito.mock(PasswordEncoder.class),
             Mockito.mock(DepartmentMapper.class), Mockito.mock(DepartmentLeaderMapper.class),
             jdbcTemplate, Mockito.mock(FormalNumberService.class),
-            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgCompanyAccess.class));
+            Mockito.mock(AuthorizationService.class), sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgAccess.class));
         User user = user(9L, 10L, null, "ACTIVE");
         when(userMapper.selectById(9L)).thenReturn(user);
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
@@ -561,7 +561,7 @@ class UserServiceTest {
             Mockito.mock(RoleMapper.class), encoder, Mockito.mock(DepartmentMapper.class),
             Mockito.mock(DepartmentLeaderMapper.class), Mockito.mock(JdbcTemplate.class),
             Mockito.mock(FormalNumberService.class), Mockito.mock(AuthorizationService.class),
-            sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgCompanyAccess.class));
+            sessions, Mockito.mock(AuditService.class), Mockito.mock(OrgAccess.class));
     }
 
     private static UserService newService(UserMapper userMapper, UserRoleMapper userRoleMapper,
@@ -582,7 +582,8 @@ class UserServiceTest {
         return new UserService(userMapper, userRoleMapper, roleMapper, encoder, departmentMapper,
             leaderMapper, jdbcTemplate, Mockito.mock(FormalNumberService.class),
             authorizationService,
-            Mockito.mock(AuthSessionService.class), Mockito.mock(AuditService.class), Mockito.mock(OrgCompanyAccess.class));
+            Mockito.mock(AuthSessionService.class), Mockito.mock(AuditService.class),
+            Mockito.mock(OrgAccess.class));
     }
 
     private static User user(long id, Long deptId, Long managerId, String status) {
@@ -597,7 +598,6 @@ class UserServiceTest {
     private static Department department(long id, long companyId) {
         Department department = new Department();
         department.setId(id);
-        department.setCompanyId(companyId);
         return department;
     }
 }

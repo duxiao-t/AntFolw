@@ -69,7 +69,6 @@ class MobileWorkflowServiceTest {
     private DepartmentMapper departmentMapper;
     private MobileWorkflowService service;
     private AuthorizationService authorizationService;
-    private com.antflow.org.CompanyAttribution companyAttribution;
 
     @BeforeEach
     void setUp() {
@@ -116,12 +115,10 @@ class MobileWorkflowServiceTest {
                 invocation.getArgument(1), Map.class));
         Mockito.when(processDefinitionService.commentPresets(Mockito.any(), Mockito.anyString()))
             .thenReturn(ApprovalCommentPresets.empty());
-        companyAttribution = Mockito.mock(com.antflow.org.CompanyAttribution.class);
-        Mockito.when(companyAttribution.resolve(Mockito.any())).thenReturn(1L);
         service = new MobileWorkflowService(engine, draftService, workflowMapper, fileLinks,
             formDefinitionService, processDefinitionService, formDataMapper, instanceMapper,
             taskMapper, historyMapper, new MobileFileLinkService(fileLinks, fileMapper),
-            objectMapper, authorizationService, companyAttribution);
+            objectMapper, authorizationService);
         Mockito.when(instanceMapper.selectForUpdate(Mockito.anyLong()))
             .thenAnswer(call -> instanceMapper.selectById(call.getArgument(0)));
         Mockito.when(taskMapper.selectForUpdate(Mockito.anyLong()))
@@ -133,7 +130,6 @@ class MobileWorkflowServiceTest {
         UUID fileId = UUID.fromString("d2cecb38-11a8-4d2e-9f43-96ce6f4a7e60");
         JsonNode data = objectMapper.createObjectNode().put("days", 2);
         Mockito.when(draftService.get(101L, 7L)).thenReturn(draftDto(101L, 3, data, 42L));
-        Mockito.when(companyAttribution.forDraft(42L, null)).thenReturn(42L);
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.when(fileMapper.selectByIdsForUpdate(any()))
             .thenReturn(List.of(file(fileId, 7L, "READY")));
@@ -152,16 +148,13 @@ class MobileWorkflowServiceTest {
         assertThat(startCaptor.getValue().formCode()).isEqualTo("leave");
         assertThat(startCaptor.getValue().data()).isEqualTo(data);
         // P4a 核心口径：归属取**草稿行里的快照**（42L），不是请求里的（这里是 null）。
-        assertThat(startCaptor.getValue().companyId()).isEqualTo(42L);
-        Mockito.verify(companyAttribution).forDraft(42L, null);
-        Mockito.verify(companyAttribution, Mockito.never()).resolve(any());
         Mockito.verify(fileLinks).insertFileLink(301L, fileId, "attachment", 0);
         Mockito.verify(draftService).deleteAfterSubmit(101L, 7L);
     }
 
     private MobileDraftDto draftDto(long id, int version, JsonNode data, Long companyId) {
         return new MobileDraftDto(id, 10L, "leave", "请假申请", version, data,
-            objectMapper.createArrayNode(), false, companyId, false,
+            objectMapper.createArrayNode(), false,
             OffsetDateTime.now(), OffsetDateTime.now());
     }
 
@@ -185,7 +178,7 @@ class MobileWorkflowServiceTest {
         Mockito.when(formDefinitionService.getByCode("leave")).thenReturn(publishedForm(3));
         Mockito.doThrow(new HiddenResourceException("form not found"))
             .when(authorizationService)
-            .requireFormUse(10L, 1L);
+            .requireFormUse(10L);
 
         assertThatThrownBy(() -> service.start(
             new StartMobileInstanceRequest("leave", data, Map.of(), null, List.of(), null), 7L))

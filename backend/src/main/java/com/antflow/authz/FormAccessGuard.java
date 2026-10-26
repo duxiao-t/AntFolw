@@ -70,13 +70,6 @@ public class FormAccessGuard {
         return count != null && count > 0;
     }
 
-    /**
-     * @deprecated 单公司模式：公司参数不再参与判定，请改用 {@link #hasFormGrant(long, long)}。
-     */
-    @Deprecated
-    public boolean hasFormGrant(long formId, long userId, Long ignoredCompanyId) {
-        return hasFormGrant(formId, userId);
-    }
 
     /**
      * 该用户有使用授权的表单 id 集合，用于列表类的批量过滤。
@@ -93,23 +86,6 @@ public class FormAccessGuard {
             """ + FORM_SUBJECT_MATCH, Long.class, userId, userId, userId)));
     }
 
-    /** Batch draft authorization uses each stored company, rather than today's department. */
-    public Optional<Map<Long, Set<Long>>> usableFormIdsByCompany(long userId) {
-        if (snapshots.snapshot(userId).admin()) return Optional.empty();
-        Map<Long, Set<Long>> result = new HashMap<>();
-        jdbcTemplate.query("""
-            SELECT DISTINCT company_grant.subject_id AS company_id, grant_row.form_def_id
-            FROM t_form_resource_grant grant_row
-            JOIN t_form_resource_grant company_grant
-              ON company_grant.form_def_id = grant_row.form_def_id
-             AND company_grant.subject_type = 'COMPANY'
-            WHERE
-            """ + FORM_SUBJECT_MATCH, rs -> {
-                result.computeIfAbsent(rs.getLong("company_id"), key -> new LinkedHashSet<>())
-                    .add(rs.getLong("form_def_id"));
-            }, userId, userId, userId);
-        return Optional.of(result);
-    }
 
     /** 已发布表单的使用入口：原子能力与使用范围必须同时满足。 */
     public void requireFormUse(long formId) {
@@ -123,13 +99,6 @@ public class FormAccessGuard {
         }
     }
 
-    /**
-     * @deprecated 单公司模式：公司参数不再参与判定，请改用 {@link #requireFormUse(long)}。
-     */
-    @Deprecated
-    public void requireFormUse(long formId, Long ignoredCompanyId) {
-        requireFormUse(formId);
-    }
 
     public boolean canUseForm(long formId, long userId) {
         AuthzSnapshot snapshot = snapshots.snapshot(userId);

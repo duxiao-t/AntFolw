@@ -46,11 +46,11 @@ public class UserService {
                        FormalNumberService formalNumberService,
                        AuthorizationService authorizationService,
                        AuthSessionService authSessionService, AuditService auditService,
-                       OrgCompanyAccess companyAccess) {
+                       OrgAccess orgAccess) {
         this.departmentMapper = departmentMapper;
         this.roles = new UserRoles(userRoleMapper, roleMapper, jdbcTemplate);
         this.queries = new UserQueryService(userMapper, departmentMapper, jdbcTemplate,
-            authorizationService, companyAccess);
+            authorizationService, orgAccess);
         this.authzVersion = new UserAuthzVersion(jdbcTemplate, authorizationService);
         UserGuards guards = new UserGuards(userMapper, departmentMapper, jdbcTemplate,
             formalNumberService);
@@ -58,7 +58,7 @@ public class UserService {
             authorizationService, roles, guards, authzVersion, queries);
         this.accounts = new UserAccountService(userMapper, userRoleMapper, departmentMapper,
             leaderMapper, jdbcTemplate, encoder, formalNumberService, authorizationService,
-            authSessionService, auditService, companyAccess, roles, guards, statuses,
+            authSessionService, auditService, orgAccess, roles, guards, statuses,
             authzVersion);
     }
 

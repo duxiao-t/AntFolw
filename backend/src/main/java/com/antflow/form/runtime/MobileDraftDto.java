@@ -8,6 +8,5 @@ public record MobileDraftDto(Long id, Long formDefId, String formCode, String fo
                              // P4a 归属快照：确认页只读展示，提交时**不再重新解析**（见 CompanyAttribution.forDraft）。
                              @com.fasterxml.jackson.annotation.JsonInclude(
                                  com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
-                             Long companyId, Boolean companyInferred,
                              OffsetDateTime createdAt, OffsetDateTime updatedAt) {
 }

@@ -513,26 +513,6 @@
         },
         "type" : "object"
       },
-      "Company" : {
-        "properties" : {
-          "createdAt" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "deleted" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "id" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "name" : {
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
       "CompanyRequest" : {
         "properties" : {
           "companyId" : {
@@ -693,14 +673,6 @@
         },
         "type" : "object"
       },
-      "CreateCompanyRequest" : {
-        "properties" : {
-          "name" : {
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
       "CreateRequest" : {
         "properties" : {
           "agentId" : {
@@ -796,10 +768,6 @@
           },
           "canReadMembers" : {
             "type" : "boolean"
-          },
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
           },
           "contextOnly" : {
             "type" : "boolean"
@@ -2032,13 +2000,6 @@
       },
       "MobileDraftDto" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "companyInferred" : {
-            "type" : "boolean"
-          },
           "createdAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -3214,10 +3175,6 @@
       },
       "PickerDepartment" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "id" : {
             "format" : "int64",
             "type" : "integer"
@@ -4488,14 +4445,6 @@
         },
         "type" : "object"
       },
-      "UpdateCompanyRequest" : {
-        "properties" : {
-          "name" : {
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
       "User" : {
         "properties" : {
           "authzVersion" : {
@@ -4857,7 +4806,7 @@
         ]
       },
       "post" : {
-        "operationId" : "create_7",
+        "operationId" : "create_6",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -5384,149 +5333,6 @@
         },
         "tags" : [
           "login-controller"
-        ]
-      }
-    },
-    "/api/companies" : {
-      "get" : {
-        "operationId" : "all_1",
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "items" : {
-                    "$ref" : "#/components/schemas/Company"
-                  },
-                  "type" : "array"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "company-controller"
-        ]
-      },
-      "post" : {
-        "operationId" : "create_6",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/CreateCompanyRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/Company"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "company-controller"
-        ]
-      }
-    },
-    "/api/companies/{id}" : {
-      "delete" : {
-        "operationId" : "delete_8",
-        "parameters" : [
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "company-controller"
-        ]
-      },
-      "get" : {
-        "operationId" : "one",
-        "parameters" : [
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/Company"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "company-controller"
-        ]
-      },
-      "put" : {
-        "operationId" : "update_5",
-        "parameters" : [
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/UpdateCompanyRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/Company"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "company-controller"
         ]
       }
     },
@@ -9644,17 +9450,6 @@
     "/api/pickers/departments" : {
       "get" : {
         "operationId" : "departments",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : false,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
-          }
-        ],
         "responses" : {
           "200" : {
             "content" : {

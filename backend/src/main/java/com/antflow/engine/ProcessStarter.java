@@ -89,12 +89,7 @@ final class ProcessStarter {
 
     Map<String, Object> start(StartCmd cmd, long userId) {
         WorkflowRuntimeV2 v2 = runtimeV2.get();
-        // P4a：归属由**调用方**解析好（它才分得清"用户显式选的"与"从草稿继承的"），
-        // 引擎只做 fail-closed 检查——绝不让一条无归属的记录静默落库。
-        Long companyId = cmd.companyId();
-        if (companyId == null) {
-            throw new BizException("BAD_COMPANY", "发起时必须确定公司归属");
-        }
+        // 单公司：不再要求（也不再记录）公司归属。
         if (v2 == null) {
             throw new BizException("RUNTIME_REQUIRED", "发起流程需要 V2 运行时");
         }
@@ -103,7 +98,7 @@ final class ProcessStarter {
             throw new BizException("FORM_NOT_PUBLISHED", "Form not published: " + cmd.formCode());
         }
         // 表单使用授权：未获得 t_form_resource_grant 授权的用户不能发起该表单的流程。
-        authorizationService.requireFormUse(fd.getId(), companyId);
+        authorizationService.requireFormUse(fd.getId());
         ProcessDefinition pd = processDefinitionService.latestPublishedForForm(fd.getId());
         if (pd == null) {
             throw new BizException("NO_FLOW", "No published process for form " + cmd.formCode());
@@ -121,8 +116,6 @@ final class ProcessStarter {
         fd2.setData(support.writeJson(visibleData));
         fd2.setStatus("SUBMITTED");
         fd2.setCreatedBy(userId);
-        fd2.setCompanyId(companyId);
-        fd2.setCompanyInferred(false);
         formDataMapper.insert(fd2);
         mediaValidator.validate(fd2.getId());
 
@@ -139,9 +132,6 @@ final class ProcessStarter {
             .filter(principal -> principal.userId() == userId)
             .ifPresent(principal -> pi.setStartedDeptId(principal.departmentId()));
         pi.setStartedAt(OffsetDateTime.now());
-        // 与 fd2 同一个值（同一次解析、同一个事务）。
-        pi.setCompanyId(companyId);
-        pi.setCompanyInferred(false);
         WorkflowRuntimeV2.StartState state = v2.prepareStart(fd2, pd, userId);
         pi.setEngineVersion(2);
         pi.setRoundNo(1);

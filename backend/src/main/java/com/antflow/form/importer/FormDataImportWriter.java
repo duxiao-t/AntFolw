@@ -48,9 +48,9 @@ public class FormDataImportWriter {
 
     /** 原子模式：任何一行失败都要整体回滚，异常原样抛给调用方翻成 422。 */
     void insertAtomically(FormDefinition form, Collection<RowPlan> rows, long userId,
-                          Long companyId, String batchId) {
+                          String batchId) {
         transactionTemplate.executeWithoutResult(status ->
-            insertRows(form, rows, userId, companyId, batchId));
+            insertRows(form, rows, userId, batchId));
     }
 
     /**
@@ -60,18 +60,18 @@ public class FormDataImportWriter {
      * 我们只知道"这 500 行里有一行坏"，不知道是哪一行；逐行提交才能给出准确的行号。
      */
     List<RowIssue> insertInBatches(FormDefinition form, List<RowPlan> rows, long userId,
-                                   Long companyId, String batchId) {
+                                   String batchId) {
         List<RowIssue> failures = new ArrayList<>();
         for (int from = 0; from < rows.size(); from += SKIP_BATCH_SIZE) {
             List<RowPlan> chunk = rows.subList(from, Math.min(rows.size(), from + SKIP_BATCH_SIZE));
             try {
                 transactionTemplate.executeWithoutResult(status ->
-                    insertRows(form, chunk, userId, companyId, batchId));
+                    insertRows(form, chunk, userId, batchId));
             } catch (RuntimeException batchError) {
                 for (RowPlan row : chunk) {
                     try {
                         transactionTemplate.executeWithoutResult(status ->
-                            insertRows(form, List.of(row), userId, companyId, batchId));
+                            insertRows(form, List.of(row), userId, batchId));
                     } catch (RuntimeException rowError) {
                         failures.add(new RowIssue(row.row(), null, null, "IMPORT_VALIDATION_FAILED",
                             rootMessage(rowError)));
@@ -83,21 +83,21 @@ public class FormDataImportWriter {
     }
 
     private void insertRows(FormDefinition form, Collection<RowPlan> rows, long userId,
-                            Long companyId, String batchId) {
+                            String batchId) {
         List<Object[]> batch = new ArrayList<>(rows.size());
         for (RowPlan row : rows) {
             // business_no 由系统生成（沿用既有规则），**不会**用导入的「业务单号」覆盖它。
             String businessNo = businessNumbers.next(form, row.values());
             batch.add(new Object[] {
                 form.getId(), form.getVersion(), businessNo, FormImportSupport.writeJson(json, row.values()), userId,
-                companyId, row.importKey(), batchId
+                row.importKey(), batchId
             });
         }
         jdbc.batchUpdate("""
             INSERT INTO t_form_data(
                 form_def_id, form_def_version, business_no, data, status,
-                created_by, company_id, company_inferred, import_key, import_batch)
-            VALUES (?, ?, ?, ?::jsonb, 'SUBMITTED', ?, ?, false, ?, ?)
+                created_by, import_key, import_batch)
+            VALUES (?, ?, ?, ?::jsonb, 'SUBMITTED', ?, ?, ?)
             """, batch);
     }
 

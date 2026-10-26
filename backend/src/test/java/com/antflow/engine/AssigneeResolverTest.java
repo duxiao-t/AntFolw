@@ -278,7 +278,6 @@ class AssigneeResolverTest {
 
     private Department companyDept(long id, long companyId) {
         Department department = dept(id, null, null);
-        department.setCompanyId(companyId);
         return department;
     }
 }

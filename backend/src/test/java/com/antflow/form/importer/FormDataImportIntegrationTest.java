@@ -198,8 +198,7 @@ class FormDataImportIntegrationTest {
             assertThat(row.get("status")).isEqualTo("SUBMITTED");
             // 提交人 = 导入人，而不是表格里的"负责人"。
             assertThat(((Number) row.get("created_by")).longValue()).isEqualTo(userId);
-            assertThat(((Number) row.get("company_id")).longValue()).isEqualTo(companyId);
-            assertThat(row.get("company_inferred")).isEqualTo(false);
+            // 单公司后不再记录公司归属
             // business_no 是系统生成的，绝不能等于外部单号。
             assertThat(row.get("business_no")).isNotEqualTo(row.get("import_key"));
             assertThat(row.get("business_no")).isNotNull();
@@ -257,12 +256,12 @@ class FormDataImportIntegrationTest {
         importService.importData(formId,
             file(new String[] {"K1", "第一行", "1", "差旅", ownerNo}), null, false, null);
 
-        // 绕过服务层直接插同一个 (form_def_id, company_id, import_key)：唯一索引必须拒绝。
+        // 绕过服务层直接插同一个 (form_def_id, import_key)：唯一索引必须拒绝。
         assertThatThrownBy(() -> jdbc.update("""
             INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status,
-                created_by, company_id, company_inferred, import_key)
-            VALUES (?, 1, 'MANUAL', '{}'::jsonb, 'SUBMITTED', ?, ?, false, 'K1')
-            """, formId, userId, companyId))
+                created_by, import_key)
+            VALUES (?, 1, 'MANUAL', '{}'::jsonb, 'SUBMITTED', ?, 'K1')
+            """, formId, userId))
             .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
     }
 

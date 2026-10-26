@@ -40,7 +40,7 @@ public class FormImportKeyLookup {
         return keys;
     }
 
-    Set<String> existingImportKeys(long formId, Long companyId, Set<String> keys) {
+    Set<String> existingImportKeys(long formId, Set<String> keys) {
         if (keys.isEmpty()) return Set.of();
         Set<String> found = new LinkedHashSet<>();
         List<String> list = new ArrayList<>(keys);
@@ -49,11 +49,10 @@ public class FormImportKeyLookup {
             String marks = String.join(",", java.util.Collections.nCopies(chunk.size(), "?"));
             List<Object> args = new ArrayList<>();
             args.add(formId);
-            args.add(companyId);
             args.addAll(chunk);
             found.addAll(jdbc.queryForList("""
                 SELECT import_key FROM t_form_data
-                WHERE form_def_id = ? AND company_id IS NOT DISTINCT FROM ?
+                WHERE form_def_id = ?
                   AND import_key IN (""" + marks + ")", String.class, args.toArray()));
         }
         return found;

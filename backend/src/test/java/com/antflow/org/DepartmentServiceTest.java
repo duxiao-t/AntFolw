@@ -21,7 +21,6 @@ class DepartmentServiceTest {
         DepartmentService service = service(mapper, Mockito.mock(DepartmentLeaderMapper.class));
         Department root = dept(2L, null, "d_2", "甲公司");
         Department child = dept(3L, 2L, "d_2.d_3", "错误归属");
-        child.setCompanyId(2L);
         when(mapper.selectById(2L)).thenReturn(root);
         when(mapper.subtree("d_2")).thenReturn(List.of(child));
 
@@ -47,7 +46,6 @@ class DepartmentServiceTest {
         }).when(mapper).insert(any(Department.class));
 
         Department created = new Department();
-        created.setCompanyId(1L);
         created.setParentId(2L);
         created.setName("研发中心");
         created.setLeaderIds(null);
@@ -181,8 +179,6 @@ class DepartmentServiceTest {
         Mockito.verify(mapper, Mockito.never()).deleteById(4L);
     }
     private static DepartmentService service(DepartmentMapper mapper, DepartmentLeaderMapper leaders) {
-        CompanyMapper companies = Mockito.mock(CompanyMapper.class);
-        when(companies.selectById(1L)).thenReturn(new Company());
         UserMapper users = Mockito.mock(UserMapper.class);
         when(users.selectById(Mockito.anyLong())).thenAnswer(call -> {
             User user = new User();
@@ -199,7 +195,6 @@ class DepartmentServiceTest {
         d.setParentId(parentId);
         d.setPath(path);
         d.setName(name);
-        d.setCompanyId(1L);
         return d;
     }
 }

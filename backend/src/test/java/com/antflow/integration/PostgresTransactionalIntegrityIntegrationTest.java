@@ -183,7 +183,6 @@ class PostgresTransactionalIntegrityIntegrationTest {
     @Autowired private UserService userService;
     @Autowired private com.antflow.org.DepartmentService departmentService;
     @Autowired private com.antflow.org.DepartmentController departmentController;
-    @Autowired private com.antflow.org.CompanyController companyController;
     @Autowired private AuditService auditService;
     @Autowired private FormProcessPublishService publishService;
     @Autowired private ProcessInstanceMapper processInstanceMapper;

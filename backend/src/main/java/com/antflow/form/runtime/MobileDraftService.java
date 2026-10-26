@@ -7,7 +7,6 @@ import com.antflow.form.FormDefinition;
 import com.antflow.form.FormDefinitionService;
 import com.antflow.form.runtime.FormData;
 import com.antflow.form.runtime.FormDataMapper;
-import com.antflow.org.CompanyAttribution;
 import com.antflow.process.ProcessDefinition;
 import com.antflow.process.ProcessDefinitionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -35,24 +34,20 @@ public class MobileDraftService {
     private final FormDefinitionService formDefinitionService;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
-    private final CompanyAttribution companyAttribution;
     @Autowired(required = false)
     private ProcessDefinitionService processDefinitionService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long create(String formCode, JsonNode data, Long explicitCompanyId, long userId) {
         FormDefinition formDefinition = requirePublishedForm(formCode);
-        // 草稿行自己落归属快照（口径：取**草稿创建时**）。提交时不再重新解析。
-        Long companyId = companyAttribution.resolve(explicitCompanyId);
-        authorizationService.requireFormUse(formDefinition.getId(), companyId);
+        // 单公司：草稿不再记录公司归属
+        authorizationService.requireFormUse(formDefinition.getId());
         FormData draft = new FormData();
         draft.setFormDefId(formDefinition.getId());
         draft.setFormDefVersion(formDefinition.getVersion());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setStatus(DRAFT_STATUS);
         draft.setCreatedBy(userId);
-        draft.setCompanyId(companyId);
-        draft.setCompanyInferred(false);
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.insert(draft);
         return draft.getId();
@@ -61,11 +56,8 @@ public class MobileDraftService {
     @Transactional(rollbackFor = Exception.class)
     public FormData update(long draftId, JsonNode data, Long explicitCompanyId, long userId) {
         FormData draft = requireOwnedDraft(draftId, userId);
-        // 已有草稿的归属不可修改：请求带了**不一致**的公司就拒，而不是偷偷覆盖快照。
-        requireConfirmedDraft(draft);
-        companyAttribution.forDraft(draft.getCompanyId(), explicitCompanyId);
         FormDefinition formDefinition = requirePublishedForm(draft.getFormDefId());
-        authorizationService.requireFormUse(formDefinition.getId(), draft.getCompanyId());
+        authorizationService.requireFormUse(formDefinition.getId());
         draft.setData(writeJson(canonicalData(formDefinition, data)));
         draft.setUpdatedAt(OffsetDateTime.now());
         formDataMapper.updateById(draft);
@@ -112,37 +104,21 @@ public class MobileDraftService {
                 .forEach((formId, definition) -> processes.put(formId, definition.getProcess()));
         }
         // canUseForm = 运行时能力 + 使用授权；能力这维一次问清，授权这维一次查全。
-        java.util.Optional<Map<Long, java.util.Set<Long>>> granted =
+        java.util.Optional<java.util.Set<Long>> granted =
             authorizationService.hasPermission(userId, PermissionCodes.FORM_RUNTIME_READ)
-                ? authorizationService.usableFormIdsByCompany(userId)
-                : java.util.Optional.of(Map.of());
+                ? authorizationService.usableFormIds(userId)
+                : java.util.Optional.of(java.util.Set.of());
         java.util.function.Predicate<FormData> usable = granted.isEmpty()
             ? draft -> true
-            : draft -> draft.getCompanyId() != null
-                && granted.get().getOrDefault(draft.getCompanyId(), java.util.Set.of())
-                .contains(draft.getFormDefId());
+            : draft -> granted.get().contains(draft.getFormDefId());
         return new DraftContext(forms, usable, processes);
     }
 
-    /**
-     * 草稿转正式前取**该草稿自己的归属快照**（顺带校验所有者/表单/状态）。
-     * 只回 {@code Long} 而不是整个 DTO：调用方在 {@code form} 包，返回 DTO 会让领域反向依赖
-     * 手机端适配层的类型（{@code ArchitectureBoundaryTest} 当场红）。
-     */
-    public Long companySnapshotForSubmit(long draftId, long formDefId, long userId) {
-        FormData draft = requireOwnedDraft(draftId, userId);
-        requireConfirmedDraft(draft);
-        if (!Objects.equals(draft.getFormDefId(), formDefId)) {
-            throw new BizException("BAD_DRAFT", "draft does not belong to requested form");
-        }
-        return draft.getCompanyId();
-    }
 
-    public Long requireUsableDraft(long draftId, long formDefId, long userId) {
-        Long companyId = companyAttribution.forDraft(
-            companySnapshotForSubmit(draftId, formDefId, userId), null);
-        authorizationService.requireFormUse(formDefId, companyId);
-        return companyId;
+    /** 校验草稿可用于预览/填写：所有者、表单一致性与使用授权。 */
+    public void requireUsableDraft(long draftId, long formDefId, long userId) {
+        java.util.Objects.requireNonNull(requireOwnedDraft(draftId, userId));
+        authorizationService.requireFormUse(formDefId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -191,8 +167,8 @@ public class MobileDraftService {
 
     private MobileDraftDto toDto(FormData draft, DraftContext context) {
         FormDefinition formDefinition = context.forms().get(draft.getFormDefId());
-        boolean pending = (draft.getCompanyId() == null || Boolean.TRUE.equals(draft.getCompanyInferred()))
-            && !authorizationService.isAdmin();
+        // 单公司：不再有"归属待确认"这种状态
+        boolean pending = false;
         boolean readOnly = pending || formDefinition == null
             || !PUBLISHED_STATUS.equals(formDefinition.getStatus())
             || !context.usable().test(draft);
@@ -209,18 +185,11 @@ public class MobileDraftService {
             pending ? objectMapper.createArrayNode()
                 : formDefinitionService.projectStarterSchema(schema, process),
             readOnly,
-            draft.getCompanyId(),
-            draft.getCompanyInferred(),
             draft.getCreatedAt(),
             draft.getUpdatedAt()
         );
     }
 
-    private static void requireConfirmedDraft(FormData draft) {
-        if (Boolean.TRUE.equals(draft.getCompanyInferred())) {
-            throw new BizException("COMPANY_PENDING", "草稿公司归属待确认，请联系管理员");
-        }
-    }
 
     private JsonNode canonicalData(FormDefinition formDefinition, JsonNode data) {
         return objectMapper.valueToTree(formDefinitionService.canonicalizeStarterData(
