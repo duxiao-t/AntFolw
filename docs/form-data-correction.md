@@ -460,7 +460,7 @@ GET /api/forms/data/corrections?sinceId=<lastSeen>&limit=500
 | （`HiddenResourceException`） | 404 | 无权限 / 单据不存在 / 不是该表单维护者 | "表单数据不存在"（沿用现有不泄露口径） |
 | `CORRECTION_CONFLICT` | 409 | `baseRevisionId` 与当前修订不一致，或主表/实例 CAS 落空 | "这条数据刚刚被改动过，请重新打开后再修正" |
 | `CORRECTION_INSTANCE_RUNNING` | 409 | 实例仍在审批中 | "审批中的单据不能这样修正：请用审批节点的字段权限，或先撤回" |
-| `CORRECTION_STATUS_NOT_ALLOWED` | 400 | `DRAFT`，或实例状态不在允许集合 | "草稿请直接修改；此状态不支持修正" |
+| `CORRECTION_STATUS_NOT_ALLOWED` | 422 | `DRAFT`，或实例状态不在允许集合 | "草稿请直接修改；此状态不支持修正" |
 | `CORRECTION_SCHEMA_UNAVAILABLE` | 409 | 该 `(form_def_id, form_def_version)` 版本行缺失 | "该单据的表单版本快照缺失，请联系管理员" |
 | `CORRECTION_SCHEMA_CONFLICT` | 409 | 修订指向的版本与 `(form_def_id, form_def_version)` **不一致**（数据损坏，见 §4.3.3 ③） | "该单据的版本信息不一致，已阻止修正，请联系管理员" |
 | `CORRECTION_FIELD_FORBIDDEN` | 400 | 请求字段不在 `allowedFields`（含黑名单） | 指名到字段："字段「所属部门」不允许事后修正：它决定审批走向" |
