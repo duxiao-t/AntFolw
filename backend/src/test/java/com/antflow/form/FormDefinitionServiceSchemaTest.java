@@ -656,16 +656,16 @@ class FormDefinitionServiceSchemaTest {
     @Test void reworkPreservesLegacyReadonlyValuesAndValidatesOnlyEditableFields() {
         String schema = """
             [{"id":"subject","type":"text","label":"主题","props":{"required":true}},
-             {"id":"legacy","type":"switch","label":"历史值"},
-             {"id":"secret","type":"switch","label":"隐藏值"},
-             {"id":"editable","type":"switch","label":"可编辑值"}]
+             {"id":"legacy","type":"select","label":"历史值","props":{"options":[{"value":"true","label":"是"},{"value":"false","label":"否"}]}},
+             {"id":"secret","type":"select","label":"隐藏值","props":{"options":[{"value":"true","label":"是"},{"value":"false","label":"否"}]}},
+             {"id":"editable","type":"select","label":"可编辑值","props":{"options":[{"value":"true","label":"是"},{"value":"false","label":"否"}]}}]
             """;
         String process = """
             {"type":"ROOT","props":{"formPerms":[
               {"fieldId":"legacy","mode":"READONLY"},{"fieldId":"secret","mode":"HIDDEN"}]}}
             """;
         Map<String, Object> revised = service.canonicalizeStarterRevision(schema,
-            Map.of("subject", "修改后的主题", "legacy", false, "secret", false, "editable", true),
+            Map.of("subject", "修改后的主题", "legacy", false, "secret", false, "editable", "true"),
             """
                 {"legacy":"true","secret":"false"}
                 """, process);
@@ -674,10 +674,10 @@ class FormDefinitionServiceSchemaTest {
         assertThatCode(() -> service.validateStarterRevision(schema, revised, process))
             .doesNotThrowAnyException();
         var invalid = new java.util.LinkedHashMap<>(revised);
-        invalid.put("editable", "true");
+        invalid.put("editable", true);
         assertThatThrownBy(() -> service.validateStarterRevision(schema, invalid, process))
             .isInstanceOf(BizException.class).hasMessageContaining("可编辑值");
-        invalid.put("editable", true);
+        invalid.put("editable", "true");
         invalid.remove("subject");
         assertThatThrownBy(() -> service.validateStarterRevision(schema, invalid, process))
             .isInstanceOf(BizException.class).hasMessageContaining("主题");
@@ -687,7 +687,7 @@ class FormDefinitionServiceSchemaTest {
         String schema = """
             [{"id":"lines","type":"table_list","label":"明细","props":{"minRows":1},
               "children":[{"id":"item","type":"text","label":"项目","props":{"required":true}},
-                {"id":"legacy","type":"switch","label":"历史值"}]}]
+                {"id":"legacy","type":"select","label":"历史值","props":{"options":[{"value":"true","label":"是"},{"value":"false","label":"否"}]}}]}]
             """;
         String process = """
             {"type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}}
@@ -705,7 +705,7 @@ class FormDefinitionServiceSchemaTest {
 
     @Test void initialSubmissionStillRejectsInvalidReadonlyDefaults() {
         String schema = """
-            [{"id":"legacy","type":"switch","label":"默认值","props":{"defaultValue":"true"}}]
+            [{"id":"legacy","type":"select","label":"默认值","props":{"defaultValue":true,"options":[{"value":"true","label":"是"}]}}]
             """;
         String process = """
             {"type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}}

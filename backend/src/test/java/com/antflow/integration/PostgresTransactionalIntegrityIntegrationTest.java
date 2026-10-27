@@ -2123,8 +2123,8 @@ class PostgresTransactionalIntegrityIntegrationTest {
         long bobId = userId("bob");
         String schema = """
             [{"id":"subject","type":"text","label":"主题","props":{"required":true}},
-             {"id":"legacy","type":"switch","label":"历史值","props":{"defaultValue":true}},
-             {"id":"editable","type":"switch","label":"可编辑值"}]
+             {"id":"legacy","type":"select","label":"历史值","props":{"defaultValue":"true","options":[{"value":"true","label":"是"},{"value":"false","label":"否"}]}},
+             {"id":"editable","type":"select","label":"可编辑值","props":{"options":[{"value":"true","label":"是"},{"value":"false","label":"否"}]}}]
             """;
         String flow = approvalFlow(bobId).replace("\"type\":\"ROOT\"", """
             "type":"ROOT","props":{"formPerms":[{"fieldId":"legacy","mode":"READONLY"}]}
@@ -2143,7 +2143,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             JOIN t_form_data data ON data.form_def_id = form.id WHERE data.id = ?
             """, String.class, started.formDataId());
         JsonNode revised = flowJson.readTree("""
-            {"subject":"revised","legacy":false,"editable":true}
+            {"subject":"revised","legacy":"false","editable":"true"}
             """);
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {

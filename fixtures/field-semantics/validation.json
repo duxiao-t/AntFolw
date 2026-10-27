@@ -58,34 +58,6 @@
       "valid": false
     },
     {
-      "id": "search-valid",
-      "schema": [
-        {
-          "id": "field",
-          "type": "search",
-          "props": {}
-        }
-      ],
-      "values": {
-        "field": "内容"
-      },
-      "valid": true
-    },
-    {
-      "id": "search-invalid",
-      "schema": [
-        {
-          "id": "field",
-          "type": "search",
-          "props": {}
-        }
-      ],
-      "values": {
-        "field": {}
-      },
-      "valid": false
-    },
-    {
       "id": "scan_code-valid",
       "schema": [
         {
@@ -371,43 +343,6 @@
       "valid": false
     },
     {
-      "id": "radio-valid",
-      "schema": [
-        {
-          "id": "field",
-          "type": "radio",
-          "props": {
-            "options": [
-              {
-                "value": "a",
-                "label": "甲"
-              }
-            ]
-          }
-        }
-      ],
-      "values": {
-        "field": "a"
-      },
-      "valid": true
-    },
-    {
-      "id": "radio-array",
-      "schema": [
-        {
-          "id": "field",
-          "type": "radio",
-          "props": {}
-        }
-      ],
-      "values": {
-        "field": [
-          "a"
-        ]
-      },
-      "valid": false
-    },
-    {
       "id": "multi_select-valid",
       "schema": [
         {
@@ -465,97 +400,6 @@
           "a",
           "b"
         ]
-      },
-      "valid": false
-    },
-    {
-      "id": "checkbox-valid",
-      "schema": [
-        {
-          "id": "field",
-          "type": "checkbox",
-          "props": {
-            "options": [
-              {
-                "value": "a",
-                "label": "甲"
-              },
-              {
-                "value": "b",
-                "label": "乙"
-              }
-            ]
-          }
-        }
-      ],
-      "values": {
-        "field": [
-          "a",
-          "b"
-        ]
-      },
-      "valid": true
-    },
-    {
-      "id": "checkbox-scalar",
-      "schema": [
-        {
-          "id": "field",
-          "type": "checkbox",
-          "props": {}
-        }
-      ],
-      "values": {
-        "field": "a"
-      },
-      "valid": false
-    },
-    {
-      "id": "checkbox-max",
-      "schema": [
-        {
-          "id": "field",
-          "type": "checkbox",
-          "props": {
-            "maxChecked": 1
-          }
-        }
-      ],
-      "values": {
-        "field": [
-          "a",
-          "b"
-        ]
-      },
-      "valid": false
-    },
-    {
-      "id": "switch-false",
-      "schema": [
-        {
-          "id": "field",
-          "type": "switch",
-          "props": {
-            "required": true
-          }
-        }
-      ],
-      "values": {
-        "field": false
-      },
-      "valid": true
-    },
-    {
-      "id": "switch-string",
-      "schema": [
-        {
-          "id": "field",
-          "type": "switch",
-          "props": {}
-        }
-      ],
-      "values": {
-        "field": "true"
       },
       "valid": false
     },

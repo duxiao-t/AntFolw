@@ -185,43 +185,6 @@
       }
     },
     {
-      "id": "checkbox-resolves-each-selected-label",
-      "intent": "checkbox stores an array; both projections resolve labels while BI preserves the original array text.",
-      "schema": [
-        {
-          "id": "checks",
-          "type": "checkbox",
-          "props": {
-            "options": [
-              {
-                "value": "a",
-                "label": "甲"
-              },
-              {
-                "value": "b",
-                "label": "乙"
-              }
-            ]
-          }
-        }
-      ],
-      "data": {
-        "checks": [
-          "b",
-          "a"
-        ]
-      },
-      "fieldId": "checks",
-      "expect": {
-        "java": "乙、甲",
-        "sql": {
-          "row": true,
-          "label": "乙、甲",
-          "textJson": ["b", "a"]
-        }
-      }
-    },
-    {
       "id": "checklist-maps-item-and-result-labels-for-bi",
       "intent": "Java summarises status counts while the BI ledger replaces checklist item ids and result ids with labels from the row's own form version, preserving per-item metadata.",
       "schema": [

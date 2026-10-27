@@ -1,5 +1,4 @@
 import { createElement, type ChangeEvent, type CSSProperties } from 'react';
-import { CheckboxField } from '../fields/CheckboxField';
 import { DateField } from '../fields/DateField';
 import { DateRangeField } from '../fields/DateRangeField';
 import { DescriptionField } from '../fields/DescriptionField';
@@ -19,11 +18,8 @@ import {
 import { MoneyField } from '../fields/MoneyField';
 import { MultiSelectField } from '../fields/MultiSelectField';
 import { NumberField } from '../fields/NumberField';
-import { RadioField } from '../fields/RadioField';
-import { SearchField } from '../fields/SearchField';
 import { SelectField } from '../fields/SelectField';
 import { SpanLayoutField } from '../fields/SpanLayoutField';
-import { SwitchField } from '../fields/SwitchField';
 import { TextField } from '../fields/TextField';
 import { TextareaField } from '../fields/TextareaField';
 import { TableListField } from '../fields/TableListField';
@@ -160,18 +156,8 @@ export const registeredFields: MobileFieldDefinition[] = [
   field('select', SelectField, {
     summarize: (node, value) => optionSummary(node, value),
   }),
-  field('radio', RadioField, {
-    summarize: (node, value) => optionSummary(node, value),
-  }),
   field('multi_select', MultiSelectField, {
     summarize: (node, value) => multiOptionSummary(node, value),
-  }),
-  field('checkbox', CheckboxField, {
-    summarize: (node, value) => multiOptionSummary(node, value),
-  }),
-  field('search', SearchField),
-  field('switch', SwitchField, {
-    summarize: (_node, value) => (value === true ? '是' : '否'),
   }),
   field('user_picker', UserPickerField, {
     validate: validateUserPicker,

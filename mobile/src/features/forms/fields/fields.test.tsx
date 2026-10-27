@@ -9,7 +9,6 @@ import { DescriptionField } from './DescriptionField';
 import { MoneyField } from './MoneyField';
 import { MultiSelectField } from './MultiSelectField';
 import { NumberField } from './NumberField';
-import { RadioField } from './RadioField';
 import { SelectField } from './SelectField';
 import { TextareaField } from './TextareaField';
 import { TextField } from './TextField';
@@ -618,39 +617,6 @@ describe('leaf mobile fields', () => {
     await user.click(screen.getByRole('button', { name: '完成' }));
 
     expect(onValueChange).toHaveBeenLastCalledWith('supplies', []);
-  });
-
-  it('renders radio options as large touch choices', async () => {
-    const onValueChange = vi.fn();
-    render(
-      <RadioField
-        {...baseProps(
-          {
-            id: 'leaveType',
-            type: 'radio',
-            label: '请假类型',
-            props: {
-              options: [
-                { label: '年假', value: 'annual' },
-                { label: '调休', value: 'adjust' },
-              ],
-            },
-          },
-          'annual',
-          onValueChange,
-        )}
-      />,
-    );
-
-    const annual = screen.getByRole('radio', { name: '年假' });
-    const adjust = screen.getByRole('radio', { name: '调休' });
-
-    expect(annual).toHaveClass('af-choice-tile');
-    expect(annual).toHaveAttribute('aria-checked', 'true');
-
-    await userEvent.click(adjust);
-
-    expect(onValueChange).toHaveBeenCalledWith('leaveType', 'adjust');
   });
 
   it('opens multi-select options in a half-height bottom sheet', async () => {

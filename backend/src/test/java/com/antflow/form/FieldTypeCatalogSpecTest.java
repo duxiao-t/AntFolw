@@ -41,8 +41,8 @@ class FieldTypeCatalogSpecTest {
 
         var declared = root.path("fieldTypes");
         assertThat(declared.size()).isEqualTo(FieldTypeCatalog.ALL.size());
-        // 26 种：数字写死在这里是故意的——加类型必须同时改这条断言，改的人会看见"这是一个 spec 变更"。
-        assertThat(declared.size()).isEqualTo(26);
+        // 22 种：数字写死在这里是故意的——加/删类型必须同时改这条断言，改的人会看见"这是一个 spec 变更"。
+        assertThat(declared.size()).isEqualTo(22);
 
         var ids = new java.util.ArrayList<String>();
         declared.forEach(entry -> {

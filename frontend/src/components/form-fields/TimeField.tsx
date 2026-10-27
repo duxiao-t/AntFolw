@@ -1,4 +1,5 @@
-import { SearchField } from './SearchField';
+import { Input, Space } from 'antd';
+import { PanelField } from './panelField';
 import { TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import type { FieldType } from '../../registry/types';
@@ -25,7 +26,16 @@ export const TimeField: FieldType = {
   label: '时间',
   icon: 'time',
   defaultProps: { required: false, placeholder: '请选择时间' },
-  ConfigPanel: SearchField.ConfigPanel,
+  ConfigPanel: ({ node, updateProps }) => (
+    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <PanelField label="占位提示">
+        <Input
+          value={node.props?.placeholder ?? ''}
+          onChange={(event) => updateProps({ placeholder: event.target.value })}
+        />
+      </PanelField>
+    </Space>
+  ),
   Component: ({ node, mode, value, onChange }) => {
     const text = typeof value === 'string' ? value : '';
     return (

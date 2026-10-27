@@ -66,7 +66,7 @@ function safeFieldSummary(node: MobileSchemaNode, value: unknown) {
 }
 
 export function optionLabels(node: MobileSchemaNode, value: unknown): string[] {
-  const multiple = node.type === 'multi_select' || node.type === 'checkbox';
+  const multiple = node.type === 'multi_select';
   const values = multiple ? primitiveValues(value) : primitiveValues([value]);
   if (values.length === 0) return [];
   const options = allFieldOptions(node);
@@ -81,7 +81,7 @@ export function optionLabels(node: MobileSchemaNode, value: unknown): string[] {
 }
 
 export function optionNeedsDetail(node: MobileSchemaNode, value: unknown, labels: string[]) {
-  const multiple = node.type === 'multi_select' || node.type === 'checkbox';
+  const multiple = node.type === 'multi_select';
   return labels.length > COMPACT_LIST_LIMIT
     || labels.some((label) => label.length > COMPACT_TEXT_LENGTH || label.startsWith('其他：'))
     || (multiple && labels.length > 1)
@@ -89,11 +89,11 @@ export function optionNeedsDetail(node: MobileSchemaNode, value: unknown, labels
 }
 
 export function isOptionField(type: string) {
-  return ['select', 'radio', 'multi_select', 'checkbox'].includes(type);
+  return ['select', 'multi_select'].includes(type);
 }
 
 export function isTextField(type: string) {
-  return ['text', 'textarea', 'search', 'scan_code'].includes(type);
+  return ['text', 'textarea', 'scan_code'].includes(type);
 }
 
 export function isMediaField(type: string) {

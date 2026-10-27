@@ -8,11 +8,7 @@ import { DateField } from '../components/form-fields/DateField';
 import { DateRangeField } from '../components/form-fields/DateRangeField';
 import { SelectField } from '../components/form-fields/SelectField';
 import { MultiSelectField } from '../components/form-fields/MultiSelectField';
-import { RadioField } from '../components/form-fields/RadioField';
-import { CheckboxField } from '../components/form-fields/CheckboxField';
-import { SearchField } from '../components/form-fields/SearchField';
 import { TimeField } from '../components/form-fields/TimeField';
-import { SwitchField } from '../components/form-fields/SwitchField';
 import { UserPickerField } from '../components/form-fields/UserPickerField';
 import { DeptPickerField } from '../components/form-fields/DeptPickerField';
 import { FileUploadField } from '../components/form-fields/FileUploadField';
@@ -36,11 +32,7 @@ export const formRegistry: Record<string, FieldType> = {
   date_range: DateRangeField,
   select: SelectField,
   multi_select: MultiSelectField,
-  radio: RadioField,
-  checkbox: CheckboxField,
-  search: SearchField,
   time: TimeField,
-  switch: SwitchField,
   user_picker: UserPickerField,
   dept_picker: DeptPickerField,
   file_upload: FileUploadField,
@@ -89,10 +81,6 @@ export const paletteGroups: PaletteGroup[] = [
       'time',
       'select',
       'multi_select',
-      'radio',
-      'checkbox',
-      'switch',
-      'search',
       'user_picker',
       'dept_picker',
       'span_layout',

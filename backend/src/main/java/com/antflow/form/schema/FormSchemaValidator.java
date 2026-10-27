@@ -143,7 +143,7 @@ public class FormSchemaValidator {
 
     public void validatePublishingNode(com.fasterxml.jackson.databind.JsonNode node) {
         String type = node.path("type").asText("");
-        if (Set.of("select", "radio", "multi_select", "checkbox").contains(type)) {
+        if (Set.of("select", "multi_select").contains(type)) {
             validateSelectOptions(node);
         }
         if (Set.of("select", "multi_select").contains(type)) {

@@ -22,8 +22,8 @@ public class BusinessNumberService {
     private static final Pattern NAMESPACE = Pattern.compile("^[A-Za-z][A-Za-z0-9_-]{0,31}$");
     private static final Pattern SAFE_VALUE = Pattern.compile("^[^/\\\\\\p{Cntrl}]{1,64}$");
     private static final Set<String> DATE_PATTERNS = Set.of("yyyy", "yyyyMM", "yyyyMMdd", "yyMMdd");
-    private static final Set<String> SCALAR_FIELDS = Set.of("text", "number", "money", "radio",
-        "select", "search", "date", "time", "user_picker", "dept_picker", "scan_code");
+    private static final Set<String> SCALAR_FIELDS = Set.of("text", "number", "money",
+        "select", "date", "time", "user_picker", "dept_picker", "scan_code");
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;

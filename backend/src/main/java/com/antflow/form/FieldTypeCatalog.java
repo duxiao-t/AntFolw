@@ -57,10 +57,9 @@ public final class FieldTypeCatalog {
         return new FieldType(id, Kind.FIELD, false, true, false, true);
     }
 
-    /** 26 种，按 id 排序——生成物也按这个顺序，diff 稳定。 */
+    /** 22 种，按 id 排序——生成物也按这个顺序，diff 稳定。 */
     public static final List<FieldType> ALL = List.of(
         media("audio_upload"),
-        options("checkbox"),
         new FieldType("checklist", Kind.CHECKLIST, false, false, false, true),
         field("date"),
         field("date_range"),
@@ -73,12 +72,9 @@ public final class FieldTypeCatalog {
         field("money"),
         options("multi_select"),
         field("number"),
-        options("radio"),
         field("scan_code"),
-        field("search"),
         new FieldType("select", Kind.FIELD, false, true, true, true),
         new FieldType("span_layout", Kind.CONTAINER, false, false, false, false),
-        field("switch"),
         new FieldType("table_list", Kind.TABLE, false, false, false, false),
         field("text"),
         field("textarea"),

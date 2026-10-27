@@ -83,7 +83,7 @@ class FormImportValueCodecTest {
     void textTypesKeepRawTextAndTextareaKeepsNewlines() {
         assertThat(decode(field("text"), "  合同 A  ")).isEqualTo("  合同 A  ");
         assertThat(decode(field("textarea"), "第一行\n第二行")).isEqualTo("第一行\n第二行");
-        assertThat(decode(field("search"), "关键词")).isEqualTo("关键词");
+        assertThat(decode(field("textarea"), "关键词")).isEqualTo("关键词");
         assertThat(decode(field("scan_code"), "6901234567890")).isEqualTo("6901234567890");
     }
 
@@ -129,17 +129,6 @@ class FormImportValueCodecTest {
             .isInstanceOf(BizException.class).hasMessageContaining("起~止");
     }
 
-    @Test
-    void switchAcceptsBooleansChineseAndCustomText() {
-        assertThat(decode(field("switch"), "是")).isEqualTo(true);
-        assertThat(decode(field("switch"), "关")).isEqualTo(false);
-        assertThat(decode(field("switch"), "TRUE")).isEqualTo(true);
-        assertThat(decode(field("switch"), "N")).isEqualTo(false);
-        assertThat(decode(field("switch", "{\"checkedText\":\"启用\",\"uncheckedText\":\"停用\"}"), "停用"))
-            .isEqualTo(false);
-        assertThatThrownBy(() -> decode(field("switch"), "也许"))
-            .isInstanceOf(BizException.class).hasMessageContaining("只能填");
-    }
 
     // ---------------------------------------------------------------- 选项
 
@@ -162,7 +151,7 @@ class FormImportValueCodecTest {
 
     @Test
     void duplicateLabelAcrossDifferentValuesIsReportedWithCandidates() {
-        JsonNode field = field("radio", "{\"options\":[{\"label\":\"是\",\"value\":\"Y\"},"
+        JsonNode field = field("select", "{\"options\":[{\"label\":\"是\",\"value\":\"Y\"},"
             + "{\"label\":\"是\",\"value\":\"1\"}]}");
         assertThatThrownBy(() -> decode(field, "是"))
             .isInstanceOf(BizException.class).hasMessageContaining("对应多个值");
@@ -177,11 +166,6 @@ class FormImportValueCodecTest {
             .isInstanceOf(BizException.class).hasMessageContaining("丁");
     }
 
-    @Test
-    void checkboxUsesSameRulesAsMultiSelect() {
-        JsonNode field = field("checkbox", "{\"options\":[{\"label\":\"甲\",\"value\":\"a\"}]}");
-        assertThat(decode(field, "甲")).isEqualTo(List.of("a"));
-    }
 
     @Test
     void externalOptionSourceLoadsRowsOnceAndResolvesLabel() {

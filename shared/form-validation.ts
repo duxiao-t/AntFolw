@@ -27,12 +27,11 @@ export function basicFieldError(node: ValidationNode, value: unknown): string | 
   const scalarOption = (item: unknown) => typeof item === 'string' || typeof item === 'number';
   const pickerId = (item: unknown) =>
     typeof item === 'number' && Number.isSafeInteger(item) && item > 0;
-  if (['text', 'textarea', 'search', 'scan_code', 'date', 'time'].includes(node.type)
+  if (['text', 'textarea', 'scan_code', 'date', 'time'].includes(node.type)
     && typeof value !== 'string') return invalid;
-  if (['select', 'radio'].includes(node.type) && !scalarOption(value)) return invalid;
-  if (['multi_select', 'checkbox'].includes(node.type)
+  if (node.type === 'select' && !scalarOption(value)) return invalid;
+  if (node.type === 'multi_select'
     && (!Array.isArray(value) || !value.every(scalarOption))) return invalid;
-  if (node.type === 'switch' && typeof value !== 'boolean') return invalid;
   if (node.type === 'date_range' && (!Array.isArray(value) || value.length !== 2
     || !value.every((item) => typeof item === 'string' && item.trim()))) return invalid;
   if (node.type === 'checklist' && (!Array.isArray(value)

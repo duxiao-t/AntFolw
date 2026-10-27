@@ -49,15 +49,14 @@ public class FormImportValueCodec {
     public static final int MAX_CELL_LENGTH = com.antflow.form.options.OptionTableImporter.MAX_CELL_LENGTH;
 
     /**
-     * 26 种类型的显式清单。测试按 {@link FieldTypeCatalog#ids()} 逐项对账——
+     * 22 种类型的显式清单。测试按 {@link FieldTypeCatalog#ids()} 逐项对账——
      * 新增类型忘了在这里登记，测试会红（而不是悄悄落进 default）。
      */
     public static final Set<String> HANDLED_TYPES = Set.of(
-        "text", "textarea", "search", "scan_code",
+        "text", "textarea", "scan_code",
         "number", "money",
         "date", "time", "date_range",
-        "switch",
-        "select", "radio", "multi_select", "checkbox",
+        "select", "multi_select",
         "user_picker", "dept_picker", "location",
         "table_list", "checklist", "matrix_fill",
         "description", "span_layout",
@@ -279,14 +278,13 @@ public class FormImportValueCodec {
             throw FormImportSupport.invalid(label, "超过 " + MAX_CELL_LENGTH + " 个字符");
         }
         return switch (type) {
-            case "text", "textarea", "search", "scan_code" -> value;
+            case "text", "textarea", "scan_code" -> value;
             case "number", "money" -> FormImportScalarCodec.number(label, value);
             case "date" -> scalar.parseDate(label, value, field).toString();
             case "time" -> scalar.parseTime(label, value, field);
             case "date_range" -> scalar.dateRange(label, value, field);
-            case "switch" -> scalar.bool(label, value, field);
-            case "select", "radio" -> option.singleOption(field, label, value, prefetch);
-            case "multi_select", "checkbox" -> option.multiOption(field, label, value, prefetch);
+            case "select" -> option.singleOption(field, label, value, prefetch);
+            case "multi_select" -> option.multiOption(field, label, value, prefetch);
             case "user_picker" -> org.users(field, label, value, prefetch);
             case "dept_picker" -> org.departments(field, label, value, prefetch);
             case "location" -> org.location(label, value);

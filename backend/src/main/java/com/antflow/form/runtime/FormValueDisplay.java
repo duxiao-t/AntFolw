@@ -238,7 +238,7 @@ public final class FormValueDisplay {
         }
         if (dictionary.isEmpty()) return null;
         List<String> selected = new ArrayList<>();
-        if (!Set.of("multi_select", "checkbox").contains(meta.type())) {
+        if (!Set.of("multi_select").contains(meta.type())) {
             // 单选却拿到数组 = 脏数据，交给形状判断（按多选拼出来会误导）。
             if (value.isArray()) return null;
             addLabel(selected, value, dictionary);

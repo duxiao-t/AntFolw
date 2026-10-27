@@ -10,13 +10,6 @@
     "displaySource" : false,
     "requiredAble" : true
   }, {
-    "id" : "checkbox",
-    "kind" : "FIELD",
-    "media" : false,
-    "options" : true,
-    "displaySource" : false,
-    "requiredAble" : true
-  }, {
     "id" : "checklist",
     "kind" : "CHECKLIST",
     "media" : false,
@@ -101,21 +94,7 @@
     "displaySource" : false,
     "requiredAble" : true
   }, {
-    "id" : "radio",
-    "kind" : "FIELD",
-    "media" : false,
-    "options" : true,
-    "displaySource" : false,
-    "requiredAble" : true
-  }, {
     "id" : "scan_code",
-    "kind" : "FIELD",
-    "media" : false,
-    "options" : false,
-    "displaySource" : false,
-    "requiredAble" : true
-  }, {
-    "id" : "search",
     "kind" : "FIELD",
     "media" : false,
     "options" : false,
@@ -135,13 +114,6 @@
     "options" : false,
     "displaySource" : false,
     "requiredAble" : false
-  }, {
-    "id" : "switch",
-    "kind" : "FIELD",
-    "media" : false,
-    "options" : false,
-    "displaySource" : false,
-    "requiredAble" : true
   }, {
     "id" : "table_list",
     "kind" : "TABLE",

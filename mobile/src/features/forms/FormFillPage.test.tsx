@@ -278,11 +278,13 @@ describe('FormFillPage', () => {
   it('still validates readonly defaults on a new submission', async () => {
     vi.mocked(fetch).mockImplementation(async () => jsonResponse({
       ...FORM_RESPONSE,
-      schema: [{ id: 'legacy', type: 'switch', label: '默认开关', props: { defaultValue: 'true' } }],
+      // switch 已下线：用数字字段承载同一语义——只读字段的默认值同样要参与校验，
+      // 这里给一个非法默认值（字符串 'abc'），提交必须被拦下。
+      schema: [{ id: 'legacy', type: 'number', label: '默认数字', props: { defaultValue: 'abc' } }],
       starterFieldModes: { legacy: 'READONLY' },
     }));
     const { router } = renderForm();
-    await screen.findByText('默认开关');
+    await screen.findByText('默认数字');
     await userEvent.click(screen.getByRole('button', { name: '提交' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/forms/leave'));
     expect(screen.queryByText('确认提交目标页')).not.toBeInTheDocument();

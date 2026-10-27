@@ -93,12 +93,7 @@ public class FormImportColumnCollector {
     /** 静态选项标签；外部选项源在下载模板时**不查库**（模板是纯渲染，不许有 IO 依赖）。 */
     private static List<String> dictionary(JsonNode node) {
         String type = node.path("type").asText("");
-        if ("switch".equals(type)) {
-            String checked = node.path("props").path("checkedText").asText("是");
-            String unchecked = node.path("props").path("uncheckedText").asText("否");
-            return List.of(checked, unchecked);
-        }
-        if (!Set.of("select", "radio").contains(type)) return List.of();
+        if (!Set.of("select").contains(type)) return List.of();
         JsonNode options = node.path("props").path("options");
         if (!options.isArray() || options.isEmpty() || options.size() > MAX_DICT_OPTIONS) return List.of();
         List<String> labels = new ArrayList<>();

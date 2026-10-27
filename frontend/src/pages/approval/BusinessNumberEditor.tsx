@@ -3,7 +3,7 @@ import { Button, Form, Input, InputNumber, Select, Switch, Typography } from 'an
 import { createStyles } from 'antd-style';
 import type { FormFieldOption } from '../designer/process/types';
 
-const fieldTypes = new Set(['text', 'number', 'money', 'radio', 'select', 'search',
+const fieldTypes = new Set(['text', 'number', 'money', 'select',
   'date', 'time', 'user_picker', 'dept_picker', 'scan_code']);
 
 const useStyles = createStyles(({ token }) => ({

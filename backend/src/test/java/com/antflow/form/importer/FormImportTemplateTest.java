@@ -38,7 +38,7 @@ class FormImportTemplateTest {
             // 第二个同名字段加序号，否则人眼无法区分两列。
             assertThat(labels.getCell(2).getStringCellValue()).isEqualTo("备注(2)");
             assertThat(labels.getCell(3).getStringCellValue()).isEqualTo("类型");
-            assertThat(labels.getCell(4).getStringCellValue()).isEqualTo("开关");
+            assertThat(labels.getCell(4).getStringCellValue()).isEqualTo("二级下拉");
             assertThat(labels.getCell(5).getStringCellValue()).isEqualTo("日期");
             assertThat(labels.getLastCellNum()).isEqualTo((short) 6);
 
@@ -85,7 +85,7 @@ class FormImportTemplateTest {
             Sheet dict = workbook.getSheet(FormImportTemplateService.SHEET_DICT);
             assertThat(dict).isNotNull();
             assertThat(workbook.isSheetHidden(workbook.getSheetIndex(dict))).isTrue();
-            // select 与 switch 各一条下拉校验；都引用隐藏的 __dict。
+            // 两个下拉列各一条下拉校验；都引用隐藏的 __dict。
             assertThat(workbook.getSheet(FormImportTemplateService.SHEET_DATA)
                 .getDataValidations()).hasSize(2);
 
@@ -139,7 +139,7 @@ class FormImportTemplateTest {
           ]},
           {"id":"kind","type":"select","label":"类型","props":{"options":[
             {"label":"差旅","value":"travel"},{"label":"办公","value":"office"}]}},
-          {"id":"flag","type":"switch","label":"开关"},
+          {"id":"flag","type":"select","label":"二级下拉","props":{"options":[{"value":"y","label":"是"},{"value":"n","label":"否"}]}},
           {"id":"day","type":"date","label":"日期"},
           {"id":"att","type":"file_upload","label":"附件"},
           {"id":"hint","type":"description","label":"说明"}

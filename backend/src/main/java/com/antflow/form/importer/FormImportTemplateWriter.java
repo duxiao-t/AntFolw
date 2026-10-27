@@ -281,18 +281,14 @@ public class FormImportTemplateWriter {
             case "date" -> "日期";
             case "time" -> "时间";
             case "date_range" -> "日期区间";
-            case "switch" -> "开关";
             case "select" -> "下拉单选";
-            case "radio" -> "单选";
             case "multi_select" -> "下拉多选";
-            case "checkbox" -> "多选";
             case "user_picker" -> "人员";
             case "dept_picker" -> "部门";
             case "location" -> "定位";
             case "table_list" -> "明细表";
             case "checklist" -> "检查项";
             case "matrix_fill" -> "矩阵填空";
-            case "search" -> "搜索";
             case "scan_code" -> "扫码";
             default -> type;
         };
@@ -306,17 +302,16 @@ public class FormImportTemplateWriter {
         }
         String type = column.type();
         return switch (type) {
-            case "text", "search", "scan_code" -> "直接输入文本，不要带公式";
+            case "text", "scan_code" -> "直接输入文本，不要带公式";
             case "textarea" -> "直接输入，可换行（Alt+Enter）";
             case "number" -> "输入数字，不要带千分位（如 1200.50）";
             case "money" -> "输入金额数字，不要带千分位与货币符号";
             case "date" -> "yyyy-MM-dd，如 2024-01-31";
             case "time" -> "HH:mm 或 HH:mm:ss";
             case "date_range" -> "起~止，如 2024-01-01~2024-01-31";
-            case "switch" -> "填「是」或「否」";
-            case "select", "radio" -> column.dictionary().isEmpty()
+            case "select" -> column.dictionary().isEmpty()
                 ? "填写选项名称（label）或选项值" : "填写选项名称：" + String.join("、", column.dictionary());
-            case "multi_select", "checkbox" -> "多个值用「、」分隔；也可用 , ， ; ；";
+            case "multi_select" -> "多个值用「、」分隔；也可用 , ， ; ；";
             case "user_picker" -> "填工号或姓名；多个用「、」分隔；重名时必须写工号或 id:123";
             case "dept_picker" -> "填部门名称或全路径（总部/研发部）；多个用「、」分隔";
             case "location" -> "纬度,经度，如 30.12,120.65";

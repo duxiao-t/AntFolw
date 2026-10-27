@@ -38,11 +38,10 @@ public class FormFieldValueValidator {
         JsonNode props = node.path("props");
         String label = node.path("label").asText(node.path("id").asText());
         boolean valid = switch (type) {
-            case "text", "textarea", "search", "scan_code", "date", "time" -> value instanceof String;
+            case "text", "textarea", "scan_code", "date", "time" -> value instanceof String;
             case "number", "money" -> value instanceof Number || value instanceof String;
-            case "switch" -> value instanceof Boolean;
-            case "select", "radio" -> value instanceof String || value instanceof Number;
-            case "multi_select", "checkbox" -> value instanceof List<?> list
+            case "select" -> value instanceof String || value instanceof Number;
+            case "multi_select" -> value instanceof List<?> list
                 && list.stream().allMatch(item -> item instanceof String || item instanceof Number);
             case "date_range" -> value instanceof List<?> list && list.size() == 2
                 && list.stream().allMatch(item -> item instanceof String text && !text.isBlank());
