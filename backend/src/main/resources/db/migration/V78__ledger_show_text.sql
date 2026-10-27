@@ -235,3 +235,4 @@ SELECT data_id,
        WHEN show_text AND field_type IS NOT NULL THEN raw_value #>> '{}' END AS value_text
 FROM projected;
 
+DROP VIEW IF EXISTS v_form_ledger_checklist;
