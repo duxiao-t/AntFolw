@@ -76,31 +76,6 @@ beforeEach(() => {
 });
 
 describe('DraftListPage', () => {
-  it('explains pending company attribution without discarding the draft', async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse([
-        {
-          id: 101,
-          formCode: 'leave',
-          formName: '请假申请',
-          formVersion: 3,
-          data: {},
-          schema: [],
-          readOnly: true,
-          companyId: null,
-        },
-      ]),
-    );
-    renderDrafts();
-    expect(
-      await screen.findByText('公司归属待确认，请联系管理员'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: '请假申请 已不可用' }),
-    ).toBeDisabled();
-    expect(screen.getByRole('button', { name: '删除 请假申请' })).toBeEnabled();
-  });
-
   it('keeps a revoked form draft visible for deletion but disables continuation', async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse([

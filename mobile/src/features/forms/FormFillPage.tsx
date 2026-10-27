@@ -9,7 +9,6 @@ import { useAuthStore } from "../auth/auth.store";
 import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
 import {
   createMobileDraft,
-  fetchCompanies,
   fetchMobileDraft,
   deleteMobileDraft,
   fetchMobileForm,
@@ -58,11 +57,6 @@ export function FormFillPage() {
   const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
   const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
   const [draftVersionMismatch, setDraftVersionMismatch] = useState(false);
-  const [pickedCompanyId, setPickedCompanyId] = useState<number | null>(null);
-
-  // P4a：只有"没有部门的账号"才需要选公司（有部门的一律由服务端按身份推导）。
-  // 重新提交原单（rework）不建新记录，归属已固定，不需要也不该出现选择器。
-  const needsCompany = user != null && user.deptId == null && reworkTaskId == null;
 
   const formQuery = useQuery({
     queryKey: queryKeys.form(code, initialDraftId, reworkTaskId),
@@ -82,16 +76,6 @@ export function FormFillPage() {
     enabled: reworkTaskId != null,
     retry: 0,
   });
-  const companiesQuery = useQuery({
-    queryKey: queryKeys.companies,
-    queryFn: fetchCompanies,
-    enabled: needsCompany,
-    retry: 0,
-  });
-
-  // 已经存在草稿时归属是**固定快照**（服务端不再重解析），选出来的那个只在还没有快照前有意义。
-  const draftCompanyId = draftQuery.data?.companyId ?? null;
-  const companyId = draftCompanyId ?? pickedCompanyId;
 
   const isDirty = initialized && !submitNavigationAllowed && !sameValues(values, initialValues);
   const blocker = useBlocker(isDirty);
@@ -106,11 +90,11 @@ export function FormFillPage() {
         return { draftId: null, rework: true };
       }
       if (draftId != null) {
-        await updateMobileDraft(draftId, code, values, companyId, draftSaveKey());
+        await updateMobileDraft(draftId, code, values, draftSaveKey());
         return { draftId, rework: false };
       }
       return {
-        draftId: await createMobileDraft(code, values, companyId, draftSaveKey()),
+        draftId: await createMobileDraft(code, values, draftSaveKey()),
         rework: false,
       };
     },
@@ -284,40 +268,6 @@ export function FormFillPage() {
           {description ? <p>{description}</p> : <p>请填写以下内容，带 * 为必填项。</p>}
         </section>
 
-        {needsCompany ? (
-          <section className="form-fill-intro" aria-label="公司归属">
-            <h2>公司归属</h2>
-            {draftCompanyId != null ? (
-              <p>
-                本草稿的归属已固定为 <b>{companyName(companiesQuery.data, draftCompanyId)}</b>，
-                提交时不会改变。
-              </p>
-            ) : companiesQuery.isError ? (
-              <p role="alert" className="status-notice status-notice--danger">
-                无法加载公司列表，暂时不能保存草稿或提交，请稍后重试。
-              </p>
-            ) : (
-              <label style={{ display: "block" }}>
-                <span>当前账号没有部门，请选择本次提交归属的公司</span>
-                <select
-                  value={companyId ?? ""}
-                  disabled={companiesQuery.isPending}
-                  onChange={(event) => setPickedCompanyId(
-                    event.currentTarget.value ? Number(event.currentTarget.value) : null,
-                  )}
-                  style={{ display: "block", width: "100%", marginTop: 8, padding: "8px 10px" }}
-                >
-                  <option value="">
-                    {companiesQuery.isPending ? "正在加载公司列表..." : "请选择公司"}
-                  </option>
-                  {(companiesQuery.data ?? []).map((company) => (
-                    <option key={company.id} value={company.id}>{company.name}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </section>
-        ) : null}
 
         <DynamicFormRenderer
           schema={formSchema}
@@ -337,8 +287,7 @@ export function FormFillPage() {
         <button
           type="button"
           className="btn btn--ghost btn--lg"
-          disabled={saveMutation.isPending || draftQuery.data?.readOnly
-            || (needsCompany && companyId == null)}
+          disabled={saveMutation.isPending || draftQuery.data?.readOnly}
           onPointerDown={(event) => {
             if (event.pointerType === "mouse") return;
             event.preventDefault();
@@ -352,7 +301,7 @@ export function FormFillPage() {
         <button
           type="button"
           className="btn btn--success btn--lg"
-          disabled={draftQuery.data?.readOnly || (needsCompany && companyId == null)}
+          disabled={draftQuery.data?.readOnly}
           onClick={submitForm}
         >
           提交
@@ -412,20 +361,7 @@ export function FormFillPage() {
   }
 
   function saveDraft() {
-    if (companyBlocked()) return;
     saveMutation.mutate();
-  }
-
-  /** 无部门的账号没选公司（或公司清单拉不到）时不许写：服务端会拒，前端先说清原因。 */
-  function companyBlocked() {
-    if (!needsCompany || companyId != null) return false;
-    showToast({
-      icon: "fail",
-      content: companiesQuery.isError
-        ? "无法加载公司列表，暂时不能保存或提交，请稍后重试"
-        : "请先选择本次提交归属的公司",
-    });
-    return true;
   }
 
   function handleValueChange(fieldId: string, value: unknown) {
@@ -447,7 +383,6 @@ export function FormFillPage() {
       scrollToFirstError(nextErrors);
       return;
     }
-    if (companyBlocked()) return;
     const submitValues = collectVisibleValues(formSchema, values);
     recoveryWriterRef.current?.flush();
     beginSubmitFlow({
@@ -455,7 +390,6 @@ export function FormFillPage() {
       draftId: reworkTaskId ? null : draftId,
       reworkTaskId,
       values: submitValues,
-      companyId,
     });
     const nextPath =
       reworkTaskId == null && findSelfSelectRules(process).length > 0
@@ -536,11 +470,6 @@ function chooseInitialValues({
     removeRecoveryDraft(userId, code, draftId);
   }
   return baseValues;
-}
-
-/** 公司名：清单里有就用它，拿不到就退回 id（归属是快照里的事实，不该因为列表拉不到而隐藏）。 */
-function companyName(companies: Array<{ id: number; name: string }> | undefined, id: number) {
-  return companies?.find((company) => company.id === id)?.name ?? `公司 #${id}`;
 }
 
 function numberParam(value: string | null) {

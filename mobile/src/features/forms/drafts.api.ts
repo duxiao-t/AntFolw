@@ -23,19 +23,11 @@ export type MobileDraft = Omit<
     AntFlowAPI.MobileDraftDto,
     'id' | 'formCode' | 'formName' | 'formVersion' | 'readOnly'
   >,
-  'data' | 'schema' | 'companyId'
+  'data' | 'schema'
 > & {
   data: MobileFormValues;
   schema?: MobileSchemaNode[];
-  companyId?: AntFlowAPI.MobileDraftDto['companyId'] | null;
 };
-
-export type CompanyOption = Required<Pick<AntFlowAPI.Company, 'id' | 'name'>>;
-
-/** 公司清单：只有"没有部门的全局管理员"需要它来显式选归属，所以只在那种情况下请求。 */
-export async function fetchCompanies() {
-  return apiRequest<CompanyOption[]>('/api/companies');
-}
 
 export async function fetchMobileForm(
   code: string,
@@ -62,13 +54,12 @@ export async function fetchMobileDrafts() {
 export async function createMobileDraft(
   formCode: string,
   data: MobileFormValues,
-  companyId: number | null,
   idempotencyKey: string,
 ) {
   return apiRequest<number>('/api/mobile/drafts', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ formCode, data, companyId }),
+    body: JSON.stringify({ formCode, data }),
   });
 }
 
@@ -76,13 +67,12 @@ export async function updateMobileDraft(
   id: number,
   formCode: string,
   data: MobileFormValues,
-  companyId: number | null,
   idempotencyKey: string,
 ) {
   return apiRequest<MobileDraft>(`/api/mobile/drafts/${id}`, {
     method: 'PUT',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ formCode, data, companyId }),
+    body: JSON.stringify({ formCode, data }),
   });
 }
 

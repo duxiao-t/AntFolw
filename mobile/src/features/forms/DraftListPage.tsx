@@ -196,10 +196,9 @@ function hasValue(value: unknown) {
   return true;
 }
 
-function readOnlyReason(draft: MobileDraft) {
-  return draft.companyId === null || draft.companyInferred === true
-    ? '公司归属待确认，请联系管理员'
-    : '使用权限已撤销，仅可删除';
+function readOnlyReason(_draft: MobileDraft) {
+  // 公司归属概念已随多公司能力一起下线，只读原因只剩「权限被撤销」这一种。
+  return '使用权限已撤销，仅可删除';
 }
 function formatUpdatedAt(value?: string) {
   if (!value) return '保存时间未知';

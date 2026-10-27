@@ -20,5 +20,4 @@ export const queryKeys = {
   notifications: ['mobile', 'notifications'] as const,
   reworkTask: (id: number) => ['mobile', 'rework-task', id] as const,
   sessions: ['auth', 'sessions'] as const,
-  companies: ['companies'] as const,
 } as const;
