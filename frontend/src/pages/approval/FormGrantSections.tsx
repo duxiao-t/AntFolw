@@ -74,7 +74,7 @@ export function FormUsageScopeSection({ formId, isAdmin, permissions }: SectionP
         <div className={styles.settingRow} style={{ marginTop: 0 }}>
           <div className={styles.settingCopy}>
             <span className={styles.settingLabel}>全部员工</span>
-            <span className={styles.settingHint}>授予已授权公司内的员工角色，不会向其他公司开放。</span>
+            <span className={styles.settingHint}>授予全体在职员工使用本表单，无需再逐个授权。</span>
           </div>
           <div className={styles.settingControl}>
             <span>{!allCompanyRoleId ? '不可用' : allCompany ? '已启用' : '未启用'}</span>

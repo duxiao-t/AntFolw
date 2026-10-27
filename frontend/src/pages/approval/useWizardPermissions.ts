@@ -72,13 +72,13 @@ export function useWizardPermissions({
   });
   const allCompanyRoleId = grantCandidates?.roles.find((role) => role.code === 'employee')?.id;
   const visibilitySummary = allCompanyRoleId && formGrant?.roleIds.includes(allCompanyRoleId)
-    ? '已授权公司内全部员工'
+    ? '全体在职员工'
     : [
         formGrant?.departmentIds.length ? `${formGrant.departmentIds.length} 个部门` : '',
         formGrant?.roleIds.length ? `${formGrant.roleIds.length} 个角色` : '',
         formGrant?.userIds.length ? `${formGrant.userIds.length} 名人员` : '',
       ].filter(Boolean).join('、') || '仅创建人';
-  // 「全公司可见」是个开关，看着像点一下就生效，但这一整段要按「保存使用范围」才落库。
+  // 「全体员工」是个开关，看着像点一下就生效，但这一整段要按「保存使用范围」才落库。
   // 没有提示的话，切走页面就会被当成"打开了又自己变回去"。所以把未保存状态写出来。
   const grantDirty = !!formGrant && (
     !sameIds(watchedUserIds, formGrant.userIds)
@@ -112,10 +112,10 @@ export function useWizardPermissions({
   }, [formGrant, grantDirty, grantVersionRef]);
 
   // ⚠ 这一段只在「换表单」或「这一张表单还没回填过」时跑，绝不能因为数据刷新就重跑：
-  // 使用范围的四个字段（人员/角色/部门/全公司可见）要按「保存使用范围」才落库，中间是用户的
+  // 使用范围的四个字段（人员/角色/部门/全体员工）要按「保存使用范围」才落库，中间是用户的
   // 未保存编辑。而保存维护人员与保存使用范围共用同一个版本计数器（saveBasic 里断言两者
   // version 必须相等），所以任何一次保存、以及 react-query 默认的 refetchOnWindowFocus 都会
-  // 换出新的 data 对象——用对象当依赖会让回填重跑，把「全公司可见」这类改动冲回服务端旧值，
+  // 换出新的 data 对象——用对象当依赖会让回填重跑，把「全体员工」这类改动冲回服务端旧值，
   // 看起来就是"打开了又自己变回未启用"。
   const grantInitKey = `${formId ?? 'new'}:${allCompanyRoleId ?? ''}`;
 
@@ -129,7 +129,7 @@ export function useWizardPermissions({
           // 非管理员也按服务端回填：早先这里给非管理员写死 []，于是 grantDirty 永远为真
           // （[] 对比服务端的角色清单），页面上恒显「有未保存的修改」，而且一旦点保存会把
           // 现有角色授权整片抹掉。候选接口与 canManageGrants 同门禁，非管理员同样拿得到
-          // 全公司角色 id，过滤逻辑不需要分角色。
+          // employee 角色 id（表示全体员工），过滤逻辑不需要分角色。
           roleIds: formGrant.roleIds.filter((id) => id !== allCompanyRoleId),
           allCompany: !!allCompanyRoleId && formGrant.roleIds.includes(allCompanyRoleId),
           departmentIds: formGrant.departmentIds,
