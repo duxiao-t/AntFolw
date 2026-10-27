@@ -41,6 +41,43 @@ compose_to() {
 # 用一次性容器把 create→start 走一遍，几秒内就能判定，给出可执行的处置建议。
 #
 # 返回 0 表示引擎能正常创建并启动容器；非 0 表示不建议继续部署。
+# 引擎不可用时**自动**重启 Docker Desktop 并重试一次预检。
+#
+# 为什么需要：本机反复出现"引擎假活"——docker ps/exec/info 都正常，但新容器的 start
+# 永久卡住、compose up 既不报错也不推进。此时人工唯一的解法就是重启 Docker Desktop，
+# 而部署脚本只会打印"请重启"然后退出，把一次可以自愈的部署变成人工中断。
+#
+# 代价与边界：
+#   · 重启会**短暂中断**所有容器（本机约 30~90 秒），所以只在预检失败时触发；
+#   · `docker desktop restart` 在假活状态下自己也可能挂住，必须用 timeout 兜住；
+#   · 最多重试一次，再失败就放弃并给出人工指引，不无限重试。
+#   · 用 ANTFLOW_DEPLOY_NO_AUTORECOVER=1 可关闭（例如 CI 或不想被打断的场合）。
+ensure_engine() {
+  if preflight_engine; then
+    return 0
+  fi
+  if [[ "${ANTFLOW_DEPLOY_NO_AUTORECOVER:-0}" == "1" ]]; then
+    echo '[预检] 引擎不可用，且已禁用自动恢复（ANTFLOW_DEPLOY_NO_AUTORECOVER=1）。' >&2
+    return 1
+  fi
+
+  echo '[预检] 引擎不可用，开始自动重启 Docker Desktop（最多等 6 分钟）...' >&2
+  timeout 180 docker desktop restart >/dev/null 2>&1 || true
+
+  local deadline=$((SECONDS + 360))
+  while (( SECONDS < deadline )); do
+    sleep 10
+    if preflight_engine; then
+      echo '[预检] Docker Desktop 已自动恢复，继续部署' >&2
+      return 0
+    fi
+  done
+
+  echo '[预检] 自动恢复失败：请手动重启 Docker Desktop 后重跑本脚本。' >&2
+  echo '      若反复失败，考虑把 Docker Desktop 切到 WSL2 后端或升级/回退版本（见 README 部署章节）。' >&2
+  return 1
+}
+
 preflight_engine() {
   local probe="antflow-preflight-$$" rc=0
   docker rm -f "$probe" >/dev/null 2>&1 || true
@@ -286,7 +323,7 @@ main() {
 
   # 先确认引擎能正常起容器，再花几分钟构建：引擎假死时构建出来的东西也用不上，
   # 更糟的是会让人以为"部署正在跑"，直到很久之后才发现根本没动。
-  preflight_engine || return 1
+  ensure_engine || return 1
 
   reset_plan
   if [[ -z "$previous" ]] || ! git cat-file -e "$previous^{commit}" 2>/dev/null || ! git merge-base --is-ancestor "$previous" "$current"; then
