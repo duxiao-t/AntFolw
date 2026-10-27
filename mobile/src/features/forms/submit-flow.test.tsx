@@ -377,7 +377,7 @@ describe('mobile form submit flow', () => {
 
   it('keeps the owned draft context through form loading and approval preview', async () => {
     useSubmitFlowStore.setState({
-      formCode: 'leave', draftId: 101, companyId: 20, reworkTaskId: null,
+      formCode: 'leave', draftId: 101, reworkTaskId: null,
       values: { reason: '原公司草稿' }, selfSelected: {},
     });
     renderSubmitFlow('/forms/leave/confirm');

@@ -89,7 +89,6 @@ export function SubmitConfirmPage() {
           formCode: flow.formCode ?? code,
           values: flow.values,
           draftId: flow.draftId,
-          companyId: flow.companyId,
         });
         return {
           mode: 'direct' as const,
@@ -102,7 +101,6 @@ export function SubmitConfirmPage() {
         values: flow.values,
         selfSelected: flow.selfSelected,
         draftId: flow.draftId,
-        companyId: flow.companyId,
         idempotencyKey: idempotencyKeyForPayload(currentPayload()),
       });
       return {
@@ -260,7 +258,6 @@ export function SubmitConfirmPage() {
     </AppPage>
   );
 
-  // companyId 必须进幂等 payload：换了公司再重试要是一次新请求，不能命中旧键拿到上一次的结果。
   function currentPayload() {
     return JSON.stringify({
       formCode: flow.formCode ?? code,
@@ -268,7 +265,6 @@ export function SubmitConfirmPage() {
       selfSelected: flow.selfSelected,
       draftId: flow.draftId,
       reworkTaskId: flow.reworkTaskId,
-      companyId: flow.companyId,
     });
   }
   function editPath() {
