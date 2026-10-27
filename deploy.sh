@@ -339,7 +339,10 @@ main() {
     bash "$ROOT/scripts/build.sh" mobile --no-budget
   fi
   if (( build_backend )); then
-    bash backend/build.sh -Dmaven.test.skip=true package
+    # 必须带 clean：容器以 root 写 target/，上一轮留下的 classes 再被 javac 覆盖时
+    # 会报 "error while writing ... /app/target/classes/*.class"（本机 2026-10-27 实测），
+    # 报错信息看起来像磁盘/权限问题，其实是陈旧产物。clean 让这步成为幂等操作。
+    bash backend/build.sh -Dmaven.test.skip=true clean package
   fi
 
   local -a deploy_services=()
