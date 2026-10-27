@@ -4567,6 +4567,49 @@ class PostgresTransactionalIntegrityIntegrationTest {
         return id;
     }
 
+    /**
+     * 台账的文本值显示是**表单级开关**（settings.ledgerShowText）：
+     * 开则 value_json/value_text 两列都有值，未开则仍为 NULL（脱敏默认值不能被绕过）。
+     */
+    @Test
+    void ledgerShowsFreeTextOnlyForFormsThatOptIn() {
+        String schema = "[{\"id\":\"memo\",\"type\":\"text\",\"label\":\"备注\"}]";
+        long shownFormId = insertForm("PUBLISHED", schema);
+        long redactedFormId = insertForm("PUBLISHED", schema);
+        jdbcTemplate.update("""
+            UPDATE t_form_definition SET settings = '{"ledgerShowText": true}'::jsonb WHERE id = ?
+            """, shownFormId);
+
+        long shownDataId = submittedTextMemo(shownFormId, schema, "原文");
+        long redactedDataId = submittedTextMemo(redactedFormId, schema, "原文");
+
+        var shown = jdbcTemplate.queryForMap("""
+            SELECT value_json::text AS value_json, value_text FROM v_form_ledger
+            WHERE data_id = ? AND field_id = 'memo'
+            """, shownDataId);
+        assertThat(shown.get("value_text")).as("开启后 value_text 应是原文").isEqualTo("原文");
+        assertThat(String.valueOf(shown.get("value_json")))
+            .as("开启后 value_json 应是原始 JSON（文本即带引号的字符串）").isEqualTo("\"原文\"");
+
+        var redacted = jdbcTemplate.queryForMap("""
+            SELECT value_json, value_text FROM v_form_ledger
+            WHERE data_id = ? AND field_id = 'memo'
+            """, redactedDataId);
+        assertThat(redacted.get("value_text")).as("未开启时仍须脱敏").isNull();
+        assertThat(redacted.get("value_json")).as("未开启时仍须脱敏").isNull();
+    }
+
+    private long submittedTextMemo(long formId, String schema, String value) {
+        jdbcTemplate.update("""
+            INSERT INTO t_form_definition_version(form_definition_id, version_no, schema, checksum)
+            VALUES (?, 1, ?::jsonb, 'v1')
+            """, formId, schema);
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO t_form_data(form_def_id, form_def_version, business_no, data, status, created_by)
+            VALUES (?, 1, ?, jsonb_build_object('memo', ?::text), 'SUBMITTED', ?) RETURNING id
+            """, Long.class, formId, "IT-LEDGER-" + formId, value, userId("admin"));
+    }
+
     private long insertForm(String status, String schema, long creatorId) {
         String code = "IT_" + UUID.randomUUID().toString().replace("-", "");
         long formId = jdbcTemplate.queryForObject("""
