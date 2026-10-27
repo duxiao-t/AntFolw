@@ -59,6 +59,12 @@ SET schema = (
 WHERE jsonb_typeof(def.schema) = 'array'
   AND def.schema::text ~ '"(radio|checkbox|switch|search)"';
 
+-- 一之二、schema 是**单个对象**（早期设计器存根节点，不是数组）的表单
+UPDATE t_form_definition def
+SET schema = af_map_retired_field_type(def.schema)
+WHERE jsonb_typeof(def.schema) = 'object'
+  AND def.schema::text ~ '"(radio|checkbox|switch|search)"';
+
 -- 二、版本快照
 UPDATE t_form_definition_version version
 SET schema = (
@@ -66,6 +72,12 @@ SET schema = (
     FROM jsonb_array_elements(version.schema) AS node
 )
 WHERE jsonb_typeof(version.schema) = 'array'
+  AND version.schema::text ~ '"(radio|checkbox|switch|search)"';
+
+-- 二之二、版本快照同样是单对象的情况
+UPDATE t_form_definition_version version
+SET schema = af_map_retired_field_type(version.schema)
+WHERE jsonb_typeof(version.schema) = 'object'
   AND version.schema::text ~ '"(radio|checkbox|switch|search)"';
 
 -- 三、switch 的历史值：布尔 -> 'true'/'false'（实测无数据，防御性处理）
