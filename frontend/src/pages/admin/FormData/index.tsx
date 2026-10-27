@@ -214,7 +214,15 @@ export default function AdminFormDataPage() {
       >
         {canCorrect && current ? (
           <Space style={{ marginBottom: 12 }}>
-            <Button onClick={() => setCorrecting(current)}>修正数据</Button>
+            <Button
+              onClick={() => setCorrecting(current)}
+              disabled={current.status === 'DRAFT'}
+              title={current.status === 'DRAFT'
+                ? '草稿请直接修改；此状态不支持修正'
+                : undefined}
+            >
+              修正数据
+            </Button>
           </Space>
         ) : null}
         <dl style={{ margin: 0 }}>

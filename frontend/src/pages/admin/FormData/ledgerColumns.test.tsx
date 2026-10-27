@@ -124,4 +124,26 @@ describe('台账列表的列与筛选', () => {
         params: expect.objectContaining({ formDefId: 5, submitterKeyword: '张三' }),
       })));
   });
+
+  it('草稿禁用修正入口', async () => {
+    state.currentUser = { roles: [], permissions: ['form:data:correct'] };
+    const props = await renderPage();
+    await act(async () => {
+      props.onRow({ ...row, status: 'DRAFT' }).onClick();
+    });
+
+    const button = await screen.findByRole('button', { name: '修正数据' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', '草稿请直接修改；此状态不支持修正');
+  });
+
+  it('已提交数据仍可打开修正入口', async () => {
+    state.currentUser = { roles: [], permissions: ['form:data:correct'] };
+    const props = await renderPage();
+    await act(async () => {
+      props.onRow(row).onClick();
+    });
+
+    expect(await screen.findByRole('button', { name: '修正数据' })).not.toBeDisabled();
+  });
 });

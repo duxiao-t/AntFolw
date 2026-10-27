@@ -75,6 +75,7 @@ public class FormDataCorrectionService {
         if (row == null) throw new BizException("FORM_DATA_NOT_FOUND", "填报记录不存在");
         authorization.requireFormCorrection(row.formDefId());
         authorization.requireCorrectableFormData(formDataId);
+        rejectDraft(row);
 
         FormConfig config = formConfig(row.formDefId());
         CorrectionSchemaResolver.Resolved resolved =
@@ -115,6 +116,7 @@ public class FormDataCorrectionService {
         if (row == null) throw new BizException("FORM_DATA_NOT_FOUND", "填报记录不存在");
         authorization.requireFormCorrection(row.formDefId());
         authorization.requireCorrectableFormData(formDataId);
+        rejectDraft(row);
 
         FormDataCorrectionRepository.InstanceRow instance = repository.latestInstance(formDataId);
         rejectRunning(instance);
@@ -174,6 +176,7 @@ public class FormDataCorrectionService {
         if (row == null) throw new BizException("FORM_DATA_NOT_FOUND", "填报记录不存在");
         authorization.requireFormCorrection(row.formDefId());
         authorization.requireCorrectableFormData(formDataId);
+        if (request.approve()) rejectDraft(row);
 
         FormDataCorrectionRepository.PendingRow pending = repository.lockPending(correctionId);
         if (pending == null || pending.formDataId() != formDataId) {
@@ -296,6 +299,13 @@ public class FormDataCorrectionService {
         if (instance != null && "RUNNING".equals(instance.status())) {
             throw new BizException("CORRECTION_INSTANCE_RUNNING",
                 "该单据正在审批中，请先撤回或等待流程结束");
+        }
+    }
+
+    private void rejectDraft(FormDataCorrectionRepository.DataRow row) {
+        if ("DRAFT".equals(row.status())) {
+            throw new BizException("CORRECTION_STATUS_NOT_ALLOWED",
+                "草稿请直接修改；此状态不支持修正");
         }
     }
 
