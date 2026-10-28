@@ -41,7 +41,7 @@ class UserQueryService {
      * 反向依赖。这里收的是同一批原始条件，部门展开仍发生在原来的位置（见 {@link #resolveDepartments}）。
      */
     record Criteria(String keyword, Long departmentId, boolean includeDescendants,
-                    List<Long> userIds, Long companyId, String positionFilter) {
+                    List<Long> userIds, String positionFilter) {
     }
 
     List<User> listAuthorized(Criteria request) {
@@ -88,7 +88,7 @@ class UserQueryService {
     }
 
     Page<User> listAuthorizedPage(String keyword, Long departmentId,
-                                  boolean includeDescendants, long page, long size, Long companyId) {
+                                  boolean includeDescendants, long page, long size) {
         String permission = com.antflow.authz.PermissionCodes.ORG_USER_READ;
         authorizationService.requirePermission(permission);
         long safePage = Math.max(page, 1);

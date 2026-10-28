@@ -81,18 +81,15 @@ public class FormDataImportController {
      * 执行导入。
      *
      * @param skipErrorRows false（默认）原子模式；true 逐行部分成功
-     * @param companyId     仅无部门的全局管理员需要显式指定
      */
     @PostMapping(path = "/api/forms/data/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("@authz.console('" + PermissionCodes.FORM_DATA_IMPORT + "')")
     public ImportOutcome importData(@RequestParam long formId,
                                     @RequestParam(required = false) MultipartFile file,
                                     @RequestParam(required = false) String sheetName,
-                                    @RequestParam(defaultValue = "false") boolean skipErrorRows,
-                                    @RequestParam(required = false) Long companyId) {
+                                    @RequestParam(defaultValue = "false") boolean skipErrorRows) {
         authorizationService.requirePermission(PermissionCodes.FORM_DATA_IMPORT);
-        ImportOutcome outcome = importService.importData(formId, file, sheetName,
-            skipErrorRows, companyId);
+        ImportOutcome outcome = importService.importData(formId, file, sheetName, skipErrorRows);
         auditService.success("form.data.import", "FORM_DEFINITION", formId,
             AuditService.RiskLevel.HIGH,
             Map.of("changedFields", java.util.List.of("t_form_data")),

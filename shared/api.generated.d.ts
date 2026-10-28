@@ -570,7 +570,6 @@ export declare namespace AntFlowAPI {
     userIds?: number[];
     scopeType?: string;
     format?: string;
-    companyId?: number;
   };
 
   type FavoriteAppsRequest = {
@@ -762,7 +761,6 @@ export declare namespace AntFlowAPI {
     formId: number;
     sheetName?: string;
     skipErrorRows?: boolean;
-    companyId?: number;
   };
 
   type importDraftParams = {
@@ -917,7 +915,6 @@ export declare namespace AntFlowAPI {
     position?: string;
     userIds?: number[];
     scopeType?: string;
-    companyId?: number;
   };
 
   type LocalTime = {
@@ -958,7 +955,6 @@ export declare namespace AntFlowAPI {
   };
 
   type ManualImportRequest = {
-    companyId?: number;
     data?: Record<string, any>;
     formId?: number;
     importKey?: string;
@@ -1376,7 +1372,6 @@ export declare namespace AntFlowAPI {
     keyword?: string;
     deptId?: number;
     includeDescendants?: boolean;
-    companyId?: number;
   };
 
   type PageSummary = {
@@ -1937,7 +1932,6 @@ export declare namespace AntFlowAPI {
   };
 
   type SubmitRequest = {
-    companyId?: number;
     data?: Record<string, any>;
     draftId?: number;
     files?: MobileFileRef[];

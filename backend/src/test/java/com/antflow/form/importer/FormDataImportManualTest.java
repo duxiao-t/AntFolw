@@ -93,7 +93,7 @@ class FormDataImportManualTest {
 
     @Test
     void structuredValuesAreStoredExactlyAsSubmitted() throws Exception {
-        ImportOutcome outcome = manual.importOne(new ManualImportRequest(FORM_ID, null, " EXT-1 ",
+        ImportOutcome outcome = manual.importOne(new ManualImportRequest(FORM_ID, " EXT-1 ",
             data()));
 
         assertThat(outcome.successCount()).isEqualTo(1);
@@ -120,7 +120,7 @@ class FormDataImportManualTest {
         data.put("amount", 10);
 
         assertThatThrownBy(() -> manual.importOne(
-            new ManualImportRequest(FORM_ID, null, null, data)))
+            new ManualImportRequest(FORM_ID, null, data)))
             .isInstanceOf(ManualImportFailure.class)
             .satisfies(error -> {
                 ManualImportFailure failure = (ManualImportFailure) error;
@@ -143,7 +143,7 @@ class FormDataImportManualTest {
             .thenReturn(List.of("EXT-1"));
 
         assertThatThrownBy(() -> manual.importOne(
-            new ManualImportRequest(FORM_ID, null, "EXT-1", data())))
+            new ManualImportRequest(FORM_ID, "EXT-1", data())))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("已经导入过");
         verify(jdbc, never()).batchUpdate(anyString(), anyList());
@@ -151,7 +151,7 @@ class FormDataImportManualTest {
 
     @Test
     void withoutImportKeyDuplicatesAreNotGuessed() throws Exception {
-        ImportOutcome outcome = manual.importOne(new ManualImportRequest(FORM_ID, null, null,
+        ImportOutcome outcome = manual.importOne(new ManualImportRequest(FORM_ID, null,
             data()));
 
         assertThat(outcome.successCount()).isEqualTo(1);

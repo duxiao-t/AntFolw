@@ -2903,7 +2903,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
         PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
         try {
             assertThat(roleAdminService.roles()).isNotEmpty();
-            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20, null).getRecords())
+            assertThat(userService.listAuthorizedPage(null, null, false, 1, 20).getRecords())
                 .isNotEmpty();
             assertThat(formDefinitionMapper.selectSummaryPage(Page.of(1, 20), null, null,
                 adminId, true).getRecords())
@@ -3249,7 +3249,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             "员工" + keyword, nameMember);
         try {
             PrincipalHolder.set(new PrincipalHolder.Principal(adminId, "admin", List.of("admin")));
-            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50, null).getRecords()
+            Set<Long> found = userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords()
                 .stream().map(User::getId).collect(java.util.stream.Collectors.toSet());
             assertThat(found).contains(childMember, nameMember);
             assertThat(found).doesNotContain(unrelatedMember);
@@ -3262,7 +3262,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
                 + " VALUES (?, 'org:user:read', 'SELF')", scopedRole);
             assignRole(scopedUser, scopedRole);
             setPrincipal(scopedUser);
-            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50, null).getRecords())
+            assertThat(userService.listAuthorizedPage(keyword, null, false, 1, 50).getRecords())
                 .extracting(User::getId).containsExactly(scopedUser);
         } finally {
             PrincipalHolder.clear();
@@ -3307,7 +3307,7 @@ class PostgresTransactionalIntegrityIntegrationTest {
             WecomService wecomTarget = AopTestUtils.getTargetObject(wecomService);
             Object directorySync = ReflectionTestUtils.getField(wecomTarget, "directorySync");
             List<User> users = userService.listAuthorizedPage(
-                null, departmentId, false, 1, 20, null).getRecords();
+                null, departmentId, false, 1, 20).getRecords();
             assertThat(users).extracting(User::getId).containsExactly(leaderId, memberId);
             assertThat(users.get(0).getDepartmentLeader()).isTrue();
             assertThat(users.get(0).getWecomStatus()).isEqualTo(4);

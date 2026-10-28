@@ -109,13 +109,12 @@ public class UserService {
     public List<User> listAuthorized(UserQuery request) {
         return queries.listAuthorized(new UserQueryService.Criteria(request.keyword(),
             request.departmentId(), request.includeDescendants(), request.userIds(),
-            request.companyId(), request.positionFilter(LEADER_TITLE)));
+            request.positionFilter(LEADER_TITLE)));
     }
 
     public Page<User> listAuthorizedPage(String keyword, Long departmentId,
-                                         boolean includeDescendants, long page, long size, Long companyId) {
-        return queries.listAuthorizedPage(keyword, departmentId, includeDescendants, page, size,
-            companyId);
+                                         boolean includeDescendants, long page, long size) {
+        return queries.listAuthorizedPage(keyword, departmentId, includeDescendants, page, size);
     }
 
     public List<User> managerCandidates(Long departmentId, Long excludedUserId, String keyword) {
@@ -138,17 +137,11 @@ public class UserService {
      * 都调它们，免得两处各写一份慢慢漂移。
      */
     public record UserQuery(String keyword, Long departmentId, boolean includeDescendants,
-                            boolean leaderOnly, String position, List<Long> userIds, Long companyId) {
+                            boolean leaderOnly, String position, List<Long> userIds) {
         public static UserQuery of(String keyword, Long departmentId, Boolean includeDescendants,
                                    Boolean leaderOnly, String position, List<Long> userIds) {
             return new UserQuery(keyword, departmentId, Boolean.TRUE.equals(includeDescendants),
-                Boolean.TRUE.equals(leaderOnly), position, userIds, null);
-        }
-
-        public static UserQuery of(String keyword, Long departmentId, Boolean includeDescendants,
-                                   Boolean leaderOnly, String position, List<Long> userIds, Long companyId) {
-            return new UserQuery(keyword, departmentId, Boolean.TRUE.equals(includeDescendants),
-                Boolean.TRUE.equals(leaderOnly), position, userIds, companyId);
+                Boolean.TRUE.equals(leaderOnly), position, userIds);
         }
 
         /** 职务过滤的最终值：自由文本优先，否则取「部门领导」的预设称谓；都没有则不过滤。 */

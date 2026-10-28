@@ -69,8 +69,7 @@ public class FormImportParser {
         this.detailSheets = detailSheets;
     }
 
-    Plan parse(long formId, MultipartFile file, String sheetName, Long explicitCompanyId,
-               boolean lenientCompany) {
+    Plan parse(long formId, MultipartFile file, String sheetName) {
         FormDefinition form = templates.requirePublished(formId);
         byte[] bytes = templates.readFile(file);
         JsonNode schema = templates.readSchema(form);

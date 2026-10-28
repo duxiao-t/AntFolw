@@ -53,7 +53,7 @@ public final class ImportDtos {
      *
      * @param importKey 可选外部单号：命中已有记录 → 422 IMPORT_DUPLICATE（与文件导入同一语义）
      */
-    public record ManualImportRequest(long formId, Long companyId, String importKey,
+    public record ManualImportRequest(long formId, String importKey,
                                       Map<String, Object> data) { }
 
     /**

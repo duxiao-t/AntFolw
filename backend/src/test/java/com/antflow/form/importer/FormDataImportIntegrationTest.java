@@ -180,7 +180,7 @@ class FormDataImportIntegrationTest {
     void importedRowsAreSubmittedAndAttributedToTheImporter() throws Exception {
         ImportDtos.ImportOutcome outcome = importService.importData(formId,
             file(new String[] {"K1", "差旅报销", "100.5", "差旅", ownerNo},
-                new String[] {"K2", "办公用品", "20", "办公", ownerNo}), null, false, null);
+                new String[] {"K2", "办公用品", "20", "办公", ownerNo}), null, false);
 
         assertThat(outcome.successCount()).isEqualTo(2);
         assertThat(outcome.atomic()).isTrue();
@@ -225,7 +225,7 @@ class FormDataImportIntegrationTest {
         assertThatThrownBy(() -> importService.importData(formId,
             file(new String[] {"K1", "第一行", "1", "差旅", ownerNo},
                 new String[] {"BOOM", "第二行", "2", "差旅", ownerNo},
-                new String[] {"K3", "第三行", "3", "差旅", ownerNo}), null, false, null))
+                new String[] {"K3", "第三行", "3", "差旅", ownerNo}), null, false))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("未写入任何数据");
 
@@ -238,13 +238,13 @@ class FormDataImportIntegrationTest {
     void importingTheSameBusinessKeysAgainOnlyAddsNewRows() throws Exception {
         importService.importData(formId,
             file(new String[] {"K1", "第一行", "1", "差旅", ownerNo},
-                new String[] {"K2", "第二行", "2", "差旅", ownerNo}), null, false, null);
+                new String[] {"K2", "第二行", "2", "差旅", ownerNo}), null, false);
         assertThat(countRows()).isEqualTo(2);
 
         ImportDtos.ImportOutcome second = importService.importData(formId,
             file(new String[] {"K1", "第一行", "1", "差旅", ownerNo},
                 new String[] {"K2", "第二行", "2", "差旅", ownerNo},
-                new String[] {"K3", "第三行", "3", "差旅", ownerNo}), null, false, null);
+                new String[] {"K3", "第三行", "3", "差旅", ownerNo}), null, false);
 
         assertThat(second.successCount()).isEqualTo(1);
         assertThat(second.skippedCount()).isEqualTo(2);
@@ -254,7 +254,7 @@ class FormDataImportIntegrationTest {
     @Test
     void uniqueIndexAlsoBlocksConcurrentStyleDuplicatesAtTheDatabaseLevel() throws Exception {
         importService.importData(formId,
-            file(new String[] {"K1", "第一行", "1", "差旅", ownerNo}), null, false, null);
+            file(new String[] {"K1", "第一行", "1", "差旅", ownerNo}), null, false);
 
         // 绕过服务层直接插同一个 (form_def_id, import_key)：唯一索引必须拒绝。
         assertThatThrownBy(() -> jdbc.update("""
@@ -299,7 +299,7 @@ class FormDataImportIntegrationTest {
         }
 
         ImportDtos.ImportOutcome outcome = importService.importData(structuredFormId,
-            new MockMultipartFile("file", "detail.xlsx", XLSX, bytes), null, false, null);
+            new MockMultipartFile("file", "detail.xlsx", XLSX, bytes), null, false);
         assertThat(outcome.successCount()).isEqualTo(2);
 
         List<Map<String, Object>> rows = jdbc.queryForList("""

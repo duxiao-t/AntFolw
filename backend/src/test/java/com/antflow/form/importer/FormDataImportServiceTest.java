@@ -138,7 +138,7 @@ class FormDataImportServiceTest {
             new String[] {"K1", "出差", "100", "差旅", "李四"},
             new String[] {"K2", "坏行", "abc", "差旅", "李四"}));
 
-        assertThatThrownBy(() -> service.importData(FORM_ID, file, null, false, null))
+        assertThatThrownBy(() -> service.importData(FORM_ID, file, null, false))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("0 行落库")
             .hasMessageContaining("第4行");
@@ -151,7 +151,7 @@ class FormDataImportServiceTest {
     void atomicImportWritesAllRowsInOneBatch() throws Exception {
         ImportOutcome outcome = service.importData(FORM_ID, file(rows(
             new String[] {"K1", "出差", "100", "差旅", "李四"},
-            new String[] {"K2", "办公", "20", "差旅", "李四"})), null, false, null);
+            new String[] {"K2", "办公", "20", "差旅", "李四"})), null, false);
 
         assertThat(outcome.atomic()).isTrue();
         assertThat(outcome.successCount()).isEqualTo(2);
@@ -169,7 +169,7 @@ class FormDataImportServiceTest {
             new String[] {"K2", "坏行", "abc", "差旅", "李四"},
             new String[] {"K3", "办公", "20", "差旅", "李四"}));
 
-        ImportOutcome outcome = service.importData(FORM_ID, file, null, true, null);
+        ImportOutcome outcome = service.importData(FORM_ID, file, null, true);
 
         assertThat(outcome.atomic()).isFalse();
         assertThat(outcome.totalRows()).isEqualTo(3);
@@ -193,7 +193,7 @@ class FormDataImportServiceTest {
     void repeatedImportKeyInsideTheFileIsSkipped() throws Exception {
         ImportOutcome outcome = service.importData(FORM_ID, file(rows(
             new String[] {"K1", "出差", "100", "差旅", "李四"},
-            new String[] {"K1", "另一个", "200", "差旅", "李四"})), null, false, null);
+            new String[] {"K1", "另一个", "200", "差旅", "李四"})), null, false);
 
         assertThat(outcome.successCount()).isEqualTo(1);
         assertThat(outcome.skippedCount()).isEqualTo(1);
@@ -204,7 +204,7 @@ class FormDataImportServiceTest {
     void identicalRowsWithoutKeyAreDedupedByContentHashWithinTheFile() throws Exception {
         ImportOutcome outcome = service.importData(FORM_ID, file(rows(
             new String[] {"", "出差", "100", "差旅", "李四"},
-            new String[] {"", "出差", "100", "差旅", "李四"})), null, false, null);
+            new String[] {"", "出差", "100", "差旅", "李四"})), null, false);
 
         assertThat(outcome.successCount()).isEqualTo(1);
         assertThat(outcome.skippedCount()).isEqualTo(1);
@@ -216,7 +216,7 @@ class FormDataImportServiceTest {
             any(Object[].class))).thenReturn(List.of("K1"));
 
         assertThatThrownBy(() -> service.importData(FORM_ID, file(rows(
-            new String[] {"K1", "出差", "100", "差旅", "李四"})), null, false, null))
+            new String[] {"K1", "出差", "100", "差旅", "李四"})), null, false))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("都已经导入过");
     }

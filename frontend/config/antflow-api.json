@@ -1754,10 +1754,6 @@
       },
       "ManualImportRequest" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "data" : {
             "additionalProperties" : {
               "type" : "object"
@@ -4140,10 +4136,6 @@
       },
       "SubmitRequest" : {
         "properties" : {
-          "companyId" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "data" : {
             "type" : "object"
           },
@@ -5744,15 +5736,6 @@
             "schema" : {
               "default" : false,
               "type" : "boolean"
-            }
-          },
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : false,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
             }
           }
         ],
@@ -11367,15 +11350,6 @@
             "schema" : {
               "type" : "string"
             }
-          },
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : false,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
-            }
           }
         ],
         "responses" : {
@@ -11504,15 +11478,6 @@
             "schema" : {
               "default" : "csv",
               "type" : "string"
-            }
-          },
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : false,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
             }
           }
         ],
@@ -11663,15 +11628,6 @@
             "schema" : {
               "default" : false,
               "type" : "boolean"
-            }
-          },
-          {
-            "in" : "query",
-            "name" : "companyId",
-            "required" : false,
-            "schema" : {
-              "format" : "int64",
-              "type" : "integer"
             }
           }
         ],

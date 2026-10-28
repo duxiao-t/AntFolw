@@ -144,8 +144,8 @@ public class FormDataController {
         return service.getById(id);
     }
 
+    // 单公司改造后不再接收 companyId：归属快照已从写路径移除，多带一个字段只会让
+    // 契约误以为"这个入口还认公司"。
     public record SubmitRequest(String formCode, String status, Object data,
-                                List<MobileFileRef> files, Long draftId,
-                                // P4a：仅无部门的全局管理员该用它；带 draftId 时忽略（取草稿快照）。
-                                Long companyId) { }
+                                List<MobileFileRef> files, Long draftId) { }
 }

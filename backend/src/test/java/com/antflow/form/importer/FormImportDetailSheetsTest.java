@@ -186,7 +186,7 @@ class FormImportDetailSheetsTest {
             Map.of("检查项", new String[][] {
                 {"行号", "检查项", "结果", "描述"},
                 {"__row", "__item", "__status", "__description"},
-                {"3", "检查项1", "不通过", ""}})), null, null, true);
+                {"3", "检查项1", "不通过", ""}})), null);
 
         assertThat(plan.errorCount()).as(plan.issues().toString()).isZero();
         assertThat(plan.rows().get(0).values().get("chk"))
@@ -212,7 +212,7 @@ class FormImportDetailSheetsTest {
                 "检查矩阵", new String[][] {
                     {"行号", "行", "上午", "下午"},
                     {"__row", "__row_key", "c1", "c2"},
-                    {"3", "第二行", "", "7"}})), null, null, true);
+                    {"3", "第二行", "", "7"}})), null);
 
         assertThat(plan.errorCount()).isZero();
         Map<String, Object> values = plan.rows().get(0).values();

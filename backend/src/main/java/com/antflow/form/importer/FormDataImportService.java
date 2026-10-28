@@ -75,7 +75,7 @@ public class FormDataImportService {
 
     /** 只读预检：解析 + 校验，**不落库**。 */
     public ImportInspection inspect(long formId, MultipartFile file, String sheetName) {
-        Plan plan = parser.parse(formId, file, sheetName, null, true);
+        Plan plan = parser.parse(formId, file, sheetName);
         return new ImportInspection(String.valueOf(FormImportTemplateService.TEMPLATE_VERSION),
             plan.form().getId(), plan.form().getCode(), plan.form().getName(),
             plan.form().getVersion() == null ? 0 : plan.form().getVersion(),
@@ -90,11 +90,10 @@ public class FormDataImportService {
     /**
      * @param skipErrorRows false：原子模式，任何一行不合格 → 422 且 0 行落库
      *                      true ：跳过模式，逐批提交，坏行单独回报
-     * @param companyId     仅"无部门的全局管理员"需要显式指定；其他人按身份推导
      */
     public ImportOutcome importData(long formId, MultipartFile file, String sheetName,
-                                    boolean skipErrorRows, Long companyId) {
-        Plan plan = parser.parse(formId, file, sheetName, companyId, false);
+                                    boolean skipErrorRows) {
+        Plan plan = parser.parse(formId, file, sheetName);
         long userId = authorizationService.currentUserId();
         String batchId = nextBatchId();
 

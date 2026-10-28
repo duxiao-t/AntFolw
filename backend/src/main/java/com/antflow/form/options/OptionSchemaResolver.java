@@ -68,7 +68,7 @@ class OptionSchemaResolver {
         }
         authorization.requireReadableFormData(request.dataId());
         jdbc.query("""
-            SELECT form_def_id, created_by, company_id FROM t_form_data
+            SELECT form_def_id, created_by FROM t_form_data
             WHERE id = ? AND status = 'DRAFT'
             """, rs -> {
                 if (!rs.next()) return null;

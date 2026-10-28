@@ -47,13 +47,13 @@ class UserExportControllerTest {
             user(3L, "王五", "000003", "wangwu", null)));
         UserController controller = controller(userService);
 
-        String csv = body(controller.export(null, 9L, true, null, null, null, null, "csv", null));
+        String csv = body(controller.export(null, 9L, true, null, null, null, null, "csv"));
 
         assertThat(csv).contains("张三").contains("李四").contains("王五");
         assertThat(csv.lines().count()).isEqualTo(4);
         // 必须是"无分页"的那条查询：带上分页参数就会退化成只导当前页。
         verify(userService, never()).listAuthorizedPage(any(), any(), Mockito.anyBoolean(),
-            Mockito.anyLong(), Mockito.anyLong(), any());
+            Mockito.anyLong(), Mockito.anyLong());
     }
 
     /** 表头与值都要和前端导入器（Contacts.utils.ts 的 headerMap）对得上，导出才能原样导回。 */
@@ -64,7 +64,7 @@ class UserExportControllerTest {
             user(1L, "张三,主管", "000001", "zhangsan", "M")));
         UserController controller = controller(userService);
 
-        String csv = body(controller.export(null, null, null, null, null, null, null, "csv", null));
+        String csv = body(controller.export(null, null, null, null, null, null, null, "csv"));
 
         assertThat(csv).startsWith("\uFEFF姓名,工号,账号,手机,邮箱,职务,性别\r\n");
         assertThat(csv).contains("\"张三,主管\",000001,zhangsan,,,组长,男");
@@ -76,7 +76,7 @@ class UserExportControllerTest {
         when(userService.listAuthorized(any())).thenReturn(List.of());
         UserController controller = controller(userService);
 
-        controller.export(null, 9L, true, null, null, null, null, "csv", null);
+        controller.export(null, 9L, true, null, null, null, null, "csv");
 
         ArgumentCaptor<UserService.UserQuery> query =
             ArgumentCaptor.forClass(UserService.UserQuery.class);
@@ -91,7 +91,7 @@ class UserExportControllerTest {
         UserService userService = Mockito.mock(UserService.class);
         UserController controller = controller(userService);
 
-        String csv = body(controller.export(null, null, null, null, null, List.of(), "user", "csv", null));
+        String csv = body(controller.export(null, null, null, null, null, List.of(), "user", "csv"));
 
         assertThat(csv).isEqualTo("\uFEFF姓名,工号,账号,手机,邮箱,职务,性别\r\n");
         verify(userService, never()).listAuthorized(any());
@@ -102,7 +102,7 @@ class UserExportControllerTest {
         UserController controller = controller(Mockito.mock(UserService.class));
 
         BizException error = assertThrows(BizException.class, () ->
-            controller.export(null, null, null, null, null, null, null, "pdf", null));
+            controller.export(null, null, null, null, null, null, null, "pdf"));
 
         assertThat(error.getMessage()).contains("csv 或 xlsx");
     }
@@ -115,7 +115,7 @@ class UserExportControllerTest {
         UserController controller = new UserController(Mockito.mock(UserMapper.class), userService,
             Mockito.mock(AuthorizationService.class), auditService);
 
-        controller.export(null, null, null, null, null, null, null, "csv", null);
+        controller.export(null, null, null, null, null, null, null, "csv");
 
         verify(auditService).success(eq("org.user.export"), eq("USER"), isNull(),
             eq(AuditService.RiskLevel.HIGH), any(), eq(Map.of("rowCount", 1, "truncated", false,
