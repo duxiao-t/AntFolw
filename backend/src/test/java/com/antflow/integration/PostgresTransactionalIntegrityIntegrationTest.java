@@ -3450,6 +3450,43 @@ class PostgresTransactionalIntegrityIntegrationTest {
         assertThat(taskMapper.countTaskPage(viewerId, "done", "APPROVED")).isEqualTo(1L);
     }
 
+    /**
+     * 「我发起的」(scope=mine) 不能因为实例没有公司归属快照就漏掉它。
+     *
+     * <p>单公司改造后业务层不再写 {@code t_process_instance.company_id}（{@code ProcessStarter}
+     * 只快照发起人与发起部门），新建实例的该列恒为 NULL。列表里若还残留
+     * "company_id 非空且 company_inferred = false" 的条件，非管理员发起人就会在自己的
+     * 「我发起的」里看不到刚提交的单据——而详情接口仍返回 200，所以现象是"列表少数据"，
+     * 不报错、也不影响 admin（admin 被短路放行），极难被发现。
+     *
+     * <p>所以这里**故意不调用** {@code confirmFixtureCompany}：夹具一旦把 company_id 补成非空，
+     * 这条用例就失去了保护意义（上一版的同类用例正是这么被兜住的）。
+     */
+    @Test
+    void myStartedInstancesSurviveWithoutCompanySnapshot() {
+        long starterId = insertUser("mine_no_company_" + UUID.randomUUID());
+        long formId = insertForm("PUBLISHED", VALID_SCHEMA);
+        long processId = insertProcess(formId, "PUBLISHED", approvalFlow(starterId));
+        long dataId = insertSubmittedData(formId, starterId);
+        long instanceId = jdbcTemplate.queryForObject("""
+            INSERT INTO t_process_instance(proc_def_id, form_data_id, status, current_node_id,
+                                           started_by, started_at)
+            VALUES (?, ?, 'RUNNING', NULL, ?, now()) RETURNING id
+            """, Long.class, processId, dataId, starterId);
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT company_id FROM t_process_instance WHERE id = ?", Long.class, instanceId))
+            .as("前提：改造后的新实例不带公司归属快照")
+            .isNull();
+
+        assertThat(processInstanceMapper.selectInstancePage(starterId, false, false, false,
+            "mine", null, null, null, null, null, 10, 0))
+            .extracting(com.antflow.task.ProcessInstance::getId)
+            .containsExactly(instanceId);
+        assertThat(processInstanceMapper.countInstancePage(starterId, false, false, false,
+            "mine", null, null, null, null, null)).isEqualTo(1L);
+    }
+
     @Test
     void desktopRecordSearchUsesBusinessFieldsDateBoundsAndTheOriginalVisibilityPredicate() {
         long viewerId = insertUser("record_viewer_" + UUID.randomUUID());

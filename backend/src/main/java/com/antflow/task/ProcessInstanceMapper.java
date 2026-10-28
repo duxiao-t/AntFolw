@@ -90,7 +90,11 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
         <choose>
           <when test="scope == 'mine'">
             pi.started_by = #{userId}
-            AND (#{admin} OR (pi.company_id IS NOT NULL AND pi.company_inferred = false))
+            <!-- 这里**不要**再叠加"company_id 非空且 company_inferred = false"。
+                 单公司改造后业务层已完全不写这两列（ProcessStarter 不再快照归属），
+                 新单据的 company_id 恒为 NULL；加了这条等于把发起人自己新建的单据
+                 从「我发起的」里静默过滤掉（本人详情接口仍 200，所以只表现为列表少数据）。
+                 `FULL_VISIBLE` 里那条同类谓词也已在同一次改造中删除，两处必须保持一致。 -->
             <!-- 「驳回待改」的单据 current_node_id 就是 '__rework__'，平时列表要把它隐掉（另有入口），
                  但按 status=REWORK 筛时不能隐，否则那条筛选恒为空——发起人永远看不到自己待修改的单据。 -->
             <if test="status != 'REWORK'">
