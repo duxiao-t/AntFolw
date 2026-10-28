@@ -171,8 +171,8 @@ public class FormAccessGuard {
      *
      * <p>这里**刻意不叠加** {@code form:data:read} 的 SELF 数据范围：数据范围只对读生效，
      * 而维护者的职责恰恰是替别人收拾数据，叠加 SELF 会让它只能改自己提交的单据，功能等于不可用。
-     * 真正需要限制的是"能碰哪些单据"，由 {@code InstanceAccessGuard.canCorrectFormData}
-     * 按公司归属判定，比一个数据范围下拉更贴合语义。
+     * 数据级只剩"记录存在"校验（{@code InstanceAccessGuard.canCorrectFormData}）——
+     * 单公司改造后公司不再是隔离维度，横向风险靠 CRITICAL 审计 + 修正台账 + 通知提交人兜。
      *
      * <p>未授权时抛 HiddenResourceException（资源不存在）而不是 403，
      * 与 {@link #requireFormMaintenance} 保持一致：不泄露表单是否存在。

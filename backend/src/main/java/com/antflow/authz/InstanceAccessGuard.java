@@ -145,18 +145,17 @@ public class InstanceAccessGuard {
     }
 
     /**
-     * 能否修正这份表单数据的**数据级**校验（表单级校验见
-     * {@code FormAccessGuard.requireFormCorrection}）。
+     * 修正入口的**存在性**校验（表单级校验见 {@code FormAccessGuard.requireFormCorrection}）。
      *
-     * <p>这里只回答"这份数据能不能碰"，不关心能力点，因为能力与维护者关系在表单级已经判过。
-     * 管理员放行一切；非管理员要求归属已确认——{@code company_id} 为空或属于推断时，
-     * 连"这份数据算哪家公司的"都不确定，允许改写会让它在别人的可见范围里凭空出现或消失。
+     * <p>改造前这里还有一层"数据级公司归属"闸门（归属未确认的单据只允许管理员改）。
+     * 单公司之后公司不再是隔离维度、写路径也不再产生归属快照，那一层已经不存在，
+     * 所以现在只剩下"这条记录存在"。真正的权限判定全在表单级（能力点 + 维护者关系）。
+     *
+     * <p>保留这个方法而不是让调用方直接查库：四个修正入口（view/submit/review/rollback）
+     * 共用同一个"记录不存在 → 资源不存在"语义，收敛在这里以后要加数据级规则也只改一处。
      */
     public boolean canCorrectFormData(long formDataId, long userId) {
-        FormDataAccess resource = formDataAccess(formDataId);
-        if (resource == null) return false;
-        if (snapshots.snapshot(userId).admin()) return true;
-        return true;
+        return formDataAccess(formDataId) != null;
     }
 
     public void requireCorrectableFormData(long formDataId) {

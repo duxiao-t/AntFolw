@@ -3,6 +3,12 @@
 > 状态：设计稿（待评审）｜作者：架构师｜版本：2026-10-23
 > 适用范围：`backend/`（核心）、`frontend/`（台账入口）、`docs/`
 > 本文只讲设计与任务拆分，不含实现代码；伪 SQL 与接口签名用于固定语义。
+>
+> **修订（2026-10-28，单公司拆除之后）**：公司归属不再是隔离维度，发起路径也不再写
+> `company_id`/`company_inferred`。因此本文中所有"按公司归属判定/归属未确认仅管理员可改"
+> 的规则（§3.2 ③、§3.3 的"数据范围"行、§7 的 R2、错误码 `CORRECTION_COMPANY_UNCONFIRMED`）
+> **均已作废**：数据级只剩"记录存在"校验，权限判定全在表单级（能力点 + 维护者关系），
+> 横向风险靠 `CRITICAL` 审计 + 修正台账 + 通知提交人。仍有效的是 R1（不写结构性列）与 R3。
 
 ---
 
@@ -115,7 +121,7 @@
 | --- | --- | --- |
 | ① 端点能力 | `@PreAuthorize("@authz.console('form:data:correct')")` + `authorizationService.requirePermission(...)`（两处都写，与 `FormDataController` 现有风格一致） | 有没有"修正"这个动作的授权 |
 | ② 资源授权 | `FormAccessGuard.requireFormCorrection(formDefId)`：`admin → 放行`；否则 `requirePermission(correct)` **且** `hasFormMaintainer(formDefId, userId)` | 是不是**这张表单**的维护者（`t_form_maintainer` 成员关系 + 原子能力双满足，形状照抄 `requireFormMaintenance`）。<br>**必须复用 `hasFormMaintainer`、不要另写裸 `EXISTS(SELECT 1 FROM t_form_maintainer …)`**：后者看着等价，但漏掉了 `form.deleted = 0` 与 `user.status = 'ACTIVE'` 两个校验（F9），会让**被停用的维护者账号继续能改已删除表单的数据**——这是 44 个表单、多人维护的实际配置下真会发生的事 |
-| ③ 数据范围 | `InstanceAccessGuard.canCorrectFormData(formDataId)`（新增）：`admin → true`；否则要求 `company_id` 非空 **且** `company_inferred = false` **且** `company_id = 本人公司`；**刻意不叠加** `form:data:read` 的 scope | 这条**单据**能不能动 |
+| ③ 数据范围 ~~（已作废，见文首修订）~~ | 现为 `InstanceAccessGuard.canCorrectFormData(formDataId)`：只校验**记录存在**；**刻意不叠加** `form:data:read` 的 scope | 这条**单据**存不存在 |
 
 **为什么第 ③ 层不叠加 `form:data:read` 的 scope（这是本次最关键的一次判断）**：
 `form:data:read` 的默认范围是 `SELF`。若修正复用它，维护者就只能修正自己提交的单据——而"修别人填错的单"正是本功能存在的理由，等于功能不可用。公司边界已经收敛了横向风险，纵向风险由 `CRITICAL` 审计 + 修正台账 + 提交人通知来兜。这属于**刻意的例外**，必须在代码注释与单测里锁死，防止后人"顺手补上"。
@@ -127,12 +133,12 @@
 | 维度 | 全局管理员 | 表单维护者（持有 `form:data:correct`） |
 | --- | --- | --- |
 | 表单范围 | 任意表单 | 仅 `t_form_maintainer` 覆盖的表单 |
-| 数据范围 | 全部（**含**归属未确认 / 跨公司） | 本公司内、**归属已确认**（`company_id` 非空且 `company_inferred=false`）的数据 |
+| 数据范围 ~~（已作废，见文首修订）~~ | 全部 | 与该表单维护者身份一致（不再有公司/归属维度） |
 | 允许的实例状态 | APPROVED / REJECTED / WITHDRAWN / 无实例 | 同（`RUNNING` 都禁止） |
 | 换版修正（按最新 schema 重填） | **禁止**（修正永不改 `form_def_version`，见 §4.3） | **禁止** |
 | 一键回滚 | 可（任意历史修订） | 可（本公司内、且仅回滚"由本表单修正产生"的修订） |
 | 结构性列（单号/归属/提交人/版本） | 禁止 | 禁止 |
-| 归属未确认的数据 | 可修（但**不会**顺手把归属"确认"掉） | 不可修 → 提示"请联系管理员确认归属" |
+| ~~归属未确认的数据~~（单公司后不存在该状态） | — | — |
 
 ### 3.4 字段白名单 / 黑名单（必须有，且必须是**服务端算的白名单**）
 
@@ -358,7 +364,7 @@ COMMIT;
 | 规则 | 内容 | 理由 |
 | --- | --- | --- |
 | R1 | 修正**永不写** `company_id` / `company_inferred`（结构性列，参数白名单之外，服务端硬拒） | 一旦能改归属，单据会从某些人的台账里消失或凭空出现，且没有任何历史能解释 |
-| R2 | 归属**未确认**（`company_id IS NULL` 或 `company_inferred = true`）的数据 → 只有全局管理员可修正；修正**不**顺手把 `company_inferred` 改成 `false` | 不允许用一次内容订正把"不确定的归属"洗成"事实" |
+| ~~R2~~ **（已作废，见文首修订）** | 单公司后不再有"归属未确认"状态，该规则不再适用 | — |
 | R3 | 修改"组织/公司维度映射源"字段（§3.4）→ 仅管理员 + 二次确认 + 审计 metadata 标 `visibilityImpact: "downstream-only"` | 它不影响归属列，但会影响 BI 台账的部门分组，属于下游可见性变化，要留痕 |
 
 **若将来业务真的需要"把单据从 A 公司挪到 B 公司"**：那是**另一个动作**（建议 `form:data:attribution:fix`），不是修正的隐藏参数。它必须走：管理员 → 双人复核 → 显式审计 `CRITICAL` → 同步 `t_process_instance.company_id` → 重算"提交人是否仍有该表单使用授权（`hasFormGrant`）"→ 通知双方公司管理员 → 下游刷新。这一条写进文档是为了**堵住"顺手加个参数"的诱惑**，本次不实现。
@@ -466,7 +472,7 @@ GET /api/forms/data/corrections?sinceId=<lastSeen>&limit=500
 | `CORRECTION_FIELD_FORBIDDEN` | 400 | 请求字段不在 `allowedFields`（含黑名单） | 指名到字段："字段「所属部门」不允许事后修正：它决定审批走向" |
 | `CORRECTION_FIELD_UNKNOWN` | 400 | 字段 id 不在该单据版本的 schema 里 | "字段不存在于这张单据的表单版本" |
 | `CORRECTION_REASON_REQUIRED` | 400 | 缺 `reasonCode` / `OTHER` 缺说明 / 缺 `confirm` | "请填写修正原因并确认" |
-| `CORRECTION_COMPANY_UNCONFIRMED` | 409 | 归属未确认且操作者非管理员（R2） | "该单据的公司归属尚未确认，请联系管理员" |
+| ~~`CORRECTION_COMPANY_UNCONFIRMED`~~（已随 R2 作废，代码中不存在） | 409 | — | — |
 | `FORM_DATA_INVALID` | 400 | 走既有 `validateSubmission` 抛出的字段级校验错误 | 原样透出字段错误（与提交表单口径一致） |
 
 ---

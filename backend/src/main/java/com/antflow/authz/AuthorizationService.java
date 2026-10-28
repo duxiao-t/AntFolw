@@ -212,13 +212,13 @@ public class AuthorizationService {
     /**
      * 修正已提交表单数据的入口校验（表单级）：管理员放行，
      * 其余必须持有 {@code form:data:correct} 且是该表单维护者。
-     * 还需配合 {@link #requireCorrectableFormData(long)} 做数据级（公司归属）校验。
+     * 还需配合 {@link #requireCorrectableFormData(long)} 做存在性校验。
      */
     public void requireFormCorrection(long formId) {
         forms.requireFormCorrection(formId);
     }
 
-    /** 修正的数据级校验：归属未确认的单据仅管理员可碰。 */
+    /** 修正的记录存在性校验（公司归属维度已在单公司改造中移除，见 {@code InstanceAccessGuard}）。 */
     public void requireCorrectableFormData(long formDataId) {
         instances.requireCorrectableFormData(formDataId);
     }

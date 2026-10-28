@@ -26,16 +26,16 @@ import java.util.function.Supplier;
 /**
  * 发起流程：建运行时表单（SUBMITTED）→ 建实例（RUNNING）→ 从 ROOT 出发落地首个节点。
  *
- * <p>与审批推进分开的变化原因：发起阶段改的是**归属、编号、快照、首节点**，
- * 审批阶段改的是**任务与分流**；两者的错误码集合也几乎不重叠（BAD_COMPANY / FORM_NOT_PUBLISHED /
+ * <p>与审批推进分开的变化原因：发起阶段改的是**编号、快照、首节点**，
+ * 审批阶段改的是**任务与分流**；两者的错误码集合也几乎不重叠（FORM_NOT_PUBLISHED /
  * NO_FLOW vs BAD_TASK_TYPE / BAD_FLOW / CONCURRENT_CONFLICT）。
  *
  * <p>五个易错点：
  * <ol>
  *   <li>**不能加 {@code @Transactional}**：入口 {@link ProcessEngine#start} 已开事务。拆开后
  *       "表单 + 实例 + 首个任务"必须同生共死，否则会留下没有任务的 RUNNING 实例。</li>
- *   <li>companyId 的检查必须**排在 runtimeV2 之前**（错误码顺序是外部契约：
- *       无归属优先报 BAD_COMPANY，而不是 RUNTIME_REQUIRED）。</li>
+ *   <li>**不要再加公司归属检查**：单公司改造后发起不再写 {@code company_id}，
+ *       以前那种"无归属优先报 BAD_COMPANY"的 fail-closed 已删除。</li>
  *   <li>{@code engineVersion} 的唯一写入点在这里，硬编码 2：新实例一律 V2，V1 只是只读兼容层。
  *       不要改成按配置读取。</li>
  *   <li>后续推进一律读 {@code pi.getProcessSnapshot()}（不是 {@code pd.getProcess()}），
