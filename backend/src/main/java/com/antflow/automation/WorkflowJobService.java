@@ -63,31 +63,7 @@ public class WorkflowJobService {
         if (existing != null && reusable(existing)) return new JobCreation(existing, false);
         boolean rearmed = existing != null;
         JsonNode props = node.path("props");
-        URI uri;
-        try {
-            uri = URI.create(props.path("url").asText());
-        } catch (Exception e) {
-            throw new BizException("BAD_WEBHOOK", "Webhook URL 无效");
-        }
-        securityPolicy.validate(uri);
-        ObjectNode payload = json.createObjectNode();
-        payload.put("method", props.path("method").asText("POST"));
-        payload.put("url", uri.toString());
-        payload.put("contentType", props.path("contentType").asText("application/json"));
-        payload.put("secret", props.path("secret").asText());
-        payload.set("headers", props.path("headers").isArray()
-            ? props.path("headers").deepCopy() : json.createArrayNode());
-        ObjectNode parameters = payload.putObject("parameters");
-        for (JsonNode parameter : iterable(props.path("parameters"))) {
-            String key = parameter.path("key").asText();
-            if (key.isBlank()) continue;
-            if ("FIELD".equals(parameter.path("source").asText())) {
-                JsonNode value = formData.path(parameter.path("fieldId").asText());
-                parameters.set(key, value.isMissingNode() ? json.nullNode() : value.deepCopy());
-            } else {
-                parameters.put(key, parameter.path("value").asText());
-            }
-        }
+        ObjectNode payload = buildTriggerPayload(props, formData);
         boolean blocking = !"AFTER_SEND".equals(props.path("continueMode").asText("ON_SUCCESS"));
         WorkflowJob job = newJob(instance, node, "TRIGGER", blocking,
             OffsetDateTime.now(), payload);
@@ -95,6 +71,55 @@ public class WorkflowJobService {
         insertHistory(instance.getId(), node.path("id").asText(), "TRIGGER_QUEUED",
             operatorId, rearmed ? "撤回后重建" : null);
         return new JobCreation(job, true);
+    }
+
+    /**
+     * 由 TRIGGER 节点 props + 表单数据构造请求载荷（入队与「测试发送」共用）。
+     * 校验/组装顺序与原先 queueTrigger 完全一致：解析 URL → SSRF 校验 → 拼 method/url/content/secret/headers → body。
+     */
+    public ObjectNode buildTriggerPayload(JsonNode props, JsonNode formData) {
+        URI uri;
+        try {
+            uri = URI.create(props.path("url").asText());
+        } catch (Exception e) {
+            throw new BizException("BAD_WEBHOOK", "Webhook URL 无效");
+        }
+        securityPolicy.validate(uri);
+        JsonNode data = formData == null ? json.createObjectNode() : formData;
+        ObjectNode payload = json.createObjectNode();
+        payload.put("method", props.path("method").asText("POST"));
+        payload.put("url", uri.toString());
+        payload.put("contentType", props.path("contentType").asText("application/json"));
+        payload.put("secret", props.path("secret").asText());
+        payload.set("headers", props.path("headers").isArray()
+            ? props.path("headers").deepCopy() : json.createArrayNode());
+        if ("TEMPLATE".equals(props.path("bodyMode").asText("PARAMETERS"))) {
+            payload.put("body", renderTemplate(props.path("bodyTemplate").asText(), data));
+        } else {
+            ObjectNode parameters = payload.putObject("parameters");
+            for (JsonNode parameter : iterable(props.path("parameters"))) {
+                String key = parameter.path("key").asText();
+                if (key.isBlank()) continue;
+                if ("FIELD".equals(parameter.path("source").asText())) {
+                    JsonNode value = data.path(parameter.path("fieldId").asText());
+                    parameters.set(key, value.isMissingNode() ? json.nullNode() : value.deepCopy());
+                } else {
+                    parameters.put(key, parameter.path("value").asText());
+                }
+            }
+        }
+        return payload;
+    }
+
+    /** 记录一次投递的 HTTP 状态与响应体（截断），成功/失败都记，供实例详情排障。 */
+    @Transactional
+    public void recordDelivery(long jobId, Integer statusCode, String body) {
+        String trimmed = body == null ? null
+            : (body.length() <= 2000 ? body : body.substring(0, 2000) + "…");
+        mapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<WorkflowJob>()
+            .eq(WorkflowJob::getId, jobId)
+            .set(WorkflowJob::getResponseStatus, statusCode)
+            .set(WorkflowJob::getResponseBody, trimmed));
     }
 
     @Transactional
@@ -212,6 +237,11 @@ public class WorkflowJobService {
     private static Iterable<JsonNode> iterable(JsonNode node) {
         if (node instanceof ArrayNode array) return array;
         return List.of();
+    }
+
+    /** 模板模式：把 {@code ${字段id}} 渲染成字段值（按占位符所在上下文决定文本/值，见 WebhookBodyTemplate）。 */
+    private String renderTemplate(String template, JsonNode formData) {
+        return WebhookBodyTemplate.render(template, formData, json);
     }
 
     private void insertHistory(Long instanceId, String nodeId, String action,

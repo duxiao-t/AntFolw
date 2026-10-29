@@ -27,6 +27,7 @@ export function DetailHero({
   onApprove,
   onReject,
   onWithdraw,
+  onDiscard,
   onOverride,
 }: {
   instance: any;
@@ -42,6 +43,7 @@ export function DetailHero({
   onApprove(): void;
   onReject(taskId: number): void;
   onWithdraw(): void;
+  onDiscard(): void;
   onOverride(): void;
 }) {
   const statusView = instanceStatus(instance.status, instance.currentNodeId);
@@ -101,6 +103,9 @@ export function DetailHero({
           )}
           {can.withdraw && isStarter && isRunner && !isRework && fullVisibility && (
             <Button onClick={onWithdraw}>撤回流程</Button>
+          )}
+          {can.discard && isStarter && isRunner && isRework && fullVisibility && (
+            <Button danger onClick={onDiscard}>作废申请</Button>
           )}
           {can.override && isRunner && hasPendingTask && fullVisibility && (
             <Button danger icon={<ThunderboltOutlined />} onClick={onOverride}>

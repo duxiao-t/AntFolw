@@ -193,6 +193,18 @@ public class MobileWorkflowController {
                 Map.of("client", "mobile")));
     }
 
+    @PostMapping("/instances/{id}/discard")
+    @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_INSTANCE_DISCARD + "')")
+    public void discard(@PathVariable Long id) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_DISCARD);
+        long userId = principal().userId();
+        auditService.execute(() -> workflowService.discard(id, userId),
+            () -> auditService.success("workflow.instance.discard", "PROCESS_INSTANCE", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", List.of("status", "formData.status", "reworkTask")),
+                Map.of("client", "mobile")));
+    }
+
     @GetMapping("/tasks")
     @PreAuthorize("@authz.capability('" + PermissionCodes.WORKFLOW_TASK_READ + "')")
     public MobilePageDto<MobileTaskDto> tasks(@RequestParam(defaultValue = "pending") String view,

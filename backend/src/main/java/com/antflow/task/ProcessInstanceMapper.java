@@ -100,6 +100,10 @@ public interface ProcessInstanceMapper extends BaseMapper<ProcessInstance> {
             <if test="status != 'REWORK'">
               AND pi.current_node_id IS DISTINCT FROM '__rework__'
             </if>
+            <!-- 作废（软终态 WITHDRAWN）后从发起人视图隐藏；显式筛「已撤回」时仍可查。 -->
+            <if test="status != 'WITHDRAWN'">
+              AND pi.status IS DISTINCT FROM 'WITHDRAWN'
+            </if>
           </when>
           <otherwise>
         """ + FULL_VISIBLE + """

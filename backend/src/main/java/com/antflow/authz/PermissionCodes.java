@@ -48,6 +48,8 @@ public final class PermissionCodes {
     public static final String WORKFLOW_INSTANCE_START = "workflow:instance:start";
     public static final String WORKFLOW_INSTANCE_READ = "workflow:instance:read";
     public static final String WORKFLOW_INSTANCE_WITHDRAW = "workflow:instance:withdraw";
+    /** 发起人作废「待修改」申请（软终态，从本人视图隐藏）。 */
+    public static final String WORKFLOW_INSTANCE_DISCARD = "workflow:instance:discard";
     public static final String WORKFLOW_INSTANCE_OVERRIDE = "workflow:instance:override";
     public static final String WORKFLOW_MONITOR_READ = "workflow:monitor:read";
     public static final String WORKFLOW_OUTBOX_RETRY = "workflow:outbox:retry";
@@ -62,6 +64,8 @@ public final class PermissionCodes {
 
     // 第三方对接
     public static final String INTEGRATION_WECOM_MANAGE = "integration:wecom:manage";
+    /** 管理 Webhook 出站允许主机（SSRF 安全边界，仅管理员）。 */
+    public static final String INTEGRATION_WEBHOOK_MANAGE = "integration:webhook:manage";
     public static final String INTEGRATION_IDENTITY_PROVIDER_MANAGE =
         "integration:identity_provider:manage";
     public static final String INTEGRATION_STORAGE_MANAGE = "integration:storage:manage";

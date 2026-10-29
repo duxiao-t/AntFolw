@@ -11,7 +11,7 @@ export async function settings2(options?: { [key: string]: any }) {
 }
 
 /** 此处后端没有提供注释 PUT /api/integrations/wecom/settings */
-export async function save(
+export async function save1(
   body: AntFlowAPI.SaveSettingsRequest,
   options?: { [key: string]: any }
 ) {

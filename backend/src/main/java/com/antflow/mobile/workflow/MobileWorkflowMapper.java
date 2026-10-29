@@ -160,6 +160,9 @@ public interface MobileWorkflowMapper {
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
           AND pi.current_node_id IS DISTINCT FROM '__rework__'
+        <if test="status != 'WITHDRAWN'">
+          AND pi.status IS DISTINCT FROM 'WITHDRAWN'
+        </if>
         <if test="status != null and status != ''">
           AND pi.status = #{status}
         </if>
@@ -197,6 +200,9 @@ public interface MobileWorkflowMapper {
           JOIN t_form_definition form ON form.id = data.form_def_id
           WHERE pi.started_by = #{userId}
             AND pi.current_node_id IS DISTINCT FROM '__rework__'
+          <if test="status != 'WITHDRAWN'">
+            AND pi.status IS DISTINCT FROM 'WITHDRAWN'
+          </if>
           UNION ALL
           SELECT 'DIRECT' AS kind,
                  data.id,
@@ -406,6 +412,7 @@ public interface MobileWorkflowMapper {
         JOIN t_form_data data ON data.id = pi.form_data_id
         JOIN t_form_definition form ON form.id = data.form_def_id
         WHERE pi.started_by = #{userId}
+          AND pi.status IS DISTINCT FROM 'WITHDRAWN'
         ORDER BY pi.started_at DESC, pi.id DESC
         LIMIT #{limit}
         """)

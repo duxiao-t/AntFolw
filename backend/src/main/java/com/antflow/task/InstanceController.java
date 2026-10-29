@@ -167,6 +167,18 @@ public class InstanceController {
                     "reworkTask")), Map.of()));
     }
 
+    @PostMapping("/{id}/discard")
+    @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_INSTANCE_DISCARD + "')")
+    public void discard(@PathVariable Long id) {
+        authorizationService.requirePermission(PermissionCodes.WORKFLOW_INSTANCE_DISCARD);
+        var p = PrincipalHolder.current().orElseThrow();
+        auditService.execute(() -> engine.discard(id, p.userId()),
+            () -> auditService.success("workflow.instance.discard", "PROCESS_INSTANCE", id,
+                AuditService.RiskLevel.HIGH,
+                Map.of("changedFields", List.of("status", "formData.status", "reworkTask")),
+                Map.of()));
+    }
+
     @PostMapping("/{id}/jobs/{jobId}/retry")
     @PreAuthorize("@authz.console('" + PermissionCodes.WORKFLOW_AUTOMATION_RETRY + "')")
     public void retryAutomationJob(@PathVariable Long id, @PathVariable Long jobId) {

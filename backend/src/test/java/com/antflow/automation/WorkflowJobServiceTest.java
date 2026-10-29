@@ -50,6 +50,50 @@ class WorkflowJobServiceTest {
     }
 
     @Test
+    void rendersNestedBodyTemplateWhenQueueingTrigger() throws Exception {
+        ProcessInstance instance = new ProcessInstance();
+        instance.setId(11L);
+        var node = json.readTree("""
+            {"id":"trigger-1","type":"TRIGGER","props":{
+              "method":"POST","url":"https://hooks.example.com/flow",
+              "contentType":"application/json","secret":"12345678",
+              "continueMode":"ON_SUCCESS","headers":[],"bodyMode":"TEMPLATE",
+              "bodyTemplate":"{\\"msgtype\\":\\"text\\",\\"text\\":{\\"content\\": ${subject}}}"}}
+            """);
+        var formData = json.readTree("{\"subject\":\"报销已通过\"}");
+
+        service.queueTrigger(instance, node, formData, 7L);
+
+        ArgumentCaptor<WorkflowJob> captor = ArgumentCaptor.forClass(WorkflowJob.class);
+        verify(mapper).insert(captor.capture());
+        var payload = json.readTree(captor.getValue().getPayload());
+        assertThat(payload.path("body").asText())
+            .isEqualTo("{\"msgtype\":\"text\",\"text\":{\"content\": \"报销已通过\"}}");
+    }
+
+    @Test
+    void rendersFieldInsideJsonStringWithEscaping() throws Exception {
+        ProcessInstance instance = new ProcessInstance();
+        instance.setId(12L);
+        var node = json.readTree("""
+            {"id":"trigger-2","type":"TRIGGER","props":{
+              "method":"POST","url":"https://hooks.example.com/flow",
+              "contentType":"application/json","secret":"12345678",
+              "continueMode":"ON_SUCCESS","headers":[],"bodyMode":"TEMPLATE",
+              "bodyTemplate":"{\\"text\\":\\"审批 ${title} 已通过\\"}"}}
+            """);
+        var formData = json.readTree("{\"title\":\"含\\\"引号\\\"的标题\"}");
+
+        service.queueTrigger(instance, node, formData, 7L);
+
+        ArgumentCaptor<WorkflowJob> captor = ArgumentCaptor.forClass(WorkflowJob.class);
+        verify(mapper).insert(captor.capture());
+        var payload = json.readTree(captor.getValue().getPayload());
+        assertThat(payload.path("body").asText())
+            .isEqualTo("{\"text\":\"审批 含\\\"引号\\\"的标题 已通过\"}");
+    }
+
+    @Test
     void retriesWithBackoffThenFailsOnEighthAttempt() {
         WorkflowJob retrying = runningJob(1);
         when(mapper.selectForUpdate(1L)).thenReturn(retrying);

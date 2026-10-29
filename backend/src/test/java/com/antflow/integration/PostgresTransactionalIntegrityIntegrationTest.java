@@ -377,6 +377,67 @@ class PostgresTransactionalIntegrityIntegrationTest {
     }
 
     @Test
+    @org.springframework.transaction.annotation.Transactional
+    void discardingWithdrawnSubmissionCancelsReworkAndHidesItFromStarterViews() {
+        long starter = userId("admin");
+        long approver = userId("bob");
+        StartedV2 started = startV2(approvalFlow(approver), starter);
+        setPrincipal(starter);
+        try {
+            processEngine.withdraw(started.instanceId(), starter);
+            sqlSession.clearCache();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT current_node_id FROM t_process_instance WHERE id = ?", String.class,
+                started.instanceId())).isEqualTo("__rework__");
+            long reworkTask = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_task WHERE proc_inst_id = ? AND task_type = 'REWORK'",
+                Long.class, started.instanceId());
+
+            processEngine.discard(started.instanceId(), starter);
+            sqlSession.clearCache();
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_process_instance WHERE id = ?", String.class,
+                started.instanceId())).isEqualTo("WITHDRAWN");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT current_node_id FROM t_process_instance WHERE id = ?", String.class,
+                started.instanceId())).isNull();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT finished_at FROM t_process_instance WHERE id = ?",
+                java.time.OffsetDateTime.class, started.instanceId())).isNotNull();
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_form_data WHERE id = ?", String.class,
+                started.formDataId())).isEqualTo("WITHDRAWN");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM t_task WHERE id = ?", String.class, reworkTask))
+                .isEqualTo("CANCELLED");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM t_task_history WHERE proc_inst_id = ? AND action = 'DISCARD'",
+                Long.class, started.instanceId())).isEqualTo(1L);
+
+            // 作废后从发起人视图（我发起的 / 我的提交）隐藏。
+            assertThat(processInstanceMapper.selectInstancePage(starter, false, false, false,
+                "mine", null, null, null, null, null, 10, 0))
+                .extracting(com.antflow.task.ProcessInstance::getId)
+                .doesNotContain(started.instanceId());
+            assertThat(formDataMapper.selectMySubmissions(starter, null, 10, 0))
+                .extracting(com.antflow.form.runtime.FormData::getId)
+                .doesNotContain(started.formDataId());
+
+            // 反向：非发起人、重复作废都要被拒。
+            setPrincipal(approver);
+            assertThatThrownBy(() -> processEngine.discard(started.instanceId(), approver))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            setPrincipal(starter);
+            assertThatThrownBy(() -> processEngine.discard(started.instanceId(), starter))
+                .isInstanceOfSatisfying(BizException.class,
+                    error -> assertThat(error.getCode()).isEqualTo("BAD_STATE"));
+        } finally {
+            PrincipalHolder.clear();
+        }
+    }
+
+    @Test
     void oldRoundPendingTaskCannotAdvanceRunningInstance() {
         StartedV2 started = startV2(approvalFlow(userId("bob")), userId("admin"));
         long task = jdbcTemplate.queryForObject(

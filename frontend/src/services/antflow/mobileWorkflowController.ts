@@ -188,6 +188,20 @@ export async function instance(
   );
 }
 
+/** 此处后端没有提供注释 POST /api/mobile/instances/${param0}/discard */
+export async function discard(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: AntFlowAPI.discardParams,
+  options?: { [key: string]: any }
+) {
+  const { id: param0, ...queryParams } = params;
+  return request<any>(`/api/mobile/instances/${param0}/discard`, {
+    method: "POST",
+    params: { ...queryParams },
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 POST /api/mobile/instances/${param0}/withdraw */
 export async function withdraw1(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)

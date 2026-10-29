@@ -12,6 +12,7 @@ export const CAPABILITY = {
   workflowInstanceRead: 'workflow:instance:read',
   workflowInstanceOverride: 'workflow:instance:override',
   workflowInstanceWithdraw: 'workflow:instance:withdraw',
+  workflowInstanceDiscard: 'workflow:instance:discard',
   workflowMonitorRead: 'workflow:monitor:read',
   workflowTaskRead: 'workflow:task:read',
   workflowTaskApprove: 'workflow:task:approve',

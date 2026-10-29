@@ -78,4 +78,52 @@ class WebhookClientTest {
             }
         }
     }
+
+    @Test
+    void capturesResponseBodyAndWarnsOnNonZeroErrCode() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/hook", exchange -> {
+            byte[] response = "{\"errcode\":93000,\"errmsg\":\"invalid webhook url\"}"
+                .getBytes(StandardCharsets.UTF_8);
+            exchange.getRequestBody().readAllBytes();
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        AutomationProperties properties = new AutomationProperties();
+        properties.setAllowedHosts(List.of("127.0.0.1"));
+        properties.setAllowPrivateAddresses(true);
+        Environment environment = mock(Environment.class);
+        when(environment.acceptsProfiles(any(Profiles.class))).thenReturn(false);
+        ObjectMapper json = new ObjectMapper();
+        WebhookClient client = new WebhookClient(
+            properties, new WebhookSecurityPolicy(properties, environment), json);
+        WorkflowJob job = new WorkflowJob();
+        job.setDeliveryId(UUID.randomUUID());
+
+        ObjectNode payload = json.createObjectNode();
+        payload.put("method", "POST");
+        payload.put("url", "http://127.0.0.1:" + server.getAddress().getPort() + "/hook");
+        payload.put("contentType", "application/json");
+        payload.put("secret", "test-signing-secret");
+        payload.putArray("headers");
+        payload.putObject("parameters").put("msg", "hi");
+
+        WebhookClient.DeliveryResult result = client.send(job, payload);
+        assertThat(result.successful()).isTrue();
+        assertThat(result.body()).contains("93000");
+        assertThat(WebhookClient.applicationWarning(json.readTree(result.body())))
+            .contains("93000");
+    }
+
+    @Test
+    void applicationWarningIgnoresZeroCodesAndNonJson() throws Exception {
+        ObjectMapper json = new ObjectMapper();
+        assertThat(WebhookClient.applicationWarning(json.readTree("{\"errcode\":0}"))).isNull();
+        assertThat(WebhookClient.applicationWarning(json.readTree("\"ok\""))).isNull();
+        assertThat(WebhookClient.applicationWarning(json.readTree("{\"code\":200}")))
+            .contains("code=200");
+    }
 }

@@ -14,6 +14,8 @@ public record WorkflowJobView(
     UUID deliveryId,
     boolean blocking,
     String lastError,
+    Integer responseStatus,
+    String responseBody,
     OffsetDateTime completedAt,
     OffsetDateTime createdAt
 ) {
@@ -22,8 +24,14 @@ public record WorkflowJobView(
             job.getId(), job.getNodeId(), job.getJobType(), job.getStatus(),
             job.getScheduledAt(), value(job.getAttempts()), value(job.getMaxAttempts()),
             job.getDeliveryId(), Boolean.TRUE.equals(job.getBlocking()),
-            redactError(job.getLastError()), job.getCompletedAt(), job.getCreatedAt()
+            redactError(job.getLastError()), job.getResponseStatus(),
+            truncate(job.getResponseBody()), job.getCompletedAt(), job.getCreatedAt()
         );
+    }
+
+    private static String truncate(String body) {
+        if (body == null) return null;
+        return body.length() <= 500 ? body : body.substring(0, 500) + "…";
     }
 
     private static int value(Integer value) {

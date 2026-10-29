@@ -151,6 +151,10 @@ final class MobileTaskCommandService {
         engine.withdraw(instanceId, userId);
     }
 
+    void discard(Long instanceId, long userId) {
+        engine.discard(instanceId, userId);
+    }
+
     private static Long asLong(Object value) {
         if (value instanceof Number number) {
             return number.longValue();

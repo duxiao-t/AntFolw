@@ -31,6 +31,7 @@ import { validateSchemaValues } from "./schema/fieldRegistry";
 import { collectVisibleValues } from "./schema/validators";
 import type { FieldMode, FieldValidationErrors, MobileFormValues } from "./schema/types";
 import { fetchReworkTask, saveReworkTask } from "./rework.api";
+import { discardMobileInstance } from "../processes/processes.api";
 import { isApiError } from "../../shared/api/errors";
 import { createClientId } from "../../shared/clientId";
 
@@ -57,6 +58,7 @@ export function FormFillPage() {
   const [submitNavigationAllowed, setSubmitNavigationAllowed] = useState(false);
   const [pendingSubmitPath, setPendingSubmitPath] = useState<string | null>(null);
   const [draftVersionMismatch, setDraftVersionMismatch] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
 
   const formQuery = useQuery({
     queryKey: queryKeys.form(code, initialDraftId, reworkTaskId),
@@ -258,6 +260,19 @@ export function FormFillPage() {
             </button>
           </div>
         ) : null}
+        {reworkTaskId != null ? (
+          <div className="rework-banner" role="note">
+            <span>这是一张待修改的申请；若不打算继续修改，可直接作废。</span>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={discarding}
+              onClick={() => void discardRework()}
+            >
+              {discarding ? "作废中..." : "作废申请"}
+            </button>
+          </div>
+        ) : null}
         <section className="form-fill-intro" aria-label="表单说明">
           {status ? (
             <div className="form-fill-intro__kicker">
@@ -335,6 +350,35 @@ export function FormFillPage() {
       ) : null}
     </AppPage>
   );
+
+  async function discardRework() {
+    const instanceId = reworkQuery.data?.instanceId;
+    if (instanceId == null) {
+      showToast({ icon: "fail", content: "申请信息缺失，无法作废" });
+      return;
+    }
+    if (typeof window.confirm === "function"
+      && !window.confirm("作废后该申请将从待办与列表中移除，且不可恢复。确认作废？")) {
+      return;
+    }
+    setDiscarding(true);
+    try {
+      await discardMobileInstance(instanceId, createClientId("discard"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.taskRoot }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.instance(instanceId) }),
+      ]);
+      void navigate("/tasks?view=pending", { replace: true });
+    } catch (errorValue) {
+      showToast({
+        icon: "fail",
+        content: errorValue instanceof Error ? errorValue.message : "作废失败",
+      });
+    } finally {
+      setDiscarding(false);
+    }
+  }
 
   async function discardDraft() {
     if (initialDraftId == null) {

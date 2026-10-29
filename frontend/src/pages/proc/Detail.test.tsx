@@ -78,6 +78,7 @@ function stubApi(options: StubOptions = {}) {
         currentNodeName: '部门审批',
       };
     }
+    if (url === '/api/instances/1/discard') return {};
     if (url === '/api/pickers/users/selected') return [];
     if (url.endsWith('/comment-presets')) return { approve: [], reject: [] };
     throw new Error(`Unexpected request: ${url}`);
@@ -188,6 +189,40 @@ describe('流程详情页', () => {
     if (visible) expect(withdraw).toBeEnabled();
     else expect(withdraw).toBeNull();
     if (notice) expect(screen.getByText(notice)).toBeInTheDocument();
+  });
+
+  const discardCases: Array<{ name: string; options: StubOptions; visible: boolean }> = [
+    { name: '发起人 + 待修改 + 完整可见', options: { startedBy: 1, currentNodeId: '__rework__' }, visible: true },
+    { name: '非发起人', options: { startedBy: 2, currentNodeId: '__rework__' }, visible: false },
+    { name: '流程不在待修改', options: { startedBy: 1 }, visible: false },
+    {
+      name: '当前账号只能看摘要',
+      options: { startedBy: 1, currentNodeId: '__rework__', visibility: 'SUMMARY' },
+      visible: false,
+    },
+  ];
+
+  it.each(discardCases)('作废按钮可见性：$name', async ({ options, visible }) => {
+    stubApi(options);
+    renderDetail();
+
+    await screen.findByRole('heading', { name: '请假申请' });
+    const discard = screen.queryByRole('button', { name: '作废申请' });
+    if (visible) expect(discard).toBeEnabled();
+    else expect(discard).toBeNull();
+  });
+
+  it('作废申请弹窗确认后调用 discard 接口', async () => {
+    stubApi({ startedBy: 1, currentNodeId: '__rework__' });
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole('button', { name: '作废申请' }));
+    expect((await screen.findAllByText('作废该申请？')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '确认作废' }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith('/api/instances/1/discard', { method: 'POST' }),
+    );
   });
 
   it('同意弹窗提交到该待办任务，并带上填写的意见', async () => {

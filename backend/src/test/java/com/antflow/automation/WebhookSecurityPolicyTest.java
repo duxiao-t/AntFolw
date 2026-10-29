@@ -4,6 +4,7 @@ import com.antflow.engine.BizException;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.net.URI;
 import java.util.List;
@@ -11,6 +12,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +45,21 @@ class WebhookSecurityPolicyTest {
         assertThatThrownBy(() -> production.validateDefinition(URI.create("http://localhost/hook")))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("HTTPS");
+    }
+
+    @Test
+    void allowsHostsAppendedFromDatabaseStore() {
+        AutomationProperties properties = new AutomationProperties();
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(String.class))).thenReturn("db.example.com");
+        WebhookSecurityPolicy policy = new WebhookSecurityPolicy(properties, environment(false),
+            new WebhookPolicyStore(jdbc));
+
+        assertThatCode(() -> policy.validateDefinition(URI.create("https://db.example.com/hook")))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> policy.validateDefinition(URI.create("https://other.example/hook")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("允许列表");
     }
 
     private static Environment environment(boolean production) {

@@ -53,6 +53,20 @@ export default function Inbox() {
     setComment('');
   };
 
+  const discard = (procInstId: number) => {
+    Modal.confirm({
+      title: '作废该申请？',
+      content: '作废后该申请将从你的列表与待办中移除，且不可恢复。',
+      okText: '确认作废',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await request(`/api/instances/${procInstId}/discard`, { method: 'POST' });
+        message.success('申请已作废');
+        actionRef.current?.reload();
+      },
+    });
+  };
+
   return (
     <>
       <ProTable
@@ -78,28 +92,44 @@ export default function Inbox() {
           { title: '创建', dataIndex: 'createdAt' },
           {
             title: '操作',
-            render: (_, t: any) => (
-              <>
-                <Button size="small" type="primary" onClick={() => open(t.id, 'approve')}>
-                  同意
-                </Button>{' '}
-                <Button
-                  size="small"
-                  danger
-                  disabled={!!t.parallelId}
-                  title={t.parallelId ? '并行审批节点不允许驳回' : undefined}
-                  onClick={() => open(t.id, 'reject')}
-                >
-                  驳回
-                </Button>{' '}
-                <Button
-                  size="small"
-                  onClick={() => navigate(`/proc/${t.procInstId}`)}
-                >
-                  查看流程
-                </Button>
-              </>
-            ),
+            render: (_, t: any) => {
+              // 「待修改」待办（REWORK）没有可审批的决策，只能查看原流程或作废；
+              // 若照旧渲染同意/驳回，点下去会打到一条 REWORK 任务上并报错。
+              if (t.taskType === 'REWORK') {
+                return (
+                  <>
+                    <Button size="small" onClick={() => navigate(`/proc/${t.procInstId}`)}>
+                      查看流程
+                    </Button>{' '}
+                    <Button size="small" danger onClick={() => discard(t.procInstId)}>
+                      作废
+                    </Button>
+                  </>
+                );
+              }
+              return (
+                <>
+                  <Button size="small" type="primary" onClick={() => open(t.id, 'approve')}>
+                    同意
+                  </Button>{' '}
+                  <Button
+                    size="small"
+                    danger
+                    disabled={!!t.parallelId}
+                    title={t.parallelId ? '并行审批节点不允许驳回' : undefined}
+                    onClick={() => open(t.id, 'reject')}
+                  >
+                    驳回
+                  </Button>{' '}
+                  <Button
+                    size="small"
+                    onClick={() => navigate(`/proc/${t.procInstId}`)}
+                  >
+                    查看流程
+                  </Button>
+                </>
+              );
+            },
           },
         ]}
       />

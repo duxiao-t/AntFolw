@@ -326,6 +326,33 @@ class ProcessDefinitionServiceValidationTest {
             .hasMessageContaining("已删除的表单字段 deleted");
     }
 
+    @Test void validate_accepts_trigger_with_nested_body_template() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF"},"children":{"id":"t1","type":"TRIGGER",
+              "props":{"method":"POST","url":"https://hooks.example.com/flow",
+              "contentType":"application/json","bodyMode":"TEMPLATE",
+              "bodyTemplate":"{\\"msgtype\\":\\"text\\",\\"text\\":{\\"content\\": ${content}}}",
+              "continueMode":"ON_SUCCESS","secret":"12345678","headers":[]}}}}
+            """;
+        assertThatCode(() -> service.validateProcessTree(tree, Map.of("content", "text")))
+            .doesNotThrowAnyException();
+    }
+
+    @Test void validate_rejects_body_template_referencing_deleted_field() {
+        String tree = """
+            {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",
+              "props":{"assignedType":"SELF"},"children":{"id":"t1","type":"TRIGGER",
+              "props":{"method":"POST","url":"https://hooks.example.com/flow",
+              "contentType":"application/json","bodyMode":"TEMPLATE",
+              "bodyTemplate":"{\\"content\\": ${deleted}}",
+              "continueMode":"ON_SUCCESS","secret":"12345678","headers":[]}}}}
+            """;
+        assertThatThrownBy(() -> service.validateProcessTree(tree, Map.of("content", "text")))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("已删除的表单字段 deleted");
+    }
+
     @Test void validate_self_select_multiple_is_boolean_when_present() {
         String missing = """
             {"id":"root","type":"ROOT","children":{"id":"a1","type":"APPROVAL",

@@ -1,7 +1,7 @@
 package com.antflow.automation;
 
 import com.antflow.engine.BizException;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
@@ -9,13 +9,27 @@ import org.springframework.stereotype.Component;
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 @Component
-@RequiredArgsConstructor
 public class WebhookSecurityPolicy {
     private final AutomationProperties properties;
     private final Environment environment;
+    private final WebhookPolicyStore policyStore;
+
+    @Autowired
+    public WebhookSecurityPolicy(AutomationProperties properties, Environment environment,
+                                 WebhookPolicyStore policyStore) {
+        this.properties = properties;
+        this.environment = environment;
+        this.policyStore = policyStore;
+    }
+
+    /** 单测/装配夹具：不含运行期追加来源，只按 env 基线判定。 */
+    public WebhookSecurityPolicy(AutomationProperties properties, Environment environment) {
+        this(properties, environment, null);
+    }
 
     public void validate(URI uri) {
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
@@ -59,7 +73,10 @@ public class WebhookSecurityPolicy {
 
     private boolean isAllowedHost(String host) {
         String normalized = host.toLowerCase(Locale.ROOT);
-        return properties.getAllowedHosts().stream()
+        List<String> allowed = policyStore == null
+            ? properties.getAllowedHosts()
+            : policyStore.effective(properties.getAllowedHosts());
+        return allowed.stream()
             .filter(value -> value != null && !value.isBlank())
             .map(value -> value.trim().toLowerCase(Locale.ROOT))
             .anyMatch(pattern -> pattern.startsWith("*.")

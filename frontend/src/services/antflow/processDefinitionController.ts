@@ -11,7 +11,7 @@ export async function list2(options?: { [key: string]: any }) {
 }
 
 /** 此处后端没有提供注释 POST /api/processes/definitions */
-export async function save1(
+export async function save2(
   body: AntFlowAPI.SaveBody,
   options?: { [key: string]: any }
 ) {

@@ -13,5 +13,6 @@
   "settings.s3": ["integration:storage:manage"],
   "settings.wecom": ["integration:wecom:manage"],
   "settings.identity-providers": ["integration:identity_provider:manage"],
-  "settings.backup": ["system:backup:manage"]
+  "settings.backup": ["system:backup:manage"],
+  "settings.webhook": ["integration:webhook:manage"]
 }

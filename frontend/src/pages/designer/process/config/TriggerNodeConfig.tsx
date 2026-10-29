@@ -1,6 +1,8 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { nanoid } from '@reduxjs/toolkit';
 import { Alert, Button, Form, Input, Radio, Select, Space } from 'antd';
+import { request } from '@umijs/max';
+import { useState } from 'react';
 import type { TreeNode } from '../types';
 import { useProcessDesignerStore } from '../useProcessDesignerStore';
 
@@ -28,6 +30,28 @@ export function TriggerNodeConfig({
     updateProps(node.id, { ...props, ...patch });
   const headers: HeaderRow[] = props.headers ?? [];
   const parameters: ParameterRow[] = props.parameters ?? [];
+  const bodyMode = props.bodyMode ?? 'PARAMETERS';
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
+
+  async function testSend() {
+    setTesting(true);
+    try {
+      const sample: Record<string, unknown> = {};
+      formFields.forEach((field) => {
+        sample[field.id] = field.type === 'number' ? 0 : '示例';
+      });
+      const result = await request('/api/automation/webhook/test', {
+        method: 'POST',
+        data: { props, formData: sample },
+      });
+      setTestResult(result);
+    } catch (error: any) {
+      setTestResult({ successful: false, error: error?.message ?? '测试发送失败' });
+    } finally {
+      setTesting(false);
+    }
+  }
   const patchHeader = (id: string, patch: Partial<HeaderRow>) =>
     set({
       headers: headers.map((row) =>
@@ -76,6 +100,21 @@ export function TriggerNodeConfig({
         />
       </Form.Item>
       <Form.Item
+        label="请求体模式"
+        extra="参数模式拼扁平 {key:value}；JSON 模板支持嵌套结构（企业微信/钉钉等）。占位符 ${字段ID}：放在引号内按文本插入（可拼固定文案），放在引号外按 JSON 值插入。"
+      >
+        <Radio.Group
+          optionType="button"
+          buttonStyle="solid"
+          value={props.bodyMode ?? 'PARAMETERS'}
+          onChange={(event) => set({ bodyMode: event.target.value })}
+          options={[
+            { value: 'PARAMETERS', label: '参数（扁平）' },
+            { value: 'TEMPLATE', label: 'JSON 模板（嵌套）' },
+          ]}
+        />
+      </Form.Item>
+      <Form.Item
         label="HMAC 签名密钥"
         extra="请求携带 X-AntFlow-Signature 与唯一投递 ID。"
       >
@@ -119,6 +158,7 @@ export function TriggerNodeConfig({
         ))}
       </ConfigRows>
 
+      {bodyMode === 'PARAMETERS' ? (
       <ConfigRows
         title="请求参数"
         onAdd={() =>
@@ -184,6 +224,20 @@ export function TriggerNodeConfig({
           </div>
         ))}
       </ConfigRows>
+      ) : (
+        <Form.Item
+          label="请求体模板"
+          extra="占位符 ${字段ID} 在引号内按文本插入、引号外按 JSON 值插入；渲染结果必须是合法 JSON。"
+        >
+          <Input.TextArea
+            rows={8}
+            style={{ fontFamily: 'monospace' }}
+            value={props.bodyTemplate ?? ''}
+            placeholder={`{"msgtype":"text","text":{"content":"审批 \${title} 已通过"}}`}
+            onChange={(event) => set({ bodyTemplate: event.target.value })}
+          />
+        </Form.Item>
+      )}
 
       <Form.Item label="流程继续方式">
         <Radio.Group
@@ -198,6 +252,39 @@ export function TriggerNodeConfig({
           ]}
         />
       </Form.Item>
+
+      <div style={{ marginTop: 8, marginBottom: 12 }}>
+        <Space>
+          <Button onClick={testSend} loading={testing}>测试发送</Button>
+          <span style={{ color: '#999', fontSize: 12 }}>
+            用当前（未保存）配置真实发送一次，并回显对方响应
+          </span>
+        </Space>
+        {testResult ? (
+          <Alert
+            style={{ marginTop: 12 }}
+            showIcon
+            type={testResult.successful
+              ? (testResult.warning ? 'warning' : 'success') : 'error'}
+            title={testResult.statusCode != null ? `HTTP ${testResult.statusCode}` : '测试未完成'}
+            description={
+              <div>
+                {testResult.error ? <div>{testResult.error}</div> : null}
+                {testResult.warning ? <div>{testResult.warning}</div> : null}
+                {testResult.responseBody ? (
+                  <pre style={{ maxHeight: 180, overflow: 'auto', margin: '8px 0 0', fontSize: 12 }}>
+                    {testResult.responseBody}
+                  </pre>
+                ) : null}
+                {testResult.durationMs != null ? (
+                  <div style={{ color: '#999', fontSize: 12 }}>耗时 {testResult.durationMs} ms</div>
+                ) : null}
+              </div>
+            }
+          />
+        ) : null}
+      </div>
+
       <Alert
         showIcon
         type="info"

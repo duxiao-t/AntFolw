@@ -1,11 +1,12 @@
 import type { FieldMode } from '../../registry/types';
 import type { ProcessNode } from './detailPresentation';
 
-/** 页面上 5 个能力位，只在壳层算一次，子组件只读。 */
+/** 页面上 6 个能力位，只在壳层算一次，子组件只读。 */
 export type DetailCapabilities = {
   approve: boolean;
   reject: boolean;
   withdraw: boolean;
+  discard: boolean;
   override: boolean;
   retryAutomation: boolean;
 };

@@ -482,6 +482,14 @@ export declare namespace AntFlowAPI {
     versionId: number;
   };
 
+  type discard1Params = {
+    id: number;
+  };
+
+  type discardParams = {
+    id: number;
+  };
+
   type discardVersionParams = {
     id: number;
     versionId: number;
@@ -2016,6 +2024,20 @@ export declare namespace AntFlowAPI {
     id: number;
   };
 
+  type TestRequest = {
+    formData?: JsonNode;
+    props?: JsonNode;
+  };
+
+  type TestResult = {
+    durationMs?: number;
+    error?: string;
+    responseBody?: string;
+    statusCode?: number;
+    successful?: boolean;
+    warning?: string;
+  };
+
   type transferParams = {
     id: number;
   };
@@ -2177,6 +2199,18 @@ export declare namespace AntFlowAPI {
     sourceId?: number;
     status?: string;
     versionNo?: number;
+  };
+
+  type WebhookSettingsRequest = {
+    allowedHosts?: string[];
+  };
+
+  type WebhookSettingsView = {
+    allowPrivateAddresses?: boolean;
+    dbHosts?: string[];
+    effective?: string[];
+    envHosts?: string[];
+    httpsOnly?: boolean;
   };
 
   type withdraw1Params = {

@@ -6,6 +6,7 @@ import * as accountController from "./accountController";
 import * as approvalDelegationController from "./approvalDelegationController";
 import * as auditController from "./auditController";
 import * as loginController from "./loginController";
+import * as webhookTestController from "./webhookTestController";
 import * as departmentController from "./departmentController";
 import * as formDataController from "./formDataController";
 import * as formDataImportController from "./formDataImportController";
@@ -32,6 +33,7 @@ import * as roleController from "./roleController";
 import * as optionRuntimeController from "./optionRuntimeController";
 import * as securityAuthorizationController from "./securityAuthorizationController";
 import * as storageConfigController from "./storageConfigController";
+import * as webhookSettingsController from "./webhookSettingsController";
 import * as backupController from "./backupController";
 import * as taskController from "./taskController";
 import * as userController from "./userController";
@@ -42,6 +44,7 @@ export default {
   approvalDelegationController,
   auditController,
   loginController,
+  webhookTestController,
   departmentController,
   formDataController,
   formDataImportController,
@@ -68,6 +71,7 @@ export default {
   optionRuntimeController,
   securityAuthorizationController,
   storageConfigController,
+  webhookSettingsController,
   backupController,
   taskController,
   userController,

@@ -56,6 +56,37 @@ final class InstanceLifecycleOps {
 
     void terminate(ProcessInstance instance, long operatorId, String reason) {
         V2RuntimeSupport.requireTransaction();
+        List<TaskRow> cancelled = cancelOutstandingWork(instance, reason);
+        cancelled.forEach(task -> support.outbox(instance.getId(), task.assigneeId(),
+            "TASK_CANCELLED", task.id()));
+        jdbc.update("""
+            INSERT INTO t_task_history(proc_inst_id, action, operator_id, comment)
+            VALUES (?, 'ADMIN_TERMINATE', ?, ?)
+            """, instance.getId(), operatorId, reason);
+        support.outbox(instance.getId(), instance.getStartedBy(), "INSTANCE_REJECTED", null);
+    }
+
+    /**
+     * 作废「待修改」申请（发起人主动放弃）：与 {@link #terminate} 相同的在办收口，
+     * 但落 {@code DISCARD} 历史并发 {@code INSTANCE_WITHDRAWN}（webhook 已认识该事件）。
+     *
+     * <p>不加 {@code isV2} 守卫：作废只发生在 {@code __rework__}（V2 才会进入的状态），
+     * 但底层的任务/节点/参与者/作业表对 V1 实例只是空集，UPDATE 是安全 no-op。
+     */
+    void discardToWithdrawn(ProcessInstance instance, long operatorId) {
+        V2RuntimeSupport.requireTransaction();
+        List<TaskRow> cancelled = cancelOutstandingWork(instance, "发起人作废申请");
+        cancelled.forEach(task -> support.outbox(instance.getId(), task.assigneeId(),
+            "TASK_CANCELLED", task.id()));
+        jdbc.update("""
+            INSERT INTO t_task_history(proc_inst_id, action, operator_id, comment)
+            VALUES (?, 'DISCARD', ?, '发起人作废申请')
+            """, instance.getId(), operatorId);
+        support.outbox(instance.getId(), instance.getStartedBy(), "INSTANCE_WITHDRAWN", null);
+    }
+
+    /** 取消实例所有在办产出（任务 / 节点 / 参与者 / 作业），返回被取消的任务供逐条发通知。 */
+    private List<TaskRow> cancelOutstandingWork(ProcessInstance instance, String reason) {
         List<TaskRow> cancelled = jdbc.query("""
             UPDATE t_task SET status = 'CANCELLED', comment = ?
             WHERE proc_inst_id = ? AND status IN ('PENDING', 'BLOCKED')
@@ -77,13 +108,7 @@ final class InstanceLifecycleOps {
                                       locked_at = NULL, locked_by = NULL
             WHERE proc_inst_id = ? AND status IN ('SCHEDULED', 'RUNNING')
             """, instance.getId());
-        cancelled.forEach(task -> support.outbox(instance.getId(), task.assigneeId(),
-            "TASK_CANCELLED", task.id()));
-        jdbc.update("""
-            INSERT INTO t_task_history(proc_inst_id, action, operator_id, comment)
-            VALUES (?, 'ADMIN_TERMINATE', ?, ?)
-            """, instance.getId(), operatorId, reason);
-        support.outbox(instance.getId(), instance.getStartedBy(), "INSTANCE_REJECTED", null);
+        return cancelled;
     }
 
     void withdrawToRework(ProcessInstance instance) {

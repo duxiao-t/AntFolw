@@ -65,6 +65,8 @@ public class AutomationJobScheduler {
                 return;
             }
             WebhookClient.DeliveryResult result = webhookClient.send(job, jobs.payload(job));
+            // HTTP 状态与响应体落库（成功也记）：企业微信等错误时仍是 200，真正原因在 body 里。
+            jobs.recordDelivery(job.getId(), result.statusCode(), result.body());
             if (result.successful()) {
                 processEngine.completeAutomation(job.getId());
             } else {

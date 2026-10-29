@@ -178,4 +178,9 @@ public class MobileWorkflowService {
     public void withdraw(Long instanceId, long userId) {
         commands.withdraw(instanceId, userId);
     }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void discard(Long instanceId, long userId) {
+        commands.discard(instanceId, userId);
+    }
 }

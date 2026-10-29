@@ -234,6 +234,11 @@ public class WorkflowRuntimeV2 {
         lifecycle.terminate(instance, operatorId, reason);
     }
 
+    /** 作废「待修改」申请：收口在办 + DISCARD 历史 + INSTANCE_WITHDRAWN。 */
+    public void discard(ProcessInstance instance, long operatorId) {
+        lifecycle.discardToWithdrawn(instance, operatorId);
+    }
+
     /**
      * 撤回后的 V2 收尾：本轮仍 ACTIVE 的节点、WAITING/PENDING 的参与者、以及分支状态一并置 CANCELLED。
      *

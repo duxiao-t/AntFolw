@@ -41,6 +41,7 @@ export default function DetailPage() {
     approve: hasCapability(currentUser, CAPABILITY.workflowTaskApprove),
     reject: hasCapability(currentUser, CAPABILITY.workflowTaskReject),
     withdraw: hasCapability(currentUser, CAPABILITY.workflowInstanceWithdraw),
+    discard: hasCapability(currentUser, CAPABILITY.workflowInstanceDiscard),
     override: hasCapability(currentUser, CAPABILITY.workflowInstanceOverride),
     retryAutomation: hasCapability(currentUser, CAPABILITY.workflowAutomationRetry),
   };
@@ -101,6 +102,7 @@ export default function DetailPage() {
             onApprove={actions.openApprove}
             onReject={actions.openReject}
             onWithdraw={actions.openWithdraw}
+            onDiscard={actions.openDiscard}
             onOverride={actions.openOverride}
           />
 

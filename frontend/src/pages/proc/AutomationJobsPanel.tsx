@@ -29,7 +29,16 @@ export function AutomationJobsPanel({
           size="small"
           pagination={false}
           dataSource={jobs}
-          scroll={{ x: 760 }}
+          scroll={{ x: 840 }}
+          expandable={{
+            rowExpandable: (row: any) =>
+              row.jobType === 'TRIGGER' && Boolean(row.responseBody),
+            expandedRowRender: (row: any) => (
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                {row.responseBody}
+              </pre>
+            ),
+          }}
           columns={[
             {
               title: '节点',
@@ -63,12 +72,21 @@ export function AutomationJobsPanel({
               render: formatDateTime,
             },
             {
-              title: '失败原因',
-              dataIndex: 'lastError',
-              minWidth: 180,
-              render: (value: string | null) => value
-                ? <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>
-                : '—',
+              title: 'HTTP',
+              dataIndex: 'responseStatus',
+              width: 80,
+              render: (value: number | null) => (value != null ? value : '—'),
+            },
+            {
+              title: '结果',
+              minWidth: 200,
+              render: (_: unknown, row: any) => {
+                // 成功也要显示响应体：企业微信等错误时 HTTP 200，真正原因在 errcode 里。
+                const text = row.lastError || row.responseBody;
+                return text
+                  ? <Typography.Text ellipsis={{ tooltip: text }}>{text}</Typography.Text>
+                  : '—';
+              },
             },
             {
               title: '操作',

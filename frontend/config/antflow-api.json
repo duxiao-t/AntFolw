@@ -4339,6 +4339,42 @@
         },
         "type" : "object"
       },
+      "TestRequest" : {
+        "properties" : {
+          "formData" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "props" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          }
+        },
+        "type" : "object"
+      },
+      "TestResult" : {
+        "properties" : {
+          "durationMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "error" : {
+            "type" : "string"
+          },
+          "responseBody" : {
+            "type" : "string"
+          },
+          "statusCode" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "successful" : {
+            "type" : "boolean"
+          },
+          "warning" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "User" : {
         "properties" : {
           "authzVersion" : {
@@ -4576,6 +4612,46 @@
           "versionNo" : {
             "format" : "int32",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "WebhookSettingsRequest" : {
+        "properties" : {
+          "allowedHosts" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "WebhookSettingsView" : {
+        "properties" : {
+          "allowPrivateAddresses" : {
+            "type" : "boolean"
+          },
+          "dbHosts" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "effective" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "envHosts" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "httpsOnly" : {
+            "type" : "boolean"
           }
         },
         "type" : "object"
@@ -5227,6 +5303,35 @@
         },
         "tags" : [
           "login-controller"
+        ]
+      }
+    },
+    "/api/automation/webhook/test" : {
+      "post" : {
+        "operationId" : "test_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TestRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TestResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "webhook-test-controller"
         ]
       }
     },
@@ -6140,7 +6245,7 @@
         ]
       },
       "post" : {
-        "operationId" : "save_2",
+        "operationId" : "save_3",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -6906,6 +7011,30 @@
         ]
       }
     },
+    "/api/instances/{id}/discard" : {
+      "post" : {
+        "operationId" : "discard_1",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "instance-controller"
+        ]
+      }
+    },
     "/api/instances/{id}/history" : {
       "get" : {
         "operationId" : "history",
@@ -7104,7 +7233,7 @@
         ]
       },
       "put" : {
-        "operationId" : "save",
+        "operationId" : "save_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -7940,6 +8069,30 @@
                 }
               }
             },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "mobile-workflow-controller"
+        ]
+      }
+    },
+    "/api/mobile/instances/{id}/discard" : {
+      "post" : {
+        "operationId" : "discard",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
             "description" : "OK"
           }
         },
@@ -9560,7 +9713,7 @@
         ]
       },
       "post" : {
-        "operationId" : "save_1",
+        "operationId" : "save_2",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -10609,7 +10762,7 @@
     },
     "/api/settings/storage" : {
       "get" : {
-        "operationId" : "view",
+        "operationId" : "view_1",
         "responses" : {
           "200" : {
             "content" : {
@@ -10644,6 +10797,54 @@
         },
         "tags" : [
           "storage-config-controller"
+        ]
+      }
+    },
+    "/api/settings/webhook" : {
+      "get" : {
+        "operationId" : "view",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WebhookSettingsView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "webhook-settings-controller"
+        ]
+      },
+      "put" : {
+        "operationId" : "save",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/WebhookSettingsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WebhookSettingsView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "webhook-settings-controller"
         ]
       }
     },

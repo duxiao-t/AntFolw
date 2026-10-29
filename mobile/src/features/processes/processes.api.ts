@@ -58,3 +58,15 @@ export async function withdrawMobileInstance(
     body: JSON.stringify({}),
   });
 }
+
+/** 作废撤回后的「待修改」申请（软终态，从本人视图隐藏）。 */
+export async function discardMobileInstance(
+  instanceId: number,
+  idempotencyKey: string,
+) {
+  await apiRequest<void>(`/api/mobile/instances/${instanceId}/discard`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({}),
+  });
+}

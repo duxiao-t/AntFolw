@@ -30,6 +30,9 @@ public class WorkflowJob {
     private String payload;
     private Boolean blocking;
     private String lastError;
+    /** 最近一次投递的 HTTP 状态码与响应体（截断），成功/失败都记，便于排障。 */
+    private Integer responseStatus;
+    private String responseBody;
     private OffsetDateTime lockedAt;
     private String lockedBy;
     private OffsetDateTime completedAt;

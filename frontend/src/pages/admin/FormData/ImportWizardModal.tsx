@@ -219,7 +219,11 @@ export default function ImportWizardModal({ defaultFormId, onClose, onImported }
   const previewRows = useMemo(() => (inspection?.previews ?? []).slice(0, 20), [inspection]);
   const previewColumns = useMemo(() => {
     const seen = new Set<string>();
-    previewRows.forEach((row) => Object.keys(row).forEach((key) => seen.add(key)));
+    previewRows.forEach((row) => {
+      Object.keys(row).forEach((key) => {
+        seen.add(key);
+      });
+    });
     return [...seen];
   }, [previewRows]);
 

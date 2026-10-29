@@ -13,6 +13,7 @@ const STAT: CSSProperties = {
 /** 三色统计卡：数字比一句话更快被读懂，成功/失败各用语义色。 */
 export function Stat({ label, value, color }: { label: string; value: number; color?: string }) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: 统计卡只是视觉分组，沿用 div+role=group 以保持既有样式
     <div style={STAT} role="group" aria-label={label}>
       <div style={{ fontSize: 12, color: 'var(--af-color-muted)' }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 600, color }}>{value}</div>

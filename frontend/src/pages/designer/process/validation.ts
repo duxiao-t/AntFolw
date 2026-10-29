@@ -333,13 +333,20 @@ const triggerReady = (node: TreeNode): boolean => {
     (row: any) =>
       String(row?.key ?? '').trim() && String(row?.value ?? '').trim(),
   );
-  const parametersReady = rowsOf(props.parameters).every(
-    (row: any) =>
-      String(row?.key ?? '').trim() &&
-      (row?.source === 'FIELD'
-        ? String(row?.fieldId ?? '').trim()
-        : row?.value !== undefined),
-  );
+  const bodyMode = props.bodyMode ?? 'PARAMETERS';
+  const parametersReady =
+    bodyMode !== 'PARAMETERS' ||
+    rowsOf(props.parameters).every(
+      (row: any) =>
+        String(row?.key ?? '').trim() &&
+        (row?.source === 'FIELD'
+          ? String(row?.fieldId ?? '').trim()
+          : row?.value !== undefined),
+    );
+  const templateReady =
+    bodyMode !== 'TEMPLATE' ||
+    (props.contentType === 'application/json' &&
+      String(props.bodyTemplate ?? '').trim().length > 0);
   return (
     validUrl &&
     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(props.method) &&
@@ -349,7 +356,8 @@ const triggerReady = (node: TreeNode): boolean => {
     ['ON_SUCCESS', 'AFTER_SEND'].includes(props.continueMode) &&
     String(props.secret ?? '').trim().length >= 8 &&
     rowsReady &&
-    parametersReady
+    parametersReady &&
+    templateReady
   );
 };
 
@@ -358,6 +366,15 @@ const missingTriggerField = (
   fieldTypes?: Map<string, string>,
 ): string | null => {
   if (!fieldTypes) return null;
+  if ((node.props?.bodyMode ?? 'PARAMETERS') === 'TEMPLATE') {
+    const template = String(node.props?.bodyTemplate ?? '');
+    const refs = template.matchAll(/\$\{([^}]+)\}/g);
+    for (const match of refs) {
+      const ref = (match[1] ?? '').trim();
+      if (ref && !fieldTypes.has(ref)) return ref;
+    }
+    return null;
+  }
   const row = rowsOf(node.props?.parameters).find(
     (parameter: any) =>
       parameter?.source === 'FIELD' &&

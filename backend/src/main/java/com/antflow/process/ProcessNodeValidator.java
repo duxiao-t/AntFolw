@@ -1,5 +1,6 @@
 package com.antflow.process;
 
+import com.antflow.automation.WebhookBodyTemplate;
 import com.antflow.automation.WebhookSecurityPolicy;
 import com.antflow.engine.BizException;
 
@@ -122,6 +123,14 @@ class ProcessNodeValidator {
             .contains(props.path("contentType").asText())) {
             throw new BizException("BAD_FLOW", "Webhook 内容类型无效");
         }
+        String bodyMode = props.path("bodyMode").asText("PARAMETERS");
+        if (!Set.of("PARAMETERS", "TEMPLATE").contains(bodyMode)) {
+            throw new BizException("BAD_FLOW", "Webhook 请求体模式无效");
+        }
+        if ("TEMPLATE".equals(bodyMode)
+            && !"application/json".equals(props.path("contentType").asText())) {
+            throw new BizException("BAD_FLOW", "Webhook 模板模式仅支持 JSON 内容类型");
+        }
         if (!Set.of("ON_SUCCESS", "AFTER_SEND").contains(props.path("continueMode").asText())
             || props.path("secret").asText().length() < 8) {
             throw new BizException("BAD_FLOW", "Webhook 继续方式或 HMAC 密钥无效");
@@ -145,20 +154,50 @@ class ProcessNodeValidator {
                 throw new BizException("BAD_FLOW", "Webhook 请求头配置无效");
             }
         }
-        for (var parameter : props.path("parameters")) {
-            String source = parameter.path("source").asText();
-            String fieldId = parameter.path("fieldId").asText();
-            if (parameter.path("key").asText().isBlank()
-                || !("FIXED".equals(source) || "FIELD".equals(source))
-                || ("FIELD".equals(source) && fieldId.isBlank())
-                || ("FIXED".equals(source) && !parameter.has("value"))) {
-                throw new BizException("BAD_FLOW", "Webhook 请求参数配置无效");
+        if ("TEMPLATE".equals(bodyMode)) {
+            validateBodyTemplate(n, props, fieldTypes);
+        } else {
+            for (var parameter : props.path("parameters")) {
+                String source = parameter.path("source").asText();
+                String fieldId = parameter.path("fieldId").asText();
+                if (parameter.path("key").asText().isBlank()
+                    || !("FIXED".equals(source) || "FIELD".equals(source))
+                    || ("FIELD".equals(source) && fieldId.isBlank())
+                    || ("FIXED".equals(source) && !parameter.has("value"))) {
+                    throw new BizException("BAD_FLOW", "Webhook 请求参数配置无效");
+                }
+                if ("FIELD".equals(source) && !fieldTypes.containsKey(fieldId)) {
+                    throw new BizException("BAD_FLOW", "Webhook 节点 "
+                        + n.path("id").asText() + " 的参数 "
+                        + parameter.path("key").asText() + " 引用了已删除的表单字段 " + fieldId);
+                }
             }
-            if ("FIELD".equals(source) && !fieldTypes.containsKey(fieldId)) {
-                throw new BizException("BAD_FLOW", "Webhook 节点 "
-                    + n.path("id").asText() + " 的参数 "
-                    + parameter.path("key").asText() + " 引用了已删除的表单字段 " + fieldId);
+        }
+    }
+
+    /**
+     * 模板模式：{@code bodyTemplate} 是最终请求体（JSON），{@code ${字段id}} 占位符按**所在位置**渲染
+     * （引号内按文本插入并转义、引号外按 JSON 值插入，见 {@link WebhookBodyTemplate}）。这里做两件事：
+     * 占位符必须引用现存字段；把占位符按上下文替换为合法片段后应能解析为合法 JSON（结构校验）。
+     */
+    private void validateBodyTemplate(com.fasterxml.jackson.databind.JsonNode n,
+                                      com.fasterxml.jackson.databind.JsonNode props,
+                                      Map<String, String> fieldTypes) {
+        String template = props.path("bodyTemplate").asText();
+        if (template.isBlank()) {
+            throw new BizException("BAD_FLOW", "Webhook 请求体模板不能为空");
+        }
+        for (String ref : WebhookBodyTemplate.references(template)) {
+            if (!fieldTypes.containsKey(ref)) {
+                throw new BizException("BAD_FLOW", "Webhook 节点 " + n.path("id").asText()
+                    + " 的请求体模板引用了已删除的表单字段 " + ref);
             }
+        }
+        String probe = WebhookBodyTemplate.probe(template);
+        try {
+            new com.fasterxml.jackson.databind.ObjectMapper().readTree(probe);
+        } catch (Exception e) {
+            throw new BizException("BAD_FLOW", "Webhook 请求体模板不是合法 JSON");
         }
     }
 

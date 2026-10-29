@@ -38,6 +38,20 @@ export async function detail1(
   });
 }
 
+/** 此处后端没有提供注释 POST /api/instances/${param0}/discard */
+export async function discard1(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: AntFlowAPI.discard1Params,
+  options?: { [key: string]: any }
+) {
+  const { id: param0, ...queryParams } = params;
+  return request<any>(`/api/instances/${param0}/discard`, {
+    method: "POST",
+    params: { ...queryParams },
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 GET /api/instances/${param0}/history */
 export async function history(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)

@@ -143,6 +143,27 @@ export function useDetailActions({
     }
   }
 
+  async function doDiscard() {
+    try {
+      await request(`/api/instances/${id}/discard`, { method: 'POST' });
+      message.success('申请已作废');
+      qc.invalidateQueries({ queryKey: ['instance', id] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (e: any) {
+      message.error(e?.message ?? '作废失败');
+    }
+  }
+
+  function openDiscard() {
+    modal.confirm({
+      title: '作废该申请？',
+      content: '作废后该申请将从你的列表与待办中移除，且不可恢复。',
+      okText: '确认作废',
+      okButtonProps: { danger: true },
+      onOk: doDiscard,
+    });
+  }
+
   async function retryAutomationJob(jobId: number) {
     try {
       await request(`/api/instances/${id}/jobs/${jobId}/retry`, {
@@ -216,10 +237,12 @@ export function useDetailActions({
     openApprove,
     openReject,
     openWithdraw,
+    openDiscard,
     openOverride,
     doApprove,
     doReject,
     doWithdraw,
+    doDiscard,
     retryAutomationJob,
     submitOverride,
   };

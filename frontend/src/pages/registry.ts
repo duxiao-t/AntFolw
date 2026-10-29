@@ -69,6 +69,9 @@ export const PAGES: PageDef[] = [
   { key: 'settings.backup', label: '系统备份', path: '/settings/backup',
     component: './settings/Backup',
     icon: 'database', readCapabilities: PAGE_CAPABILITIES['settings.backup'] },
+  { key: 'settings.webhook', label: 'Webhook 出站', path: '/settings/webhook',
+    component: './settings/Webhook',
+    icon: 'export', readCapabilities: PAGE_CAPABILITIES['settings.webhook'] },
 ];
 
 export const PAGE_BY_KEY: Record<string, PageDef> = Object.fromEntries(

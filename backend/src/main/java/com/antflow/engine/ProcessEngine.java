@@ -224,6 +224,12 @@ public class ProcessEngine implements FlowAdvancer {
         withdrawService.withdraw(instanceId, operatorId);
     }
 
+    /** 发起人作废「待修改」申请（软终态 WITHDRAWN）。 */
+    @Transactional
+    public void discard(long instanceId, long operatorId) {
+        withdrawService.discard(instanceId, operatorId);
+    }
+
     public boolean canWithdraw(long instanceId, long operatorId) {
         return withdrawService.canWithdraw(instanceId, operatorId);
     }

@@ -69,6 +69,7 @@ public final class PermissionCatalog {
         entry(PermissionCodes.WORKFLOW_INSTANCE_START, "发起审批", Risk.NORMAL),
         entry(PermissionCodes.WORKFLOW_INSTANCE_READ, "查看审批记录", Risk.NORMAL, DataScope.SELF),
         entry(PermissionCodes.WORKFLOW_INSTANCE_WITHDRAW, "撤回审批", Risk.HIGH),
+        entry(PermissionCodes.WORKFLOW_INSTANCE_DISCARD, "作废申请", Risk.HIGH),
         entry(PermissionCodes.WORKFLOW_INSTANCE_OVERRIDE, "紧急干预审批", Risk.CRITICAL,
             DataScope.ALL),
         entry(PermissionCodes.WORKFLOW_MONITOR_READ, "查看流程监控", Risk.HIGH, DataScope.ALL),
@@ -86,6 +87,7 @@ public final class PermissionCatalog {
             DataScope.ALL),
 
         entry(PermissionCodes.INTEGRATION_WECOM_MANAGE, "管理企业微信对接", Risk.HIGH, true),
+        entry(PermissionCodes.INTEGRATION_WEBHOOK_MANAGE, "管理 Webhook 出站配置", Risk.HIGH, true),
         entry(PermissionCodes.INTEGRATION_IDENTITY_PROVIDER_MANAGE, "管理身份提供方", Risk.HIGH, true),
         entry(PermissionCodes.INTEGRATION_STORAGE_MANAGE, "管理对象存储", Risk.HIGH, true),
 
