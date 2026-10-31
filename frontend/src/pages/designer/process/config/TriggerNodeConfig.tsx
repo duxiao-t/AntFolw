@@ -15,6 +15,15 @@ type ParameterRow = {
   value?: string;
   fieldId?: string;
 };
+/** 「测试发送」接口返回shape，用于替代 any 保持类型安全。 */
+type TestResult = {
+  successful?: boolean;
+  warning?: string | null;
+  statusCode?: number | null;
+  error?: string | null;
+  responseBody?: string | null;
+  durationMs?: number | null;
+};
 
 export function TriggerNodeConfig({
   node,
@@ -32,7 +41,7 @@ export function TriggerNodeConfig({
   const parameters: ParameterRow[] = props.parameters ?? [];
   const bodyMode = props.bodyMode ?? 'PARAMETERS';
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<any>(null);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   async function testSend() {
     setTesting(true);
@@ -46,8 +55,8 @@ export function TriggerNodeConfig({
         data: { props, formData: sample },
       });
       setTestResult(result);
-    } catch (error: any) {
-      setTestResult({ successful: false, error: error?.message ?? '测试发送失败' });
+    } catch (error) {
+      setTestResult({ successful: false, error: error instanceof Error ? error.message : '测试发送失败' });
     } finally {
       setTesting(false);
     }

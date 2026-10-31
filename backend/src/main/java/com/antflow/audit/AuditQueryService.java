@@ -47,22 +47,45 @@ public class AuditQueryService {
         return event;
     }
 
-    public byte[] export(AuditSearch search) {
+    /** 权限在请求线程内同步校验（流式写出发生在异步线程，SecurityContext 不会自动传播）。 */
+    public void requireExportPermission() {
         authorizationService.requirePermission(PermissionCodes.AUDIT_EVENT_EXPORT);
+    }
+
+    /**
+     * 流式导出 NDJSON：逐行写出、不在内存里聚合整个结果集（原实现用 byte[] 全量拼接，F8）。
+     * 调用前须自行完成 {@link #requireExportPermission()}（在请求线程）。
+     *
+     * @return 已写出的字节数
+     */
+    public long streamExport(AuditSearch search, java.io.OutputStream out) throws java.io.IOException {
         QueryParts parts = where(search);
-        List<AuditEventDto> records = jdbcTemplate.query("""
-            SELECT * FROM t_audit_event
-            """ + parts.sql() + " ORDER BY occurred_at DESC, id DESC LIMIT 10000",
-            (rs, row) -> event(rs), parts.args().toArray());
-        StringBuilder ndjson = new StringBuilder();
-        records.forEach(event -> {
-            try {
-                ndjson.append(objectMapper.writeValueAsString(event)).append('\n');
-            } catch (Exception exception) {
-                throw new IllegalStateException("could not serialize audit export", exception);
-            }
-        });
-        return ndjson.toString().getBytes(StandardCharsets.UTF_8);
+        long[] written = {0L};
+        try {
+            jdbcTemplate.query("""
+                SELECT * FROM t_audit_event
+                """ + parts.sql() + " ORDER BY occurred_at DESC, id DESC LIMIT 10000",
+                rs -> {
+                    AuditEventDto event = event(rs);
+                    byte[] line;
+                    try {
+                        line = (objectMapper.writeValueAsString(event) + "\n")
+                            .getBytes(StandardCharsets.UTF_8);
+                    } catch (Exception exception) {
+                        throw new IllegalStateException("could not serialize audit export", exception);
+                    }
+                    try {
+                        out.write(line);
+                    } catch (java.io.IOException exception) {
+                        throw new java.io.UncheckedIOException(exception);
+                    }
+                    written[0] += line.length;
+                }, parts.args().toArray());
+        } catch (java.io.UncheckedIOException exception) {
+            throw exception.getCause();
+        }
+        out.flush();
+        return written[0];
     }
 
     private QueryParts where(AuditSearch search) {

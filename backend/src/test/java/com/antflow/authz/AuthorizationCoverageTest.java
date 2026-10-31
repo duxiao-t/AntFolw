@@ -119,7 +119,8 @@ class AuthorizationCoverageTest {
 
         // 冻结清单：改动放行范围必须同时改这里（review 时一眼可见）。
         assertThat(SecurityConfig.PUBLIC_PATH_MATCHERS).containsExactlyElementsOf(
-            List.of("/api/public/**", "/actuator/**", "/v3/api-docs/**", "/swagger-ui/**"));
+            List.of("/api/public/**", "/actuator/health", "/actuator/health/**", "/actuator/info",
+                "/v3/api-docs/**", "/swagger-ui/**"));
         assertThat(SecurityConfig.PUBLIC_POST_ENDPOINTS).containsExactlyElementsOf(
             List.of("/api/auth/login", "/api/auth/refresh", "/api/auth/logout"));
     }

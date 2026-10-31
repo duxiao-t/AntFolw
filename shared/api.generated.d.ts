@@ -1935,6 +1935,8 @@ export declare namespace AntFlowAPI {
     writable?: boolean;
   };
 
+  type StreamingResponseBody = true;
+
   type submissionParams = {
     id: number;
   };

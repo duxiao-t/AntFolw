@@ -63,7 +63,7 @@ export async function export2(
   params: AntFlowAPI.export2Params,
   options?: { [key: string]: any }
 ) {
-  return request<string>("/api/audit/export", {
+  return request<AntFlowAPI.StreamingResponseBody>("/api/audit/export", {
     method: "GET",
     params: {
       ...params,

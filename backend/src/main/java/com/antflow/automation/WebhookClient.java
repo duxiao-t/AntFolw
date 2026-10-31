@@ -51,7 +51,6 @@ public class WebhookClient {
             throw new BizException("BAD_WEBHOOK", "Webhook 请求方法无效");
         }
         URI uri = parseUri(payload.path("url").asText());
-        securityPolicy.validate(uri);
         JsonNode parameters = payload.path("parameters");
         boolean queryMethod = "GET".equals(method) || "DELETE".equals(method);
         if (queryMethod) uri = appendQuery(uri, parameters);
@@ -84,14 +83,20 @@ public class WebhookClient {
             : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
 
         try {
+            // SSRF 校验放在**紧邻连接**处，把「校验解析」与「连接解析」的窗口压到最小。
+            // ponytail: java.net.http.HttpClient 无法注入自定义 DNS 解析器，故只能在连接前即时校验，
+            // 无法把校验过的 IP 真正钉进连接（彻底修复需换成支持自定义 Resolver 的客户端）；
+            // 配合下方 followRedirects(NEVER)，已堵住“重定向到内网”这条主线，残余 DNS 重绑定窗口见 F2 记录。
+            securityPolicy.validate(uri);
             HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(properties.getConnectTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
-            HttpResponse<String> response = client.send(builder.build(),
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            // 有界读取：只取前 MAX_RESPONSE_BYTES，超大响应绝不整体进内存（F1）。
+            HttpResponse<java.io.InputStream> response = client.send(builder.build(),
+                HttpResponse.BodyHandlers.ofInputStream());
             int status = response.statusCode();
-            String responseBody = truncate(response.body(), MAX_RESPONSE_BYTES);
+            String responseBody = readBounded(response.body(), MAX_RESPONSE_BYTES);
             return new DeliveryResult(status, responseBody, status >= 200 && status < 300);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -121,9 +126,20 @@ public class WebhookClient {
         return null;
     }
 
-    private static String truncate(String value, int max) {
-        if (value == null) return "";
-        return value.length() <= max ? value : value.substring(0, max) + "…";
+    /**
+     * 只读取响应体的前 {@code max} 字节（按字节截断），其余流即时关闭丢弃——
+     * 保证超大响应不会整体进入内存（F1）。截断时补一个“…”标记。
+     */
+    private static String readBounded(java.io.InputStream stream, int max) {
+        if (stream == null) return "";
+        try (stream) {
+            byte[] head = stream.readNBytes(max);
+            boolean truncated = stream.read() != -1;
+            String value = new String(head, StandardCharsets.UTF_8);
+            return truncated ? value + "…" : value;
+        } catch (java.io.IOException e) {
+            return "";
+        }
     }
 
     private URI parseUri(String value) {

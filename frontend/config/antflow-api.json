@@ -4134,6 +4134,9 @@
         },
         "type" : "object"
       },
+      "StreamingResponseBody" : {
+        "type" : "object"
+      },
       "SubmitRequest" : {
         "properties" : {
           "data" : {
@@ -5120,8 +5123,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "format" : "byte",
-                  "type" : "string"
+                  "$ref" : "#/components/schemas/StreamingResponseBody"
                 }
               }
             },

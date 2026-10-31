@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.antflow.authz.PermissionCodes;
 
@@ -50,7 +51,7 @@ public class AuditController {
 
     @GetMapping("/export")
     @PreAuthorize("@authz.console('" + PermissionCodes.AUDIT_EVENT_EXPORT + "')")
-    public ResponseEntity<byte[]> export(
+    public ResponseEntity<StreamingResponseBody> export(
             @RequestParam(required = false) OffsetDateTime from,
             @RequestParam(required = false) OffsetDateTime to,
             @RequestParam(required = false) Long operatorId,
@@ -60,11 +61,14 @@ public class AuditController {
             @RequestParam(required = false) String result,
             @RequestParam(required = false) String riskLevel,
             @RequestParam(required = false) String ip) {
-        byte[] body = queryService.export(search(from, to, operatorId, action, resourceType,
-            resourceId, result, riskLevel, ip, 1, 10000));
+        AuditQueryService.AuditSearch search = search(from, to, operatorId, action, resourceType,
+            resourceId, result, riskLevel, ip, 1, 10000);
+        // 权限与审计在请求线程内同步完成：流式写出在异步线程执行，SecurityContext/Principal 不会自动传播。
+        queryService.requireExportPermission();
         auditService.success("security.audit.export", "AUDIT_EVENT", null,
             AuditService.RiskLevel.HIGH, java.util.Map.of(),
-            java.util.Map.of("recordLimit", 10000, "bytes", body.length));
+            java.util.Map.of("recordLimit", 10000));
+        StreamingResponseBody body = out -> queryService.streamExport(search, out);
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType("application/x-ndjson"))
             .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()

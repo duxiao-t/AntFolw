@@ -102,11 +102,15 @@ class WecomManagerSync {
                         // 单个成员的异常已经在上面记录，这里只等全部完成。
                     }
                 }
-                try {
-                    Thread.sleep(MANAGER_BATCH_INTERVAL_MS);
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
-                    return List.copyOf(problems);
+                // 只在“后面还有批次”时节流；末尾无谓的睡眠只会无端占住调用线程（F7）。
+                // ponytail: 仍是同步阻塞节流，彻底异步化需改 sync() 的返回契约，超出本次范围。
+                if (offset + MANAGER_POOL_SIZE < targets.size()) {
+                    try {
+                        Thread.sleep(MANAGER_BATCH_INTERVAL_MS);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        return List.copyOf(problems);
+                    }
                 }
             }
         } finally {

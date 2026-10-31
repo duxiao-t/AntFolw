@@ -5,7 +5,6 @@ import com.antflow.authz.AuthorizationService;
 import com.antflow.authz.PermissionCodes;
 import com.antflow.audit.AuditService;
 import com.antflow.engine.BizException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -40,6 +39,8 @@ public class OptionSourceService {
     private final AuditService audit;
     /** 引用关系只读查询（表单侧的表），见 {@link OptionBindingGuard}：配置写入与引用判定是两套数据所有权。 */
     private final OptionBindingGuard bindingGuard;
+    /** 版本只读查询与行映射（F3 职责抽取，见 {@link OptionSourceVersionReader}）。 */
+    private final OptionSourceVersionReader versionReader;
 
     public List<SourceSummary> list() {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
@@ -91,7 +92,7 @@ public class OptionSourceService {
     public SourceDetail detail(long sourceId) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         SourceSummary source = requireSource(sourceId);
-        List<VersionView> versions = versions(sourceId, false);
+        List<VersionView> versions = versionReader.versions(sourceId, false);
         List<Long> userIds = jdbc.queryForList("""
             SELECT subject_id FROM t_option_data_source_grant
             WHERE source_id = ? AND subject_type = 'USER' ORDER BY subject_id
@@ -234,7 +235,7 @@ public class OptionSourceService {
                 Map.of("changedFields", List.of("draftVersion")),
                 Map.of("rowCount", table.rows().size(), "columnCount", table.columns().size(),
                     "noteLength", normalizeNote(note) == null ? 0 : normalizeNote(note).length()));
-            return version(versionId);
+            return versionReader.requireVersion(versionId);
         } catch (BizException error) {
             throw error;
         } catch (Exception error) {
@@ -303,7 +304,7 @@ public class OptionSourceService {
         audit.success("form.option_source.publish", "OPTION_SOURCE", sourceId,
             AuditService.RiskLevel.HIGH,
             Map.of("changedFields", List.of("publishedVersion")), Map.of("versionId", versionId));
-        return version(versionId);
+        return versionReader.requireVersion(versionId);
     }
 
     @Transactional
@@ -351,7 +352,7 @@ public class OptionSourceService {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         // 用 lockSourceRow 而不是 lockSource：收回是「不再用」的动作，停用的源也该能收回它的版本。
         lockSourceRow(sourceId);
-        VersionView target = version(versionId);
+        VersionView target = versionReader.requireVersion(versionId);
         if (target.sourceId() != sourceId) {
             throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
         }
@@ -384,7 +385,7 @@ public class OptionSourceService {
         audit.success("form.option_source.unpublish", "OPTION_SOURCE", sourceId,
             AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("publishedVersion")),
             Map.of("versionId", versionId, "versionNo", target.versionNo()));
-        return version(versionId);
+        return versionReader.requireVersion(versionId);
     }
 
     /**
@@ -409,7 +410,7 @@ public class OptionSourceService {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         // 收回动作：和取消发布同一个方向，不要求源处于 ACTIVE。
         lockSourceRow(sourceId);
-        VersionView target = version(versionId);
+        VersionView target = versionReader.requireVersion(versionId);
         if (target.sourceId() != sourceId) {
             throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
         }
@@ -430,7 +431,7 @@ public class OptionSourceService {
                 : "form.option_source.version.enable", "OPTION_SOURCE", sourceId,
             AuditService.RiskLevel.HIGH, Map.of("changedFields", List.of("versionDisabled")),
             Map.of("versionId", versionId, "versionNo", target.versionNo()));
-        return version(versionId);
+        return versionReader.requireVersion(versionId);
     }
 
     /**
@@ -442,7 +443,7 @@ public class OptionSourceService {
     public void discardVersion(long sourceId, long versionId) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         lockSourceRow(sourceId);
-        VersionView target = version(versionId);
+        VersionView target = versionReader.requireVersion(versionId);
         if (target.sourceId() != sourceId) {
             throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
         }
@@ -545,14 +546,14 @@ public class OptionSourceService {
             """ + predicate + " ORDER BY source.name, version_row.version_no DESC",
             (rs, row) -> new BindableSource(rs.getLong("id"), rs.getString("code"),
                 rs.getString("name"), rs.getLong("version_id"), rs.getInt("version_no"),
-                readColumns(rs.getString("columns_json")), rs.getInt("row_count"),
+                versionReader.readColumns(rs.getString("columns_json")), rs.getInt("row_count"),
                 rs.getInt("latest_version_no")), args.toArray());
     }
 
     public List<Map<String, Object>> previewRows(long sourceId, long versionId, int limit) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         requireSource(sourceId);
-        if (version(versionId).sourceId() != sourceId) throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
+        if (versionReader.requireVersion(versionId).sourceId() != sourceId) throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
         return jdbc.query("""
             SELECT row_no, data::text FROM t_option_data_source_row
             WHERE version_id = ? ORDER BY row_no LIMIT ?
@@ -577,7 +578,7 @@ public class OptionSourceService {
     public VersionDiff diffVersions(long sourceId, long versionId) {
         authorization.requirePermission(PermissionCodes.FORM_OPTION_SOURCE_MANAGE);
         requireSource(sourceId);
-        VersionView target = version(versionId);
+        VersionView target = versionReader.requireVersion(versionId);
         if (target.sourceId() != sourceId) {
             throw new BizException("OPTION_SOURCE_VERSION_INVALID", "数据版本不属于此数据源");
         }
@@ -589,7 +590,7 @@ public class OptionSourceService {
             LEFT JOIN t_user publisher ON publisher.id = v.published_by
             WHERE v.source_id = ? AND v.version_no < ?
             ORDER BY v.version_no DESC LIMIT 1
-            """, rs -> rs.next() ? versionView(rs) : null, sourceId, target.versionNo());
+            """, rs -> rs.next() ? versionReader.mapVersion(rs) : null, sourceId, target.versionNo());
         // 第一版没有上一版——不是错误，回一份空 diff 让界面把按钮藏掉就行。
         if (previous == null) {
             return new VersionDiff(target.versionNo(), null, List.of(), List.of(), List.of(), 0, 0, false);
@@ -603,22 +604,14 @@ public class OptionSourceService {
         boolean truncated = beforeRows.size() >= DIFF_SCAN_LIMIT || afterRows.size() >= DIFF_SCAN_LIMIT;
         return new VersionDiff(target.versionNo(), previous.versionNo(),
             diffColumns(previous.columns(), target.columns()),
-            added.stream().limit(DIFF_ROW_LIMIT).map(this::readRow).toList(),
-            removed.stream().limit(DIFF_ROW_LIMIT).map(this::readRow).toList(),
+            added.stream().limit(DIFF_ROW_LIMIT).map(versionReader::readRow).toList(),
+            removed.stream().limit(DIFF_ROW_LIMIT).map(versionReader::readRow).toList(),
             added.size(), removed.size(), truncated);
     }
 
     private List<String> rowKeys(long versionId) {
         return jdbc.query("SELECT data::text FROM t_option_data_source_row WHERE version_id = ? "
             + "ORDER BY row_no LIMIT " + DIFF_SCAN_LIMIT, (rs, row) -> rs.getString(1), versionId);
-    }
-
-    private Map<String, Object> readRow(String raw) {
-        try {
-            return json.readValue(raw, Map.class);
-        } catch (Exception error) {
-            throw new IllegalStateException("invalid option row", error);
-        }
     }
 
     /** 列变化按"新增/删除/顺序"三件事说，顺序变化也算（分步列的顺序决定级联层级）。 */
@@ -635,50 +628,6 @@ public class OptionSourceService {
     private SourceSummary requireSource(long sourceId) {
         return list().stream().filter(source -> source.id() == sourceId).findFirst()
             .orElseThrow(() -> new BizException("OPTION_SOURCE_NOT_FOUND", "数据源不存在"));
-    }
-
-    private VersionView version(long versionId) {
-        VersionView version = jdbc.query("""
-            SELECT v.id, v.source_id, v.version_no, v.status, v.columns_json::text, v.row_count,
-                   v.original_name, v.sha256, v.created_at, v.published_at, v.disabled_at,
-                   v.note, publisher.display_name AS published_by_name
-            FROM t_option_data_source_version v
-            LEFT JOIN t_user publisher ON publisher.id = v.published_by
-            WHERE v.id = ?
-            """, rs -> rs.next() ? versionView(rs) : null, versionId);
-        if (version == null) throw new BizException("OPTION_SOURCE_VERSION_NOT_FOUND", "数据版本不存在");
-        return version;
-    }
-
-    private List<VersionView> versions(long sourceId, boolean publishedOnly) {
-        return jdbc.query("""
-            SELECT v.id, v.source_id, v.version_no, v.status, v.columns_json::text, v.row_count,
-                   v.original_name, v.sha256, v.created_at, v.published_at, v.disabled_at,
-                   v.note, publisher.display_name AS published_by_name
-            FROM t_option_data_source_version v
-            -- 发布人只给显示名：这页是管理端，但登录账号没必要下发（同 D-20260924 的窄 DTO 口径）。
-            LEFT JOIN t_user publisher ON publisher.id = v.published_by
-            WHERE v.source_id = ? AND (? = false OR v.status = 'PUBLISHED')
-            ORDER BY v.version_no DESC
-            """, (rs, row) -> versionView(rs), sourceId, publishedOnly);
-    }
-
-    private VersionView versionView(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new VersionView(rs.getLong("id"), rs.getLong("source_id"), rs.getInt("version_no"),
-            rs.getString("status"), readColumns(rs.getString("columns_json")),
-            rs.getInt("row_count"), rs.getString("original_name"), rs.getString("sha256"),
-            rs.getObject("created_at", OffsetDateTime.class),
-            rs.getObject("published_at", OffsetDateTime.class),
-            rs.getObject("disabled_at", OffsetDateTime.class), rs.getString("note"),
-            rs.getString("published_by_name"));
-    }
-
-    private List<String> readColumns(String value) {
-        try {
-            return json.readValue(value, new TypeReference<List<String>>() { });
-        } catch (Exception error) {
-            throw new IllegalStateException("invalid option source columns", error);
-        }
     }
 
     private void requireSubjects(Set<Long> userIds, Set<Long> roleIds) {

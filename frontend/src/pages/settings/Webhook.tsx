@@ -46,7 +46,7 @@ export default function WebhookSettingsPage() {
       setDraft(data.dbHosts.join('\n'));
       message.success('已保存');
     },
-    onError: (error: any) => message.error(error?.message ?? '保存失败'),
+    onError: (error: Error) => message.error(error?.message ?? '保存失败'),
   });
 
   const submit = () => {

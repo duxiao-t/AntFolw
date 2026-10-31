@@ -126,4 +126,42 @@ class WebhookClientTest {
         assertThat(WebhookClient.applicationWarning(json.readTree("{\"code\":200}")))
             .contains("code=200");
     }
+
+    @Test
+    void truncatesOversizedResponseBodyInsteadOfBufferingItAll() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/hook", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] response = ("x".repeat(10_000)).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        AutomationProperties properties = new AutomationProperties();
+        properties.setAllowedHosts(List.of("127.0.0.1"));
+        properties.setAllowPrivateAddresses(true);
+        Environment environment = mock(Environment.class);
+        when(environment.acceptsProfiles(any(Profiles.class))).thenReturn(false);
+        ObjectMapper json = new ObjectMapper();
+        WebhookClient client = new WebhookClient(
+            properties, new WebhookSecurityPolicy(properties, environment), json);
+        WorkflowJob job = new WorkflowJob();
+        job.setDeliveryId(UUID.randomUUID());
+
+        ObjectNode payload = json.createObjectNode();
+        payload.put("method", "POST");
+        payload.put("url", "http://127.0.0.1:" + server.getAddress().getPort() + "/hook");
+        payload.put("contentType", "application/json");
+        payload.put("secret", "test-signing-secret");
+        payload.putArray("headers");
+        payload.putObject("parameters").put("msg", "hi");
+
+        WebhookClient.DeliveryResult result = client.send(job, payload);
+        assertThat(result.successful()).isTrue();
+        // 4096 字节 + 一个省略号；远超 10000 的原始响应仍被有界截断。
+        assertThat(result.body().length()).isLessThanOrEqualTo(4097);
+        assertThat(result.body()).endsWith("…");
+    }
 }

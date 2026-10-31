@@ -36,6 +36,7 @@ import java.util.regex.Pattern;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -60,6 +61,8 @@ public class BackupService {
      * 结果是仅库备份能生成却永远列不出来、也无法下载。抽成常量后新格式只需改这里。
      */
     static final Pattern BACKUP_NAME = Pattern.compile("antflow(-db)?-[0-9-]+\\.afbackup");
+    /** pg_dump 最长执行时间：超时看门狗会强杀进程，避免挂死的 pg_dump 永久占住备份线程/阻塞流读取。 */
+    private static final long PG_DUMP_TIMEOUT_MINUTES = 30;
     private final JdbcTemplate jdbc;
     private final AuthorizationService authorization;
     private final AuditService audit;
@@ -226,6 +229,7 @@ public class BackupService {
             "--username", username, "--dbname", jdbc.database());
         builder.environment().put("PGPASSWORD", password);
         Process process = builder.start();
+        Thread watchdog = startDumpWatchdog(process);
         CompletableFuture<byte[]> stderr = CompletableFuture.supplyAsync(() -> {
             try { return process.getErrorStream().readAllBytes(); }
             catch (Exception error) { return new byte[0]; }
@@ -236,10 +240,35 @@ public class BackupService {
             input.transferTo(zip);
         }
         zip.closeEntry();
-        int exit = process.waitFor();
+        int exit;
+        try {
+            exit = process.waitFor();
+        } finally {
+            watchdog.interrupt();
+        }
         String error = new String(stderr.join(), StandardCharsets.UTF_8);
         if (exit != 0) throw new IllegalStateException("pg_dump failed: " + error);
         return new ManifestEntry("database.dump", HexFormat.of().formatHex(digest.digest()));
+    }
+
+    /**
+     * pg_dump 看门狗：超时强杀子进程。挂死时 {@code input.transferTo} 会在流被关闭后抛 IOException，
+     * 从而让备份失败而不是无限阻塞备份线程（F6）。进程正常结束时主流程 interrupt 该线程退出。
+     */
+    private Thread startDumpWatchdog(Process process) {
+        Thread watchdog = new Thread(() -> {
+            try {
+                if (!process.waitFor(PG_DUMP_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
+                    log.error("pg_dump exceeded {} minutes; killing process", PG_DUMP_TIMEOUT_MINUTES);
+                    process.destroyForcibly();
+                }
+            } catch (InterruptedException ignored) {
+                // 主流程已结束并打断看门狗，正常退出。
+            }
+        }, "pg-dump-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+        return watchdog;
     }
 
     private long bucket(ZipOutputStream zip, String prefix, String endpoint, String access,

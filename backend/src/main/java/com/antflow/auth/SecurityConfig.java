@@ -33,8 +33,11 @@ public class SecurityConfig {
      * 真正决定放行的是这里。改这个列表必须同时改 {@code AuthorizationCoverageTest} 的冻结断言，
      * 否则就出现"注解说需要登录、实际匿名可访问"的漂移（见 code-review-2026-10-17 B6）。
      */
-    public static final List<String> PUBLIC_PATH_MATCHERS =
-        List.of("/api/public/**", "/actuator/**", "/v3/api-docs/**", "/swagger-ui/**");
+    public static final List<String> PUBLIC_PATH_MATCHERS = List.of(
+        "/api/public/**",
+        // 只放行实际暴露的只读探针，不再用 /actuator/** 通配放行（防止将来开启 env/heapdump 等端点后匿名可访问）。
+        "/actuator/health", "/actuator/health/**", "/actuator/info",
+        "/v3/api-docs/**", "/swagger-ui/**");
 
     /** 免登录的 POST 端点：登录/刷新/登出（会话与 CSRF 语义自带，不需要 JWT）。 */
     public static final List<String> PUBLIC_POST_ENDPOINTS =
@@ -78,7 +81,10 @@ public class SecurityConfig {
                 CorsConfiguration corsConfiguration = new CorsConfiguration();
                 corsConfiguration.setAllowedOriginPatterns(corsProperties.getAllowedOriginPatterns());
                 corsConfiguration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-                corsConfiguration.setAllowedHeaders(List.of("*"));
+                // 显式白名单而非 "*"：凭证模式（allowCredentials=true）下不放开任意请求头（F10）。
+                corsConfiguration.setAllowedHeaders(List.of(
+                    "Authorization", "Content-Type", "Accept",
+                    "Idempotency-Key", "X-CSRF-Token", "X-Requested-With", "X-Request-Id"));
                 corsConfiguration.setAllowCredentials(true);
                 UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
                 source.registerCorsConfiguration("/**", corsConfiguration);
